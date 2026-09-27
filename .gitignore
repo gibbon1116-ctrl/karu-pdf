@@ -1,0 +1,8 @@
+node_modules/
+dist/
+test-data/*.pdf
+bench-results/
+test-results/
+playwright-report/
+test-data/real/
+.claude/

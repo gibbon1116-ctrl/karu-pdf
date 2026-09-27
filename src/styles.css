@@ -1,0 +1,76 @@
+:root {
+  color: #202124;
+  font-family: "Yu Gothic UI", "Meiryo UI", sans-serif;
+  font-synthesis: none;
+}
+
+@font-face {
+  font-family: "KaruBIZUDGothic";
+  src: url("/karu-pdf/fonts/BIZUDGothic-Regular.ttf") format("truetype");
+  font-display: swap;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+button, input { font: inherit; }
+
+.app { position: relative; display: grid; grid-template-rows: 48px 1fr; width: 100%; height: 100%; }
+.toolbar {
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 12px;
+  background: #f7f7f7;
+  border-bottom: 1px solid #c8c8c8;
+}
+.toolbar button { min-height: 32px; padding: 4px 12px; }
+.toolbar button.active { color: #fff; background: #1769aa; border-color: #0f568d; }
+.toolbar-separator { width: 1px; height: 28px; margin: 0 2px; background: #c8c8c8; }
+.toolbar output { min-width: 68px; text-align: center; font-variant-numeric: tabular-nums; }
+.file-name { overflow: hidden; margin-left: auto; text-overflow: ellipsis; white-space: nowrap; color: #555; }
+.viewer { position: relative; overflow: auto; background: #525659; overscroll-behavior: contain; }
+.page-strip { position: relative; min-width: 100%; }
+.page-empty, .page-view { position: absolute; overflow: hidden; background: #e8e8e8; box-shadow: 0 1px 4px rgb(0 0 0 / 45%); }
+.page-empty, .page-placeholder { display: grid; place-items: center; color: #777; font-size: 14px; }
+.page-placeholder { position: absolute; inset: 0; }
+.preview-canvas { position: absolute; inset: 0; display: block; }
+.detail-canvas { position: absolute; display: block; }
+.annotation-layer { position: absolute; z-index: 3; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; }
+.annotation-item { cursor: move; }
+.annotation-layer.tool-text, .annotation-layer.tool-square { cursor: crosshair; }
+.annotation-surface { fill: transparent; pointer-events: all; }
+.annotation-text, .annotation-square { pointer-events: none; }
+.annotation-hit { fill: transparent; stroke: none; pointer-events: all; }
+.annotation-selection { fill: none; stroke: #1473e6; stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+.annotation-draft { display: none; fill: none; stroke: #e00000; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
+.text-editor {
+  position: absolute;
+  z-index: 4;
+  overflow: hidden;
+  resize: none;
+  background: rgb(255 255 255 / 82%);
+  border: 1px solid #75a9e8;
+  outline: none;
+  font-family: "KaruBIZUDGothic", sans-serif;
+  font-kerning: none;
+  line-height: 1.2;
+}
+.error { position: absolute; z-index: 20; top: 56px; left: 50%; transform: translateX(-50%); padding: 10px 16px; color: #8b0000; background: #fff1f1; border: 1px solid #c44; }
+.save-status { position: absolute; z-index: 20; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 9px 16px; color: #174c24; background: #effaf1; border: 1px solid #78a781; border-radius: 4px; }
+.debug-panel {
+  position: absolute;
+  z-index: 30;
+  right: 12px;
+  bottom: 12px;
+  display: grid;
+  gap: 3px;
+  min-width: 330px;
+  padding: 10px 12px;
+  color: #eaffea;
+  background: rgb(20 24 20 / 92%);
+  border: 1px solid #789478;
+  border-radius: 4px;
+  font: 12px/1.4 Consolas, monospace;
+}

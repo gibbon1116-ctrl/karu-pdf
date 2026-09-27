@@ -1,0 +1,173 @@
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { PdfWorkerPool } from '../client/PdfWorkerPool'
+import { CSS_PX_PER_PT } from '../viewer/pageLayout'
+import type { EditableAnnotation } from './AnnotationStore'
+import { AnnotationStore } from './AnnotationStore'
+
+export interface TimingSummary {
+  samples: number
+  p95: number
+  max: number
+}
+
+export interface FrameStats {
+  drag: TimingSummary
+  input: TimingSummary
+}
+
+const emptyTiming = (): TimingSummary => ({ samples: 0, p95: 0, max: 0 })
+const frameStats: FrameStats = { drag: emptyTiming(), input: emptyTiming() }
+const inputSamples: number[] = []
+
+function summarize(samples: readonly number[]): TimingSummary {
+  if (samples.length === 0) return emptyTiming()
+  const sorted = [...samples].sort((a, b) => a - b)
+  return {
+    samples: sorted.length,
+    p95: sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)],
+    max: sorted[sorted.length - 1],
+  }
+}
+
+export function beginDragFrameMeasurement(): (publish?: boolean) => void {
+  const samples: number[] = []
+  let previous = performance.now()
+  let frame = 0
+  let stopped = false
+  const tick = (now: number) => {
+    if (stopped) return
+    samples.push(now - previous)
+    previous = now
+    frame = requestAnimationFrame(tick)
+  }
+  frame = requestAnimationFrame(tick)
+  return (publish = true) => {
+    if (stopped) return
+    stopped = true
+    cancelAnimationFrame(frame)
+    if (publish) frameStats.drag = summarize(samples)
+  }
+}
+
+export function recordInputFrame(): void {
+  const started = performance.now()
+  requestAnimationFrame((now) => {
+    inputSamples.push(now - started)
+    if (inputSamples.length > 500) inputSamples.splice(0, inputSamples.length - 500)
+    frameStats.input = summarize(inputSamples)
+  })
+}
+
+export function getFrameStats(): FrameStats {
+  return {
+    drag: { ...frameStats.drag },
+    input: { ...frameStats.input },
+  }
+}
+
+interface Props {
+  annotation: EditableAnnotation
+  zoom: number
+  pool: PdfWorkerPool
+  store: AnnotationStore
+  onClose(): void
+  registerCommit(commit: (() => Promise<void>) | null): void
+}
+
+export function TextEditor({ annotation, zoom, pool, store, onClose, registerCommit }: Props) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const composingRef = useRef(false)
+  const valueRef = useRef(annotation.text)
+  const commitPromiseRef = useRef<Promise<void> | null>(null)
+  const [value, setValue] = useState(annotation.text)
+  const scale = zoom * CSS_PX_PER_PT
+
+  const commit = useCallback((): Promise<void> => {
+    if (commitPromiseRef.current) return commitPromiseRef.current
+    const promise = (async () => {
+      const text = valueRef.current
+      if (text.length === 0) {
+        store.remove(annotation.id)
+      } else {
+        const width = annotation.rect[2] - annotation.rect[0]
+        const layout = await pool.layoutText(text, annotation.fontSize, width)
+        store.updateText(annotation.id, text, layout, [
+          annotation.rect[0],
+          annotation.rect[1],
+          annotation.rect[2],
+          annotation.rect[1] + layout.height,
+        ])
+      }
+      onClose()
+    })().finally(() => {
+      commitPromiseRef.current = null
+    })
+    commitPromiseRef.current = promise
+    return promise
+  }, [annotation, onClose, pool, store])
+
+  useEffect(() => {
+    inputSamples.length = 0
+    frameStats.input = emptyTiming()
+  }, [])
+
+  useEffect(() => {
+    registerCommit(commit)
+    return () => registerCommit(null)
+  }, [commit, registerCommit])
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (textareaRef.current?.contains(event.target as Node)) return
+      void commit()
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [commit])
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.style.height = '0px'
+    textarea.style.height = `${Math.max(annotation.rect[3] - annotation.rect[1], textarea.scrollHeight / scale) * scale}px`
+  }, [annotation.rect, scale, value])
+
+  useEffect(() => {
+    textareaRef.current?.focus()
+    textareaRef.current?.setSelectionRange(value.length, value.length)
+  }, [])
+
+  return (
+    <textarea
+      ref={textareaRef}
+      className="text-editor"
+      data-testid="text-editor"
+      value={value}
+      style={{
+        left: annotation.rect[0] * scale,
+        top: annotation.rect[1] * scale,
+        width: (annotation.rect[2] - annotation.rect[0]) * scale,
+        minHeight: (annotation.rect[3] - annotation.rect[1]) * scale,
+        padding: `${2 * scale}px`,
+        fontSize: annotation.fontSize * scale,
+        color: `rgb(${annotation.color.map((component) => Math.round(component * 255)).join(' ')})`,
+      }}
+      onChange={(event) => {
+        valueRef.current = event.currentTarget.value
+        setValue(event.currentTarget.value)
+        recordInputFrame()
+      }}
+      onCompositionStart={() => { composingRef.current = true }}
+      onCompositionEnd={() => { composingRef.current = false }}
+      onKeyDown={(event) => {
+        const composing = composingRef.current || event.nativeEvent.isComposing
+        if (composing && (event.key === 'Escape' || event.key === 'Enter')) return
+        if (event.key === 'Escape' || (event.key === 'Enter' && event.ctrlKey)) {
+          event.preventDefault()
+          event.stopPropagation()
+          void commit()
+        }
+      }}
+    />
+  )
+}
