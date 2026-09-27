@@ -92,4 +92,23 @@ describe('AnnotationStore', () => {
     expect(store.toEdits()).toEqual([])
     expect(store.get('obj-61')).toMatchObject({ objNum: 61, dirty: false })
   })
+
+  it('新規と既存の大きさを変更し、既存は下地から除外する', async () => {
+    const store = new AnnotationStore()
+    const created = store.create({ pageIndex: 0, kind: 'square', rect: [10, 20, 30, 40] })
+    store.resize(created.id, [10, 20, 60, 80])
+    expect(store.get(created.id)?.rect).toEqual([10, 20, 60, 80])
+    expect(store.toEdits()).toEqual([
+      expect.objectContaining({ kind: 'createSquare', rect: [10, 20, 60, 80] }),
+    ])
+
+    const existingSquare = { ...existingFreeText, objNum: 18, type: 'Square', contents: '', strokeColor: [1, 0, 0] as [number, number, number] }
+    await store.ensurePageLoaded(1, async () => [{ ...existingSquare, pageIndex: 1 }])
+    store.resize('obj-18', [5, 6, 45, 56])
+    expect(store.touchedObjNums(1)).toEqual([18])
+    expect(store.get('obj-18')).toMatchObject({ rect: [5, 6, 45, 56], dirty: true })
+    expect(store.toEdits()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'updateSquare', objNum: 18, pageIndex: 1, rect: [5, 6, 45, 56] }),
+    ]))
+  })
 })

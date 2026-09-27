@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
+import type { Rect } from '../core/annotations'
 import type { PageSize } from '../core/mupdfDoc'
+import { CSS_PX_PER_PT } from '../viewer/pageLayout'
 import { beginDragFrameMeasurement, TextEditor } from './TextEditor'
 import { AnnotationStore, type EditableAnnotation } from './AnnotationStore'
 
 export type EditorTool = 'select' | 'text' | 'square'
+export const EditorToolChangeContext = createContext<(tool: EditorTool) => void>(() => undefined)
+type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 
 interface Props {
   pageIndex: number
@@ -24,13 +28,16 @@ interface Point { x: number; y: number }
 
 interface DragOperation {
   pointerId: number
-  mode: 'move' | 'text' | 'square'
+  mode: 'move' | 'text' | 'square' | 'resize'
   start: Point
   latest: Point
   id: string | null
   element: SVGGElement | null
   frame: number
   moved: boolean
+  resizeHandle?: ResizeHandle
+  originalRect?: Rect
+  annotationKind?: EditableAnnotation['kind']
   stopMeasurement(publish?: boolean): void
 }
 
@@ -51,10 +58,28 @@ function annotationIdFromTarget(target: EventTarget | null): string | null {
   return (target as Element | null)?.closest('[data-annotation-id]')?.getAttribute('data-annotation-id') ?? null
 }
 
+function resizeHandleFromTarget(target: EventTarget | null): ResizeHandle | null {
+  return (target as Element | null)?.closest('[data-resize-handle]')?.getAttribute('data-resize-handle') as ResizeHandle | null
+}
+
+function resizedRect(rect: Rect, handle: ResizeHandle, point: Point, kind: EditableAnnotation['kind']): Rect {
+  let [x0, y0, x1, y1] = rect
+  const minimumWidth = kind === 'freetext' ? 20 : 4
+  if (handle.includes('w')) x0 = Math.min(point.x, x1 - minimumWidth)
+  if (handle.includes('e')) x1 = Math.max(point.x, x0 + minimumWidth)
+  if (kind === 'square') {
+    if (handle.includes('n')) y0 = Math.min(point.y, y1 - 4)
+    if (handle.includes('s')) y1 = Math.max(point.y, y0 + 4)
+  }
+  return [x0, y0, x1, y1]
+}
+
 export function AnnotationLayer(props: Props) {
+  const changeTool = useContext(EditorToolChangeContext)
   useSyncExternalStore(props.store.subscribe, props.store.getSnapshot)
   const svgRef = useRef<SVGSVGElement>(null)
   const draftRef = useRef<SVGRectElement>(null)
+  const resizePreviewRef = useRef<SVGRectElement>(null)
   const dragRef = useRef<DragOperation | null>(null)
   const loadingLayoutsRef = useRef(new Set<string>())
   const annotations = props.store.getPageAnnotations(props.pageIndex)
@@ -74,14 +99,29 @@ export function AnnotationLayer(props: Props) {
   }, [annotations, props.pool, props.store, touched])
 
   const updateDraft = (operation: DragOperation) => {
-    const draft = draftRef.current
-    if (!draft) return
     const dx = operation.latest.x - operation.start.x
     const dy = operation.latest.y - operation.start.y
     if (operation.mode === 'move') {
       operation.element?.setAttribute('transform', `translate(${dx} ${dy})`)
       return
     }
+    if (operation.mode === 'resize' && operation.originalRect && operation.resizeHandle && operation.annotationKind) {
+      const preview = resizePreviewRef.current
+      if (!preview) return
+      const [x0, y0, x1, y1] = resizedRect(
+        operation.originalRect,
+        operation.resizeHandle,
+        operation.latest,
+        operation.annotationKind,
+      )
+      preview.setAttribute('x', String(x0))
+      preview.setAttribute('y', String(y0))
+      preview.setAttribute('width', String(x1 - x0))
+      preview.setAttribute('height', String(y1 - y0))
+      return
+    }
+    const draft = draftRef.current
+    if (!draft) return
     if (operation.mode === 'square') {
       draft.setAttribute('x', String(Math.min(operation.start.x, operation.latest.x)))
       draft.setAttribute('y', String(Math.min(operation.start.y, operation.latest.y)))
@@ -113,12 +153,29 @@ export function AnnotationLayer(props: Props) {
     operation.element?.removeAttribute('transform')
     const draft = draftRef.current
     if (draft) draft.style.display = 'none'
+    const resizePreview = resizePreviewRef.current
+    if (resizePreview) resizePreview.style.display = 'none'
     if (!commit) return
 
     const dx = operation.latest.x - operation.start.x
     const dy = operation.latest.y - operation.start.y
     if (operation.mode === 'move' && operation.id) {
       props.store.move(operation.id, dx, dy)
+      return
+    }
+    if (operation.mode === 'resize' && operation.id && operation.originalRect && operation.resizeHandle && operation.annotationKind) {
+      const rect = resizedRect(operation.originalRect, operation.resizeHandle, operation.latest, operation.annotationKind)
+      if (operation.annotationKind === 'square') {
+        props.store.resize(operation.id, rect)
+      } else {
+        const annotation = props.store.get(operation.id)
+        if (!annotation) return
+        const width = rect[2] - rect[0]
+        void props.pool.layoutText(annotation.text, annotation.fontSize, width).then((layout) => {
+          props.store.resize(operation.id!, [rect[0], rect[1], rect[2], rect[1] + layout.height])
+          props.store.setLayout(operation.id!, layout)
+        })
+      }
       return
     }
     if (operation.mode === 'square') {
@@ -134,6 +191,7 @@ export function AnnotationLayer(props: Props) {
         ],
       })
       props.onSelect(annotation.id)
+      changeTool('select')
       return
     }
     const width = operation.moved ? Math.max(20, Math.abs(dx)) : 200
@@ -150,6 +208,22 @@ export function AnnotationLayer(props: Props) {
   const renderAnnotation = (annotation: EditableAnnotation) => {
     const visible = annotation.objNum === null || touched.has(annotation.objNum)
     const [x0, y0, x1, y1] = annotation.rect
+    const handleSize = 8 / Math.max(0.01, props.zoom * CSS_PX_PER_PT)
+    const handlePositions: Array<{ handle: ResizeHandle; x: number; y: number }> = annotation.kind === 'square'
+      ? [
+          { handle: 'nw', x: x0, y: y0 },
+          { handle: 'n', x: (x0 + x1) / 2, y: y0 },
+          { handle: 'ne', x: x1, y: y0 },
+          { handle: 'e', x: x1, y: (y0 + y1) / 2 },
+          { handle: 'se', x: x1, y: y1 },
+          { handle: 's', x: (x0 + x1) / 2, y: y1 },
+          { handle: 'sw', x: x0, y: y1 },
+          { handle: 'w', x: x0, y: (y0 + y1) / 2 },
+        ]
+      : [
+          { handle: 'e', x: x1, y: (y0 + y1) / 2 },
+          { handle: 'w', x: x0, y: (y0 + y1) / 2 },
+        ]
     return (
       <g key={annotation.id} data-annotation-id={annotation.id} className="annotation-item">
         {visible && annotation.kind === 'square' && (
@@ -186,13 +260,28 @@ export function AnnotationLayer(props: Props) {
           height={Math.max(1, y1 - y0)}
         />
         {props.selectedId === annotation.id && (
-          <rect
-            className="annotation-selection"
-            x={x0 - 1}
-            y={y0 - 1}
-            width={x1 - x0 + 2}
-            height={y1 - y0 + 2}
-          />
+          <>
+            <rect
+              className="annotation-selection"
+              x={x0 - 1}
+              y={y0 - 1}
+              width={x1 - x0 + 2}
+              height={y1 - y0 + 2}
+            />
+            {props.tool === 'select' && handlePositions.map(({ handle, x, y }) => (
+              <rect
+                key={`${annotation.id}-${handle}`}
+                className="annotation-resize-handle"
+                data-testid={`resize-handle-${handle}`}
+                data-annotation-id={annotation.id}
+                data-resize-handle={handle}
+                x={x - handleSize / 2}
+                y={y - handleSize / 2}
+                width={handleSize}
+                height={handleSize}
+              />
+            ))}
+          </>
         )}
       </g>
     )
@@ -207,10 +296,41 @@ export function AnnotationLayer(props: Props) {
         viewBox={`0 0 ${props.pageSize.width} ${props.pageSize.height}`}
         onPointerDown={(event) => {
           if (event.button !== 0 || props.editingId) return
+          event.preventDefault()
           const svg = event.currentTarget
           const start = pointInPage(svg, event)
           const id = annotationIdFromTarget(event.target)
           if (props.tool === 'select') {
+            const resizeHandle = resizeHandleFromTarget(event.target)
+            const annotation = id ? props.store.get(id) : undefined
+            if (resizeHandle && annotation) {
+              props.store.touch(id!)
+              props.onSelect(id)
+              const [x0, y0, x1, y1] = annotation.rect
+              if (resizePreviewRef.current) {
+                resizePreviewRef.current.style.display = 'block'
+                resizePreviewRef.current.setAttribute('x', String(x0))
+                resizePreviewRef.current.setAttribute('y', String(y0))
+                resizePreviewRef.current.setAttribute('width', String(x1 - x0))
+                resizePreviewRef.current.setAttribute('height', String(y1 - y0))
+              }
+              dragRef.current = {
+                pointerId: event.pointerId,
+                mode: 'resize',
+                start,
+                latest: start,
+                id,
+                element: null,
+                frame: 0,
+                moved: false,
+                resizeHandle,
+                originalRect: [...annotation.rect],
+                annotationKind: annotation.kind,
+                stopMeasurement: beginDragFrameMeasurement(),
+              }
+              svg.setPointerCapture(event.pointerId)
+              return
+            }
             if (!id) {
               props.onSelect(null)
               return
@@ -284,6 +404,7 @@ export function AnnotationLayer(props: Props) {
         <rect className="annotation-surface" x="0" y="0" width={props.pageSize.width} height={props.pageSize.height} />
         {annotations.map(renderAnnotation)}
         <rect ref={draftRef} className="annotation-draft" x="0" y="0" width="0" height="0" />
+        <rect ref={resizePreviewRef} className="annotation-resize-preview" x="0" y="0" width="0" height="0" />
       </svg>
       {editing && (
         <TextEditor
@@ -291,7 +412,13 @@ export function AnnotationLayer(props: Props) {
           zoom={props.zoom}
           pool={props.pool}
           store={props.store}
-          onClose={() => props.onEdit(null)}
+          onClose={(removed) => {
+            props.onEdit(null)
+            if (props.tool === 'text') {
+              props.onSelect(removed ? null : editing.id)
+              changeTool('select')
+            }
+          }}
           registerCommit={props.registerCommit}
         />
       )}

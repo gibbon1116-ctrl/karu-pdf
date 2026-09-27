@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import './resume.spec'
 
 const sample = path.resolve('test-data/sample-small.pdf')
 
@@ -60,28 +61,51 @@ test('文字と四角を保存し、開き直して再編集できる', async ({
   await page.mouse.click(box.x + 400, box.y + 350)
   await expect(editor).toBeHidden()
   await expect(layer.locator('.annotation-text')).toContainText(['日本語の書き込み', '二行目'])
+  await expect(page.getByRole('button', { name: '選択', exact: true })).toHaveAttribute('aria-pressed', 'true')
+
+  const createdText = await page.evaluate(() => window.__karu!.getEditableAnnotations(0).find((item) => item.kind === 'freetext' && item.objNum === null))
+  if (!createdText) throw new Error('作成した文字がストアにありません。')
+  const textWidthBefore = createdText.rect[2] - createdText.rect[0]
+  const textHeightBefore = createdText.rect[3] - createdText.rect[1]
+  const textLinesBefore = createdText.layout?.lines.length ?? 0
+  const textRightHandle = layer.locator(`g[data-annotation-id="${createdText.id}"] [data-resize-handle="e"]`)
+  const textHandleBox = await textRightHandle.boundingBox()
+  if (!textHandleBox) throw new Error('文字の右辺の取っ手がありません。')
+  await page.mouse.move(textHandleBox.x + textHandleBox.width / 2, textHandleBox.y + textHandleBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(textHandleBox.x - 190, textHandleBox.y + textHandleBox.height / 2, { steps: 8 })
+  await page.mouse.up()
+  await expect.poll(() => page.evaluate(({ id, width, height, lines }) => {
+    const item = window.__karu!.getEditableAnnotations(0).find((annotation) => annotation.id === id)
+    return Boolean(item
+      && item.rect[2] - item.rect[0] < width
+      && item.rect[3] - item.rect[1] > height
+      && (item.layout?.lines.length ?? 0) > lines)
+  }, { id: createdText.id, width: textWidthBefore, height: textHeightBefore, lines: textLinesBefore })).toBe(true)
+  const resizedText = await page.evaluate((id) => window.__karu!.getEditableAnnotations(0).find((item) => item.id === id)!, createdText.id)
+  expect(resizedText.rect[2] - resizedText.rect[0]).toBeLessThan(textWidthBefore)
+  expect(resizedText.rect[3] - resizedText.rect[1]).toBeGreaterThan(textHeightBefore)
+  expect(resizedText.layout?.lines.length ?? 0).toBeGreaterThan(textLinesBefore)
 
   await page.getByRole('button', { name: '四角', exact: true }).click()
-  await page.mouse.move(box.x + 250, box.y + 180)
+  await page.mouse.move(box.x + 350, box.y + 300)
   await page.mouse.down()
-  await page.mouse.move(box.x + 360, box.y + 260, { steps: 8 })
+  await page.mouse.move(box.x + 460, box.y + 380, { steps: 8 })
   await page.mouse.up()
+  await expect(page.getByRole('button', { name: '選択', exact: true })).toHaveAttribute('aria-pressed', 'true')
   const createdSquare = await page.evaluate(() => window.__karu!.getEditableAnnotations(0).find((item) => item.kind === 'square' && item.objNum === null))
   if (!createdSquare) throw new Error('作成した四角がストアにありません。')
-  const beforeMove = createdSquare.rect
-
-  await page.getByRole('button', { name: '選択', exact: true }).click()
-  const square = layer.locator('.annotation-square')
-  await expect(square).toBeVisible()
-  const squareBox = await square.boundingBox()
-  if (!squareBox) throw new Error('四角注釈がありません。')
-  await page.mouse.move(squareBox.x + squareBox.width / 2, squareBox.y + squareBox.height / 2)
+  await expect(layer.locator(`g[data-annotation-id="${createdSquare.id}"] .annotation-resize-handle`)).toHaveCount(8)
+  const squareHandle = layer.locator(`g[data-annotation-id="${createdSquare.id}"] [data-resize-handle="se"]`)
+  const squareHandleBox = await squareHandle.boundingBox()
+  if (!squareHandleBox) throw new Error('四角の右下の取っ手がありません。')
+  await page.mouse.move(squareHandleBox.x + squareHandleBox.width / 2, squareHandleBox.y + squareHandleBox.height / 2)
   await page.mouse.down()
-  await page.mouse.move(squareBox.x + squareBox.width / 2 + 45, squareBox.y + squareBox.height / 2 + 30, { steps: 8 })
+  await page.mouse.move(squareHandleBox.x + squareHandleBox.width / 2 + 50, squareHandleBox.y + squareHandleBox.height / 2 + 40, { steps: 8 })
   await page.mouse.up()
-  const afterMove = await page.evaluate((id) => window.__karu!.getEditableAnnotations(0).find((item) => item.id === id)!.rect, createdSquare.id)
-  expect(afterMove[0]).toBeGreaterThan(beforeMove[0])
-  expect(afterMove[1]).toBeGreaterThan(beforeMove[1])
+  const resizedSquareRect = await page.evaluate((id) => window.__karu!.getEditableAnnotations(0).find((item) => item.id === id)!.rect, createdSquare.id)
+  expect(resizedSquareRect[2] - resizedSquareRect[0]).toBeGreaterThan(createdSquare.rect[2] - createdSquare.rect[0])
+  expect(resizedSquareRect[3] - resizedSquareRect[1]).toBeGreaterThan(createdSquare.rect[3] - createdSquare.rect[1])
 
   await saveTwiceAndReopen(page)
   await expect.poll(() => page.evaluate((rect) => {
@@ -90,7 +114,7 @@ test('文字と四角を保存し、開き直して再編集できる', async ({
       textCount: annotations.filter((item) => item.kind === 'freetext' && item.text === '日本語の書き込み\n二行目' && item.madeByKaru).length,
       square: annotations.some((item) => item.kind === 'square' && item.rect.every((value, index) => Math.abs(value - rect[index]) < 0.01)),
     }
-  }, afterMove)).toEqual({ textCount: 1, square: true })
+  }, resizedSquareRect)).toEqual({ textCount: 1, square: true })
 
   const existing = await page.evaluate(() => window.__karu!.getEditableAnnotations(0).find((item) => item.text === 'Existing note'))
   if (!existing) throw new Error('既存の Existing note がありません。')
@@ -105,14 +129,14 @@ test('文字と四角を保存し、開き直して再編集できる', async ({
 
   const squareAfterOpen = await page.evaluate((rect) => window.__karu!.getEditableAnnotations(0).find((item) => (
     item.kind === 'square' && item.rect.every((value, index) => Math.abs(value - rect[index]) < 0.01)
-  )), afterMove)
+  )), resizedSquareRect)
   if (!squareAfterOpen) throw new Error('保存後の四角がありません。')
   await page.locator(`g[data-annotation-id="${squareAfterOpen.id}"] .annotation-hit`).click()
   await page.keyboard.press('Delete')
   const finalBytes = await saveAndReopen(page)
   await expect.poll(() => page.evaluate((rect) => window.__karu!.getEditableAnnotations(0).some((item) => (
     item.kind === 'square' && item.rect.every((value, index) => Math.abs(value - rect[index]) < 0.01)
-  )), afterMove)).toBe(false)
+  )), resizedSquareRect)).toBe(false)
 
   await fs.mkdir('test-results', { recursive: true })
   await fs.writeFile('test-results/ui-roundtrip.pdf', Buffer.from(finalBytes))

@@ -3,7 +3,8 @@ import { PdfWorkerPool, type ApplyAndSaveResult } from './client/PdfWorkerPool'
 import type { PageSize } from './core/mupdfDoc'
 import type { EditorTool } from './editor/AnnotationLayer'
 import { AnnotationStore, type EditableAnnotation } from './editor/AnnotationStore'
-import { PDF_PICKER_TYPES, downloadPdf, pickSaveHandle, requestWritePermission, writePdf, type PdfFileHandle } from './editor/fileAccess'
+import { downloadPdf, pickOpenHandles, pickSaveHandle, requestWritePermission, writePdf, type PdfFileHandle } from './editor/fileAccess'
+import { documentViewId, loadLastOpenedHandle, loadViewPosition, saveLastOpenedHandle, saveViewPosition } from './editor/recentStore'
 import { getFrameStats, type FrameStats } from './editor/TextEditor'
 import { DebugPanel } from './perf/DebugPanel'
 import { getMetrics, resetBlankFrames, startMeasure } from './perf/metrics'
@@ -57,7 +58,11 @@ export default function App() {
   const statusTimerRef = useRef<number | undefined>(undefined)
   const savingRef = useRef(false)
   const fileOutdatedRef = useRef(false)
+  const currentDocumentIdRef = useRef<string | null>(null)
+  const currentViewRef = useRef({ page: 1, zoom: 1 })
+  const viewSaveTimerRef = useRef<number | undefined>(undefined)
   const [pageSizes, setPageSizes] = useState<PageSize[]>([])
+  const [initialView, setInitialView] = useState<{ page: number; zoom: number } | null>(null)
   const [documentId, setDocumentId] = useState(0)
   const [fileName, setFileName] = useState('PDFを開いてください')
   const [zoom, setZoom] = useState(1)
@@ -104,7 +109,38 @@ export default function App() {
     setSaving(false)
   }, [])
 
+  const persistCurrentView = useCallback(() => {
+    const documentId = currentDocumentIdRef.current
+    if (!documentId) return
+    saveViewPosition(documentId, currentViewRef.current.page, currentViewRef.current.zoom)
+  }, [])
+
+  const scheduleViewPersistence = useCallback(() => {
+    window.clearTimeout(viewSaveTimerRef.current)
+    viewSaveTimerRef.current = window.setTimeout(persistCurrentView, 500)
+  }, [persistCurrentView])
+
+  const handlePageChange = useCallback((nextPage: number) => {
+    currentViewRef.current.page = nextPage
+    setPage(nextPage)
+    scheduleViewPersistence()
+  }, [scheduleViewPersistence])
+
+  const handleZoomChange = useCallback((nextZoom: number) => {
+    currentViewRef.current.zoom = nextZoom
+    setZoom(nextZoom)
+    scheduleViewPersistence()
+  }, [scheduleViewPersistence])
+
+  useEffect(() => () => {
+    window.clearTimeout(viewSaveTimerRef.current)
+    persistCurrentView()
+  }, [persistCurrentView])
+
   const openBuffer = useCallback(async (buffer: ArrayBuffer, name: string, handle: PdfFileHandle | null) => {
+    window.clearTimeout(viewSaveTimerRef.current)
+    persistCurrentView()
+    const byteLength = buffer.byteLength
     setError('')
     setStatus('')
     setFileName(name)
@@ -114,22 +150,33 @@ export default function App() {
     openSharpEndRef.current = startMeasure('open-sharp')
     annotationStore.reset()
     setFileOutdatedValue(false)
+    currentDocumentIdRef.current = null
+    setInitialView(null)
     viewerRef.current?.clearSelection()
     try {
       setPageSizes([])
       setDocumentId((value) => value + 1)
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
       const result = await pool.open(buffer)
+      const documentId = documentViewId(name, byteLength)
+      const remembered = loadViewPosition(documentId)
+      const restored = remembered
+        ? { page: remembered.page <= result.pageCount ? remembered.page : 1, zoom: remembered.zoom }
+        : null
+      currentDocumentIdRef.current = documentId
+      currentViewRef.current = restored ?? { page: 1, zoom: 1 }
+      setInitialView(restored)
+      setZoom(restored?.zoom ?? 1)
       setPageSizes(result.pageSizes)
       setDocumentId((value) => value + 1)
-      setPage(1)
+      setPage(restored?.page ?? 1)
     } catch (reason) {
       openEndRef.current = null
       openSharpEndRef.current = null
       setError(`PDFを開けませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
       throw reason
     }
-  }, [annotationStore, pool, setFileOutdatedValue])
+  }, [annotationStore, persistCurrentView, pool, setFileOutdatedValue])
 
   const confirmDiscard = useCallback(() => (
     (!annotationStore.isDirty() && !fileOutdatedRef.current)
@@ -139,6 +186,7 @@ export default function App() {
   const openFile = useCallback(async (file: File, handle: PdfFileHandle | null = null) => {
     if (!confirmDiscard()) return
     await openBuffer(await file.arrayBuffer(), file.name, handle)
+    if (handle) await saveLastOpenedHandle(handle, file.name)
   }, [confirmDiscard, openBuffer])
 
   const saveToBytes = useCallback(async (): Promise<{ bytes: Uint8Array; result: ApplyAndSaveResult } | null> => {
@@ -165,7 +213,7 @@ export default function App() {
       let handle = fileHandleRef.current
       const needsDestination = saveAs || !handle
       if (needsDestination && window.showSaveFilePicker) {
-        handle = await pickSaveHandle(fileName)
+        handle = await pickSaveHandle(fileName, fileHandleRef.current ?? undefined)
       }
       if (!needsDestination && handle && !await requestWritePermission(handle)) {
         throw new Error('ファイルへの書き込みが許可されませんでした。')
@@ -211,13 +259,14 @@ export default function App() {
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      persistCurrentView()
       if (!annotationStore.isDirty() && !fileOutdatedRef.current) return
       event.preventDefault()
       event.returnValue = ''
     }
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [annotationStore])
+  }, [annotationStore, persistCurrentView])
 
   useEffect(() => {
     if (new URLSearchParams(location.search).get('test') !== '1') return
@@ -246,7 +295,8 @@ export default function App() {
   const pickFile = async () => {
     if (window.showOpenFilePicker) {
       try {
-        const [handle] = await window.showOpenFilePicker({ multiple: false, types: PDF_PICKER_TYPES })
+        const recent = await loadLastOpenedHandle()
+        const [handle] = await pickOpenHandles(recent?.handle)
         if (handle) await openFile(await handle.getFile(), handle)
       } catch (reason) {
         if (!(reason instanceof DOMException && reason.name === 'AbortError')) {
@@ -310,9 +360,11 @@ export default function App() {
         pool={pool}
         annotationStore={annotationStore}
         tool={tool}
+        initialView={initialView}
+        onToolChange={setTool}
         pageSizes={pageSizes}
-        onZoomChange={setZoom}
-        onPageChange={setPage}
+        onZoomChange={handleZoomChange}
+        onPageChange={handlePageChange}
         onFirstBitmap={() => {
           openEndRef.current?.()
           openEndRef.current = null

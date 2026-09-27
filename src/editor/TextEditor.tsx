@@ -70,7 +70,7 @@ interface Props {
   zoom: number
   pool: PdfWorkerPool
   store: AnnotationStore
-  onClose(): void
+  onClose(removed: boolean): void
   registerCommit(commit: (() => Promise<void>) | null): void
 }
 
@@ -86,6 +86,7 @@ export function TextEditor({ annotation, zoom, pool, store, onClose, registerCom
     if (commitPromiseRef.current) return commitPromiseRef.current
     const promise = (async () => {
       const text = valueRef.current
+      const removed = text.length === 0
       if (text.length === 0) {
         store.remove(annotation.id)
       } else {
@@ -98,7 +99,7 @@ export function TextEditor({ annotation, zoom, pool, store, onClose, registerCom
           annotation.rect[1] + layout.height,
         ])
       }
-      onClose()
+      onClose(removed)
     })().finally(() => {
       commitPromiseRef.current = null
     })

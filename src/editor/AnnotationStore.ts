@@ -172,6 +172,17 @@ export class AnnotationStore {
     this.notify()
   }
 
+  resize(id: string, rect: Rect): void {
+    const annotation = this.annotations.get(id)
+    if (!annotation || annotation.deleted) return
+    if (annotation.rect.every((value, index) => value === rect[index])) return
+    this.markTouched(annotation)
+    annotation.rect = [...rect]
+    annotation.dirty = true
+    annotation.revision += 1
+    this.notify()
+  }
+
   updateText(id: string, text: string, layout: LayoutResult, rect?: Rect): void {
     const annotation = this.annotations.get(id)
     if (!annotation || annotation.deleted || annotation.kind !== 'freetext') return

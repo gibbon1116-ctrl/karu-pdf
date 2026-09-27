@@ -4,6 +4,7 @@ export interface FileSystemWritableFileStreamLike {
 }
 
 export interface PdfFileHandle {
+  readonly name?: string
   getFile(): Promise<File>
   queryPermission?(options: { mode: 'readwrite' }): Promise<PermissionState>
   requestPermission?(options: { mode: 'readwrite' }): Promise<PermissionState>
@@ -18,12 +19,16 @@ export const PDF_PICKER_TYPES = [{
 declare global {
   interface Window {
     showOpenFilePicker?: (options: {
+      id?: string
       multiple?: boolean
       types?: typeof PDF_PICKER_TYPES
+      startIn?: PdfFileHandle
     }) => Promise<PdfFileHandle[]>
     showSaveFilePicker?: (options: {
+      id?: string
       suggestedName?: string
       types?: typeof PDF_PICKER_TYPES
+      startIn?: PdfFileHandle
     }) => Promise<PdfFileHandle>
   }
 }
@@ -40,9 +45,28 @@ export async function writePdf(handle: PdfFileHandle, bytes: Uint8Array): Promis
   await writable.close()
 }
 
-export async function pickSaveHandle(suggestedName: string): Promise<PdfFileHandle | null> {
+export async function pickOpenHandles(startIn?: PdfFileHandle): Promise<PdfFileHandle[]> {
+  if (!window.showOpenFilePicker) return []
+  const options = { id: 'karu-pdf-open', multiple: false, types: PDF_PICKER_TYPES }
+  if (!startIn) return window.showOpenFilePicker(options)
+  try {
+    return await window.showOpenFilePicker({ ...options, startIn })
+  } catch (reason) {
+    if (reason instanceof DOMException && reason.name === 'AbortError') throw reason
+    return window.showOpenFilePicker(options)
+  }
+}
+
+export async function pickSaveHandle(suggestedName: string, startIn?: PdfFileHandle): Promise<PdfFileHandle | null> {
   if (!window.showSaveFilePicker) return null
-  return window.showSaveFilePicker({ suggestedName, types: PDF_PICKER_TYPES })
+  const options = { id: 'karu-pdf-save', suggestedName, types: PDF_PICKER_TYPES }
+  if (!startIn) return window.showSaveFilePicker(options)
+  try {
+    return await window.showSaveFilePicker({ ...options, startIn })
+  } catch (reason) {
+    if (reason instanceof DOMException && reason.name === 'AbortError') throw reason
+    return window.showSaveFilePicker(options)
+  }
 }
 
 export function downloadPdf(bytes: Uint8Array, fileName: string): void {

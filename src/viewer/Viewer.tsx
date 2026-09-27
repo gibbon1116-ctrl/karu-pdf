@@ -1,8 +1,8 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { RenderScheduler } from '../client/RenderScheduler'
 import type { PageSize } from '../core/mupdfDoc'
-import type { EditorTool } from '../editor/AnnotationLayer'
+import { EditorToolChangeContext, type EditorTool } from '../editor/AnnotationLayer'
 import type { AnnotationStore } from '../editor/AnnotationStore'
 import { getMetrics, recordBlankFrame, recordMetric, resetBlankFrames, startMeasure } from '../perf/metrics'
 import type { Priority } from '../worker/protocol'
@@ -31,7 +31,9 @@ interface Props {
   pool: PdfWorkerPool
   annotationStore: AnnotationStore
   tool: EditorTool
+  initialView: { page: number; zoom: number } | null
   pageSizes: PageSize[]
+  onToolChange(tool: EditorTool): void
   onZoomChange(zoom: number): void
   onPageChange(page: number): void
   onFirstBitmap(): void
@@ -57,6 +59,10 @@ type RenderLogWindow = Window & typeof globalThis & {
 }
 
 export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref) {
+  const initialZoom = Math.max(0.25, Math.min(8, props.initialView?.zoom ?? 1))
+  const initialLayout = computePageLayout(props.pageSizes, initialZoom)
+  const initialPageIndex = Math.max(0, Math.min(props.pageSizes.length - 1, (props.initialView?.page ?? 1) - 1))
+  const initialTop = initialLayout.pages[initialPageIndex]?.top ?? 0
   const annotationVersion = useSyncExternalStore(props.annotationStore.subscribe, props.annotationStore.getSnapshot)
   const scrollerRef = useRef<HTMLDivElement>(null)
   const cacheRef = useRef(new BitmapCache())
@@ -71,15 +77,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   const scrollStopTimerRef = useRef<number | undefined>(undefined)
   const panSequenceRef = useRef(0)
   const zoomSequenceRef = useRef(0)
-  const lastPositionRef = useRef({ left: 0, top: 0 })
+  const lastPositionRef = useRef({ left: 0, top: initialTop })
   const horizontalScrollRef = useRef(false)
   const suppressPanUntilRef = useRef(0)
   const renderRequestLogRef = useRef<RenderRequestLogEntry[]>([])
   const editorCommitRef = useRef<(() => Promise<void>) | null>(null)
-  const layoutRef = useRef(computePageLayout([], 1))
-  const [zoom, setZoomState] = useState(1)
-  const [committedZoom, setCommittedZoom] = useState(1)
-  const [viewport, setViewport] = useState<Box>({ x: 0, y: 0, width: 800, height: 600 })
+  const initialPositionAppliedRef = useRef(false)
+  const zoomRef = useRef(initialZoom)
+  const layoutRef = useRef(initialLayout)
+  const [zoom, setZoomState] = useState(initialZoom)
+  const [committedZoom, setCommittedZoom] = useState(initialZoom)
+  const [viewport, setViewport] = useState<Box>({ x: 0, y: initialTop, width: 800, height: 600 })
   const [scrollDirection, setScrollDirection] = useState<1 | -1>(1)
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null)
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null)
@@ -146,11 +154,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   const setZoom = useCallback((next: number, anchor?: { x: number; y: number }) => {
     const scroller = scrollerRef.current
     const bounded = Math.max(0.25, Math.min(8, next))
+    const previousZoom = zoomRef.current
+    zoomRef.current = bounded
     suppressPanUntilRef.current = performance.now() + 400
     if (scroller) {
       const x = anchor?.x ?? scroller.clientWidth / 2
       const y = anchor?.y ?? scroller.clientHeight / 2
-      const ratio = bounded / zoom
+      const ratio = bounded / previousZoom
       setZoomState(bounded)
       requestAnimationFrame(() => {
         scroller.scrollLeft = (scroller.scrollLeft + x) * ratio - x
@@ -159,7 +169,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     } else setZoomState(bounded)
     props.onZoomChange(bounded)
     commitZoom(bounded)
-  }, [commitZoom, props.onZoomChange, zoom])
+  }, [commitZoom, props.onZoomChange])
 
   const fitWidth = useCallback(() => {
     const scroller = scrollerRef.current
@@ -170,11 +180,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   }, [props.pageSizes, setZoom])
 
   const stepZoom = useCallback((direction: -1 | 1) => {
+    const currentZoom = zoomRef.current
     const next = direction > 0
-      ? ZOOM_STEPS.find((step) => step > zoom + 0.001) ?? 8
-      : [...ZOOM_STEPS].reverse().find((step) => step < zoom - 0.001) ?? 0.25
+      ? ZOOM_STEPS.find((step) => step > currentZoom + 0.001) ?? 8
+      : [...ZOOM_STEPS].reverse().find((step) => step < currentZoom - 0.001) ?? 0.25
     setZoom(next)
-  }, [setZoom, zoom])
+  }, [setZoom])
 
   const updateViewport = useCallback(() => {
     const scroller = scrollerRef.current
@@ -259,11 +270,22 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [editingAnnotationId, props.annotationStore, selectedAnnotationId])
 
-  useEffect(() => {
-    if (props.pageSizes.length > 0) requestAnimationFrame(fitWidth)
+  useLayoutEffect(() => {
+    if (props.pageSizes.length === 0 || initialPositionAppliedRef.current) return
+    initialPositionAppliedRef.current = true
+    if (props.initialView) {
+      const target = layoutRef.current.pages[initialPageIndex]
+      if (scrollerRef.current && target) {
+        scrollerRef.current.scrollTop = target.top
+        lastPositionRef.current.top = target.top
+        updateViewport()
+      }
+    } else {
+      fitWidth()
+    }
     firstBitmapRef.current = false
     firstSharpRef.current = false
-  }, [props.pageSizes])
+  }, [fitWidth, initialPageIndex, props.initialView, props.pageSizes, updateViewport])
 
   useEffect(() => {
     const desired = new Map<number, { priority: Priority; key: string; excluded: number[] }>()
@@ -329,11 +351,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   }, [scheduler])
 
   const onSharpChange = useCallback((pageIndex: number, sharp: boolean) => {
-    if (pageIndex === 0 && sharp && !firstSharpRef.current) {
+    if (pageIndex === initialPageIndex && sharp && !firstSharpRef.current) {
       firstSharpRef.current = true
       props.onFirstSharp()
     }
-  }, [props.onFirstSharp])
+  }, [initialPageIndex, props.onFirstSharp])
 
   const pending = scheduler.pendingCount()
   void pending
@@ -349,14 +371,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     },
     isIdle: () => scheduler.pendingCount() === 0,
     isSharp: isSharpNow,
-    getZoom: () => zoom,
+    getZoom: () => zoomRef.current,
     getCache: () => cacheRef.current,
     commitEditor: () => editorCommitRef.current?.() ?? Promise.resolve(),
     clearSelection: () => {
       setSelectedAnnotationId(null)
       setEditingAnnotationId(null)
     },
-  }), [fitWidth, isSharpNow, scheduler, setZoom, stepZoom, zoom])
+  }), [fitWidth, isSharpNow, scheduler, setZoom, stepZoom])
 
   const registerEditorCommit = useCallback((commit: (() => Promise<void>) | null) => {
     editorCommitRef.current = commit
@@ -375,7 +397,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   }
 
   return (
-    <div
+    <EditorToolChangeContext.Provider value={props.onToolChange}>
+      <div
       ref={scrollerRef}
       className="viewer"
       data-testid="viewer"
@@ -383,7 +406,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
         if (!event.ctrlKey) return
         event.preventDefault()
         const rect = event.currentTarget.getBoundingClientRect()
-        setZoom(zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1), { x: event.clientX - rect.left, y: event.clientY - rect.top })
+        setZoom(zoomRef.current * (event.deltaY < 0 ? 1.1 : 1 / 1.1), { x: event.clientX - rect.left, y: event.clientY - rect.top })
       }}
     >
       <div className="page-strip" style={{ width: contentWidth, height: layout.totalHeight }}>
@@ -422,7 +445,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
           />
         } )}
       </div>
-    </div>
+      </div>
+    </EditorToolChangeContext.Provider>
   )
 })
 
