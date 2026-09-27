@@ -5,8 +5,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { applyEdits, listAnnotations, type AnnotationEdit, type Rect } from '../src/core/annotations'
 import { createFontResource, type FontResource } from '../src/core/fontMetrics'
 import { saveDocument, type SaveMode } from '../src/core/save'
+import { ensureSamplePdf } from './fixtures'
 
-const samplePath = path.resolve('test-data/sample-small.pdf')
 const realPath = path.resolve('test-data/real/公共建築工事標準仕様書_建築_R7.pdf')
 const fontPath = path.resolve('public/fonts/BIZUDGothic-Regular.ttf')
 const resultPath = path.resolve('test-results/annot-roundtrip.pdf')
@@ -18,7 +18,7 @@ let fontResource: FontResource
 let sampleBytes: Uint8Array
 
 beforeAll(async () => {
-  sampleBytes = new Uint8Array(await fs.readFile(samplePath))
+  sampleBytes = new Uint8Array(await fs.readFile(await ensureSamplePdf()))
   fontResource = createFontResource(new Uint8Array(await fs.readFile(fontPath)))
   await fs.mkdir(path.dirname(resultPath), { recursive: true })
 })

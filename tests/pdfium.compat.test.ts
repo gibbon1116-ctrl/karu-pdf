@@ -6,8 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { applyEdits, type Rect } from '../src/core/annotations'
 import { createFontResource, type FontResource } from '../src/core/fontMetrics'
 import { saveDocument } from '../src/core/save'
+import { ensureSamplePdf } from './fixtures'
 
-const samplePath = path.resolve('test-data/sample-small.pdf')
 const fontPath = path.resolve('public/fonts/BIZUDGothic-Regular.ttf')
 const wasmPath = path.resolve('node_modules/@embedpdf/pdfium/dist/pdfium.wasm')
 const pageRect: Rect = [72, 320, 272, 362]
@@ -26,7 +26,7 @@ beforeAll(async () => {
   pdfium.FPDF_InitLibrary()
   pdfium.PDFiumExt_Init()
   fontResource = createFontResource(new Uint8Array(await fs.readFile(fontPath)))
-  const source = new Uint8Array(await fs.readFile(samplePath))
+  const source = new Uint8Array(await fs.readFile(await ensureSamplePdf()))
   const document = new mupdf.PDFDocument(source)
   try {
     const applied = applyEdits(document, [

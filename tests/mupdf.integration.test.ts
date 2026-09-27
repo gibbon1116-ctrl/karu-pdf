@@ -5,18 +5,10 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { DisplayListCache } from '../src/core/displayListCache'
 import { openDocument } from '../src/core/mupdfDoc'
 import { renderRegion } from '../src/core/render'
-
-const samplePath = path.resolve('test-data/sample-small.pdf')
+import { ensureSamplePdf, samplePath } from './fixtures'
 
 beforeAll(async () => {
-  try {
-    await fs.access(samplePath)
-  } catch {
-    await fs.mkdir(path.dirname(samplePath), { recursive: true })
-    // @ts-expect-error The executable generator intentionally has no separate declaration file.
-    const { makeSmallPdf } = await import('../scripts/make-test-pdf.mjs')
-    await makeSmallPdf(samplePath)
-  }
+  await ensureSamplePdf()
 })
 
 async function openSample() {
