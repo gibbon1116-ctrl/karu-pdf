@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { PdfWorkerPool } from '../client/PdfWorkerPool'
+import type { PdfWorkerPool, WorkerRenderLogEntry } from '../client/PdfWorkerPool'
 import type { RenderScheduler } from '../client/RenderScheduler'
 import type { PageSize } from '../core/mupdfDoc'
 import { EditorToolChangeContext, type EditorTool } from '../editor/AnnotationLayer'
@@ -63,6 +63,7 @@ interface RenderRequestLogEntry {
 
 type RenderLogWindow = Window & typeof globalThis & {
   __karuRenderRequests?: RenderRequestLogEntry[]
+  __karuWorkerRenderRequests?: readonly WorkerRenderLogEntry[]
 }
 
 export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref) {
@@ -100,6 +101,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null)
 
   const scheduler = props.scheduler
+  ;(window as RenderLogWindow).__karuWorkerRenderRequests = props.pool.renderLog()
   const warmEnabled = new URLSearchParams(location.search).get('warm') === '1'
   const layout = useMemo(() => computePageLayout(props.pageSizes, zoom), [props.pageSizes, zoom])
   layoutRef.current = layout
@@ -114,7 +116,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
 
   const onRenderRequest = useCallback((pageIndex: number, priority: Priority, key: string) => {
     const entry: RenderRequestLogEntry = {
-      worker: pageIndex % props.pool.workerCount,
+      worker: props.pool.workerIndexForPage(props.docId, pageIndex),
       priority,
       key,
       startMs: performance.now(),
@@ -125,7 +127,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     return () => {
       if (entry.endMs === null) entry.endMs = performance.now()
     }
-  }, [props.pool.workerCount])
+  }, [props.docId, props.pool])
 
   const isSharpNow = useCallback(() => {
     const scroller = scrollerRef.current
@@ -170,15 +172,23 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       const x = anchor?.x ?? scroller.clientWidth / 2
       const y = anchor?.y ?? scroller.clientHeight / 2
       const ratio = bounded / previousZoom
+      const nextLeft = (scroller.scrollLeft + x) * ratio - x
+      const nextTop = (scroller.scrollTop + y) * ratio - y
+      lastPositionRef.current = { left: nextLeft, top: nextTop }
+      setViewport({ x: nextLeft, y: nextTop, width: scroller.clientWidth, height: scroller.clientHeight })
       setZoomState(bounded)
       requestAnimationFrame(() => {
-        scroller.scrollLeft = (scroller.scrollLeft + x) * ratio - x
-        scroller.scrollTop = (scroller.scrollTop + y) * ratio - y
+        scroller.scrollLeft = nextLeft
+        scroller.scrollTop = nextTop
+        const actual = { left: scroller.scrollLeft, top: scroller.scrollTop }
+        lastPositionRef.current = actual
+        setViewport({ x: actual.left, y: actual.top, width: scroller.clientWidth, height: scroller.clientHeight })
+        props.onScrollPositionChange(actual.left, actual.top)
       })
     } else setZoomState(bounded)
     props.onZoomChange(bounded)
     commitZoom(bounded)
-  }, [commitZoom, props.onZoomChange])
+  }, [commitZoom, props.onScrollPositionChange, props.onZoomChange])
 
   const fitWidth = useCallback(() => {
     const scroller = scrollerRef.current
@@ -390,7 +400,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       const page = layoutRef.current.pages[Math.max(0, Math.min(layoutRef.current.pages.length - 1, index))]
       ignoreScrollForPrefetchRef.current = true
       scrollerRef.current?.scrollTo({ top: page?.top ?? 0 })
-      requestAnimationFrame(() => { ignoreScrollForPrefetchRef.current = false })
+      requestAnimationFrame(() => {
+        updateViewport()
+        ignoreScrollForPrefetchRef.current = false
+      })
     },
     isIdle: () => scheduler.pendingCount() === 0,
     isSharp: isSharpNow,
@@ -401,7 +414,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       props.onSelectAnnotation(null)
       setEditingAnnotationId(null)
     },
-  }), [fitWidth, isSharpNow, props.onSelectAnnotation, scheduler, setZoom, stepZoom])
+  }), [fitWidth, isSharpNow, props.onSelectAnnotation, scheduler, setZoom, stepZoom, updateViewport])
 
   const registerEditorCommit = useCallback((commit: (() => Promise<void>) | null) => {
     editorCommitRef.current = commit

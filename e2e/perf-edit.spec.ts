@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Browser, type Page } from '@playwright/test'
 
 interface EditResult {
   source: string
@@ -13,6 +13,56 @@ interface EditResult {
 const heavy = path.resolve('test-data/heavy-300p.pdf')
 const real = path.resolve('test-data/real/七ヶ浜町_実施設計図.pdf')
 
+async function isolatedPage(browser: Browser): Promise<{ page: Page; close(): Promise<void> }> {
+  const context = await browser.newContext({
+    baseURL: 'http://127.0.0.1:4173',
+    viewport: { width: 1440, height: 900 },
+  })
+  const page = await context.newPage()
+  return { page, close: () => context.close() }
+}
+
+async function renderDiagnostics(page: Page, label: string): Promise<void> {
+  const state = await page.evaluate(async () => {
+    const viewer = document.querySelector<HTMLElement>('[data-testid="viewer"]')
+    const viewerRect = viewer?.getBoundingClientRect()
+    const visiblePages = [...document.querySelectorAll<HTMLElement>('.page-view')].filter((element) => {
+      const rect = element.getBoundingClientRect()
+      return Boolean(viewerRect && rect.bottom > viewerRect.top && rect.top < viewerRect.bottom)
+    }).map((element) => ({
+      page: Number(element.dataset.pageIndex) + 1,
+      sharp: element.dataset.sharp,
+      visible: element.dataset.visible,
+      zoomStable: element.dataset.zoomStable,
+      usesDetail: element.dataset.usesDetail,
+      detailStage: element.dataset.detailStage,
+      detailKey: element.querySelector<HTMLElement>('.detail-canvas')?.dataset.detailKey ?? null,
+    }))
+    const requests = ((window as Window & { __karuRenderRequests?: unknown[] }).__karuRenderRequests ?? []).slice(-80)
+    return {
+      scroll: viewer ? { left: viewer.scrollLeft, top: viewer.scrollTop } : null,
+      zoomText: document.querySelector('.zoom-output')?.textContent ?? null,
+      visiblePages,
+      unsharpPages: visiblePages.filter((item) => item.sharp !== 'true').map((item) => item.page),
+      requests,
+      workers: await Promise.race([
+        window.__karu?.getWorkerStats(),
+        new Promise((resolve) => window.setTimeout(() => resolve({ timedOut: true }), 2_000)),
+      ]),
+    }
+  })
+  console.error(`[render-diagnostics] ${label}`, JSON.stringify(state))
+}
+
+async function waitSharp(page: Page, label: string): Promise<void> {
+  try {
+    await expect.poll(() => page.evaluate(() => window.__karu!.isSharp()), { timeout: 180_000 }).toBe(true)
+  } catch (error) {
+    await renderDiagnostics(page, label)
+    throw error
+  }
+}
+
 async function measureEditing(page: Page, pdf: string, pageIndex: number, source: string): Promise<EditResult> {
   await page.goto('/karu-pdf/?test=1&workers=3')
   await page.getByTestId('file-input').setInputFiles(pdf)
@@ -22,7 +72,7 @@ async function measureEditing(page: Page, pdf: string, pageIndex: number, source
   await page.evaluate(() => window.__karu!.setZoom(4))
   await page.waitForTimeout(350)
   await page.evaluate((index) => window.__karu!.scrollToPage(index), pageIndex)
-  await expect.poll(() => page.evaluate(() => window.__karu!.isSharp()), { timeout: 180_000 }).toBe(true)
+  await waitSharp(page, `${source} p${pageIndex + 1}`)
 
   const layer = page.getByTestId(`annotation-layer-${pageIndex}`)
   const box = await layer.boundingBox()
@@ -63,13 +113,23 @@ async function measureEditing(page: Page, pdf: string, pageIndex: number, source
   return result
 }
 
-test('書き込み操作のフレーム時間を計測する', async ({ page }) => {
+test('書き込み操作のフレーム時間を計測する', async ({ browser }) => {
   await fs.access(heavy)
   const results: EditResult[] = []
-  results.push(await measureEditing(page, heavy, 5, 'heavy-300p.pdf A1'))
+  const heavyRun = await isolatedPage(browser)
+  try {
+    results.push(await measureEditing(heavyRun.page, heavy, 5, 'heavy-300p.pdf A1'))
+  } finally {
+    await heavyRun.close()
+  }
   try {
     await fs.access(real)
-    results.push(await measureEditing(page, real, 11, '七ヶ浜町_実施設計図.pdf'))
+    const realRun = await isolatedPage(browser)
+    try {
+      results.push(await measureEditing(realRun.page, real, 11, '七ヶ浜町_実施設計図.pdf'))
+    } finally {
+      await realRun.close()
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     console.log('[perf-edit] 実施設計図がないため p12 の計測をスキップしました。')

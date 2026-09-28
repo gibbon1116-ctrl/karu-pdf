@@ -6,7 +6,8 @@ import { AnnotationLayer, type EditorTool } from '../editor/AnnotationLayer'
 import type { AnnotationStore } from '../editor/AnnotationStore'
 import type { FormatDefaults } from '../editor/formatDefaults'
 import type { DeviceRect, Priority } from '../worker/protocol'
-import { computeDetailRegion, computeVisibleRegion, regionCovers, visiblePartOfPage, type Box } from './detailRegion'
+import { completedBandsCover, isBandedRender, makeRenderBands, type RenderBand } from './bandedRender'
+import { computeDetailRegion, computeVisibleRegion, visiblePartOfPage, type Box } from './detailRegion'
 import { CSS_PX_PER_PT, type PageLayout } from './pageLayout'
 
 interface Props {
@@ -35,11 +36,14 @@ interface Props {
 }
 
 interface DetailState {
-  key: string
+  baseKey: string
   stage: 'visible' | 'full'
   renderScale: number
   region: DeviceRect
-  bitmap: ImageBitmap
+  bands: RenderBand[]
+  completed: boolean[]
+  complete: boolean
+  canvas: HTMLCanvasElement
 }
 
 interface DetailRequest {
@@ -56,6 +60,13 @@ function draw(canvas: HTMLCanvasElement | null, bitmap: ImageBitmap): void {
   canvas.width = bitmap.width
   canvas.height = bitmap.height
   canvas.getContext('2d', { alpha: false })?.drawImage(bitmap, 0, 0)
+}
+
+function drawCanvas(canvas: HTMLCanvasElement | null, source: HTMLCanvasElement): void {
+  if (!canvas) return
+  canvas.width = source.width
+  canvas.height = source.height
+  canvas.getContext('2d')?.drawImage(source, 0, 0)
 }
 
 export function PageView(props: Props) {
@@ -112,9 +123,9 @@ export function PageView(props: Props) {
 
   const detailSharp = props.visible && zoomStable
     && detail?.renderScale === renderScale
-    && detail.key.endsWith(excludeKey)
-    && regionCovers(detail.region, visibleDevice)
-  const detailFull = detailSharp && detail?.stage === 'full'
+    && detail.baseKey.endsWith(excludeKey)
+    && completedBandsCover(detail.region, detail.bands, detail.completed, visibleDevice)
+  const detailFull = detailSharp && detail?.stage === 'full' && detail.complete
 
   useEffect(() => {
     if (!props.warmEnabled) return
@@ -168,47 +179,96 @@ export function PageView(props: Props) {
   useEffect(() => {
     if (!props.visible || (usesDetail && !detailFull)) return
     const priority: Priority = usesDetail ? 2 : 0
-    const finishLog = props.onRenderRequest(props.layout.index, priority, previewKey)
-    const params = {
-      docId: props.docId,
-      pageIndex: props.layout.index,
-      renderScale: previewScale,
-      deviceRect: null,
-      excludeAnnotObjNums: excludedObjNums,
+    const previewRegion: DeviceRect = [
+      0,
+      0,
+      Math.ceil(props.pageSize.width * previewScale),
+      Math.ceil(props.pageSize.height * previewScale),
+    ]
+    const bands = usesDetail ? makeRenderBands(previewKey, previewRegion) : makeRenderBands(previewKey, [0, 0, 1, 1])
+    const banded = usesDetail && isBandedRender(bands)
+    const buffer = document.createElement('canvas')
+    buffer.width = previewRegion[2]
+    buffer.height = previewRegion[3]
+    const bufferContext = buffer.getContext('2d', { alpha: false })
+    if (previewRef.current && bufferContext) {
+      bufferContext.drawImage(previewRef.current, 0, 0, buffer.width, buffer.height)
     }
-    const release = props.scheduler.want(previewKey, params, priority, (bitmap) => {
-      finishLog()
-      draw(previewRef.current, bitmap)
-      qualityRef.current = 2
-      setHasBitmap(true)
-      setDrawnPreviewKey(previewKey)
-      props.onFirstBitmap()
-    })
+    let completed = 0
+    let displayed = false
+    let active = true
+    const releases: Array<{ finishLog(completed?: boolean): void; release(): void }> = []
+    const requestBand = (index: number) => {
+      if (!active || index >= bands.length) return
+      const band = bands[index]
+      const finishLog = props.onRenderRequest(props.layout.index, priority, band.key)
+      const params = {
+        docId: props.docId,
+        pageIndex: props.layout.index,
+        renderScale: previewScale,
+        deviceRect: banded ? band.rect : null,
+        excludeAnnotObjNums: excludedObjNums,
+      }
+      const item = {
+        finishLog,
+        release: props.scheduler.want(band.key, params, priority, (bitmap) => {
+          finishLog()
+          const x = band.rect[0] - previewRegion[0]
+          const y = band.rect[1] - previewRegion[1]
+          bufferContext?.drawImage(bitmap, x, y)
+          const canvas = previewRef.current
+          if (canvas) {
+            if (!displayed) {
+              drawCanvas(canvas, buffer)
+              displayed = true
+            } else {
+              canvas.getContext('2d', { alpha: false })?.drawImage(bitmap, x, y)
+            }
+          }
+          completed += 1
+          qualityRef.current = 2
+          setHasBitmap(true)
+          props.onFirstBitmap()
+          if (completed === bands.length) setDrawnPreviewKey(previewKey)
+          else requestBand(index + 1)
+        }),
+      }
+      releases.push(item)
+    }
+    requestBand(0)
     return () => {
-      finishLog()
-      release()
+      active = false
+      for (const item of releases) {
+        item.finishLog()
+        item.release()
+      }
     }
-  }, [props.scheduler, previewKey, previewScale, props.layout.index, props.visible, props.onRenderRequest, usesDetail, detailFull])
+  }, [props.scheduler, previewKey, previewScale, props.layout.index, props.pageSize, props.visible, props.onRenderRequest, usesDetail, detailFull])
 
   useEffect(() => {
-    const scaleChanged = lastScaleRef.current !== null && Math.abs(lastScaleRef.current - renderScale) > 0.000001
+    const firstScale = lastScaleRef.current === null
+    const scaleChanged = !firstScale && Math.abs(lastScaleRef.current! - renderScale) > 0.000001
     lastScaleRef.current = renderScale
-    if (scaleChanged) {
-      setDetail(null)
-      setDetailRequest(null)
-    }
+    if (scaleChanged) setDetail(null)
     if (!usesDetail || !visibleDevice) {
       setDetailRequest(null)
       return
     }
-    if (!scaleChanged && detail?.renderScale === renderScale && regionCovers(detail.region, visibleDevice)) return
+    if (!scaleChanged
+      && detail?.renderScale === renderScale
+      && completedBandsCover(detail.region, detail.bands, detail.completed, visibleDevice)) return
     const next: DetailRequest = {
       stage: 'visible',
       region: computeVisibleRegion(visibleDevice, pageDeviceSize),
     }
-    const timer = window.setTimeout(() => setDetailRequest((current) => (
+    const updateRequest = () => setDetailRequest((current) => (
       current?.stage === next.stage && sameRegion(current.region, next.region) ? current : next
-    )), scaleChanged ? 0 : 60)
+    ))
+    if (firstScale || scaleChanged) {
+      updateRequest()
+      return
+    }
+    const timer = window.setTimeout(updateRequest, 60)
     return () => window.clearTimeout(timer)
   }, [usesDetail, visibleDevice, renderScale, pageDeviceSize, detail])
 
@@ -228,27 +288,77 @@ export function PageView(props: Props) {
   useEffect(() => {
     if (!detailRequest || !detailKey || !props.visible) return
     const priority: Priority = detailRequest.stage === 'visible' ? 0 : 1
-    const finishLog = props.onRenderRequest(props.layout.index, priority, detailKey)
-    const params = {
-      docId: props.docId,
-      pageIndex: props.layout.index,
-      renderScale,
-      deviceRect: detailRequest.region,
-      excludeAnnotObjNums: excludedObjNums,
+    const bands = detailRequest.stage === 'full'
+      ? makeRenderBands(detailKey, detailRequest.region)
+      : [{ key: detailKey, rect: detailRequest.region }]
+    const completed = bands.map(() => false)
+    const buffer = document.createElement('canvas')
+    buffer.width = detailRequest.region[2] - detailRequest.region[0]
+    buffer.height = detailRequest.region[3] - detailRequest.region[1]
+    const context = buffer.getContext('2d')
+    let active = true
+    let displayed = false
+    const releases: Array<{ finishLog(completed?: boolean): void; release(): void }> = []
+    const requestBand = (index: number) => {
+      if (!active || index >= bands.length) return
+      const band = bands[index]
+      const finishLog = props.onRenderRequest(props.layout.index, priority, band.key)
+      const params = {
+        docId: props.docId,
+        pageIndex: props.layout.index,
+        renderScale,
+        deviceRect: band.rect,
+        excludeAnnotObjNums: excludedObjNums,
+      }
+      const item = {
+        finishLog,
+        release: props.scheduler.want(band.key, params, priority, (bitmap) => {
+          finishLog()
+          if (!active) return
+          context?.drawImage(
+            bitmap,
+            band.rect[0] - detailRequest.region[0],
+            band.rect[1] - detailRequest.region[1],
+          )
+          completed[index] = true
+          const complete = completed.every(Boolean)
+          const coversRequestedVisible = completedBandsCover(
+            detailRequest.region,
+            bands,
+            completed,
+            visibleDevice,
+          )
+          if (detailRequest.stage === 'visible' || displayed || coversRequestedVisible) {
+            displayed = true
+            setDetail({
+              baseKey: detailKey,
+              stage: detailRequest.stage,
+              renderScale,
+              region: detailRequest.region,
+              bands,
+              completed: [...completed],
+              complete,
+              canvas: buffer,
+            })
+          }
+          setHasBitmap(true)
+          if (!complete) requestBand(index + 1)
+        }),
+      }
+      releases.push(item)
     }
-    const release = props.scheduler.want(detailKey, params, priority, (bitmap) => {
-      finishLog()
-      setDetail({ key: detailKey, stage: detailRequest.stage, renderScale, region: detailRequest.region, bitmap })
-      setHasBitmap(true)
-    })
+    requestBand(0)
     return () => {
-      finishLog()
-      release()
+      active = false
+      for (const item of releases) {
+        item.finishLog()
+        item.release()
+      }
     }
   }, [props.scheduler, props.layout.index, props.visible, props.onRenderRequest, renderScale, detailKey, detailRequest])
 
   useEffect(() => {
-    if (detail) draw(detailRef.current, detail.bitmap)
+    if (detail) drawCanvas(detailRef.current, detail.canvas)
   }, [detail])
 
   const sharp = props.visible && zoomStable && (usesDetail
@@ -267,7 +377,10 @@ export function PageView(props: Props) {
       data-page-index={props.layout.index}
       data-has-bitmap={hasBitmap ? 'true' : 'false'}
       data-sharp={sharp ? 'true' : 'false'}
-      data-detail-stage={showDetail ? detail.stage : 'none'}
+      data-visible={props.visible ? 'true' : 'false'}
+      data-zoom-stable={zoomStable ? 'true' : 'false'}
+      data-uses-detail={usesDetail ? 'true' : 'false'}
+      data-detail-stage={showDetail ? (detail.complete ? detail.stage : `${detail.stage}-partial`) : 'none'}
       style={{ top: props.layout.top, left: props.pageLeft, width: props.layout.width, height: props.layout.height }}
     >
       <span className="page-placeholder">{props.layout.index + 1}</span>
@@ -275,7 +388,7 @@ export function PageView(props: Props) {
       {showDetail && <canvas
         ref={detailRef}
         className="detail-canvas"
-        data-detail-key={detail.key}
+        data-detail-key={detail.baseKey}
         style={{
           left: detail.region[0] / dpr,
           top: detail.region[1] / dpr,

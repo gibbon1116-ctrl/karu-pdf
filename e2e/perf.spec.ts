@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Browser, type Page } from '@playwright/test'
 
 interface BlankResult { ratio: number; longestMs: number }
 interface RenderRequestLogEntry {
@@ -11,6 +11,17 @@ interface RenderRequestLogEntry {
   startMs: number
   endMs: number | null
 }
+interface WorkerRenderLogEntry {
+  jobId: number
+  pageIndex: number
+  worker: number
+  priority: number
+  deviceRect: [number, number, number, number] | null
+  queuedMs: number
+  startedMs: number | null
+  endedMs: number | null
+  cancelled: boolean
+}
 interface PageZoomResult {
   zoomMs: number
   zoomFullMs: number
@@ -19,8 +30,14 @@ interface PageZoomResult {
   pan1500Ms: number
   requestLog: RenderRequestLogEntry[]
   zoomFullRequestLog: RenderRequestLogEntry[]
+  workerRequestLog: WorkerRenderLogEntry[]
+  zoomFullWorkerRequestLog: WorkerRenderLogEntry[]
 }
-interface ZoomFullResult { durationMs: number; requestLog: RenderRequestLogEntry[] }
+interface ZoomFullResult {
+  durationMs: number
+  requestLog: RenderRequestLogEntry[]
+  workerRequestLog: WorkerRenderLogEntry[]
+}
 interface BenchRow {
   workers: number
   warm: boolean
@@ -43,6 +60,49 @@ const pdf = path.resolve('test-data/heavy-300p.pdf')
 const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
 const urlFor = (workers: number, warm: boolean) => `/karu-pdf/?test=1&workers=${workers}&warm=${warm ? 1 : 0}`
 
+async function isolatedPage(browser: Browser): Promise<{ page: Page; close(): Promise<void> }> {
+  const context = await browser.newContext({
+    baseURL: 'http://127.0.0.1:4173',
+    viewport: { width: 1440, height: 900 },
+  })
+  const page = await context.newPage()
+  return { page, close: () => context.close() }
+}
+
+async function renderDiagnostics(page: Page, label: string): Promise<void> {
+  const state = await page.evaluate(async () => {
+    const viewer = document.querySelector<HTMLElement>('[data-testid="viewer"]')
+    const viewerRect = viewer?.getBoundingClientRect()
+    const visiblePages = [...document.querySelectorAll<HTMLElement>('.page-view')].filter((element) => {
+      const rect = element.getBoundingClientRect()
+      return Boolean(viewerRect && rect.bottom > viewerRect.top && rect.top < viewerRect.bottom)
+    }).map((element) => ({
+      page: Number(element.dataset.pageIndex) + 1,
+      sharp: element.dataset.sharp,
+      visible: element.dataset.visible,
+      zoomStable: element.dataset.zoomStable,
+      usesDetail: element.dataset.usesDetail,
+      detailStage: element.dataset.detailStage,
+      detailKey: element.querySelector<HTMLElement>('.detail-canvas')?.dataset.detailKey ?? null,
+    }))
+    const requests = ((window as Window & { __karuRenderRequests?: RenderRequestLogEntry[] }).__karuRenderRequests ?? []).slice(-100)
+    const workerRequests = ((window as Window & { __karuWorkerRenderRequests?: WorkerRenderLogEntry[] }).__karuWorkerRenderRequests ?? []).slice(-100)
+    return {
+      scroll: viewer ? { left: viewer.scrollLeft, top: viewer.scrollTop } : null,
+      zoomText: document.querySelector('.zoom-output')?.textContent ?? null,
+      visiblePages,
+      unsharpPages: visiblePages.filter((item) => item.sharp !== 'true').map((item) => item.page),
+      requests,
+      workerRequests,
+      workers: await Promise.race([
+        window.__karu?.getWorkerStats(),
+        new Promise((resolve) => window.setTimeout(() => resolve({ timedOut: true }), 2_000)),
+      ]),
+    }
+  })
+  console.error(`[render-diagnostics] ${label}`, JSON.stringify(state))
+}
+
 async function openPdf(page: Page): Promise<{ open: number; sharp: number }> {
   await page.evaluate(() => localStorage.removeItem('karu-pdf:view'))
   const before = await page.evaluate(() => ({
@@ -59,7 +119,12 @@ async function openPdf(page: Page): Promise<{ open: number; sharp: number }> {
 }
 
 async function waitSharp(page: Page): Promise<void> {
-  await expect.poll(() => page.evaluate(() => window.__karu?.isSharp() ?? false), { timeout: 180_000 }).toBe(true)
+  try {
+    await expect.poll(() => page.evaluate(() => window.__karu?.isSharp() ?? false), { timeout: 180_000 }).toBe(true)
+  } catch (error) {
+    await renderDiagnostics(page, 'isSharp')
+    throw error
+  }
 }
 
 async function measureScroll(page: Page, pixelsPerSecond: 1500 | 3000): Promise<BlankResult> {
@@ -106,15 +171,30 @@ async function measurePan(
   return page.evaluate(() => window.__karu?.getMetrics().panSettle.latest ?? 0)
 }
 
-async function measureZoomPage(page: Page, pageIndex: number): Promise<PageZoomResult> {
+async function fitWidthAndScrollTo(page: Page, pageIndex: number): Promise<void> {
+  const before = await page.evaluate(() => window.__karu?.getMetrics().zoomSettle.count ?? 0)
   await page.getByRole('button', { name: '幅に合わせる' }).click()
+  await expect.poll(() => page.evaluate((count) => (
+    window.__karu?.getMetrics().zoomSettle.count ?? 0
+  ) > count, before), { timeout: 180_000 }).toBe(true)
   await page.evaluate((index) => window.__karu?.scrollToPage(index), pageIndex)
   await page.waitForTimeout(200)
   await waitSharp(page)
+}
+
+async function measureZoomPage(page: Page, pageIndex: number): Promise<PageZoomResult> {
+  await fitWidthAndScrollTo(page, pageIndex)
   const requestLogStart = await page.evaluate(() => performance.now())
   const before = await page.evaluate(() => window.__karu?.getMetrics().zoomSettle.count ?? 0)
   await page.evaluate(() => window.__karu?.setZoom(4))
-  await expect.poll(() => page.evaluate((count) => (window.__karu?.getMetrics().zoomSettle.count ?? 0) > count, before), { timeout: 180_000 }).toBe(true)
+  try {
+    await expect.poll(() => page.evaluate((count) => (
+      window.__karu?.getMetrics().zoomSettle.count ?? 0
+    ) > count, before), { timeout: 180_000 }).toBe(true)
+  } catch (error) {
+    await renderDiagnostics(page, `zoom-settle p${pageIndex + 1}`)
+    throw error
+  }
   await waitSharp(page)
   const zoomMs = await page.evaluate(() => window.__karu?.getMetrics().zoomSettle.latest ?? 0)
   const pan250Ms = await measurePan(page, pageIndex, 250, false)
@@ -124,20 +204,36 @@ async function measureZoomPage(page: Page, pageIndex: number): Promise<PageZoomR
     const log = (window as Window & { __karuRenderRequests?: RenderRequestLogEntry[] }).__karuRenderRequests ?? []
     return log.filter((entry) => entry.startMs >= start && entry.key.startsWith(`${index}:`))
   }, { index: pageIndex, start: requestLogStart })
-  return { zoomMs, zoomFullMs: 0, pan250Ms, pan500Ms, pan1500Ms, requestLog, zoomFullRequestLog: [] }
+  const workerRequestLog = await page.evaluate((start) => {
+    const log = (window as Window & { __karuWorkerRenderRequests?: WorkerRenderLogEntry[] }).__karuWorkerRenderRequests ?? []
+    return log.filter((entry) => entry.queuedMs >= start - 5_000)
+  }, requestLogStart)
+  return {
+    zoomMs,
+    zoomFullMs: 0,
+    pan250Ms,
+    pan500Ms,
+    pan1500Ms,
+    requestLog,
+    zoomFullRequestLog: [],
+    workerRequestLog,
+    zoomFullWorkerRequestLog: [],
+  }
 }
 
 async function measureZoomFull(page: Page, pageIndex: number): Promise<ZoomFullResult> {
-  await page.getByRole('button', { name: '幅に合わせる' }).click()
-  await page.evaluate((index) => window.__karu?.scrollToPage(index), pageIndex)
-  await page.waitForTimeout(200)
-  await waitSharp(page)
+  await fitWidthAndScrollTo(page, pageIndex)
   const startedAt = await page.evaluate(() => performance.now())
   await page.evaluate(() => window.__karu?.setZoom(4))
-  await expect.poll(() => page.evaluate((index) => {
-    const element = document.querySelector<HTMLElement>(`.page-view[data-page-index="${index}"]`)
-    return element?.dataset.detailStage === 'full' && element.dataset.sharp === 'true'
-  }, pageIndex), { timeout: 180_000 }).toBe(true)
+  try {
+    await expect.poll(() => page.evaluate((index) => {
+      const element = document.querySelector<HTMLElement>(`.page-view[data-page-index="${index}"]`)
+      return element?.dataset.detailStage === 'full' && element.dataset.sharp === 'true'
+    }, pageIndex), { timeout: 180_000 }).toBe(true)
+  } catch (error) {
+    await renderDiagnostics(page, `zoom-full p${pageIndex + 1}`)
+    throw error
+  }
   const durationMs = await page.evaluate((start) => performance.now() - start, startedAt)
   await expect.poll(() => page.evaluate(({ index, start }) => {
     const log = (window as Window & { __karuRenderRequests?: RenderRequestLogEntry[] }).__karuRenderRequests ?? []
@@ -148,10 +244,14 @@ async function measureZoomFull(page: Page, pageIndex: number): Promise<ZoomFullR
     const log = (window as Window & { __karuRenderRequests?: RenderRequestLogEntry[] }).__karuRenderRequests ?? []
     return log.filter((entry) => entry.startMs >= start && entry.key.startsWith(`${index}:`))
   }, { index: pageIndex, start: startedAt })
-  return { durationMs, requestLog }
+  const workerRequestLog = await page.evaluate(({ index, start }) => {
+    const log = (window as Window & { __karuWorkerRenderRequests?: WorkerRenderLogEntry[] }).__karuWorkerRenderRequests ?? []
+    return log.filter((entry) => entry.queuedMs >= start && entry.pageIndex === index)
+  }, { index: pageIndex, start: startedAt })
+  return { durationMs, requestLog, workerRequestLog }
 }
 
-test('Worker 3本・warmなしの表示性能を計測する', async ({ page }) => {
+test('Worker 3本・warmなしの表示性能を計測する', async ({ browser }) => {
   await fs.access(pdf)
   const rows: BenchRow[] = []
 
@@ -160,42 +260,95 @@ test('Worker 3本・warmなしの表示性能を計測する', async ({ page }) 
   const openValues: number[] = []
   const sharpValues: number[] = []
   for (let run = 0; run < 3; run += 1) {
-    await page.goto(urlFor(workers, warm))
-    const opened = await openPdf(page)
-    openValues.push(opened.open)
-    sharpValues.push(opened.sharp)
+    const isolatedRun = await isolatedPage(browser)
+    const runPage = isolatedRun.page
+    try {
+      await runPage.goto(urlFor(workers, warm))
+      const opened = await openPdf(runPage)
+      openValues.push(opened.open)
+      sharpValues.push(opened.sharp)
+    } finally {
+      await isolatedRun.close()
+    }
   }
 
-  const cold1500 = await measureScroll(page, 1500)
-  await page.waitForTimeout(1500)
-  const cached1500 = await measureScroll(page, 1500)
+  const scroll1500Run = await isolatedPage(browser)
+  const scroll1500Page = scroll1500Run.page
+  let cold1500!: BlankResult
+  let cached1500!: BlankResult
+  try {
+    await scroll1500Page.goto(urlFor(workers, warm))
+    await openPdf(scroll1500Page)
+    cold1500 = await measureScroll(scroll1500Page, 1500)
+    await scroll1500Page.waitForTimeout(1500)
+    cached1500 = await measureScroll(scroll1500Page, 1500)
+  } finally {
+    await scroll1500Run.close()
+  }
 
-  await page.goto(urlFor(workers, warm))
-  await openPdf(page)
-  const cold3000 = await measureScroll(page, 3000)
-  await page.waitForTimeout(1500)
-  const cached3000 = await measureScroll(page, 3000)
+  const scroll3000Run = await isolatedPage(browser)
+  const scroll3000Page = scroll3000Run.page
+  let cold3000!: BlankResult
+  let cached3000!: BlankResult
+  try {
+    await scroll3000Page.goto(urlFor(workers, warm))
+    await openPdf(scroll3000Page)
+    cold3000 = await measureScroll(scroll3000Page, 3000)
+    await scroll3000Page.waitForTimeout(1500)
+    cached3000 = await measureScroll(scroll3000Page, 3000)
+  } finally {
+    await scroll3000Run.close()
+  }
 
-  const a1 = await measureZoomPage(page, 5)
-  const a4 = await measureZoomPage(page, 0)
-  const metrics = await page.evaluate(() => window.__karu!.getMetrics())
-  const stats = await page.evaluate(() => window.__karu!.getWorkerStats())
+  const zoomRun = await isolatedPage(browser)
+  const zoomPage = zoomRun.page
+  let a1!: PageZoomResult
+  let a4!: PageZoomResult
+  let renderAverageMs = 0
+  let renderP95Ms = 0
+  let workerProcessed: number[] = []
+  try {
+    await zoomPage.goto(urlFor(workers, warm))
+    await openPdf(zoomPage)
+    a1 = await measureZoomPage(zoomPage, 5)
+    a4 = await measureZoomPage(zoomPage, 0)
+    const metrics = await zoomPage.evaluate(() => window.__karu!.getMetrics())
+    const stats = await zoomPage.evaluate(() => Promise.race([
+      window.__karu!.getWorkerStats(),
+      new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 5_000)),
+    ]))
+    renderAverageMs = metrics.renderWorker.average ?? 0
+    renderP95Ms = metrics.renderWorker.p95 ?? 0
+    workerProcessed = stats?.workers.map((worker) => worker.processedCount) ?? [-1, -1, -1]
+  } finally {
+    await zoomRun.close()
+  }
 
-  const a1FullPage = await page.context().newPage()
-  await a1FullPage.goto(urlFor(workers, warm))
-  await openPdf(a1FullPage)
-  const a1Full = await measureZoomFull(a1FullPage, 5)
-  a1.zoomFullMs = a1Full.durationMs
-  a1.zoomFullRequestLog = a1Full.requestLog
-  await a1FullPage.close()
+  const a1FullRun = await isolatedPage(browser)
+  const a1FullPage = a1FullRun.page
+  try {
+    await a1FullPage.goto(urlFor(workers, warm))
+    await openPdf(a1FullPage)
+    const a1Full = await measureZoomFull(a1FullPage, 5)
+    a1.zoomFullMs = a1Full.durationMs
+    a1.zoomFullRequestLog = a1Full.requestLog
+    a1.zoomFullWorkerRequestLog = a1Full.workerRequestLog
+  } finally {
+    await a1FullRun.close()
+  }
 
-  const a4FullPage = await page.context().newPage()
-  await a4FullPage.goto(urlFor(workers, warm))
-  await openPdf(a4FullPage)
-  const a4Full = await measureZoomFull(a4FullPage, 0)
-  a4.zoomFullMs = a4Full.durationMs
-  a4.zoomFullRequestLog = a4Full.requestLog
-  await a4FullPage.close()
+  const a4FullRun = await isolatedPage(browser)
+  const a4FullPage = a4FullRun.page
+  try {
+    await a4FullPage.goto(urlFor(workers, warm))
+    await openPdf(a4FullPage)
+    const a4Full = await measureZoomFull(a4FullPage, 0)
+    a4.zoomFullMs = a4Full.durationMs
+    a4.zoomFullRequestLog = a4Full.requestLog
+    a4.zoomFullWorkerRequestLog = a4Full.workerRequestLog
+  } finally {
+    await a4FullRun.close()
+  }
   rows.push({
     workers,
     warm,
@@ -204,16 +357,22 @@ test('Worker 3本・warmなしの表示性能を計測する', async ({ page }) 
     scroll: { cold1500, cached1500, cold3000, cached3000 },
     a1,
     a4,
-    renderAverageMs: metrics.renderWorker.average ?? 0,
-    renderP95Ms: metrics.renderWorker.p95 ?? 0,
-    workerProcessed: stats.workers.map((worker) => worker.processedCount),
+    renderAverageMs,
+    renderP95Ms,
+    workerProcessed,
   })
 
+  const hardwareRun = await isolatedPage(browser)
+  const browserHardware = await hardwareRun.page.evaluate(() => ({
+    hardwareConcurrency: navigator.hardwareConcurrency,
+    deviceMemory: navigator.deviceMemory ?? null,
+  }))
+  await hardwareRun.close()
   const hardware = {
     cpu: os.cpus()[0]?.model ?? 'unknown',
     cores: os.cpus().length,
     totalMemoryBytes: os.totalmem(),
-    browser: await page.evaluate(() => window.__karu?.getHardwareInfo()),
+    browser: browserHardware,
   }
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
   await fs.mkdir('bench-results', { recursive: true })

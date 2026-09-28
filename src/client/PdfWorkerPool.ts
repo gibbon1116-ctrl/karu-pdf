@@ -45,6 +45,19 @@ export interface PoolStats {
   workers: Array<{ index: number; queueLength: number; displayListCount: number; displayListBytes: number; processedCount: number }>
 }
 
+export interface WorkerRenderLogEntry {
+  jobId: number
+  docId: string
+  pageIndex: number
+  worker: number
+  priority: Priority
+  deviceRect: DeviceRect | null
+  queuedMs: number
+  startedMs: number | null
+  endedMs: number | null
+  cancelled: boolean
+}
+
 export interface RenderTask {
   jobId: number
   promise: Promise<RenderResult>
@@ -78,6 +91,7 @@ type Pending = {
   started: number
   workerStarted: boolean
   slot: WorkerSlot
+  log: WorkerRenderLogEntry
   resolve(value: RenderResult): void
   reject(error: Error): void
 }
@@ -96,6 +110,7 @@ export class PdfWorkerPool {
   private readonly pendingRequests = new Map<number, { resolve(value: WorkerResponse): void; reject(error: Error): void }>()
   private displayLru: string[] = []
   private readonly pageAssignments = new Map<string, number>()
+  private readonly renderLogEntries: WorkerRenderLogEntry[] = []
   private readonly assignedCounts: number[] = []
   private activeDocId: string | null = null
   private nextId = 1
@@ -172,6 +187,14 @@ export class PdfWorkerPool {
     return chosen
   }
 
+  workerIndexForPage(docId: string, pageIndex: number): number {
+    return this.slotForPage(docId, pageIndex).index
+  }
+
+  renderLog(): readonly WorkerRenderLogEntry[] {
+    return this.renderLogEntries
+  }
+
   render(options: {
     docId: string
     priority: Priority
@@ -182,9 +205,23 @@ export class PdfWorkerPool {
   }): RenderTask {
     const slot = this.slotForPage(options.docId, options.pageIndex)
     const jobId = this.nextId++
+    const log: WorkerRenderLogEntry = {
+      jobId,
+      docId: options.docId,
+      pageIndex: options.pageIndex,
+      worker: slot.index,
+      priority: options.priority,
+      deviceRect: options.deviceRect ? [...options.deviceRect] as DeviceRect : null,
+      queuedMs: performance.now(),
+      startedMs: null,
+      endedMs: null,
+      cancelled: false,
+    }
+    this.renderLogEntries.push(log)
+    if (this.renderLogEntries.length > 5_000) this.renderLogEntries.splice(0, 1_000)
     slot.queueLength += 1
     const promise = new Promise<RenderResult>((resolve, reject) => {
-      this.pendingRenders.set(jobId, { docId: options.docId, started: performance.now(), workerStarted: false, slot, resolve, reject })
+      this.pendingRenders.set(jobId, { docId: options.docId, started: performance.now(), workerStarted: false, slot, log, resolve, reject })
       slot.worker.postMessage({ type: 'render', jobId, ...options })
     })
     return {
@@ -320,7 +357,10 @@ export class PdfWorkerPool {
     }
     if (message.type === 'started') {
       const pending = this.pendingRenders.get(message.jobId)
-      if (pending) pending.workerStarted = true
+      if (pending) {
+        pending.workerStarted = true
+        pending.log.startedMs = performance.now()
+      }
       return
     }
     if (message.type === 'rendered') {
@@ -331,6 +371,8 @@ export class PdfWorkerPool {
       }
       this.pendingRenders.delete(message.jobId)
       pending.slot.queueLength = Math.max(0, pending.slot.queueLength - 1)
+      pending.log.endedMs = performance.now()
+      pending.log.cancelled = Boolean(message.cancelled)
       if (message.cancelled) pending.reject(new CancelledRenderError())
       else if (message.bitmap) pending.resolve({
         bitmap: message.bitmap,
@@ -346,6 +388,7 @@ export class PdfWorkerPool {
         if (pending) {
           this.pendingRenders.delete(message.jobId)
           pending.slot.queueLength = Math.max(0, pending.slot.queueLength - 1)
+          pending.log.endedMs = performance.now()
           pending.reject(error)
         }
       } else if (message.requestId !== undefined) {
