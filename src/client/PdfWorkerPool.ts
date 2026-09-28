@@ -95,6 +95,8 @@ export class PdfWorkerPool {
   private readonly pendingRenders = new Map<number, Pending>()
   private readonly pendingRequests = new Map<number, { resolve(value: WorkerResponse): void; reject(error: Error): void }>()
   private displayLru: string[] = []
+  private readonly pageAssignments = new Map<string, number>()
+  private readonly assignedCounts: number[] = []
   private activeDocId: string | null = null
   private nextId = 1
 
@@ -149,6 +151,25 @@ export class PdfWorkerPool {
     }
     this.displayLru = this.displayLru.filter((id) => id !== docId)
     if (this.activeDocId === docId) this.activeDocId = null
+    for (const key of this.pageAssignments.keys()) {
+      if (key.startsWith(`${docId}:`)) this.pageAssignments.delete(key)
+    }
+  }
+
+  // ページ番号の剰余で固定すると、図面が周期的に並ぶ文書で重いページが
+  // 1本の Worker に集中する。最初の要求のときに最も空いている Worker を
+  // 選び、以後はそのページを同じ Worker に任せる（DisplayList を1つで済ませる）。
+  private slotForPage(docId: string, pageIndex: number): WorkerSlot {
+    const key = `${docId}:${pageIndex}`
+    const assigned = this.pageAssignments.get(key)
+    if (assigned !== undefined) return this.slots[assigned]
+    const chosen = this.slots.reduce((best, current) => {
+      if (current.queueLength !== best.queueLength) return current.queueLength < best.queueLength ? current : best
+      return (this.assignedCounts[current.index] ?? 0) < (this.assignedCounts[best.index] ?? 0) ? current : best
+    })
+    this.pageAssignments.set(key, chosen.index)
+    this.assignedCounts[chosen.index] = (this.assignedCounts[chosen.index] ?? 0) + 1
+    return chosen
   }
 
   render(options: {
@@ -159,7 +180,7 @@ export class PdfWorkerPool {
     deviceRect: DeviceRect | null
     excludeAnnotObjNums?: number[]
   }): RenderTask {
-    const slot = this.slots[options.pageIndex % this.workerCount]
+    const slot = this.slotForPage(options.docId, options.pageIndex)
     const jobId = this.nextId++
     slot.queueLength += 1
     const promise = new Promise<RenderResult>((resolve, reject) => {

@@ -36,19 +36,32 @@ function Thumbnail({ layout, pageSize, docId, scheduler, store }: {
   const scale = 512 / Math.max(pageSize.width, pageSize.height)
   const key = `${layout.index}:${scale.toFixed(6)}:full:x=${excluded.join('.')}`
 
-  useEffect(() => scheduler.want(key, {
-    docId,
-    pageIndex: layout.index,
-    renderScale: scale,
-    deviceRect: null,
-    excludeAnnotObjNums: excluded,
-  }, 2, (bitmap) => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    canvas.width = bitmap.width
-    canvas.height = bitmap.height
-    canvas.getContext('2d', { alpha: false })?.drawImage(bitmap, 0, 0)
-  }), [docId, key, layout.index, scale, scheduler])
+  useEffect(() => {
+    const params = {
+      docId,
+      pageIndex: layout.index,
+      renderScale: scale,
+      deviceRect: null,
+      excludeAnnotObjNums: excluded,
+    }
+    const draw = (bitmap: ImageBitmap) => {
+      const canvas = canvasRef.current
+      if (!canvas) return
+      canvas.width = bitmap.width
+      canvas.height = bitmap.height
+      canvas.getContext('2d', { alpha: false })?.drawImage(bitmap, 0, 0)
+    }
+    // 描画済みならすぐ使う。まだなら、一覧が 250ms 止まってから最低の優先度で頼む。
+    // 本体を速くスクロールしている間は一覧も追従して入れ替わり続けるため、
+    // すぐ頼むと重いページの描画で Worker が埋まり、本体の表示が遅れる。
+    if (scheduler.has(key)) return scheduler.want(key, params, 3, draw)
+    let release: (() => void) | undefined
+    const timer = window.setTimeout(() => { release = scheduler.want(key, params, 3, draw) }, 250)
+    return () => {
+      window.clearTimeout(timer)
+      release?.()
+    }
+  }, [docId, key, layout.index, scale, scheduler])
 
   return <canvas ref={canvasRef} className="thumbnail-canvas" style={{ width: layout.width, height: layout.height }} />
 }

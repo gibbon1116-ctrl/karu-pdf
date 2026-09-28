@@ -19,7 +19,7 @@ export class DisplayListCache {
 
   constructor(
     private readonly document: Document,
-    maxBytes = 48 * 1024 * 1024,
+    maxBytes = 96 * 1024 * 1024,
   ) {
     this.maxBytes = maxBytes
   }
@@ -75,9 +75,12 @@ export class DisplayListCache {
       device = undefined
 
       const elapsed = performance.now() - started
+      // MuPDF.js から DisplayList の実サイズは取れないため、生成時間から見積もる。
+      // 線分 15 万本のページ（生成 0.3〜0.5 秒）でノード1つ 60〜100 バイト程度、
+      // 実サイズは 10〜20MB と見込み、1ページの見積もりを 2〜12MB に収める。
       const estimatedBytes = Math.min(
-        this.maxBytes,
-        Math.max(4 * 1024 * 1024, Math.ceil(elapsed * 256 * 1024)),
+        12 * 1024 * 1024,
+        Math.max(2 * 1024 * 1024, Math.ceil(elapsed * 32 * 1024)),
       )
       this.entries.set(key, { list, usedAt: ++this.clock, estimatedBytes })
       this.bytes += estimatedBytes
