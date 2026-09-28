@@ -1,5 +1,6 @@
 import type { PageSize } from '../core/mupdfDoc'
 import type { AnnotationEdit, AnnotationInfo, ApplyError } from '../core/annotations'
+import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
 import type { SaveMode } from '../core/save'
 
@@ -59,6 +60,7 @@ export interface LayoutTextRequest {
   text: string
   fontSize: number
   boxWidth: number
+  font?: FontName
 }
 
 export interface ApplyAndSaveRequest {

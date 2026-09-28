@@ -109,7 +109,7 @@ describe('AnnotationStore', () => {
       expect.objectContaining({ kind: 'createSquare', rect: [10, 20, 60, 80] }),
     ])
 
-    const existingSquare = { ...existingFreeText, objNum: 18, type: 'Square', contents: '', strokeColor: [1, 0, 0] as [number, number, number] }
+    const existingSquare = { ...existingFreeText, objNum: 18, type: 'Square', kind: 'square' as const, contents: '', strokeColor: [1, 0, 0] as [number, number, number] }
     await store.ensurePageLoaded(1, async () => [{ ...existingSquare, pageIndex: 1 }])
     store.resize('obj-18', [5, 6, 45, 56])
     expect(store.touchedObjNums(1)).toEqual([18])
@@ -117,5 +117,63 @@ describe('AnnotationStore', () => {
     expect(store.toEdits()).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'updateSquare', objNum: 18, pageIndex: 1, rect: [5, 6, 45, 56] }),
     ]))
+  })
+
+  it('戻す、やり直し、新しい操作によるやり直し破棄を行う', () => {
+    const store = new AnnotationStore()
+    const square = store.create({ pageIndex: 0, kind: 'square', rect: [10, 10, 30, 30] })
+    store.move(square.id, 5, 8)
+    expect(store.get(square.id)?.rect).toEqual([15, 18, 35, 38])
+
+    store.undo()
+    expect(store.get(square.id)?.rect).toEqual([10, 10, 30, 30])
+    expect(store.canRedo()).toBe(true)
+    store.redo()
+    expect(store.get(square.id)?.rect).toEqual([15, 18, 35, 38])
+
+    store.undo()
+    store.update(square.id, { borderWidth: 3 })
+    expect(store.canRedo()).toBe(false)
+  })
+
+  it('履歴を100手に制限する', () => {
+    const store = new AnnotationStore()
+    for (let index = 0; index < 101; index += 1) {
+      store.create({ pageIndex: 0, kind: 'square', rect: [index, 0, index + 4, 4] })
+    }
+    for (let index = 0; index < 100; index += 1) store.undo()
+    expect(store.getPageAnnotations(0)).toHaveLength(1)
+    expect(store.canUndo()).toBe(false)
+  })
+
+  it('保存済みの作成を戻すとdeleteになる', () => {
+    const store = new AnnotationStore()
+    store.create({ pageIndex: 0, kind: 'square', rect: [1, 2, 20, 30] })
+    store.toEdits()
+    store.markApplied({ created: [70], errors: [] })
+    store.undo()
+    expect(store.toEdits()).toEqual([{ kind: 'delete', objNum: 70, pageIndex: 0 }])
+  })
+
+  it('保存済みの削除を戻すとcreateになる', async () => {
+    const store = new AnnotationStore()
+    const square = { ...existingFreeText, objNum: 71, type: 'Square', kind: 'square' as const, contents: '', strokeColor: [1, 0, 0] as [number, number, number] }
+    await store.ensurePageLoaded(0, async () => [square])
+    store.remove('obj-71')
+    store.toEdits()
+    store.markApplied({ created: [], errors: [] })
+    store.undo()
+    expect(store.toEdits()).toEqual([expect.objectContaining({ kind: 'createSquare', pageIndex: 0 })])
+  })
+
+  it('保存済みの移動を戻すと元位置へのupdateになる', async () => {
+    const store = new AnnotationStore()
+    const square = { ...existingFreeText, objNum: 72, type: 'Square', kind: 'square' as const, contents: '', strokeColor: [1, 0, 0] as [number, number, number] }
+    await store.ensurePageLoaded(0, async () => [square])
+    store.move('obj-72', 20, 10)
+    store.toEdits()
+    store.markApplied({ created: [], errors: [] })
+    store.undo()
+    expect(store.toEdits()).toEqual([expect.objectContaining({ kind: 'updateSquare', objNum: 72, rect: [10, 20, 110, 40] })])
   })
 })

@@ -142,3 +142,115 @@ test('文字と四角を保存し、開き直して再編集できる', async ({
   await fs.mkdir('test-results', { recursive: true })
   await fs.writeFile('test-results/ui-roundtrip.pdf', Buffer.from(finalBytes))
 })
+
+async function dragOnLayer(
+  page: Page,
+  tool: string,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  steps = 8,
+): Promise<void> {
+  const layer = page.getByTestId('annotation-layer-0')
+  const box = await layer.boundingBox()
+  if (!box) throw new Error('1ページ目の注釈レイヤーがありません。')
+  await page.getByRole('button', { name: tool, exact: true }).click()
+  await page.mouse.move(box.x + start.x, box.y + start.y)
+  await page.mouse.down()
+  await page.mouse.move(box.x + end.x, box.y + end.y, { steps })
+  await page.mouse.up()
+}
+
+test('全種類の書き込みを作成し、保存して開き直せる', async ({ page }) => {
+  await page.goto('/karu-pdf/?test=1')
+  await page.getByTestId('file-input').setInputFiles(sample)
+  await waitForPage(page)
+
+  const layer = page.getByTestId('annotation-layer-0')
+  await page.getByRole('button', { name: '文字', exact: true }).click()
+  await page.getByLabel('書体').selectOption('BIZUDMincho')
+  await layer.click({ position: { x: 80, y: 80 } })
+  await page.getByTestId('text-editor').fill('明朝の文字')
+  await page.keyboard.press('Control+Enter')
+
+  await page.getByRole('button', { name: '線', exact: true }).click()
+  await expect(page.getByLabel('線の太さ')).toBeVisible()
+  await expect(page.getByLabel('書体')).toHaveCount(0)
+  await expect(page.getByText('次に作る書き込み')).toBeVisible()
+
+  await dragOnLayer(page, '線', { x: 70, y: 150 }, { x: 170, y: 150 })
+  await dragOnLayer(page, '矢印', { x: 200, y: 150 }, { x: 300, y: 205 })
+  await dragOnLayer(page, '四角', { x: 335, y: 145 }, { x: 415, y: 205 })
+  await dragOnLayer(page, '丸', { x: 450, y: 145 }, { x: 525, y: 210 })
+  await dragOnLayer(page, '白塗り', { x: 70, y: 250 }, { x: 165, y: 300 })
+  await dragOnLayer(page, '蛍光ペン', { x: 205, y: 270 }, { x: 340, y: 280 }, 20)
+  await dragOnLayer(page, '手書き', { x: 380, y: 260 }, { x: 445, y: 295 }, 12)
+  await dragOnLayer(page, '手書き', { x: 450, y: 295 }, { x: 500, y: 260 }, 12)
+
+  await expect(page.getByRole('button', { name: '手書き', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(() => page.evaluate(() => {
+    const items = window.__karu!.getEditableAnnotations(0)
+    return {
+      kinds: [...new Set(items.filter((item) => item.objNum === null).map((item) => item.kind))].sort(),
+      joinedInk: items.some((item) => item.kind === 'ink' && item.inkList?.length === 2),
+      mincho: items.some((item) => item.kind === 'freetext' && item.text === '明朝の文字' && item.font === 'BIZUDMincho'),
+    }
+  })).toEqual({
+    kinds: ['arrow', 'circle', 'freetext', 'highlight', 'ink', 'line', 'square', 'whiteout'],
+    joinedInk: true,
+    mincho: true,
+  })
+
+  await saveAndReopen(page)
+  await expect.poll(() => page.evaluate(() => {
+    const items = window.__karu!.getEditableAnnotations(0)
+    return {
+      kinds: [...new Set(items.filter((item) => item.text === '明朝の文字' || item.kind !== 'freetext').map((item) => item.kind))].sort(),
+      joinedInk: items.some((item) => item.kind === 'ink' && item.inkList?.length === 2),
+      highlight: items.some((item) => item.kind === 'highlight' && Math.abs(item.opacity - 0.35) < 0.01),
+      mincho: items.some((item) => item.text === '明朝の文字' && item.font === 'BIZUDMincho'),
+    }
+  })).toEqual({
+    kinds: ['arrow', 'circle', 'freetext', 'highlight', 'ink', 'line', 'square', 'whiteout'],
+    joinedInk: true,
+    highlight: true,
+    mincho: true,
+  })
+})
+
+test('四角の移動を元に戻し、やり直せる', async ({ page }) => {
+  await page.goto('/karu-pdf/?test=1')
+  await page.getByTestId('file-input').setInputFiles(sample)
+  await waitForPage(page)
+  await dragOnLayer(page, '四角', { x: 220, y: 180 }, { x: 320, y: 250 })
+  const square = await page.evaluate(() => window.__karu!.getEditableAnnotations(0).find((item) => item.kind === 'square' && item.objNum === null))
+  if (!square) throw new Error('作成した四角がありません。')
+  const hit = page.locator(`g[data-annotation-id="${square.id}"] .annotation-hit`)
+  const hitBox = await hit.boundingBox()
+  if (!hitBox) throw new Error('四角の当たり判定がありません。')
+  await page.mouse.move(hitBox.x + hitBox.width / 2, hitBox.y + hitBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(hitBox.x + hitBox.width / 2 + 45, hitBox.y + hitBox.height / 2 + 30, { steps: 8 })
+  await page.mouse.up()
+  const moved = await page.evaluate((id) => window.__karu!.getEditableAnnotations(0).find((item) => item.id === id)!.rect, square.id)
+  expect(moved[0]).toBeGreaterThan(square.rect[0])
+
+  await page.keyboard.press('Control+z')
+  await expect.poll(() => page.evaluate((id) => window.__karu!.getEditableAnnotations(0).find((item) => item.id === id)?.rect, square.id)).toEqual(square.rect)
+  await page.keyboard.press('Control+y')
+  await expect.poll(() => page.evaluate((id) => window.__karu!.getEditableAnnotations(0).find((item) => item.id === id)?.rect, square.id)).toEqual(moved)
+})
+
+test('保存済みの作成を元に戻して保存すると注釈が消える', async ({ page }) => {
+  await page.goto('/karu-pdf/?test=1')
+  await page.getByTestId('file-input').setInputFiles(sample)
+  await waitForPage(page)
+  await dragOnLayer(page, '丸', { x: 260, y: 180 }, { x: 350, y: 260 })
+  const first = await page.evaluate(async () => Array.from((await window.__karu!.saveToBytes())!))
+  expect(first.length).toBeGreaterThan(0)
+  await page.keyboard.press('Control+z')
+  await expect.poll(() => page.evaluate(() => window.__karu!.getEditableAnnotations(0).some((item) => item.kind === 'circle'))).toBe(false)
+  const second = await page.evaluate(async () => Array.from((await window.__karu!.saveToBytes())!))
+  await page.evaluate(async (bytes) => window.__karu!.openBytes(bytes, 'undo-saved-create.pdf'), second)
+  await waitForPage(page)
+  await expect.poll(() => page.evaluate(() => window.__karu!.getEditableAnnotations(0).some((item) => item.kind === 'circle'))).toBe(false)
+})

@@ -7,6 +7,7 @@ interface EditResult {
   source: string
   page: number
   drag: { samples: number; p95: number; max: number }
+  ink: { samples: number; p95: number; max: number }
   input: { samples: number; p95: number; max: number }
 }
 
@@ -91,6 +92,16 @@ async function measureEditing(page: Page, pdf: string, pageIndex: number, source
   }
   await page.mouse.up()
 
+  await page.getByRole('button', { name: '手書き', exact: true }).click()
+  const inkY = Math.min(viewerBox.y + viewerBox.height - 150, startY + 95)
+  await page.mouse.move(startX, inkY)
+  await page.mouse.down()
+  for (let step = 1; step <= 120; step += 1) {
+    await page.mouse.move(startX + step * 1.1, inkY + Math.sin(step / 8) * 28)
+    await page.waitForTimeout(1000 / 60)
+  }
+  await page.mouse.up()
+
   await page.getByRole('button', { name: '文字', exact: true }).click()
   await page.mouse.click(startX, Math.min(viewerBox.y + viewerBox.height - 100, box.y + box.height - 20, startY + 140))
   await expect(page.getByTestId('text-editor')).toBeVisible()
@@ -103,13 +114,16 @@ async function measureEditing(page: Page, pdf: string, pageIndex: number, source
   const stats = await page.evaluate(() => window.__karu!.getFrameStats())
   await page.keyboard.press('Control+Enter')
 
-  const result: EditResult = { source, page: pageIndex + 1, drag: stats.drag, input: stats.input }
+  const result: EditResult = { source, page: pageIndex + 1, drag: stats.drag, ink: stats.ink, input: stats.input }
   console.log(`[perf-edit] ${source} p${pageIndex + 1}`, JSON.stringify(result))
   expect(result.drag.samples).toBeGreaterThan(30)
   expect(result.input.samples).toBe(50)
+  expect(result.ink.samples).toBeGreaterThan(30)
   expect(result.drag.p95).toBeLessThanOrEqual(20)
   expect(result.drag.max).toBeLessThanOrEqual(50)
   expect(result.input.p95).toBeLessThanOrEqual(50)
+  expect(result.ink.p95).toBeLessThanOrEqual(20)
+  expect(result.ink.max).toBeLessThanOrEqual(50)
   return result
 }
 

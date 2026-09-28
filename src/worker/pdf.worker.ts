@@ -125,7 +125,7 @@ async function execute(job: QueuedRequest): Promise<void> {
 async function executeCoreRequest(request: CoreRequest): Promise<void> {
   try {
     if (request.type === 'layoutText') {
-      const font = await getFontResource('BIZUDGothic')
+      const font = await getFontResource(request.font ?? 'BIZUDGothic')
       const replaced = replaceMissingCharacters(font.font, request.text)
       post({
         type: 'textLaidOut',

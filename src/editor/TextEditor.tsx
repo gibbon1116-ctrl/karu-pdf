@@ -12,11 +12,12 @@ export interface TimingSummary {
 
 export interface FrameStats {
   drag: TimingSummary
+  ink: TimingSummary
   input: TimingSummary
 }
 
 const emptyTiming = (): TimingSummary => ({ samples: 0, p95: 0, max: 0 })
-const frameStats: FrameStats = { drag: emptyTiming(), input: emptyTiming() }
+const frameStats: FrameStats = { drag: emptyTiming(), ink: emptyTiming(), input: emptyTiming() }
 const inputSamples: number[] = []
 
 function summarize(samples: readonly number[]): TimingSummary {
@@ -29,7 +30,7 @@ function summarize(samples: readonly number[]): TimingSummary {
   }
 }
 
-export function beginDragFrameMeasurement(): (publish?: boolean) => void {
+export function beginDragFrameMeasurement(channel: 'drag' | 'ink' = 'drag'): (publish?: boolean) => void {
   const samples: number[] = []
   let previous = performance.now()
   let frame = 0
@@ -45,7 +46,7 @@ export function beginDragFrameMeasurement(): (publish?: boolean) => void {
     if (stopped) return
     stopped = true
     cancelAnimationFrame(frame)
-    if (publish) frameStats.drag = summarize(samples)
+    if (publish) frameStats[channel] = summarize(samples)
   }
 }
 
@@ -61,6 +62,7 @@ export function recordInputFrame(): void {
 export function getFrameStats(): FrameStats {
   return {
     drag: { ...frameStats.drag },
+    ink: { ...frameStats.ink },
     input: { ...frameStats.input },
   }
 }
@@ -91,7 +93,7 @@ export function TextEditor({ annotation, zoom, pool, store, onClose, registerCom
         store.remove(annotation.id)
       } else {
         const width = annotation.rect[2] - annotation.rect[0]
-        const layout = await pool.layoutText(text, annotation.fontSize, width)
+        const layout = await pool.layoutText(text, annotation.fontSize, width, annotation.font)
         store.updateText(annotation.id, text, layout, [
           annotation.rect[0],
           annotation.rect[1],
@@ -151,6 +153,7 @@ export function TextEditor({ annotation, zoom, pool, store, onClose, registerCom
         minHeight: (annotation.rect[3] - annotation.rect[1]) * scale,
         padding: `${2 * scale}px`,
         fontSize: annotation.fontSize * scale,
+        fontFamily: annotation.font === 'BIZUDMincho' ? 'KaruBIZUDMincho' : 'KaruBIZUDGothic',
         color: `rgb(${annotation.color.map((component) => Math.round(component * 255)).join(' ')})`,
       }}
       onChange={(event) => {

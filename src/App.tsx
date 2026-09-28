@@ -359,15 +359,31 @@ export default function App() {
         void saveDocument(event.shiftKey)
         return
       }
+      if (!isInput && event.ctrlKey && (key === 'z' || key === 'y')) {
+        event.preventDefault()
+        const session = activeRef.current
+        if (!session) return
+        if (key === 'y' || event.shiftKey) session.annotationStore.redo()
+        else session.annotationStore.undo()
+        viewerRef.current?.clearSelection()
+        refreshTabs()
+        return
+      }
       if (isInput || event.ctrlKey || event.metaKey || event.altKey) return
       if (key === 'v') void changeTool('select')
       else if (key === 't') void changeTool('text')
+      else if (key === 'l') void changeTool('line')
+      else if (key === 'a') void changeTool('arrow')
       else if (key === 'r') void changeTool('square')
-      else if (event.key === 'Escape') viewerRef.current?.clearSelection()
+      else if (key === 'o') void changeTool('circle')
+      else if (key === 'h') void changeTool('highlight')
+      else if (key === 'p') void changeTool('ink')
+      else if (key === 'w') void changeTool('whiteout')
+      else if (event.key === 'Escape') { setTool('select'); viewerRef.current?.clearSelection() }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [activateDocument, changeTool, closeDocument, pickFile, saveDocument, tabs])
+  }, [activateDocument, changeTool, closeDocument, pickFile, refreshTabs, saveDocument, tabs])
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -444,7 +460,16 @@ export default function App() {
         <span className="toolbar-separator" />
         <button type="button" className={tool === 'select' ? 'active' : ''} aria-pressed={tool === 'select'} disabled={!active} onClick={() => void changeTool('select')}>選択</button>
         <button type="button" className={tool === 'text' ? 'active' : ''} aria-pressed={tool === 'text'} disabled={!active} onClick={() => void changeTool('text')}>文字</button>
+        <button type="button" className={tool === 'line' ? 'active' : ''} aria-pressed={tool === 'line'} disabled={!active} onClick={() => void changeTool('line')}>線</button>
+        <button type="button" className={tool === 'arrow' ? 'active' : ''} aria-pressed={tool === 'arrow'} disabled={!active} onClick={() => void changeTool('arrow')}>矢印</button>
         <button type="button" className={tool === 'square' ? 'active' : ''} aria-pressed={tool === 'square'} disabled={!active} onClick={() => void changeTool('square')}>四角</button>
+        <button type="button" className={tool === 'circle' ? 'active' : ''} aria-pressed={tool === 'circle'} disabled={!active} onClick={() => void changeTool('circle')}>丸</button>
+        <button type="button" className={tool === 'highlight' ? 'active' : ''} aria-pressed={tool === 'highlight'} disabled={!active} onClick={() => void changeTool('highlight')}>蛍光ペン</button>
+        <button type="button" className={tool === 'ink' ? 'active' : ''} aria-pressed={tool === 'ink'} disabled={!active} onClick={() => void changeTool('ink')}>手書き</button>
+        <button type="button" className={tool === 'whiteout' ? 'active' : ''} aria-pressed={tool === 'whiteout'} disabled={!active} onClick={() => void changeTool('whiteout')}>白塗り</button>
+        <span className="toolbar-separator" />
+        <button type="button" disabled={!active?.annotationStore.canUndo()} onClick={() => { active?.annotationStore.undo(); viewerRef.current?.clearSelection(); refreshTabs() }}>元に戻す</button>
+        <button type="button" disabled={!active?.annotationStore.canRedo()} onClick={() => { active?.annotationStore.redo(); viewerRef.current?.clearSelection(); refreshTabs() }}>やり直し</button>
         <span className="toolbar-separator" />
         <button type="button" aria-pressed={panels.thumbnails} onClick={() => updatePanels({ ...panels, thumbnails: !panels.thumbnails })}>ページ一覧</button>
         <button type="button" aria-pressed={panels.format} onClick={() => updatePanels({ ...panels, format: !panels.format })}>書式</button>

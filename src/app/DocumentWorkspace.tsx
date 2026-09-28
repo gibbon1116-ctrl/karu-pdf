@@ -92,6 +92,7 @@ export function DocumentWorkspace(props: Props) {
       />
       {props.showFormat && <FormatPanel
         selected={selected}
+        tool={props.tool}
         store={props.session.annotationStore}
         pool={props.pool}
         defaults={props.formatDefaults}
