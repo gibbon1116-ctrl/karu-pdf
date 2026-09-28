@@ -88,6 +88,14 @@ export interface ApplyEditsRequest {
   edits: AnnotationEdit[]
 }
 
+export interface PrepareOutputRequest {
+  type: 'prepareOutput'
+  requestId: number
+  docId: string
+  edits: AnnotationEdit[]
+  bake: boolean
+}
+
 export interface ApplyPageLayoutRequest {
   type: 'applyPageLayout'
   requestId: number
@@ -146,6 +154,7 @@ export type WorkerRequest =
   | LayoutTextRequest
   | ApplyAndSaveRequest
   | ApplyEditsRequest
+  | PrepareOutputRequest
   | ApplyPageLayoutRequest
   | UndoPageLayoutRequest
   | ExtractPagesRequest
@@ -220,6 +229,15 @@ export interface AppliedEditsResponse {
   errors: ApplyError[]
 }
 
+export interface OutputPreparedResponse {
+  type: 'outputPrepared'
+  requestId: number
+  bytes: ArrayBuffer
+  ms: number
+  replacedCharacters: number
+  errors: ApplyError[]
+}
+
 export interface PageLayoutResponse {
   type: 'pageLayoutApplied' | 'pageLayoutUndone'
   requestId: number
@@ -271,6 +289,7 @@ export type WorkerResponse =
   | LayoutTextResponse
   | ApplyAndSaveResponse
   | AppliedEditsResponse
+  | OutputPreparedResponse
   | PageLayoutResponse
   | PagesExtractedResponse
   | PagesSplitResponse

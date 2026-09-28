@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { DocumentTabs } from './app/DocumentTabs'
 import { DocumentWorkspace } from './app/DocumentWorkspace'
 import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
+import { HelpDialog } from './app/HelpDialog'
 import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS } from './app/documentModel'
 import { StartScreen } from './app/StartScreen'
-import { PdfWorkerPool, type ApplyAndSaveResult, type PageLayoutTimings } from './client/PdfWorkerPool'
+import { PdfWorkerPool, type ApplyAndSaveResult, type PageLayoutTimings, type PreparedOutputResult } from './client/PdfWorkerPool'
 import type { EditorTool } from './editor/AnnotationLayer'
 import type { EditableAnnotation } from './editor/AnnotationStore'
 import { downloadPdf, pickOpenHandles, pickSaveHandle, requestWritePermission, writePdf, writePdfWithoutOverwrite, type PdfFileHandle } from './editor/fileAccess'
@@ -25,6 +26,7 @@ import type { ViewerHandle } from './viewer/Viewer'
 import { OrganizeDraft } from './organize/OrganizeDraft'
 import type { OrganizeSourceInfo } from './organize/OrganizeView'
 import type { PageLayoutCard } from './core/pageOps'
+import { registerPwa } from './pwa'
 import './styles.css'
 
 declare global {
@@ -52,6 +54,11 @@ declare global {
       getPageInfo(): ReturnType<PdfWorkerPool['getPageInfo']>
       extractToBytes(cardIds: string[]): Promise<Uint8Array>
       splitToBytes(mode: OrganizeSplitMode): Promise<Uint8Array[]>
+      finalizeToBytes(): Promise<Uint8Array | null>
+      printToBytes(): Promise<Uint8Array | null>
+    }
+    launchQueue?: {
+      setConsumer(consumer: (params: { files: PdfFileHandle[] }) => void): void
     }
   }
   interface Navigator { deviceMemory?: number }
@@ -90,8 +97,12 @@ function copyToArrayBuffer(bytes: Uint8Array | number[] | ArrayBuffer): ArrayBuf
 }
 
 function saveMessage(result: ApplyAndSaveResult): string {
-  const mode = result.mode === 'incremental' ? '増分保存' : '完全保存'
-  return `保存しました（${mode}・${(result.ms / 1000).toFixed(1)}秒）`
+  if (result.mode === 'full') return `ファイルを整理して保存しました（全体保存・${(result.ms / 1000).toFixed(1)}秒）`
+  return `保存しました（増分保存・${(result.ms / 1000).toFixed(1)}秒）`
+}
+
+function finalizedName(fileName: string): string {
+  return `${fileName.replace(/\.pdf$/i, '')}_確定.pdf`
 }
 
 function loadPanels(): { thumbnails: boolean; format: boolean } {
@@ -115,6 +126,7 @@ export default function App() {
   const savingRef = useRef(false)
   const openQueueRef = useRef<Promise<void>>(Promise.resolve())
   const organizeRef = useRef<ActiveOrganize | null>(null)
+  const updateServiceWorkerRef = useRef<((reloadPage?: boolean) => Promise<void>) | null>(null)
   const [, setTabsVersion] = useState(0)
   const [page, setPage] = useState(0)
   const [zoom, setZoom] = useState(1)
@@ -126,6 +138,8 @@ export default function App() {
   const [status, setStatus] = useState('')
   const [saving, setSaving] = useState(false)
   const [organize, setOrganize] = useState<ActiveOrganize | null>(null)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [updateReady, setUpdateReady] = useState(false)
   const [debug, setDebug] = useState(() => new URLSearchParams(location.search).get('debug') === '1')
   const active = tabs.active
   activeRef.current = active
@@ -148,6 +162,15 @@ export default function App() {
     setStatus(message)
     window.clearTimeout(statusTimerRef.current)
     statusTimerRef.current = window.setTimeout(() => setStatus(''), 5000)
+  }, [])
+
+  useEffect(() => {
+    updateServiceWorkerRef.current = registerPwa({
+      onNeedRefresh: () => setUpdateReady(true),
+      // 初回キャッシュ完了の通知で、保存・印刷など重要な結果表示を上書きしない。
+      onOfflineReady: () => undefined,
+    })
+    return () => { updateServiceWorkerRef.current = null }
   }, [])
 
   const persistView = useCallback((session: DocumentSession | null = activeRef.current) => {
@@ -250,6 +273,20 @@ export default function App() {
     return operation
   }, [activateDocument, openBuffer, tabs])
 
+  useEffect(() => {
+    window.launchQueue?.setConsumer((params) => {
+      void (async () => {
+        for (const handle of params.files) {
+          try {
+            await openFile(await handle.getFile(), handle)
+          } catch (reason) {
+            setError(`PDFを開けませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
+          }
+        }
+      })()
+    })
+  }, [openFile])
+
   const closeDocument = useCallback(async (docId: string, confirmDirty = true) => {
     const documents = tabs.list()
     const index = documents.findIndex((document) => document.docId === docId)
@@ -293,8 +330,9 @@ export default function App() {
     if (!session || !beginSave()) return null
     try {
       await viewerRef.current?.commitEditor()
-      const result = await pool.applyAndSave(session.docId, session.annotationStore.toEdits(), 'incremental')
+      const result = await pool.applyAndSave(session.docId, session.annotationStore.toEdits(), session.nextSaveMode())
       session.annotationStore.markApplied(result)
+      session.recordSave(result.mode, result.bytes.byteLength)
       session.fileOutdated = true
       viewerRef.current?.clearSelection()
       refreshTabs()
@@ -317,8 +355,9 @@ export default function App() {
         throw new Error('ファイルへの書き込みが許可されませんでした。')
       }
       await viewerRef.current?.commitEditor()
-      const result = await pool.applyAndSave(session.docId, session.annotationStore.toEdits(), 'incremental')
+      const result = await pool.applyAndSave(session.docId, session.annotationStore.toEdits(), session.nextSaveMode())
       session.annotationStore.markApplied(result)
+      session.recordSave(result.mode, result.bytes.byteLength)
       session.fileOutdated = true
       if (handle) {
         await writePdf(handle, result.bytes)
@@ -340,6 +379,62 @@ export default function App() {
       endSave()
     }
   }, [beginSave, endSave, pool, refreshRecent, refreshTabs, showStatus])
+
+  const prepareOutput = useCallback(async (bake: boolean): Promise<PreparedOutputResult | null> => {
+    const session = activeRef.current
+    if (!session) return null
+    await viewerRef.current?.commitEditor()
+    const result = await pool.prepareOutput(session.docId, session.annotationStore.toEdits(), bake)
+    if (result.errors.length > 0) throw new Error(result.errors.map((item) => item.message).join(' / '))
+    return result
+  }, [pool])
+
+  const saveFinalized = useCallback(async () => {
+    const session = activeRef.current
+    if (!session || !beginSave()) return
+    setError('')
+    try {
+      const name = finalizedName(session.name)
+      const handle = window.showSaveFilePicker ? await pickSaveHandle(name, session.handle ?? undefined) : null
+      const result = await prepareOutput(true)
+      if (!result) return
+      if (handle) await writePdf(handle, result.bytes)
+      else downloadPdf(result.bytes, name)
+      showStatus('確定版を保存しました。確定版の書き込みは編集できません。')
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === 'AbortError') return
+      setError(`確定版を保存できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
+    } finally {
+      endSave()
+    }
+  }, [beginSave, endSave, prepareOutput, showStatus])
+
+  const printDocument = useCallback(async () => {
+    const session = activeRef.current
+    if (!session || !beginSave()) return
+    setError('')
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) {
+      endSave()
+      setError('印刷用のタブを開けませんでした。ポップアップを許可してください。')
+      return
+    }
+    try {
+      printWindow.document.title = '印刷用PDFを準備中'
+      printWindow.document.body.textContent = '印刷用PDFを準備しています…'
+      const result = await prepareOutput(false)
+      if (!result) return
+      const url = URL.createObjectURL(new Blob([new Uint8Array(result.bytes)], { type: 'application/pdf' }))
+      printWindow.location.replace(url)
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      showStatus('新しいタブの印刷ボタンから印刷してください')
+    } catch (reason) {
+      printWindow.close()
+      setError(`印刷用PDFを開けませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
+    } finally {
+      endSave()
+    }
+  }, [beginSave, endSave, prepareOutput, showStatus])
 
   const pickFile = useCallback(async () => {
     if (window.showOpenFilePicker) {
@@ -623,6 +718,11 @@ export default function App() {
         void saveDocument(event.shiftKey)
         return
       }
+      if (event.ctrlKey && key === 'p') {
+        event.preventDefault()
+        void printDocument()
+        return
+      }
       if (!isInput && event.ctrlKey && (key === 'z' || key === 'y')) {
         event.preventDefault()
         const session = activeRef.current
@@ -647,7 +747,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [activateDocument, changeTool, closeDocument, discardOrganize, pickFile, refreshTabs, saveDocument, tabs])
+  }, [activateDocument, changeTool, closeDocument, discardOrganize, pickFile, printDocument, refreshTabs, saveDocument, tabs])
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -689,9 +789,11 @@ export default function App() {
       },
       extractToBytes,
       splitToBytes,
+      finalizeToBytes: async () => (await prepareOutput(true))?.bytes ?? null,
+      printToBytes: async () => (await prepareOutput(false))?.bytes ?? null,
     }
     return () => { delete window.__karu }
-  }, [activateDocument, applyOrganize, closeDocument, extractToBytes, openBuffer, openOrganize, pool, saveToBytes, splitToBytes, tabs, undoLastOrganize])
+  }, [activateDocument, applyOrganize, closeDocument, extractToBytes, openBuffer, openOrganize, pool, prepareOutput, saveToBytes, splitToBytes, tabs, undoLastOrganize])
 
   const openRecent = async (item: RecentFile) => {
     try {
@@ -719,6 +821,12 @@ export default function App() {
   }
 
   const documents = tabs.list()
+  const applyUpdate = async () => {
+    await viewerRef.current?.commitEditor()
+    if (documents.some((session) => session.dirty)
+      && !window.confirm('未保存の変更があります。新しい版へ更新しますか？')) return
+    await updateServiceWorkerRef.current?.(true)
+  }
   const workspaceOrganize: OrganizeWorkspaceState | null = organize && active?.docId === organize.docId ? {
     draft: organize.draft,
     sources: organize.sources,
@@ -730,7 +838,13 @@ export default function App() {
     onSplit: (cardIds) => void splitAndSave(cardIds),
   } : null
   return (
-    <main className="app" onDragOver={(event) => event.preventDefault()} onDrop={(event) => void handleDrop(event)}>
+    <main className={`app${updateReady ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => void handleDrop(event)}>
+      {updateReady && (
+        <div className="update-banner" role="status">
+          <span>新しい版があります。</span>
+          <button type="button" onClick={() => void applyUpdate()}>更新する</button>
+        </div>
+      )}
       <DocumentTabs
         documents={documents}
         activeDocId={active?.docId ?? null}
@@ -742,6 +856,8 @@ export default function App() {
         <button type="button" onClick={() => void pickFile()}>開く</button>
         <button type="button" onClick={() => void saveDocument(false)} disabled={!active || saving || !!organize}>上書き保存</button>
         <button type="button" onClick={() => void saveDocument(true)} disabled={!active || saving || !!organize}>別名で保存</button>
+        <button type="button" onClick={() => void saveFinalized()} disabled={!active || saving || !!organize}>確定して別名で保存</button>
+        <button type="button" onClick={() => void printDocument()} disabled={!active || saving || !!organize}>印刷</button>
         <span className="toolbar-separator" />
         <button type="button" className={tool === 'select' ? 'active' : ''} aria-pressed={tool === 'select'} disabled={!active} onClick={() => void changeTool('select')}>選択</button>
         <button type="button" className={tool === 'text' ? 'active' : ''} aria-pressed={tool === 'text'} disabled={!active} onClick={() => void changeTool('text')}>文字</button>
@@ -765,6 +881,7 @@ export default function App() {
         <button type="button" onClick={() => viewerRef.current?.zoomIn()} disabled={!active}>拡大</button>
         <button type="button" onClick={() => viewerRef.current?.fitWidth()} disabled={!active}>幅に合わせる</button>
         <output className="zoom-output">{Math.round(zoom * 100)}%</output>
+        <button type="button" onClick={() => setHelpOpen(true)}>使い方</button>
       </header>
       <input
         hidden
@@ -804,12 +921,14 @@ export default function App() {
           onOpen={() => void pickFile()}
           onOpenRecent={(item) => void openRecent(item)}
           onRemoveRecent={(item) => void removeRecentFile(item.handle).then(setRecent)}
+          onHelp={() => setHelpOpen(true)}
         />
       )}
       <footer className="status-bar">
         <span>{active ? `${page} / ${active.pageSizes.length} ページ` : 'PDFを開いてください'}</span>
         <span role="status">{status}</span>
       </footer>
+      <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
     </main>
   )
 }

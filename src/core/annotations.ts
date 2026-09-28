@@ -296,6 +296,7 @@ function configureSquare(
   borderWidth: number,
   interiorColor: RGB | null = null,
 ): void {
+  annotation.setFlags(annotation.getFlags() | 4)
   annotation.setRect(rect)
   annotation.setColor(color)
   annotation.setBorderWidth(borderWidth)
@@ -310,6 +311,7 @@ function configureLine(
   borderWidth: number,
   lineEnding: LineEnding,
 ): void {
+  annotation.setFlags(annotation.getFlags() | 4)
   annotation.setLine(line[0], line[1])
   annotation.setColor(color)
   annotation.setBorderWidth(borderWidth)
@@ -324,6 +326,7 @@ function configureCircle(
   borderWidth: number,
   interiorColor: RGB | null = null,
 ): void {
+  annotation.setFlags(annotation.getFlags() | 4)
   annotation.setRect(rect)
   annotation.setColor(color)
   annotation.setBorderWidth(borderWidth)
@@ -338,6 +341,7 @@ function configureInk(
   borderWidth: number,
   opacity: number,
 ): void {
+  annotation.setFlags(annotation.getFlags() | 4)
   annotation.setInkList(inkList)
   annotation.setColor(color)
   annotation.setBorderWidth(borderWidth)

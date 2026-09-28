@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS } from '../src/app/documentModel'
+import {
+  DocumentSession,
+  DocumentTabsModel,
+  MAX_INCREMENTAL_GROWTH,
+  MAX_OPEN_DOCUMENTS,
+} from '../src/app/documentModel'
 import type { PdfFileHandle } from '../src/editor/fileAccess'
 
 function handle(name: string, sameName?: string): PdfFileHandle {
@@ -52,5 +57,32 @@ describe('DocumentTabsModel', () => {
     expect((await tabs.findDuplicate({ handle: handle('same.pdf'), name: 'renamed.pdf', byteLength: 999 }))?.docId).toBe('handled')
     expect((await tabs.findDuplicate({ handle: null, name: 'memory.pdf', byteLength: 30 }))?.docId).toBe('bytes')
     expect(await tabs.findDuplicate({ handle: null, name: 'memory.pdf', byteLength: 31 })).toBeNull()
+  })
+})
+
+describe('DocumentSession の保存量管理', () => {
+  it('6回の増分保存後は次を全体保存にし、全体保存後に数値を戻す', () => {
+    const target = new DocumentSession({
+      docId: 'large-save-budget', name: 'large.pdf', byteLength: 10_000_000, handle: null, pageSizes: [],
+    })
+    for (let index = 1; index <= 5; index += 1) {
+      expect(target.nextSaveMode()).toBe('incremental')
+      target.recordSave('incremental', 10_000_000 + index * 100)
+    }
+    expect(target.nextSaveMode()).toBe('incremental')
+    target.recordSave('incremental', 10_000_600)
+    expect(target.incrementalSaveCount).toBe(6)
+    expect(target.nextSaveMode()).toBe('full')
+
+    target.recordSave('full', 200)
+    expect(target.incrementalSaveCount).toBe(0)
+    expect(target.incrementalGrowth).toBe(0)
+    expect(target.nextSaveMode()).toBe('incremental')
+  })
+
+  it('増分の増加量が2MBを超えた次を全体保存にする', () => {
+    const target = session(1)
+    target.recordSave('incremental', 101 + MAX_INCREMENTAL_GROWTH + 1)
+    expect(target.nextSaveMode()).toBe('full')
   })
 })

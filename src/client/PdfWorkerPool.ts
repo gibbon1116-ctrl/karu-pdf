@@ -21,6 +21,7 @@ import type {
   StatsResponse,
   WorkerResponse,
   PageLayoutWorkerTimings,
+  OutputPreparedResponse,
 } from '../worker/protocol'
 
 export interface OpenResult {
@@ -47,6 +48,13 @@ export interface ApplyAndSaveResult {
 
 export interface ApplyEditsResult {
   created: number[]
+  replacedCharacters: number
+  errors: ApplyError[]
+}
+
+export interface PreparedOutputResult {
+  bytes: Uint8Array
+  ms: number
   replacedCharacters: number
   errors: ApplyError[]
 }
@@ -332,6 +340,18 @@ export class PdfWorkerPool {
     }))
     return {
       created: response.created,
+      replacedCharacters: response.replacedCharacters,
+      errors: response.errors,
+    }
+  }
+
+  async prepareOutput(docId: string, edits: AnnotationEdit[], bake: boolean): Promise<PreparedOutputResult> {
+    const response = await this.request<OutputPreparedResponse>(this.slots[0], (requestId) => ({
+      type: 'prepareOutput', requestId, docId, edits, bake,
+    }))
+    return {
+      bytes: new Uint8Array(response.bytes),
+      ms: response.ms,
       replacedCharacters: response.replacedCharacters,
       errors: response.errors,
     }

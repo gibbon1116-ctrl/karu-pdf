@@ -14,7 +14,9 @@ export function saveDocument(doc: PDFDocument, requestedMode: SaveMode): SaveRes
     : 'full'
   const options = mode === 'incremental'
     ? 'incremental'
-    : 'garbage=4,compress,compress-images'
+    // garbage=1 removes unreachable objects while preserving object numbers.
+    // The editor uses annotation object numbers as stable identifiers.
+    : 'garbage=1,compress,compress-images'
   const started = performance.now()
   const buffer = doc.saveToBuffer(options)
   try {

@@ -13,6 +13,7 @@ import {
 } from '../core/fontMetrics'
 import { layoutText } from '../core/textLayout'
 import { saveDocument } from '../core/save'
+import { prepareDocumentOutput } from '../core/output'
 import {
   applyPageLayout,
   extractPages,
@@ -29,6 +30,7 @@ import type {
   GetPageInfoRequest,
   LayoutTextRequest,
   ListAnnotationsRequest,
+  PrepareOutputRequest,
   RenderRequest,
   SplitPagesRequest,
   UndoPageLayoutRequest,
@@ -54,6 +56,7 @@ type CoreRequest =
   | LayoutTextRequest
   | ApplyAndSaveRequest
   | ApplyEditsRequest
+  | PrepareOutputRequest
   | ApplyPageLayoutRequest
   | UndoPageLayoutRequest
   | ExtractPagesRequest
@@ -213,6 +216,24 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       return
     }
 
+    if (request.type === 'prepareOutput') {
+      const requiredFonts = new Set<FontName>()
+      for (const edit of request.edits) {
+        if (edit.kind === 'createFreeText' || edit.kind === 'updateFreeText') requiredFonts.add(edit.font)
+      }
+      await Promise.all([...requiredFonts].map((fontName) => getFontResource(fontName)))
+      const source = saveDocument(document, 'incremental').bytes
+      const output = prepareDocumentOutput(source, request.edits, fontResources, request.bake)
+      const bytes = output.bytes.buffer as ArrayBuffer
+      post({
+        type: 'outputPrepared', requestId: request.requestId, bytes,
+        ms: output.ms,
+        replacedCharacters: output.applied.replacedCharacters,
+        errors: output.applied.errors,
+      }, [bytes])
+      return
+    }
+
     if (request.type === 'applyPageLayout') {
       const workerStarted = performance.now()
       const backupStarted = performance.now()
@@ -320,6 +341,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       return
     }
     const saved = saveDocument(document, request.mode)
+    if (saved.mode === 'full') replaceDocument(request.docId, saved.bytes.slice(), true)
     const bytes = saved.bytes.buffer as ArrayBuffer
     post({
       type: 'appliedAndSaved',
@@ -381,6 +403,7 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     || message.type === 'layoutText'
     || message.type === 'applyAndSave'
     || message.type === 'applyEdits'
+    || message.type === 'prepareOutput'
     || message.type === 'applyPageLayout'
     || message.type === 'undoPageLayout'
     || message.type === 'extractPages'

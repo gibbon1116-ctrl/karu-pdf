@@ -1,8 +1,12 @@
 import type { PageSize } from '../core/mupdfDoc'
+import type { SaveMode } from '../core/save'
 import { AnnotationStore } from '../editor/AnnotationStore'
 import type { PdfFileHandle } from '../editor/fileAccess'
 
 export const MAX_OPEN_DOCUMENTS = 8
+export const MAX_INCREMENTAL_SAVES = 5
+export const MAX_INCREMENTAL_GROWTH = 2 * 1024 * 1024
+const MAX_RELATIVE_INCREMENTAL_GROWTH = 0.5
 
 export interface DocumentViewState {
   page: number
@@ -33,6 +37,10 @@ export class DocumentSession {
   pageRevision = 0
   fitOnFirstView: boolean
   restorePageOnFirstView: boolean
+  incrementalSaveCount = 0
+  incrementalGrowth = 0
+  private lastSavedByteLength: number
+  private lastFullByteLength: number
 
   constructor(init: DocumentSessionInit) {
     this.docId = init.docId
@@ -40,6 +48,8 @@ export class DocumentSession {
     this.byteLength = init.byteLength
     this.handle = init.handle
     this.pageSizes = init.pageSizes
+    this.lastSavedByteLength = init.byteLength
+    this.lastFullByteLength = init.byteLength
     this.fitOnFirstView = init.view === undefined
     this.restorePageOnFirstView = init.view !== undefined && init.view.scrollTop === undefined
     this.view = {
@@ -52,6 +62,27 @@ export class DocumentSession {
 
   get dirty(): boolean {
     return this.annotationStore.isDirty() || this.fileOutdated
+  }
+
+  nextSaveMode(): SaveMode {
+    return this.incrementalSaveCount > MAX_INCREMENTAL_SAVES
+      || this.incrementalGrowth > MAX_INCREMENTAL_GROWTH
+      // 小さいPDFでも、増分だけで元サイズの半分を超えたら肥大化を抑える。
+      || this.incrementalGrowth > this.lastFullByteLength * MAX_RELATIVE_INCREMENTAL_GROWTH
+      ? 'full'
+      : 'incremental'
+  }
+
+  recordSave(mode: SaveMode, byteLength: number): void {
+    if (mode === 'full') {
+      this.incrementalSaveCount = 0
+      this.incrementalGrowth = 0
+      this.lastFullByteLength = byteLength
+    } else {
+      this.incrementalSaveCount += 1
+      this.incrementalGrowth += Math.max(0, byteLength - this.lastSavedByteLength)
+    }
+    this.lastSavedByteLength = byteLength
   }
 
   updateAfterPageLayout(pageSizes: PageSize[], canUndoOrganize: boolean): void {

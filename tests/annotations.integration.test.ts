@@ -425,6 +425,17 @@ describe('annotation integration', () => {
       ))
       const [line, circle, highlight, handwriting, whiteout, mincho] = infos
 
+      for (const objNum of saved.created) {
+        const page = document.loadPage(0)
+        const annotation = findAnnotation(page, objNum)
+        try {
+          expect(annotation.getFlags() & 4).toBe(4)
+        } finally {
+          annotation.destroy()
+          page.destroy()
+        }
+      }
+
       expect(line).toMatchObject({
         type: 'Line', kind: 'arrow', editable: true,
         strokeColor: [1, 0, 0], borderWidth: 3,
