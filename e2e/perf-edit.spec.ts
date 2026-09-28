@@ -26,10 +26,11 @@ async function measureEditing(page: Page, pdf: string, pageIndex: number, source
 
   const layer = page.getByTestId(`annotation-layer-${pageIndex}`)
   const box = await layer.boundingBox()
+  const viewerBox = await page.getByTestId('viewer').boundingBox()
   if (!box) throw new Error(`${source} の対象ページが表示されていません。`)
-  const viewport = page.viewportSize()!
-  const startX = Math.max(80, Math.min(viewport.width - 260, box.x + 180))
-  const startY = Math.max(90, Math.min(viewport.height - 220, box.y + 160))
+  if (!viewerBox) throw new Error('PDF表示領域がありません。')
+  const startX = Math.max(viewerBox.x + 80, Math.min(viewerBox.x + viewerBox.width - 260, box.x + 180))
+  const startY = Math.max(viewerBox.y + 90, Math.min(viewerBox.y + viewerBox.height - 220, box.y + 160))
 
   await page.getByRole('button', { name: '四角', exact: true }).click()
   await page.mouse.move(startX, startY)
@@ -41,7 +42,7 @@ async function measureEditing(page: Page, pdf: string, pageIndex: number, source
   await page.mouse.up()
 
   await page.getByRole('button', { name: '文字', exact: true }).click()
-  await page.mouse.click(startX, Math.min(viewport.height - 100, startY + 140))
+  await page.mouse.click(startX, Math.min(viewerBox.y + viewerBox.height - 100, box.y + box.height - 20, startY + 140))
   await expect(page.getByTestId('text-editor')).toBeVisible()
   const characters = 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん１２３４５'
   for (const character of [...characters].slice(0, 50)) {

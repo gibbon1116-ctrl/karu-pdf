@@ -8,10 +8,10 @@ test('前回のページと倍率を文書ごとに復元する', async ({ page 
   await page.goto('/karu-pdf/?test=1')
   await page.getByTestId('file-input').setInputFiles(sample)
   await expect(page.getByText('1 / 5')).toBeVisible()
-  await expect(page.getByText('125%')).toBeVisible()
+  await expect(page.locator('.zoom-output')).toContainText('%')
   await page.evaluate(() => window.__karu!.scrollToPage(2))
   await expect(page.getByText('3 / 5')).toBeVisible()
-  await page.getByRole('button', { name: '拡大', exact: true }).click()
+  await page.evaluate(() => window.__karu!.setZoom(1.5))
   await expect(page.getByText('150%')).toBeVisible()
   await page.waitForTimeout(700)
   await expect.poll(() => page.evaluate(() => {

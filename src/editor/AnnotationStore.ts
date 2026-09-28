@@ -208,6 +208,26 @@ export class AnnotationStore {
     this.notify()
   }
 
+  update(id: string, values: {
+    color?: RGB
+    borderWidth?: number
+    fontSize?: number
+    layout?: LayoutResult
+    rect?: Rect
+  }): void {
+    const annotation = this.annotations.get(id)
+    if (!annotation || annotation.deleted) return
+    this.markTouched(annotation)
+    if (values.color) annotation.color = [...values.color]
+    if (values.borderWidth !== undefined && annotation.kind === 'square') annotation.borderWidth = values.borderWidth
+    if (values.fontSize !== undefined && annotation.kind === 'freetext') annotation.fontSize = values.fontSize
+    if (values.layout && annotation.kind === 'freetext') annotation.layout = values.layout
+    if (values.rect) annotation.rect = [...values.rect]
+    annotation.dirty = true
+    annotation.revision += 1
+    this.notify()
+  }
+
   remove(id: string): void {
     const annotation = this.annotations.get(id)
     if (!annotation || annotation.deleted) return

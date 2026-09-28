@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import './resume.spec'
+import './shell.spec'
 
 const sample = path.resolve('test-data/sample-small.pdf')
 

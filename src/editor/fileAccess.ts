@@ -6,8 +6,9 @@ export interface FileSystemWritableFileStreamLike {
 export interface PdfFileHandle {
   readonly name?: string
   getFile(): Promise<File>
-  queryPermission?(options: { mode: 'readwrite' }): Promise<PermissionState>
-  requestPermission?(options: { mode: 'readwrite' }): Promise<PermissionState>
+  queryPermission?(options: { mode: 'read' | 'readwrite' }): Promise<PermissionState>
+  requestPermission?(options: { mode: 'read' | 'readwrite' }): Promise<PermissionState>
+  isSameEntry?(other: PdfFileHandle): Promise<boolean>
   createWritable(): Promise<FileSystemWritableFileStreamLike>
 }
 
@@ -47,7 +48,7 @@ export async function writePdf(handle: PdfFileHandle, bytes: Uint8Array): Promis
 
 export async function pickOpenHandles(startIn?: PdfFileHandle): Promise<PdfFileHandle[]> {
   if (!window.showOpenFilePicker) return []
-  const options = { id: 'karu-pdf-open', multiple: false, types: PDF_PICKER_TYPES }
+  const options = { id: 'karu-pdf-open', multiple: true, types: PDF_PICKER_TYPES }
   if (!startIn) return window.showOpenFilePicker(options)
   try {
     return await window.showOpenFilePicker({ ...options, startIn })

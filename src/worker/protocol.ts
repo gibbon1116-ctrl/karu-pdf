@@ -9,12 +9,14 @@ export type Priority = 0 | 1 | 2 | 3
 export interface OpenRequest {
   type: 'open'
   requestId: number
+  docId: string
   bytes: ArrayBuffer
 }
 
 export interface RenderRequest {
   type: 'render'
   jobId: number
+  docId: string
   priority: Priority
   pageIndex: number
   renderScale: number
@@ -24,11 +26,13 @@ export interface RenderRequest {
 
 export interface CancelJobsRequest {
   type: 'cancelJobs'
+  docId: string
   jobIds: number[]
 }
 
 export interface ReprioritizeRequest {
   type: 'reprioritize'
+  docId: string
   jobId: number
   priority: Priority
 }
@@ -45,6 +49,7 @@ export interface DisposeRequest {
 export interface ListAnnotationsRequest {
   type: 'listAnnotations'
   requestId: number
+  docId: string
   pageIndex: number
 }
 
@@ -59,8 +64,20 @@ export interface LayoutTextRequest {
 export interface ApplyAndSaveRequest {
   type: 'applyAndSave'
   requestId: number
+  docId: string
   edits: AnnotationEdit[]
   mode: SaveMode
+}
+
+export interface CloseRequest {
+  type: 'close'
+  docId: string
+}
+
+export interface ExportBytesRequest {
+  type: 'exportBytes'
+  requestId: number
+  docId: string
 }
 
 export type WorkerRequest =
@@ -73,6 +90,8 @@ export type WorkerRequest =
   | ListAnnotationsRequest
   | LayoutTextRequest
   | ApplyAndSaveRequest
+  | CloseRequest
+  | ExportBytesRequest
 
 export interface ReadyResponse {
   type: 'ready'
@@ -132,6 +151,12 @@ export interface ApplyAndSaveResponse {
   errors: ApplyError[]
 }
 
+export interface ExportBytesResponse {
+  type: 'bytesExported'
+  requestId: number
+  bytes: ArrayBuffer
+}
+
 export interface ErrorResponse {
   type: 'error'
   requestId?: number
@@ -148,4 +173,5 @@ export type WorkerResponse =
   | ListAnnotationsResponse
   | LayoutTextResponse
   | ApplyAndSaveResponse
+  | ExportBytesResponse
   | ErrorResponse

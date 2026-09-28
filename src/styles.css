@@ -14,7 +14,25 @@
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 button, input { font: inherit; }
 
-.app { position: relative; display: grid; grid-template-rows: auto 1fr; width: 100%; height: 100%; }
+.app { position: relative; display: grid; grid-template-rows: 38px auto minmax(0, 1fr) 28px; width: 100%; height: 100%; }
+.document-tabs {
+  z-index: 11;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px 8px 0;
+  overflow-x: auto;
+  background: #e7e7e7;
+  border-bottom: 1px solid #aaa;
+}
+.document-tab { display: flex; min-width: 120px; max-width: 230px; border: 1px solid #bbb; border-bottom: 0; border-radius: 5px 5px 0 0; background: #d5d5d5; }
+.document-tab.active { background: #fff; border-color: #8d8d8d; }
+.document-tab button { border: 0; background: transparent; }
+.document-tab-name { min-width: 0; flex: 1; padding: 4px 4px 4px 10px; overflow: hidden; text-align: left; white-space: nowrap; }
+.document-tab-name span:first-child { display: inline-block; max-width: calc(100% - 14px); overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.document-tab-close { width: 30px; padding: 0; font-size: 18px; }
+.document-tab-add { min-width: 34px; border: 0; background: transparent; font-size: 20px; }
 .toolbar {
   z-index: 10;
   display: flex;
@@ -30,8 +48,43 @@ button, input { font: inherit; }
 .toolbar button.active { color: #fff; background: #1769aa; border-color: #0f568d; }
 .toolbar-separator { width: 1px; height: 28px; margin: 0 2px; background: #c8c8c8; }
 .toolbar output { min-width: 68px; text-align: center; font-variant-numeric: tabular-nums; }
-.file-name { overflow: hidden; margin-left: auto; text-overflow: ellipsis; white-space: nowrap; color: #555; }
-.viewer { position: relative; overflow: auto; background: #525659; overscroll-behavior: contain; }
+.document-workspace { position: relative; display: grid; grid-template-columns: 160px minmax(0, 1fr) 210px; min-width: 0; min-height: 0; }
+.document-workspace.thumbnails-hidden { grid-template-columns: minmax(0, 1fr) 210px; }
+.document-workspace.format-hidden { grid-template-columns: 160px minmax(0, 1fr); }
+.document-workspace.thumbnails-hidden.format-hidden { grid-template-columns: minmax(0, 1fr); }
+.viewer { position: relative; min-width: 0; min-height: 0; overflow: auto; background: #525659; overscroll-behavior: contain; }
+.thumbnail-panel { position: relative; width: 160px; min-height: 0; overflow-y: auto; overflow-x: hidden; background: #ededed; border-right: 1px solid #bbb; }
+.thumbnail-strip { position: relative; width: 100%; }
+.thumbnail-item { position: absolute; left: 10px; display: flex; width: 140px; align-items: center; flex-direction: column; gap: 4px; padding: 5px 10px; border: 1px solid transparent; background: transparent; }
+.thumbnail-item.active { color: #064f91; background: #dcecff; border-color: #6b9bc7; }
+.thumbnail-canvas { display: block; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 35%); }
+.thumbnail-item span { font-size: 12px; line-height: 18px; }
+.format-panel { min-width: 0; padding: 14px 12px; overflow-y: auto; background: #f4f4f4; border-left: 1px solid #bbb; }
+.format-panel h2 { margin: 0 0 16px; font-size: 16px; }
+.format-panel fieldset { padding: 0; margin: 0 0 18px; border: 0; }
+.format-panel legend { margin-bottom: 8px; }
+.color-grid { display: grid; grid-template-columns: repeat(4, 34px); gap: 6px; }
+.color-grid button { width: 34px; height: 34px; padding: 5px; border: 1px solid #aaa; background: #fff; border-radius: 3px; }
+.color-grid button.selected { outline: 2px solid #1769aa; outline-offset: 1px; }
+.color-grid span { display: block; width: 100%; height: 100%; border: 1px solid #888; }
+.format-panel label { display: grid; gap: 6px; margin-bottom: 16px; }
+.format-panel select { width: 100%; min-height: 32px; }
+.format-target { color: #666; font-size: 12px; }
+.status-bar { display: flex; justify-content: space-between; gap: 20px; padding: 4px 12px; color: #444; background: #f2f2f2; border-top: 1px solid #bbb; font-size: 13px; font-variant-numeric: tabular-nums; }
+.start-screen { min-height: 0; overflow-y: auto; padding: 48px max(24px, calc((100% - 800px) / 2)); background: #fafafa; }
+.start-primary { display: grid; place-items: center; margin-bottom: 44px; }
+.start-primary h1 { margin: 0 0 28px; font-size: 34px; }
+.start-open { padding: 14px 42px; color: #fff; background: #1769aa; border: 1px solid #0f568d; border-radius: 5px; font-size: 20px; }
+.start-primary p { color: #666; }
+.recent-files, .start-help { max-width: 800px; margin: 0 auto 34px; }
+.recent-files h2, .start-help h2 { font-size: 18px; }
+.recent-files ul { padding: 0; margin: 0; list-style: none; border: 1px solid #ccc; border-radius: 5px; background: #fff; }
+.recent-files li { display: flex; border-bottom: 1px solid #ddd; }
+.recent-files li:last-child { border-bottom: 0; }
+.recent-open { display: flex; min-width: 0; flex: 1; justify-content: space-between; gap: 16px; padding: 10px 14px; border: 0; background: transparent; text-align: left; }
+.recent-open span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-open time { flex: none; color: #666; font-size: 12px; }
+.recent-remove { width: 42px; border: 0; background: transparent; font-size: 18px; }
 .page-strip { position: relative; min-width: 100%; }
 .page-empty, .page-view { position: absolute; overflow: hidden; background: #e8e8e8; box-shadow: 0 1px 4px rgb(0 0 0 / 45%); }
 .page-empty, .page-placeholder { display: grid; place-items: center; color: #777; font-size: 14px; }
@@ -64,8 +117,7 @@ button, input { font: inherit; }
   font-kerning: none;
   line-height: 1.2;
 }
-.error { position: absolute; z-index: 20; top: 56px; left: 50%; transform: translateX(-50%); padding: 10px 16px; color: #8b0000; background: #fff1f1; border: 1px solid #c44; }
-.save-status { position: absolute; z-index: 20; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 9px 16px; color: #174c24; background: #effaf1; border: 1px solid #78a781; border-radius: 4px; }
+.error { position: absolute; z-index: 20; top: 92px; left: 50%; transform: translateX(-50%); padding: 10px 16px; color: #8b0000; background: #fff1f1; border: 1px solid #c44; }
 .debug-panel {
   position: absolute;
   z-index: 30;

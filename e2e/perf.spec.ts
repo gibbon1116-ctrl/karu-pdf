@@ -44,6 +44,7 @@ const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floo
 const urlFor = (workers: number, warm: boolean) => `/karu-pdf/?test=1&workers=${workers}&warm=${warm ? 1 : 0}`
 
 async function openPdf(page: Page): Promise<{ open: number; sharp: number }> {
+  await page.evaluate(() => localStorage.removeItem('karu-pdf:view'))
   const before = await page.evaluate(() => ({
     open: window.__karu?.getMetrics().open.count ?? 0,
     sharp: window.__karu?.getMetrics().openSharp.count ?? 0,
@@ -73,10 +74,12 @@ async function measureScroll(page: Page, pixelsPerSecond: 1500 | 3000): Promise<
     await page.waitForTimeout(100)
   }
   await page.waitForTimeout(250)
-  return page.evaluate(() => {
+  const result = await page.evaluate(() => {
     const blank = window.__karu!.getMetrics().blankFrames
     return { ratio: blank.ratio, longestMs: blank.longestMs }
   })
+  console.log(`[perf-scroll] ${pixelsPerSecond}px/s`, JSON.stringify(result))
+  return result
 }
 
 async function measurePan(

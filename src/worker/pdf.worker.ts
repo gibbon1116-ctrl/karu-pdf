@@ -8,6 +8,7 @@ import { layoutText } from '../core/textLayout'
 import { saveDocument } from '../core/save'
 import type {
   ApplyAndSaveRequest,
+  ExportBytesRequest,
   LayoutTextRequest,
   ListAnnotationsRequest,
   RenderRequest,
@@ -16,13 +17,18 @@ import type {
 } from './protocol'
 
 const scope = self as unknown as DedicatedWorkerGlobalScope
-let opened: OpenedDocument | undefined
-let displayLists: DisplayListCache | undefined
+
+interface WorkerDocument {
+  opened: OpenedDocument
+  displayLists: DisplayListCache
+}
+
+const documents = new Map<string, WorkerDocument>()
 let fontResource: FontResource | undefined
 let sequence = 0
 let running = false
 let processedCount = 0
-type CoreRequest = ListAnnotationsRequest | LayoutTextRequest | ApplyAndSaveRequest
+type CoreRequest = ListAnnotationsRequest | LayoutTextRequest | ApplyAndSaveRequest | ExportBytesRequest
 type QueuedRequest =
   | (RenderRequest & { sequence: number })
   | (CoreRequest & { sequence: number; priority: -1 })
@@ -33,11 +39,16 @@ function post(message: WorkerResponse, transfer: Transferable[] = []): void {
   scope.postMessage(message, transfer)
 }
 
-function disposeDocument(): void {
-  displayLists?.destroy()
-  displayLists = undefined
-  opened?.document.destroy()
-  opened = undefined
+function disposeDocument(docId: string): void {
+  const entry = documents.get(docId)
+  if (!entry) return
+  entry.displayLists.destroy()
+  entry.opened.document.destroy()
+  documents.delete(docId)
+}
+
+function disposeAllDocuments(): void {
+  for (const docId of [...documents.keys()]) disposeDocument(docId)
 }
 
 function disposeFont(): void {
@@ -72,7 +83,8 @@ async function execute(job: QueuedRequest): Promise<void> {
     await executeCoreRequest(job)
     return
   }
-  if (!displayLists) {
+  const entry = documents.get(job.docId)
+  if (!entry) {
     post({ type: 'error', jobId: job.jobId, message: 'PDF が開かれていません。' })
     return
   }
@@ -80,7 +92,7 @@ async function execute(job: QueuedRequest): Promise<void> {
     post({ type: 'started', jobId: job.jobId })
     const started = performance.now()
     const rendered = renderRegion(
-      displayLists,
+      entry.displayLists,
       job.pageIndex,
       job.renderScale,
       job.deviceRect,
@@ -99,27 +111,9 @@ async function execute(job: QueuedRequest): Promise<void> {
 }
 
 async function executeCoreRequest(request: CoreRequest): Promise<void> {
-  if (!opened) {
-    post({ type: 'error', requestId: request.requestId, message: 'PDF が開かれていません。' })
-    return
-  }
-  const document = opened.document.asPDF()
-  if (!document) {
-    post({ type: 'error', requestId: request.requestId, message: 'PDF 文書ではありません。' })
-    return
-  }
   try {
-    if (request.type === 'listAnnotations') {
-      post({
-        type: 'annotationsListed',
-        requestId: request.requestId,
-        annotations: listAnnotations(document, request.pageIndex),
-      })
-      return
-    }
-
-    const font = await getFontResource()
     if (request.type === 'layoutText') {
+      const font = await getFontResource()
       const replaced = replaceMissingCharacters(font.font, request.text)
       post({
         type: 'textLaidOut',
@@ -135,8 +129,30 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       return
     }
 
+    const entry = documents.get(request.docId)
+    if (!entry) throw new Error('PDF が開かれていません。')
+    const document = entry.opened.document.asPDF()
+    if (!document) throw new Error('PDF 文書ではありません。')
+
+    if (request.type === 'listAnnotations') {
+      post({
+        type: 'annotationsListed',
+        requestId: request.requestId,
+        annotations: listAnnotations(document, request.pageIndex),
+      })
+      return
+    }
+
+    if (request.type === 'exportBytes') {
+      const saved = saveDocument(document, 'incremental')
+      const bytes = saved.bytes.buffer as ArrayBuffer
+      post({ type: 'bytesExported', requestId: request.requestId, bytes }, [bytes])
+      return
+    }
+
+    const font = await getFontResource()
     const applied = applyEdits(document, request.edits, font)
-    displayLists?.clear()
+    entry.displayLists.clear()
     const saved = saveDocument(document, request.mode)
     const bytes = saved.bytes.buffer as ArrayBuffer
     post({
@@ -158,18 +174,24 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
   }
 }
 
+function cancelQueuedForDocument(docId: string, message: string): void {
+  for (let index = queue.length - 1; index >= 0; index -= 1) {
+    const queued = queue[index]
+    if (!('docId' in queued) || queued.docId !== docId) continue
+    queue.splice(index, 1)
+    if (queued.type === 'render') post({ type: 'rendered', jobId: queued.jobId, cancelled: true })
+    else post({ type: 'error', requestId: queued.requestId, message })
+  }
+}
+
 scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const message = event.data
   if (message.type === 'open') {
     try {
-      for (const cancelled of queue.splice(0, queue.length)) {
-        if (cancelled.type === 'render') post({ type: 'rendered', jobId: cancelled.jobId, cancelled: true })
-        else post({ type: 'error', requestId: cancelled.requestId, message: '別の PDF が開かれました。' })
-      }
-      disposeDocument()
-      processedCount = 0
-      opened = openDocument(new Uint8Array(message.bytes))
-      displayLists = new DisplayListCache(opened.document)
+      cancelQueuedForDocument(message.docId, 'PDF が開き直されました。')
+      disposeDocument(message.docId)
+      const opened = openDocument(new Uint8Array(message.bytes))
+      documents.set(message.docId, { opened, displayLists: new DisplayListCache(opened.document) })
       post({
         type: 'opened',
         requestId: message.requestId,
@@ -183,7 +205,12 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     }
     return
   }
-  if (message.type === 'listAnnotations' || message.type === 'layoutText' || message.type === 'applyAndSave') {
+  if (message.type === 'close') {
+    cancelQueuedForDocument(message.docId, 'PDF は閉じられました。')
+    disposeDocument(message.docId)
+    return
+  }
+  if (message.type === 'listAnnotations' || message.type === 'layoutText' || message.type === 'applyAndSave' || message.type === 'exportBytes') {
     queue.push({ ...message, priority: -1, sequence: sequence++ })
     queue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence)
     schedule()
@@ -199,16 +226,16 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     const ids = new Set(message.jobIds)
     for (let index = queue.length - 1; index >= 0; index -= 1) {
       const queued = queue[index]
-      if (queued.type === 'render' && ids.has(queued.jobId)) {
-        const [cancelled] = queue.splice(index, 1)
-        if (cancelled.type === 'render') post({ type: 'rendered', jobId: cancelled.jobId, cancelled: true })
+      if (queued.type === 'render' && queued.docId === message.docId && ids.has(queued.jobId)) {
+        queue.splice(index, 1)
+        post({ type: 'rendered', jobId: queued.jobId, cancelled: true })
       }
     }
     return
   }
   if (message.type === 'reprioritize') {
     const job = queue.find((candidate): candidate is RenderRequest & { sequence: number } => (
-      candidate.type === 'render' && candidate.jobId === message.jobId
+      candidate.type === 'render' && candidate.docId === message.docId && candidate.jobId === message.jobId
     ))
     if (job !== undefined) {
       job.priority = message.priority
@@ -221,14 +248,14 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
       type: 'stats',
       requestId: message.requestId,
       queueLength: queue.length + (running ? 1 : 0),
-      displayListCount: displayLists?.count ?? 0,
-      displayListBytes: displayLists?.usedBytes ?? 0,
+      displayListCount: [...documents.values()].reduce((sum, entry) => sum + entry.displayLists.count, 0),
+      displayListBytes: [...documents.values()].reduce((sum, entry) => sum + entry.displayLists.usedBytes, 0),
       processedCount,
     })
     return
   }
   queue.splice(0, queue.length)
-  disposeDocument()
+  disposeAllDocuments()
   disposeFont()
 }
 

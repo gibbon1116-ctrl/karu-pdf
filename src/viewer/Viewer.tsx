@@ -1,9 +1,10 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
-import { RenderScheduler } from '../client/RenderScheduler'
+import type { RenderScheduler } from '../client/RenderScheduler'
 import type { PageSize } from '../core/mupdfDoc'
 import { EditorToolChangeContext, type EditorTool } from '../editor/AnnotationLayer'
 import type { AnnotationStore } from '../editor/AnnotationStore'
+import type { FormatDefaults } from '../editor/formatDefaults'
 import { getMetrics, recordBlankFrame, recordMetric, resetBlankFrames, startMeasure } from '../perf/metrics'
 import type { Priority } from '../worker/protocol'
 import { BitmapCache } from './BitmapCache'
@@ -28,14 +29,20 @@ export interface ViewerHandle {
 }
 
 interface Props {
+  docId: string
   pool: PdfWorkerPool
+  scheduler: RenderScheduler
   annotationStore: AnnotationStore
+  formatDefaults: FormatDefaults
   tool: EditorTool
-  initialView: { page: number; zoom: number } | null
+  initialView: { page: number; zoom: number; scrollLeft?: number; scrollTop?: number } | null
   pageSizes: PageSize[]
+  selectedAnnotationId: string | null
+  onSelectAnnotation(id: string | null): void
   onToolChange(tool: EditorTool): void
   onZoomChange(zoom: number): void
   onPageChange(page: number): void
+  onScrollPositionChange(left: number, top: number): void
   onFirstBitmap(): void
   onFirstSharp(): void
 }
@@ -62,12 +69,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   const initialZoom = Math.max(0.25, Math.min(8, props.initialView?.zoom ?? 1))
   const initialLayout = computePageLayout(props.pageSizes, initialZoom)
   const initialPageIndex = Math.max(0, Math.min(props.pageSizes.length - 1, (props.initialView?.page ?? 1) - 1))
-  const initialTop = initialLayout.pages[initialPageIndex]?.top ?? 0
+  const initialTop = props.initialView?.scrollTop ?? initialLayout.pages[initialPageIndex]?.top ?? 0
   const annotationVersion = useSyncExternalStore(props.annotationStore.subscribe, props.annotationStore.getSnapshot)
   const scrollerRef = useRef<HTMLDivElement>(null)
-  const cacheRef = useRef(new BitmapCache())
-  const warmCacheRef = useRef(new BitmapCache(64 * 1024 * 1024))
-  const schedulerRef = useRef(new RenderScheduler(props.pool, cacheRef.current, warmCacheRef.current))
   const prefetchRef = useRef(new Map<number, PrefetchEntry>())
   const warmReleasesRef = useRef<Array<() => void>>([])
   const firstBitmapRef = useRef(false)
@@ -77,9 +81,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   const scrollStopTimerRef = useRef<number | undefined>(undefined)
   const panSequenceRef = useRef(0)
   const zoomSequenceRef = useRef(0)
-  const lastPositionRef = useRef({ left: 0, top: initialTop })
+  const lastPositionRef = useRef({ left: props.initialView?.scrollLeft ?? 0, top: initialTop })
   const horizontalScrollRef = useRef(false)
   const suppressPanUntilRef = useRef(0)
+  const ignoreScrollForPrefetchRef = useRef(false)
+  const scrollSampleRef = useRef({ top: initialTop, at: performance.now() })
   const renderRequestLogRef = useRef<RenderRequestLogEntry[]>([])
   const editorCommitRef = useRef<(() => Promise<void>) | null>(null)
   const initialPositionAppliedRef = useRef(false)
@@ -89,10 +95,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   const [committedZoom, setCommittedZoom] = useState(initialZoom)
   const [viewport, setViewport] = useState<Box>({ x: 0, y: initialTop, width: 800, height: 600 })
   const [scrollDirection, setScrollDirection] = useState<1 | -1>(1)
-  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null)
+  const [isScrolling, setIsScrolling] = useState(false)
+  const [prefetchDistance, setPrefetchDistance] = useState(4)
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null)
 
-  const scheduler = schedulerRef.current
+  const scheduler = props.scheduler
   const warmEnabled = new URLSearchParams(location.search).get('warm') === '1'
   const layout = useMemo(() => computePageLayout(props.pageSizes, zoom), [props.pageSizes, zoom])
   layoutRef.current = layout
@@ -156,6 +163,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     const bounded = Math.max(0.25, Math.min(8, next))
     const previousZoom = zoomRef.current
     zoomRef.current = bounded
+    for (const entry of prefetchRef.current.values()) entry.release()
+    prefetchRef.current.clear()
     suppressPanUntilRef.current = performance.now() + 400
     if (scroller) {
       const x = anchor?.x ?? scroller.clientWidth / 2
@@ -197,6 +206,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       horizontalScrollRef.current = true
     }
     lastPositionRef.current = next
+    props.onScrollPositionChange(next.left, next.top)
     setViewport({ x: next.left, y: next.top, width: scroller.clientWidth, height: scroller.clientHeight })
     let current = layoutRef.current.pages[0]
     for (const candidate of layoutRef.current.pages) {
@@ -204,7 +214,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       current = candidate
     }
     props.onPageChange((current?.index ?? 0) + 1)
-  }, [props.onPageChange])
+  }, [props.onPageChange, props.onScrollPositionChange])
 
   const sampleBlankFrame = useCallback(() => {
     const scroller = scrollerRef.current
@@ -225,10 +235,21 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       blankRafRef.current = requestAnimationFrame(blankLoop)
     }
     const onScroll = () => {
+      const now = performance.now()
+      const verticalMovement = Math.abs(scroller.scrollTop - lastPositionRef.current.top) > 0.5
       updateViewport()
+      if (verticalMovement && !ignoreScrollForPrefetchRef.current && performance.now() >= suppressPanUntilRef.current) {
+        const elapsed = Math.max(16, now - scrollSampleRef.current.at)
+        const speed = Math.abs(scroller.scrollTop - scrollSampleRef.current.top) * 1000 / elapsed
+        setPrefetchDistance(speed <= 2200 ? 10 : 4)
+        setIsScrolling(true)
+      }
+      if (verticalMovement) scrollSampleRef.current = { top: scroller.scrollTop, at: now }
       if (!blankRafRef.current) blankRafRef.current = requestAnimationFrame(blankLoop)
       window.clearTimeout(scrollStopTimerRef.current)
       scrollStopTimerRef.current = window.setTimeout(() => {
+        setIsScrolling(false)
+        setPrefetchDistance(4)
         cancelAnimationFrame(blankRafRef.current)
         blankRafRef.current = 0
         recordBlankFrame(false)
@@ -259,16 +280,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       const isInput = target?.matches('input, textarea, [contenteditable="true"]') ?? false
       if (isInput || editingAnnotationId) return
       if (event.key === 'Escape') {
-        setSelectedAnnotationId(null)
-      } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedAnnotationId) {
+        props.onSelectAnnotation(null)
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && props.selectedAnnotationId) {
         event.preventDefault()
-        props.annotationStore.remove(selectedAnnotationId)
-        setSelectedAnnotationId(null)
+        props.annotationStore.remove(props.selectedAnnotationId)
+        props.onSelectAnnotation(null)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [editingAnnotationId, props.annotationStore, selectedAnnotationId])
+  }, [editingAnnotationId, props.annotationStore, props.onSelectAnnotation, props.selectedAnnotationId])
 
   useLayoutEffect(() => {
     if (props.pageSizes.length === 0 || initialPositionAppliedRef.current) return
@@ -276,8 +297,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     if (props.initialView) {
       const target = layoutRef.current.pages[initialPageIndex]
       if (scrollerRef.current && target) {
-        scrollerRef.current.scrollTop = target.top
-        lastPositionRef.current.top = target.top
+        const top = props.initialView.scrollTop ?? target.top
+        const left = props.initialView.scrollLeft ?? 0
+        scrollerRef.current.scrollTop = top
+        scrollerRef.current.scrollLeft = left
+        lastPositionRef.current = { left, top }
         updateViewport()
       }
     } else {
@@ -293,7 +317,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       ? Math.max(0, viewport.y - viewport.height)
       : Math.max(0, viewport.y - viewport.height * 3)
     const end = scrollDirection > 0
-      ? viewport.y + viewport.height * 4
+      ? viewport.y + viewport.height * (zoom > 1.5 ? 2 : isScrolling ? prefetchDistance : 4)
       : viewport.y + viewport.height * 2
     for (const page of pagesInRange(layout.pages, start, end)) {
       const behind = scrollDirection > 0
@@ -318,11 +342,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       if (prefetchRef.current.has(pageIndex)) continue
       const size = props.pageSizes[pageIndex]
       const scale = 512 / Math.max(size.width, size.height)
-      const params = { pageIndex, renderScale: scale, deviceRect: null, excludeAnnotObjNums: wanted.excluded }
+      const params = { docId: props.docId, pageIndex, renderScale: scale, deviceRect: null, excludeAnnotObjNums: wanted.excluded }
       const release = scheduler.want(wanted.key, params, wanted.priority, () => undefined)
       prefetchRef.current.set(pageIndex, { priority: wanted.priority, key: wanted.key, release })
     }
-  }, [scheduler, layout.pages, props.pageSizes, props.annotationStore, annotationVersion, viewport.y, viewport.height, scrollDirection])
+  }, [scheduler, layout.pages, props.docId, props.pageSizes, props.annotationStore, annotationVersion, viewport.y, viewport.height, scrollDirection, zoom, isScrolling, prefetchDistance])
 
   useEffect(() => {
     if (!warmEnabled || props.pageSizes.length === 0) return
@@ -333,21 +357,18 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       const scale = 256 / Math.max(size.width, size.height)
       const excluded = props.annotationStore.touchedObjNums(pageIndex)
       const key = `warm:${pageIndex}:${scale.toFixed(6)}:full:x=${excluded.join('.')}`
-      const params = { pageIndex, renderScale: scale, deviceRect: null, excludeAnnotObjNums: excluded }
+      const params = { docId: props.docId, pageIndex, renderScale: scale, deviceRect: null, excludeAnnotObjNums: excluded }
       return scheduler.want(key, params, 3, () => undefined)
     })
     return () => {
       for (const release of warmReleasesRef.current) release()
       warmReleasesRef.current = []
     }
-  }, [warmEnabled, props.pageSizes, props.annotationStore, annotationVersion, scheduler])
+  }, [warmEnabled, props.docId, props.pageSizes, props.annotationStore, annotationVersion, scheduler])
 
   useEffect(() => () => {
     window.clearTimeout(zoomTimerRef.current)
     for (const entry of prefetchRef.current.values()) entry.release()
-    scheduler.destroy()
-    cacheRef.current.clear()
-    warmCacheRef.current.clear()
   }, [scheduler])
 
   const onSharpChange = useCallback((pageIndex: number, sharp: boolean) => {
@@ -367,18 +388,20 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     fitWidth,
     scrollToPage: (index) => {
       const page = layoutRef.current.pages[Math.max(0, Math.min(layoutRef.current.pages.length - 1, index))]
+      ignoreScrollForPrefetchRef.current = true
       scrollerRef.current?.scrollTo({ top: page?.top ?? 0 })
+      requestAnimationFrame(() => { ignoreScrollForPrefetchRef.current = false })
     },
     isIdle: () => scheduler.pendingCount() === 0,
     isSharp: isSharpNow,
     getZoom: () => zoomRef.current,
-    getCache: () => cacheRef.current,
+    getCache: () => scheduler.cache,
     commitEditor: () => editorCommitRef.current?.() ?? Promise.resolve(),
     clearSelection: () => {
-      setSelectedAnnotationId(null)
+      props.onSelectAnnotation(null)
       setEditingAnnotationId(null)
     },
-  }), [fitWidth, isSharpNow, scheduler, setZoom, stepZoom])
+  }), [fitWidth, isSharpNow, props.onSelectAnnotation, scheduler, setZoom, stepZoom])
 
   const registerEditorCommit = useCallback((commit: (() => Promise<void>) | null) => {
     editorCommitRef.current = commit
@@ -423,12 +446,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
           return <PageView
             key={page.index}
             pool={props.pool}
+            docId={props.docId}
             scheduler={scheduler}
             annotationStore={props.annotationStore}
+            formatDefaults={props.formatDefaults}
             tool={props.tool}
-            selectedAnnotationId={selectedAnnotationId}
+            selectedAnnotationId={props.selectedAnnotationId}
             editingAnnotationId={editingAnnotationId}
-            onSelectAnnotation={setSelectedAnnotationId}
+            onSelectAnnotation={props.onSelectAnnotation}
             onEditAnnotation={setEditingAnnotationId}
             registerEditorCommit={registerEditorCommit}
             layout={page}

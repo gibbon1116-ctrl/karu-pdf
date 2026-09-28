@@ -34,7 +34,7 @@ function backendHarness() {
   return { backend, tasks }
 }
 
-const params = { pageIndex: 2, renderScale: 1, deviceRect: null }
+const params = { docId: 'doc-a', pageIndex: 2, renderScale: 1, deviceRect: null }
 const flush = () => new Promise<void>((resolve) => queueMicrotask(resolve))
 
 describe('RenderScheduler', () => {
@@ -53,7 +53,7 @@ describe('RenderScheduler', () => {
     const release = scheduler.want('cancel', params, 1, () => undefined)
     release()
     await flush()
-    expect(backend.cancelJobs).toHaveBeenCalledWith([tasks[0].task.jobId])
+    expect(backend.cancelJobs).toHaveBeenCalledWith('doc-a', [tasks[0].task.jobId])
     expect(scheduler.pendingCount()).toBe(0)
   })
 
@@ -75,6 +75,6 @@ describe('RenderScheduler', () => {
     const scheduler = new RenderScheduler(backend, new BitmapCache())
     scheduler.want('priority', params, 2, () => undefined)
     scheduler.want('priority', params, 0, () => undefined)
-    expect(backend.reprioritize).toHaveBeenCalledWith(tasks[0].task.jobId, 0 satisfies Priority)
+    expect(backend.reprioritize).toHaveBeenCalledWith('doc-a', tasks[0].task.jobId, 0 satisfies Priority)
   })
 })

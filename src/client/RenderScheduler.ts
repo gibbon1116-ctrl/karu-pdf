@@ -4,9 +4,11 @@ import type { DeviceRect, Priority } from '../worker/protocol'
 import { CancelledRenderError, type RenderBackend, type RenderTask } from './PdfWorkerPool'
 
 export interface RenderParams {
+  docId: string
   pageIndex: number
   renderScale: number
   deviceRect: DeviceRect | null
+  excludeAnnotObjNums?: number[]
 }
 
 interface RequestEntry {
@@ -46,7 +48,7 @@ export class RenderScheduler {
       entry.waiters.set(waiterId, onReady)
       if (priority < entry.priority) {
         entry.priority = priority
-        this.backend.reprioritize(entry.task.jobId, priority)
+        this.backend.reprioritize(entry.params.docId, entry.task.jobId, priority)
       }
     } else {
       const task = this.backend.render({ ...params, priority })
@@ -78,7 +80,7 @@ export class RenderScheduler {
       queueMicrotask(() => {
         if (this.requests.get(key) !== current || current.waiters.size > 0 || current.task.isStarted()) return
         this.requests.delete(key)
-        this.backend.cancelJobs([current.task.jobId])
+        this.backend.cancelJobs(current.params.docId, [current.task.jobId])
       })
     }
   }
@@ -94,7 +96,7 @@ export class RenderScheduler {
   destroy(): void {
     for (const entry of this.requests.values()) {
       entry.waiters.clear()
-      if (!entry.task.isStarted()) this.backend.cancelJobs([entry.task.jobId])
+      if (!entry.task.isStarted()) this.backend.cancelJobs(entry.params.docId, [entry.task.jobId])
     }
     this.requests.clear()
   }

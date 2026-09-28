@@ -4,14 +4,17 @@ import type { RenderScheduler } from '../client/RenderScheduler'
 import type { PageSize } from '../core/mupdfDoc'
 import { AnnotationLayer, type EditorTool } from '../editor/AnnotationLayer'
 import type { AnnotationStore } from '../editor/AnnotationStore'
+import type { FormatDefaults } from '../editor/formatDefaults'
 import type { DeviceRect, Priority } from '../worker/protocol'
 import { computeDetailRegion, computeVisibleRegion, regionCovers, visiblePartOfPage, type Box } from './detailRegion'
 import { CSS_PX_PER_PT, type PageLayout } from './pageLayout'
 
 interface Props {
+  docId: string
   pool: PdfWorkerPool
   scheduler: RenderScheduler
   annotationStore: AnnotationStore
+  formatDefaults: FormatDefaults
   tool: EditorTool
   selectedAnnotationId: string | null
   editingAnnotationId: string | null
@@ -69,9 +72,9 @@ export function PageView(props: Props) {
   useEffect(() => {
     void props.annotationStore.ensurePageLoaded(
       props.layout.index,
-      () => props.pool.listAnnotations(props.layout.index),
+      () => props.pool.listAnnotations(props.docId, props.layout.index),
     ).catch((error) => console.error('注釈の読み込みに失敗しました。', error))
-  }, [props.annotationStore, props.layout.index, props.pool])
+  }, [props.annotationStore, props.docId, props.layout.index, props.pool])
 
   const dpr = window.devicePixelRatio || 1
   const renderScale = props.zoom * CSS_PX_PER_PT * dpr
@@ -117,6 +120,7 @@ export function PageView(props: Props) {
     if (!props.warmEnabled) return
     const finishLog = props.onRenderRequest(props.layout.index, props.visible ? 0 : 3, warmKey)
     const params = {
+      docId: props.docId,
       pageIndex: props.layout.index,
       renderScale: warmScale,
       deviceRect: null,
@@ -141,6 +145,7 @@ export function PageView(props: Props) {
     const priority = usesDetail ? 0 : props.priority
     const finishLog = props.onRenderRequest(props.layout.index, priority, lowKey)
     const params = {
+      docId: props.docId,
       pageIndex: props.layout.index,
       renderScale: lowScale,
       deviceRect: null,
@@ -161,10 +166,11 @@ export function PageView(props: Props) {
   }, [props.scheduler, lowKey, lowScale, props.layout.index, props.priority, props.onRenderRequest, usesDetail, hasBitmap])
 
   useEffect(() => {
-    if (usesDetail && !detailFull) return
-    const priority = usesDetail ? 2 : props.priority
+    if (!props.visible || (usesDetail && !detailFull)) return
+    const priority: Priority = usesDetail ? 2 : 0
     const finishLog = props.onRenderRequest(props.layout.index, priority, previewKey)
     const params = {
+      docId: props.docId,
       pageIndex: props.layout.index,
       renderScale: previewScale,
       deviceRect: null,
@@ -182,7 +188,7 @@ export function PageView(props: Props) {
       finishLog()
       release()
     }
-  }, [props.scheduler, previewKey, previewScale, props.layout.index, props.priority, props.onRenderRequest, usesDetail, detailFull])
+  }, [props.scheduler, previewKey, previewScale, props.layout.index, props.visible, props.onRenderRequest, usesDetail, detailFull])
 
   useEffect(() => {
     const scaleChanged = lastScaleRef.current !== null && Math.abs(lastScaleRef.current - renderScale) > 0.000001
@@ -224,6 +230,7 @@ export function PageView(props: Props) {
     const priority: Priority = detailRequest.stage === 'visible' ? 0 : 1
     const finishLog = props.onRenderRequest(props.layout.index, priority, detailKey)
     const params = {
+      docId: props.docId,
       pageIndex: props.layout.index,
       renderScale,
       deviceRect: detailRequest.region,
@@ -288,6 +295,7 @@ export function PageView(props: Props) {
         onSelect={props.onSelectAnnotation}
         onEdit={props.onEditAnnotation}
         registerCommit={props.registerEditorCommit}
+        formatDefaults={props.formatDefaults}
       />
     </div>
   )

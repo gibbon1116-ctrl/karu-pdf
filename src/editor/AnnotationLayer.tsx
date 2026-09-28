@@ -5,6 +5,7 @@ import type { PageSize } from '../core/mupdfDoc'
 import { CSS_PX_PER_PT } from '../viewer/pageLayout'
 import { beginDragFrameMeasurement, TextEditor } from './TextEditor'
 import { AnnotationStore, type EditableAnnotation } from './AnnotationStore'
+import type { FormatDefaults } from './formatDefaults'
 
 export type EditorTool = 'select' | 'text' | 'square'
 export const EditorToolChangeContext = createContext<(tool: EditorTool) => void>(() => undefined)
@@ -22,6 +23,7 @@ interface Props {
   onSelect(id: string | null): void
   onEdit(id: string | null): void
   registerCommit(commit: (() => Promise<void>) | null): void
+  formatDefaults: FormatDefaults
 }
 
 interface Point { x: number; y: number }
@@ -183,6 +185,8 @@ export function AnnotationLayer(props: Props) {
       const annotation = props.store.create({
         pageIndex: props.pageIndex,
         kind: 'square',
+        color: props.formatDefaults.color,
+        borderWidth: props.formatDefaults.borderWidth,
         rect: [
           Math.min(operation.start.x, operation.latest.x),
           Math.min(operation.start.y, operation.latest.y),
@@ -199,6 +203,8 @@ export function AnnotationLayer(props: Props) {
     const annotation = props.store.create({
       pageIndex: props.pageIndex,
       kind: 'freetext',
+      color: props.formatDefaults.color,
+      fontSize: props.formatDefaults.fontSize,
       rect: [left, operation.start.y, left + width, operation.start.y + 16.6],
     })
     props.onSelect(annotation.id)
