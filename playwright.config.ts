@@ -20,6 +20,6 @@ export default defineConfig({
   },
   projects: [
     { name: 'e2e', testMatch: /(?:smoke|annotate)\.spec\.ts/ },
-    { name: 'bench', testMatch: /(?:perf|perf-edit)\.spec\.ts/ },
+    { name: 'bench', testMatch: /(?:perf|perf-edit|perf-organize)\.spec\.ts/ },
   ],
 })

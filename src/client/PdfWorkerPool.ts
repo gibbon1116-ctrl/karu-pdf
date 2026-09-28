@@ -3,17 +3,24 @@ import type { AnnotationEdit, AnnotationInfo, ApplyError } from '../core/annotat
 import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
 import type { SaveMode } from '../core/save'
+import type { PageInfo, PageLayoutCard } from '../core/pageOps'
 import type {
+  AppliedEditsResponse,
   ApplyAndSaveResponse,
   DeviceRect,
   ExportBytesResponse,
   LayoutTextResponse,
   ListAnnotationsResponse,
   OpenResponse,
+  PageInfoResponse,
+  PageLayoutResponse,
+  PagesExtractedResponse,
+  PagesSplitResponse,
   Priority,
   RenderResponse,
   StatsResponse,
   WorkerResponse,
+  PageLayoutWorkerTimings,
 } from '../worker/protocol'
 
 export interface OpenResult {
@@ -36,6 +43,26 @@ export interface ApplyAndSaveResult {
   created: number[]
   replacedCharacters: number
   errors: ApplyError[]
+}
+
+export interface ApplyEditsResult {
+  created: number[]
+  replacedCharacters: number
+  errors: ApplyError[]
+}
+
+export interface PageLayoutResult {
+  pageCount: number
+  pageSizes: PageSize[]
+  hasBackup: boolean
+  timings: PageLayoutTimings
+}
+
+export interface PageLayoutTimings extends PageLayoutWorkerTimings {
+  workerRoundTripMs: number
+  transferToMainMs: number
+  displayReloadMs: number
+  poolTotalMs: number
 }
 
 export interface PoolStats {
@@ -143,6 +170,14 @@ export class PdfWorkerPool {
       openMs: first.openMs,
       sizesMs: first.sizesMs,
     }
+  }
+
+  async openSource(docId: string, bytes: ArrayBuffer): Promise<OpenResult> {
+    await Promise.all(this.slots.map((slot) => slot.ready))
+    const copies = this.slots.map((_, index) => (index === 0 ? bytes : bytes.slice(0)))
+    const responses = await Promise.all(this.slots.map((slot, index) => this.openOnSlot(slot, docId, copies[index])))
+    const first = responses[0]
+    return { pageCount: first.pageCount, pageSizes: first.pageSizes, openMs: first.openMs, sizesMs: first.sizesMs }
   }
 
   async activate(docId: string): Promise<void> {
@@ -291,6 +326,88 @@ export class PdfWorkerPool {
     }
   }
 
+  async applyEdits(docId: string, edits: AnnotationEdit[]): Promise<ApplyEditsResult> {
+    const response = await this.request<AppliedEditsResponse>(this.slots[0], (requestId) => ({
+      type: 'applyEdits', requestId, docId, edits,
+    }))
+    return {
+      created: response.created,
+      replacedCharacters: response.replacedCharacters,
+      errors: response.errors,
+    }
+  }
+
+  async applyPageLayout(docId: string, cards: readonly PageLayoutCard[], sources: readonly string[]): Promise<PageLayoutResult> {
+    const poolStarted = performance.now()
+    const workerStarted = performance.now()
+    const response = await this.request<PageLayoutResponse>(this.slots[0], (requestId) => ({
+      type: 'applyPageLayout', requestId, docId, cards, sources,
+    }))
+    const workerRoundTripMs = performance.now() - workerStarted
+    const reloadStarted = performance.now()
+    await this.reloadDisplayWorkers(docId, response.bytes)
+    const displayReloadMs = performance.now() - reloadStarted
+    this.clearPageAssignments(docId)
+    return {
+      pageCount: response.pageCount,
+      pageSizes: response.pageSizes,
+      hasBackup: response.hasBackup,
+      timings: {
+        ...response.timings,
+        workerRoundTripMs,
+        transferToMainMs: Math.max(0, workerRoundTripMs - response.timings.workerTotalMs),
+        displayReloadMs,
+        poolTotalMs: performance.now() - poolStarted,
+      },
+    }
+  }
+
+  async undoPageLayout(docId: string): Promise<PageLayoutResult> {
+    const poolStarted = performance.now()
+    const workerStarted = performance.now()
+    const response = await this.request<PageLayoutResponse>(this.slots[0], (requestId) => ({
+      type: 'undoPageLayout', requestId, docId,
+    }))
+    const workerRoundTripMs = performance.now() - workerStarted
+    const reloadStarted = performance.now()
+    await this.reloadDisplayWorkers(docId, response.bytes)
+    const displayReloadMs = performance.now() - reloadStarted
+    this.clearPageAssignments(docId)
+    return {
+      pageCount: response.pageCount,
+      pageSizes: response.pageSizes,
+      hasBackup: response.hasBackup,
+      timings: {
+        ...response.timings,
+        workerRoundTripMs,
+        transferToMainMs: Math.max(0, workerRoundTripMs - response.timings.workerTotalMs),
+        displayReloadMs,
+        poolTotalMs: performance.now() - poolStarted,
+      },
+    }
+  }
+
+  async extractPages(docId: string, cards: readonly PageLayoutCard[], sources: readonly string[]): Promise<Uint8Array> {
+    const response = await this.request<PagesExtractedResponse>(this.slots[0], (requestId) => ({
+      type: 'extractPages', requestId, docId, cards, sources,
+    }))
+    return new Uint8Array(response.bytes)
+  }
+
+  async splitPages(docId: string, groups: readonly (readonly PageLayoutCard[])[], sources: readonly string[]): Promise<Uint8Array[]> {
+    const response = await this.request<PagesSplitResponse>(this.slots[0], (requestId) => ({
+      type: 'splitPages', requestId, docId, groups, sources,
+    }))
+    return response.bytes.map((bytes) => new Uint8Array(bytes))
+  }
+
+  async getPageInfo(docId: string): Promise<PageInfo[]> {
+    const response = await this.request<PageInfoResponse>(this.slots[0], (requestId) => ({
+      type: 'getPageInfo', requestId, docId,
+    }))
+    return response.pages
+  }
+
   isIdle(): boolean {
     return this.pendingRenders.size === 0 && this.slots.every((slot) => slot.queueLength === 0)
   }
@@ -332,6 +449,20 @@ export class PdfWorkerPool {
       type: 'exportBytes', requestId, docId,
     }))
     return response.bytes
+  }
+
+  private async reloadDisplayWorkers(docId: string, buffer: ArrayBuffer): Promise<void> {
+    const displaySlots = this.slots.slice(1).filter((slot) => slot.documents.has(docId))
+    await Promise.all(displaySlots.map((slot, index) => {
+      const copy = index === displaySlots.length - 1 ? buffer : buffer.slice(0)
+      return this.openOnSlot(slot, docId, copy)
+    }))
+  }
+
+  private clearPageAssignments(docId: string): void {
+    for (const key of [...this.pageAssignments.keys()]) {
+      if (key.startsWith(`${docId}:`)) this.pageAssignments.delete(key)
+    }
   }
 
   private touchDisplayDocument(docId: string): void {

@@ -9,6 +9,19 @@ import { Viewer, type ViewerHandle } from '../viewer/Viewer'
 import type { DocumentSession } from './documentModel'
 import { FormatPanel } from './FormatPanel'
 import { ThumbnailPanel } from './ThumbnailPanel'
+import { OrganizeView, type OrganizeSourceInfo } from '../organize/OrganizeView'
+import type { OrganizeDraft } from '../organize/OrganizeDraft'
+
+export interface OrganizeWorkspaceState {
+  draft: OrganizeDraft
+  sources: ReadonlyMap<string, OrganizeSourceInfo>
+  busy: boolean
+  onAddFiles(files: File[], beforeIndex: number): Promise<void>
+  onApply(): void
+  onCancel(): void
+  onExtract(cardIds: string[]): void
+  onSplit(cardIds: string[]): void
+}
 
 interface Props {
   session: DocumentSession
@@ -25,6 +38,7 @@ interface Props {
   onZoomChange(zoom: number): void
   onFirstBitmap(): void
   onFirstSharp(): void
+  organize: OrganizeWorkspaceState | null
 }
 
 export function DocumentWorkspace(props: Props) {
@@ -32,7 +46,7 @@ export function DocumentWorkspace(props: Props) {
     props.pool,
     new BitmapCache(),
     new BitmapCache(64 * 1024 * 1024),
-  ), [props.pool, props.session.docId])
+  ), [props.pool, props.session.docId, props.session.pageRevision])
   const initialView = useMemo(() => {
     const value = props.session.fitOnFirstView
       ? null
@@ -51,6 +65,25 @@ export function DocumentWorkspace(props: Props) {
     scheduler.cache.clear()
     scheduler.warmCache.clear()
   }, [scheduler])
+
+  if (props.organize) return (
+    <div className="document-workspace organize-mode">
+      <OrganizeView
+        docId={props.session.docId}
+        draft={props.organize.draft}
+        pageSizes={props.session.pageSizes}
+        sources={props.organize.sources}
+        scheduler={scheduler}
+        annotationStore={props.session.annotationStore}
+        busy={props.organize.busy}
+        onAddFiles={props.organize.onAddFiles}
+        onApply={props.organize.onApply}
+        onCancel={props.organize.onCancel}
+        onExtract={props.organize.onExtract}
+        onSplit={props.organize.onSplit}
+      />
+    </div>
+  )
 
   return (
     <div className={`document-workspace${props.showThumbnails ? '' : ' thumbnails-hidden'}${props.showFormat ? '' : ' format-hidden'}`}>

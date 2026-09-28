@@ -12,6 +12,10 @@ export interface PdfFileHandle {
   createWritable(): Promise<FileSystemWritableFileStreamLike>
 }
 
+export interface PdfDirectoryHandle {
+  getFileHandle(name: string, options?: { create?: boolean }): Promise<PdfFileHandle>
+}
+
 export const PDF_PICKER_TYPES = [{
   description: 'PDF',
   accept: { 'application/pdf': ['.pdf'] },
@@ -31,6 +35,7 @@ declare global {
       types?: typeof PDF_PICKER_TYPES
       startIn?: PdfFileHandle
     }) => Promise<PdfFileHandle>
+    showDirectoryPicker?: (options?: { id?: string; mode?: 'read' | 'readwrite' }) => Promise<PdfDirectoryHandle>
   }
 }
 
@@ -78,4 +83,24 @@ export function downloadPdf(bytes: Uint8Array, fileName: string): void {
   anchor.download = fileName
   anchor.click()
   setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+export async function writePdfWithoutOverwrite(
+  directory: PdfDirectoryHandle,
+  desiredName: string,
+  bytes: Uint8Array,
+): Promise<string> {
+  const extension = desiredName.toLowerCase().endsWith('.pdf') ? '.pdf' : ''
+  const stem = extension ? desiredName.slice(0, -extension.length) : desiredName
+  for (let suffix = 1; ; suffix += 1) {
+    const name = suffix === 1 ? `${stem}${extension}` : `${stem} (${suffix})${extension}`
+    try {
+      await directory.getFileHandle(name)
+    } catch (reason) {
+      if (!(reason instanceof DOMException) || reason.name !== 'NotFoundError') throw reason
+      const handle = await directory.getFileHandle(name, { create: true })
+      await writePdf(handle, bytes)
+      return name
+    }
+  }
 }

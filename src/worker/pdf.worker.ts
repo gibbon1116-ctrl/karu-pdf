@@ -13,12 +13,25 @@ import {
 } from '../core/fontMetrics'
 import { layoutText } from '../core/textLayout'
 import { saveDocument } from '../core/save'
+import {
+  applyPageLayout,
+  extractPages,
+  getPageInfo,
+  getPageSizes,
+  splitPages,
+} from '../core/pageOps'
 import type {
+  ApplyEditsRequest,
   ApplyAndSaveRequest,
+  ApplyPageLayoutRequest,
+  ExtractPagesRequest,
   ExportBytesRequest,
+  GetPageInfoRequest,
   LayoutTextRequest,
   ListAnnotationsRequest,
   RenderRequest,
+  SplitPagesRequest,
+  UndoPageLayoutRequest,
   WorkerRequest,
   WorkerResponse,
 } from './protocol'
@@ -31,11 +44,22 @@ interface WorkerDocument {
 }
 
 const documents = new Map<string, WorkerDocument>()
+const pageLayoutBackups = new Map<string, Uint8Array>()
 const fontResources: FontResources = {}
 let sequence = 0
 let running = false
 let processedCount = 0
-type CoreRequest = ListAnnotationsRequest | LayoutTextRequest | ApplyAndSaveRequest | ExportBytesRequest
+type CoreRequest =
+  | ListAnnotationsRequest
+  | LayoutTextRequest
+  | ApplyAndSaveRequest
+  | ApplyEditsRequest
+  | ApplyPageLayoutRequest
+  | UndoPageLayoutRequest
+  | ExtractPagesRequest
+  | SplitPagesRequest
+  | GetPageInfoRequest
+  | ExportBytesRequest
 type QueuedRequest =
   | (RenderRequest & { sequence: number })
   | (CoreRequest & { sequence: number; priority: -1 })
@@ -52,6 +76,28 @@ function disposeDocument(docId: string): void {
   entry.displayLists.destroy()
   entry.opened.document.destroy()
   documents.delete(docId)
+  pageLayoutBackups.delete(docId)
+}
+
+function replaceDocument(docId: string, bytes: Uint8Array, keepBackup = false): WorkerDocument {
+  const backup = keepBackup ? pageLayoutBackups.get(docId) : undefined
+  disposeDocument(docId)
+  if (backup) pageLayoutBackups.set(docId, backup)
+  const opened = openDocument(bytes)
+  const entry = { opened, displayLists: new DisplayListCache(opened.document) }
+  documents.set(docId, entry)
+  return entry
+}
+
+function sourceDocuments(ids: readonly string[]): Map<string, import('mupdf').PDFDocument> {
+  const result = new Map<string, import('mupdf').PDFDocument>()
+  for (const id of ids) {
+    const entry = documents.get(id)
+    const document = entry?.opened.document.asPDF()
+    if (!document) throw new Error(`追加元の PDF が開かれていません: ${id}`)
+    result.set(id, document)
+  }
+  return result
 }
 
 function disposeAllDocuments(): void {
@@ -162,6 +208,101 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       return
     }
 
+    if (request.type === 'getPageInfo') {
+      post({ type: 'pageInfo', requestId: request.requestId, pages: getPageInfo(document) })
+      return
+    }
+
+    if (request.type === 'applyPageLayout') {
+      const workerStarted = performance.now()
+      const backupStarted = performance.now()
+      const backup = saveDocument(document, 'incremental').bytes
+      const backupMs = performance.now() - backupStarted
+      pageLayoutBackups.set(request.docId, backup)
+      try {
+        const assembleStarted = performance.now()
+        applyPageLayout(request.docId, document, request.cards, sourceDocuments(request.sources))
+        const assembleMs = performance.now() - assembleStarted
+        // ページ木を書き換えた文書を同じインスタンスから続けて増分保存すると、
+        // MuPDF 1.28.1 では次の保存で参照が欠けることがある。最初の増分出力を
+        // Worker 0 自身の新しい基準文書として開き直し、次の保存を安定させる。
+        const exportStarted = performance.now()
+        const saved = saveDocument(document, 'incremental').bytes
+        const exportMs = performance.now() - exportStarted
+        const primaryReloadStarted = performance.now()
+        const reopened = replaceDocument(request.docId, saved.slice(), true)
+        const primaryReloadMs = performance.now() - primaryReloadStarted
+        const reopenedDocument = reopened.opened.document.asPDF()
+        if (!reopenedDocument) throw new Error('PDF 文書ではありません。')
+        const pageMetadataStarted = performance.now()
+        const pageSizes = getPageSizes(reopenedDocument)
+        const pageMetadataMs = performance.now() - pageMetadataStarted
+        const bytes = saved.buffer as ArrayBuffer
+        post({
+          type: 'pageLayoutApplied', requestId: request.requestId, bytes,
+          pageCount: pageSizes.length,
+          pageSizes,
+          hasBackup: true,
+          timings: {
+            backupMs,
+            assembleMs,
+            exportMs,
+            primaryReloadMs,
+            pageMetadataMs,
+            workerTotalMs: performance.now() - workerStarted,
+          },
+        }, [bytes])
+      } catch (error) {
+        replaceDocument(request.docId, backup.slice(), true)
+        throw error
+      }
+      return
+    }
+
+    if (request.type === 'undoPageLayout') {
+      const workerStarted = performance.now()
+      const backup = pageLayoutBackups.get(request.docId)
+      if (!backup) throw new Error('元に戻せるページ整理がありません。')
+      const primaryReloadStarted = performance.now()
+      const restored = replaceDocument(request.docId, backup.slice())
+      const primaryReloadMs = performance.now() - primaryReloadStarted
+      const restoredDocument = restored.opened.document.asPDF()
+      if (!restoredDocument) throw new Error('PDF 文書ではありません。')
+      const pageMetadataStarted = performance.now()
+      const pageSizes = getPageSizes(restoredDocument)
+      const pageMetadataMs = performance.now() - pageMetadataStarted
+      const bytes = backup.buffer as ArrayBuffer
+      post({
+        type: 'pageLayoutUndone', requestId: request.requestId, bytes,
+        pageCount: pageSizes.length,
+        pageSizes,
+        hasBackup: false,
+        timings: {
+          backupMs: 0,
+          assembleMs: 0,
+          exportMs: 0,
+          primaryReloadMs,
+          pageMetadataMs,
+          workerTotalMs: performance.now() - workerStarted,
+        },
+      }, [bytes])
+      return
+    }
+
+    if (request.type === 'extractPages') {
+      const output = extractPages(request.docId, document, request.cards, sourceDocuments(request.sources))
+      const bytes = output.buffer as ArrayBuffer
+      post({ type: 'pagesExtracted', requestId: request.requestId, bytes }, [bytes])
+      return
+    }
+
+    if (request.type === 'splitPages') {
+      const outputs = splitPages(request.docId, document, request.groups, sourceDocuments(request.sources))
+      const bytes = outputs.map((output) => output.buffer as ArrayBuffer)
+      post({ type: 'pagesSplit', requestId: request.requestId, bytes }, bytes)
+      return
+    }
+
     const requiredFonts = new Set<FontName>()
     for (const edit of request.edits) {
       if (edit.kind === 'createFreeText' || edit.kind === 'updateFreeText') requiredFonts.add(edit.font)
@@ -169,6 +310,15 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
     await Promise.all([...requiredFonts].map((fontName) => getFontResource(fontName)))
     const applied = applyEdits(document, request.edits, fontResources)
     entry.displayLists.clear()
+    if (request.type === 'applyEdits') {
+      post({
+        type: 'editsApplied', requestId: request.requestId,
+        created: applied.created,
+        replacedCharacters: applied.replacedCharacters,
+        errors: applied.errors,
+      })
+      return
+    }
     const saved = saveDocument(document, request.mode)
     const bytes = saved.bytes.buffer as ArrayBuffer
     post({
@@ -226,7 +376,18 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     disposeDocument(message.docId)
     return
   }
-  if (message.type === 'listAnnotations' || message.type === 'layoutText' || message.type === 'applyAndSave' || message.type === 'exportBytes') {
+  if (
+    message.type === 'listAnnotations'
+    || message.type === 'layoutText'
+    || message.type === 'applyAndSave'
+    || message.type === 'applyEdits'
+    || message.type === 'applyPageLayout'
+    || message.type === 'undoPageLayout'
+    || message.type === 'extractPages'
+    || message.type === 'splitPages'
+    || message.type === 'getPageInfo'
+    || message.type === 'exportBytes'
+  ) {
     queue.push({ ...message, priority: -1, sequence: sequence++ })
     queue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence)
     schedule()

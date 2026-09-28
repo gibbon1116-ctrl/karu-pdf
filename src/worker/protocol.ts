@@ -3,9 +3,19 @@ import type { AnnotationEdit, AnnotationInfo, ApplyError } from '../core/annotat
 import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
 import type { SaveMode } from '../core/save'
+import type { PageInfo, PageLayoutCard } from '../core/pageOps'
 
 export type DeviceRect = [number, number, number, number]
 export type Priority = 0 | 1 | 2 | 3
+
+export interface PageLayoutWorkerTimings {
+  backupMs: number
+  assembleMs: number
+  exportMs: number
+  primaryReloadMs: number
+  pageMetadataMs: number
+  workerTotalMs: number
+}
 
 export interface OpenRequest {
   type: 'open'
@@ -71,6 +81,49 @@ export interface ApplyAndSaveRequest {
   mode: SaveMode
 }
 
+export interface ApplyEditsRequest {
+  type: 'applyEdits'
+  requestId: number
+  docId: string
+  edits: AnnotationEdit[]
+}
+
+export interface ApplyPageLayoutRequest {
+  type: 'applyPageLayout'
+  requestId: number
+  docId: string
+  cards: PageLayoutCard[]
+  sources: string[]
+}
+
+export interface UndoPageLayoutRequest {
+  type: 'undoPageLayout'
+  requestId: number
+  docId: string
+}
+
+export interface ExtractPagesRequest {
+  type: 'extractPages'
+  requestId: number
+  docId: string
+  cards: PageLayoutCard[]
+  sources: string[]
+}
+
+export interface SplitPagesRequest {
+  type: 'splitPages'
+  requestId: number
+  docId: string
+  groups: PageLayoutCard[][]
+  sources: string[]
+}
+
+export interface GetPageInfoRequest {
+  type: 'getPageInfo'
+  requestId: number
+  docId: string
+}
+
 export interface CloseRequest {
   type: 'close'
   docId: string
@@ -92,6 +145,12 @@ export type WorkerRequest =
   | ListAnnotationsRequest
   | LayoutTextRequest
   | ApplyAndSaveRequest
+  | ApplyEditsRequest
+  | ApplyPageLayoutRequest
+  | UndoPageLayoutRequest
+  | ExtractPagesRequest
+  | SplitPagesRequest
+  | GetPageInfoRequest
   | CloseRequest
   | ExportBytesRequest
 
@@ -153,6 +212,42 @@ export interface ApplyAndSaveResponse {
   errors: ApplyError[]
 }
 
+export interface AppliedEditsResponse {
+  type: 'editsApplied'
+  requestId: number
+  created: number[]
+  replacedCharacters: number
+  errors: ApplyError[]
+}
+
+export interface PageLayoutResponse {
+  type: 'pageLayoutApplied' | 'pageLayoutUndone'
+  requestId: number
+  bytes: ArrayBuffer
+  pageCount: number
+  pageSizes: PageSize[]
+  hasBackup: boolean
+  timings: PageLayoutWorkerTimings
+}
+
+export interface PagesExtractedResponse {
+  type: 'pagesExtracted'
+  requestId: number
+  bytes: ArrayBuffer
+}
+
+export interface PagesSplitResponse {
+  type: 'pagesSplit'
+  requestId: number
+  bytes: ArrayBuffer[]
+}
+
+export interface PageInfoResponse {
+  type: 'pageInfo'
+  requestId: number
+  pages: PageInfo[]
+}
+
 export interface ExportBytesResponse {
   type: 'bytesExported'
   requestId: number
@@ -175,5 +270,10 @@ export type WorkerResponse =
   | ListAnnotationsResponse
   | LayoutTextResponse
   | ApplyAndSaveResponse
+  | AppliedEditsResponse
+  | PageLayoutResponse
+  | PagesExtractedResponse
+  | PagesSplitResponse
+  | PageInfoResponse
   | ExportBytesResponse
   | ErrorResponse

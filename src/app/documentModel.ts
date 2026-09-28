@@ -25,10 +25,12 @@ export class DocumentSession {
   readonly name: string
   readonly byteLength: number
   handle: PdfFileHandle | null
-  readonly pageSizes: PageSize[]
+  pageSizes: PageSize[]
   readonly annotationStore = new AnnotationStore()
   view: DocumentViewState
   fileOutdated = false
+  canUndoOrganize = false
+  pageRevision = 0
   fitOnFirstView: boolean
   restorePageOnFirstView: boolean
 
@@ -50,6 +52,18 @@ export class DocumentSession {
 
   get dirty(): boolean {
     return this.annotationStore.isDirty() || this.fileOutdated
+  }
+
+  updateAfterPageLayout(pageSizes: PageSize[], canUndoOrganize: boolean): void {
+    this.pageSizes = pageSizes
+    this.canUndoOrganize = canUndoOrganize
+    this.pageRevision += 1
+    this.annotationStore.reset()
+    this.view.page = Math.min(Math.max(1, this.view.page), pageSizes.length)
+    this.view.scrollLeft = 0
+    this.view.scrollTop = 0
+    this.restorePageOnFirstView = true
+    this.fileOutdated = true
   }
 }
 

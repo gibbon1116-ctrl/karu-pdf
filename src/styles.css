@@ -142,3 +142,20 @@ button, input { font: inherit; }
   border-radius: 4px;
   font: 12px/1.4 Consolas, monospace;
 }
+.document-workspace.organize-mode { display: block; min-width: 0; min-height: 0; }
+.organize-view { display: grid; grid-template-rows: auto minmax(0, 1fr); width: 100%; height: 100%; min-height: 0; background: #e9ecef; }
+.organize-toolbar { z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 8px 12px; background: #f7f7f7; border-bottom: 1px solid #bbb; }
+.organize-toolbar strong { margin-right: 8px; }
+.organize-toolbar button { min-height: 30px; padding: 3px 9px; white-space: nowrap; }
+.organize-toolbar [role="status"] { color: #174f7a; }
+.organize-grid-scroller { min-width: 0; min-height: 0; overflow: auto; outline: none; overscroll-behavior: contain; }
+.organize-grid-scroller:focus-visible { box-shadow: inset 0 0 0 2px #1769aa; }
+.organize-grid { position: relative; min-width: 100%; }
+.organize-card { position: absolute; display: grid; grid-template-rows: 184px 24px; place-items: center; width: 160px; height: 214px; padding: 7px; overflow: visible; background: #f8f8f8; border: 2px solid transparent; border-radius: 4px; box-shadow: 0 1px 4px rgb(0 0 0 / 20%); }
+.organize-card.selected { background: #e5f1ff; border-color: #1769aa; }
+.organize-thumbnail-stage { display: grid; width: 140px; height: 180px; place-items: center; overflow: hidden; }
+.organize-thumbnail { display: block; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 35%); }
+.organize-blank { background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 35%); }
+.organize-card > span:last-child { max-width: 144px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.organize-drop-marker { position: absolute; z-index: 4; top: 0; bottom: 0; left: -10px; width: 4px; background: #1769aa; border-radius: 2px; pointer-events: none; }
+.organize-drop-marker.end { width: 4px; height: 214px; }

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { DocumentTabs } from './app/DocumentTabs'
 import { DocumentWorkspace } from './app/DocumentWorkspace'
+import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
 import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS } from './app/documentModel'
 import { StartScreen } from './app/StartScreen'
-import { PdfWorkerPool, type ApplyAndSaveResult } from './client/PdfWorkerPool'
+import { PdfWorkerPool, type ApplyAndSaveResult, type PageLayoutTimings } from './client/PdfWorkerPool'
 import type { EditorTool } from './editor/AnnotationLayer'
 import type { EditableAnnotation } from './editor/AnnotationStore'
-import { downloadPdf, pickOpenHandles, pickSaveHandle, requestWritePermission, writePdf, type PdfFileHandle } from './editor/fileAccess'
+import { downloadPdf, pickOpenHandles, pickSaveHandle, requestWritePermission, writePdf, writePdfWithoutOverwrite, type PdfFileHandle } from './editor/fileAccess'
 import { loadFormatDefaults, saveFormatDefaults, type FormatDefaults } from './editor/formatDefaults'
 import {
   documentViewId,
@@ -21,6 +22,9 @@ import {
 import { getFrameStats, type FrameStats } from './editor/TextEditor'
 import { getMetrics, resetBlankFrames, startMeasure } from './perf/metrics'
 import type { ViewerHandle } from './viewer/Viewer'
+import { OrganizeDraft } from './organize/OrganizeDraft'
+import type { OrganizeSourceInfo } from './organize/OrganizeView'
+import type { PageLayoutCard } from './core/pageOps'
 import './styles.css'
 
 declare global {
@@ -41,9 +45,33 @@ declare global {
       closeTab(docId: string): Promise<void>
       getEditableAnnotations(pageIndex: number): EditableAnnotation[]
       getFrameStats(): FrameStats
+      openOrganize(): Promise<void>
+      organizeDraft(): OrganizeDraft | null
+      applyOrganize(): Promise<OrganizeApplyTimings | null>
+      undoLastOrganize(): Promise<void>
+      getPageInfo(): ReturnType<PdfWorkerPool['getPageInfo']>
+      extractToBytes(cardIds: string[]): Promise<Uint8Array>
+      splitToBytes(mode: OrganizeSplitMode): Promise<Uint8Array[]>
     }
   }
   interface Navigator { deviceMemory?: number }
+}
+
+export type OrganizeSplitMode =
+  | { kind: 'every'; count: number }
+  | { kind: 'before'; cardIds: string[] }
+
+export interface OrganizeApplyTimings extends PageLayoutTimings {
+  applyEditsMs: number
+  mainUpdateMs: number
+  totalMs: number
+}
+
+interface ActiveOrganize {
+  docId: string
+  draft: OrganizeDraft
+  sources: Map<string, OrganizeSourceInfo>
+  busy: boolean
 }
 
 const noopSubscribe = () => () => undefined
@@ -86,6 +114,7 @@ export default function App() {
   const viewSaveTimerRef = useRef<number | undefined>(undefined)
   const savingRef = useRef(false)
   const openQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const organizeRef = useRef<ActiveOrganize | null>(null)
   const [, setTabsVersion] = useState(0)
   const [page, setPage] = useState(0)
   const [zoom, setZoom] = useState(1)
@@ -96,9 +125,11 @@ export default function App() {
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const [saving, setSaving] = useState(false)
+  const [organize, setOrganize] = useState<ActiveOrganize | null>(null)
   const [debug, setDebug] = useState(() => new URLSearchParams(location.search).get('debug') === '1')
   const active = tabs.active
   activeRef.current = active
+  organizeRef.current = organize
   useSyncExternalStore(active?.annotationStore.subscribe ?? noopSubscribe, active?.annotationStore.getSnapshot ?? zeroSnapshot)
 
   const refreshTabs = useCallback(() => setTabsVersion((value) => value + 1), [])
@@ -129,9 +160,26 @@ export default function App() {
     viewSaveTimerRef.current = window.setTimeout(() => persistView(), 500)
   }, [persistView])
 
+  const closeOrganizeSources = useCallback((state: ActiveOrganize | null) => {
+    if (!state) return
+    for (const sourceId of state.sources.keys()) pool.close(sourceId)
+  }, [pool])
+
+  const discardOrganize = useCallback((confirmChanged = true): boolean => {
+    const current = organizeRef.current
+    if (!current) return true
+    if (current.busy) return false
+    if (confirmChanged && current.draft.isChanged() && !window.confirm('ページ整理の変更を捨てますか？')) return false
+    closeOrganizeSources(current)
+    organizeRef.current = null
+    setOrganize(null)
+    return true
+  }, [closeOrganizeSources])
+
   const activateDocument = useCallback(async (docId: string) => {
     const current = activeRef.current
     if (current?.docId === docId) return
+    if (!discardOrganize()) return
     await viewerRef.current?.commitEditor()
     persistView(current)
     await pool.activate(docId)
@@ -142,7 +190,7 @@ export default function App() {
     setZoom(next?.view.zoom ?? 1)
     setTool('select')
     refreshTabs()
-  }, [persistView, pool, refreshTabs, tabs])
+  }, [discardOrganize, persistView, pool, refreshTabs, tabs])
 
   const openBuffer = useCallback(async (buffer: ArrayBuffer, name: string, handle: PdfFileHandle | null) => {
     const byteLength = buffer.byteLength
@@ -207,6 +255,7 @@ export default function App() {
     const index = documents.findIndex((document) => document.docId === docId)
     const session = documents[index]
     if (!session) return
+    if (organizeRef.current?.docId === docId && !discardOrganize(confirmDirty)) return
     if (activeRef.current?.docId === docId) await viewerRef.current?.commitEditor()
     if (confirmDirty && session.dirty && !window.confirm('未保存の変更があります。保存せずに閉じますか？')) return
     if (activeRef.current?.docId === docId) {
@@ -222,7 +271,7 @@ export default function App() {
     setZoom(next?.view.zoom ?? 1)
     setTool('select')
     refreshTabs()
-  }, [persistView, pool, refreshTabs, tabs])
+  }, [discardOrganize, persistView, pool, refreshTabs, tabs])
 
   const beginSave = useCallback(() => {
     if (savingRef.current) {
@@ -323,11 +372,226 @@ export default function App() {
     saveFormatDefaults(next)
   }, [])
 
+  const applyPendingEdits = useCallback(async (session: DocumentSession) => {
+    await viewerRef.current?.commitEditor()
+    const edits = session.annotationStore.toEdits()
+    if (edits.length === 0) return
+    const result = await pool.applyEdits(session.docId, edits)
+    session.annotationStore.markApplied(result)
+    session.fileOutdated = true
+    viewerRef.current?.clearSelection()
+    refreshTabs()
+    if (result.errors.length > 0) throw new Error(result.errors.map((item) => item.message).join(' / '))
+  }, [pool, refreshTabs])
+
+  const openOrganize = useCallback(async () => {
+    const session = activeRef.current
+    if (!session || organizeRef.current) return
+    await viewerRef.current?.commitEditor()
+    const next: ActiveOrganize = {
+      docId: session.docId,
+      draft: new OrganizeDraft(session.docId, session.pageSizes),
+      sources: new Map(),
+      busy: false,
+    }
+    organizeRef.current = next
+    setOrganize(next)
+    setTool('select')
+  }, [])
+
+  const addOrganizeFiles = useCallback(async (files: File[], beforeIndex: number) => {
+    const current = organizeRef.current
+    if (!current || current.busy) return
+    let insertion = beforeIndex
+    for (const file of files) {
+      const sourceId = `src-${createDocId()}`
+      try {
+        const result = await pool.openSource(sourceId, await file.arrayBuffer())
+        if (organizeRef.current !== current) {
+          pool.close(sourceId)
+          return
+        }
+        current.sources.set(sourceId, { docId: sourceId, name: file.name, pageSizes: result.pageSizes })
+        current.draft.insertPages(insertion, sourceId, result.pageSizes)
+        insertion += result.pageCount
+        const next = { ...current, sources: new Map(current.sources) }
+        organizeRef.current = next
+        setOrganize(next)
+      } catch (reason) {
+        pool.close(sourceId)
+        setError(`追加するPDFを開けませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
+      }
+    }
+  }, [pool])
+
+  const finishPageLayout = useCallback((session: DocumentSession, result: { pageSizes: typeof session.pageSizes; hasBackup: boolean }) => {
+    session.updateAfterPageLayout(result.pageSizes, result.hasBackup)
+    activeRef.current = session
+    setPage(session.view.page)
+    setZoom(session.view.zoom)
+    refreshTabs()
+  }, [refreshTabs])
+
+  const applyOrganize = useCallback(async (): Promise<OrganizeApplyTimings | null> => {
+    const totalStarted = performance.now()
+    const current = organizeRef.current
+    const session = activeRef.current
+    if (!current || !session || current.docId !== session.docId || current.busy) return null
+    const busyState = { ...current, busy: true }
+    organizeRef.current = busyState
+    setOrganize(busyState)
+    setError('')
+    try {
+      const editsStarted = performance.now()
+      await applyPendingEdits(session)
+      const applyEditsMs = performance.now() - editsStarted
+      const result = await pool.applyPageLayout(session.docId, current.draft.getCards(), [...current.sources.keys()])
+      const mainUpdateStarted = performance.now()
+      finishPageLayout(session, result)
+      closeOrganizeSources(current)
+      organizeRef.current = null
+      setOrganize(null)
+      showStatus('ページ整理を適用しました')
+      const mainUpdateMs = performance.now() - mainUpdateStarted
+      return {
+        ...result.timings,
+        applyEditsMs,
+        mainUpdateMs,
+        totalMs: performance.now() - totalStarted,
+      }
+    } catch (reason) {
+      const restored = { ...current, busy: false }
+      organizeRef.current = restored
+      setOrganize(restored)
+      setError(`ページ整理を適用できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
+      return null
+    }
+  }, [applyPendingEdits, closeOrganizeSources, finishPageLayout, pool, showStatus])
+
+  const undoLastOrganize = useCallback(async () => {
+    const session = activeRef.current
+    if (!session?.canUndoOrganize || savingRef.current || organizeRef.current) return
+    savingRef.current = true
+    setSaving(true)
+    setError('')
+    try {
+      const result = await pool.undoPageLayout(session.docId)
+      finishPageLayout(session, result)
+      showStatus('直前のページ整理を元に戻しました')
+    } catch (reason) {
+      setError(`ページ整理を元に戻せませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
+  }, [finishPageLayout, pool, showStatus])
+
+  const selectedCards = useCallback((cardIds: readonly string[]): PageLayoutCard[] => {
+    const current = organizeRef.current
+    if (!current) throw new Error('ページ整理を開いてください。')
+    const wanted = new Set(cardIds)
+    return current.draft.getCards().filter((card) => wanted.has(card.id))
+  }, [])
+
+  const extractToBytes = useCallback(async (cardIds: string[]): Promise<Uint8Array> => {
+    const current = organizeRef.current
+    const session = activeRef.current
+    if (!current || !session || current.docId !== session.docId) throw new Error('ページ整理を開いてください。')
+    await applyPendingEdits(session)
+    return pool.extractPages(session.docId, selectedCards(cardIds), [...current.sources.keys()])
+  }, [applyPendingEdits, pool, selectedCards])
+
+  const splitGroups = useCallback((mode: OrganizeSplitMode): PageLayoutCard[][] => {
+    const current = organizeRef.current
+    if (!current) throw new Error('ページ整理を開いてください。')
+    const cards = [...current.draft.getCards()]
+    if (mode.kind === 'every') {
+      const count = Math.trunc(mode.count)
+      if (count < 1) throw new Error('分割するページ数は1以上にしてください。')
+      const groups: PageLayoutCard[][] = []
+      for (let index = 0; index < cards.length; index += count) groups.push(cards.slice(index, index + count))
+      return groups
+    }
+    const boundaries = new Set(mode.cardIds)
+    const starts = cards.map((card, index) => boundaries.has(card.id) ? index : -1).filter((index) => index > 0)
+    const points = [0, ...starts, cards.length]
+    const groups = points.slice(0, -1).map((start, index) => cards.slice(start, points[index + 1])).filter((group) => group.length > 0)
+    if (groups.length < 2) throw new Error('区切りにするページを選んでください。')
+    return groups
+  }, [])
+
+  const splitToBytes = useCallback(async (mode: OrganizeSplitMode): Promise<Uint8Array[]> => {
+    const current = organizeRef.current
+    const session = activeRef.current
+    if (!current || !session || current.docId !== session.docId) throw new Error('ページ整理を開いてください。')
+    await applyPendingEdits(session)
+    return pool.splitPages(session.docId, splitGroups(mode), [...current.sources.keys()])
+  }, [applyPendingEdits, pool, splitGroups])
+
+  const extractAndSave = useCallback(async (cardIds: string[]) => {
+    const session = activeRef.current
+    if (!session) return
+    try {
+      const bytes = await extractToBytes(cardIds)
+      const fileName = `${session.name.replace(/\.pdf$/i, '')}_抜粋.pdf`
+      const handle = window.showSaveFilePicker ? await pickSaveHandle(fileName) : null
+      if (handle) await writePdf(handle, bytes)
+      else downloadPdf(bytes, fileName)
+      showStatus('選んだページを抽出しました')
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === 'AbortError') return
+      setError(`抽出できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
+    }
+  }, [extractToBytes, showStatus])
+
+  const splitAndSave = useCallback(async (cardIds: string[]) => {
+    const session = activeRef.current
+    if (!session) return
+    try {
+      let mode: OrganizeSplitMode
+      if (cardIds.length > 0 && window.confirm('選んだカードの前で区切りますか？\n「キャンセル」でNページごとに分割します。')) {
+        mode = { kind: 'before', cardIds }
+      } else {
+        const raw = window.prompt('何ページごとに分割しますか？', '1')
+        if (raw === null) return
+        mode = { kind: 'every', count: Number(raw) }
+      }
+      const outputs = await splitToBytes(mode)
+      const stem = session.name.replace(/\.pdf$/i, '')
+      if (window.showDirectoryPicker) {
+        const directory = await window.showDirectoryPicker({ id: 'karu-pdf-split', mode: 'readwrite' })
+        for (let index = 0; index < outputs.length; index += 1) {
+          await writePdfWithoutOverwrite(directory, `${stem}_${index + 1}.pdf`, outputs[index])
+        }
+      } else {
+        outputs.forEach((bytes, index) => downloadPdf(bytes, `${stem}_${index + 1}.pdf`))
+      }
+      showStatus(`${outputs.length}個のPDFに分割しました`)
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === 'AbortError') return
+      setError(`分割できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
+    }
+  }, [showStatus, splitToBytes])
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       const isInput = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false
       const key = event.key.toLowerCase()
+      const organizing = organizeRef.current
+      if (organizing && !isInput) {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          discardOrganize()
+          return
+        }
+        if (event.ctrlKey && (key === 'z' || key === 'y')) {
+          event.preventDefault()
+          if (key === 'y' || event.shiftKey) organizing.draft.redo()
+          else organizing.draft.undo()
+          return
+        }
+      }
       if (event.ctrlKey && event.shiftKey && key === 'd') {
         event.preventDefault()
         setDebug((value) => !value)
@@ -383,7 +647,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [activateDocument, changeTool, closeDocument, pickFile, refreshTabs, saveDocument, tabs])
+  }, [activateDocument, changeTool, closeDocument, discardOrganize, pickFile, refreshTabs, saveDocument, tabs])
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -414,9 +678,20 @@ export default function App() {
       closeTab: (docId) => closeDocument(docId, false),
       getEditableAnnotations: (pageIndex) => activeRef.current?.annotationStore.getPageAnnotations(pageIndex) ?? [],
       getFrameStats,
+      openOrganize,
+      organizeDraft: () => organizeRef.current?.draft ?? null,
+      applyOrganize,
+      undoLastOrganize,
+      getPageInfo: () => {
+        const session = activeRef.current
+        if (!session) return Promise.resolve([])
+        return pool.getPageInfo(session.docId)
+      },
+      extractToBytes,
+      splitToBytes,
     }
     return () => { delete window.__karu }
-  }, [activateDocument, closeDocument, openBuffer, pool, saveToBytes, tabs])
+  }, [activateDocument, applyOrganize, closeDocument, extractToBytes, openBuffer, openOrganize, pool, saveToBytes, splitToBytes, tabs, undoLastOrganize])
 
   const openRecent = async (item: RecentFile) => {
     try {
@@ -444,6 +719,16 @@ export default function App() {
   }
 
   const documents = tabs.list()
+  const workspaceOrganize: OrganizeWorkspaceState | null = organize && active?.docId === organize.docId ? {
+    draft: organize.draft,
+    sources: organize.sources,
+    busy: organize.busy,
+    onAddFiles: addOrganizeFiles,
+    onApply: () => void applyOrganize(),
+    onCancel: () => { discardOrganize() },
+    onExtract: (cardIds) => void extractAndSave(cardIds),
+    onSplit: (cardIds) => void splitAndSave(cardIds),
+  } : null
   return (
     <main className="app" onDragOver={(event) => event.preventDefault()} onDrop={(event) => void handleDrop(event)}>
       <DocumentTabs
@@ -455,8 +740,8 @@ export default function App() {
       />
       <header className="toolbar">
         <button type="button" onClick={() => void pickFile()}>開く</button>
-        <button type="button" onClick={() => void saveDocument(false)} disabled={!active || saving}>上書き保存</button>
-        <button type="button" onClick={() => void saveDocument(true)} disabled={!active || saving}>別名で保存</button>
+        <button type="button" onClick={() => void saveDocument(false)} disabled={!active || saving || !!organize}>上書き保存</button>
+        <button type="button" onClick={() => void saveDocument(true)} disabled={!active || saving || !!organize}>別名で保存</button>
         <span className="toolbar-separator" />
         <button type="button" className={tool === 'select' ? 'active' : ''} aria-pressed={tool === 'select'} disabled={!active} onClick={() => void changeTool('select')}>選択</button>
         <button type="button" className={tool === 'text' ? 'active' : ''} aria-pressed={tool === 'text'} disabled={!active} onClick={() => void changeTool('text')}>文字</button>
@@ -473,6 +758,8 @@ export default function App() {
         <span className="toolbar-separator" />
         <button type="button" aria-pressed={panels.thumbnails} onClick={() => updatePanels({ ...panels, thumbnails: !panels.thumbnails })}>ページ一覧</button>
         <button type="button" aria-pressed={panels.format} onClick={() => updatePanels({ ...panels, format: !panels.format })}>書式</button>
+        <button type="button" disabled={!active || !!organize} onClick={() => void openOrganize()}>ページ整理</button>
+        <button type="button" disabled={!active?.canUndoOrganize || !!organize || saving} onClick={() => void undoLastOrganize()}>ページ整理を元に戻す</button>
         <span className="toolbar-separator" />
         <button type="button" onClick={() => viewerRef.current?.zoomOut()} disabled={!active}>縮小</button>
         <button type="button" onClick={() => viewerRef.current?.zoomIn()} disabled={!active}>拡大</button>
@@ -494,7 +781,7 @@ export default function App() {
       {error && <div className="error" role="alert">{error}</div>}
       {active ? (
         <DocumentWorkspace
-          key={active.docId}
+          key={`${active.docId}:${active.pageRevision}`}
           session={active}
           pool={pool}
           viewerRef={viewerRef}
@@ -509,6 +796,7 @@ export default function App() {
           onZoomChange={(next) => { setZoom(next); scheduleViewPersistence() }}
           onFirstBitmap={() => { openEndRef.current?.(); openEndRef.current = null }}
           onFirstSharp={() => { openSharpEndRef.current?.(); openSharpEndRef.current = null }}
+          organize={workspaceOrganize}
         />
       ) : (
         <StartScreen
