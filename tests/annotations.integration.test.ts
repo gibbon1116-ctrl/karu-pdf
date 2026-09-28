@@ -2,29 +2,45 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import mupdf, { type PDFAnnotation, type PDFDocument, type PDFObject, type PDFPage } from 'mupdf'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { applyEdits, listAnnotations, type AnnotationEdit, type Rect } from '../src/core/annotations'
-import { createFontResource, type FontResource } from '../src/core/fontMetrics'
+import {
+  applyEdits,
+  listAnnotations,
+  type AnnotationEdit,
+  type Point,
+  type Rect,
+  type RGB,
+} from '../src/core/annotations'
+import { createFontResource, type FontResource, type FontResources } from '../src/core/fontMetrics'
 import { saveDocument, type SaveMode } from '../src/core/save'
 import { ensureSamplePdf } from './fixtures'
 
 const realPath = path.resolve('test-data/real/公共建築工事標準仕様書_建築_R7.pdf')
 const fontPath = path.resolve('public/fonts/BIZUDGothic-Regular.ttf')
+const minchoFontPath = path.resolve('public/fonts/BIZUDMincho-Regular.ttf')
 const resultPath = path.resolve('test-results/annot-roundtrip.pdf')
 const firstText = '日本語の書き込みテスト①（半角ABC 123）'
 const firstRect: Rect = [72, 320, 272, 362]
 const rotatedRect: Rect = [100, 100, 300, 145]
 
 let fontResource: FontResource
+let minchoFontResource: FontResource
+let fontResources: FontResources
 let sampleBytes: Uint8Array
 
 beforeAll(async () => {
   sampleBytes = new Uint8Array(await fs.readFile(await ensureSamplePdf()))
   fontResource = createFontResource(new Uint8Array(await fs.readFile(fontPath)))
+  minchoFontResource = createFontResource(
+    new Uint8Array(await fs.readFile(minchoFontPath)),
+    'BIZUDMincho',
+  )
+  fontResources = { BIZUDGothic: fontResource, BIZUDMincho: minchoFontResource }
   await fs.mkdir(path.dirname(resultPath), { recursive: true })
 })
 
 afterAll(() => {
   fontResource.font.destroy()
+  minchoFontResource.font.destroy()
 })
 
 function openPdf(bytes: Uint8Array): PDFDocument {
@@ -34,7 +50,7 @@ function openPdf(bytes: Uint8Array): PDFDocument {
 function applyAndSave(bytes: Uint8Array, edits: AnnotationEdit[], mode: SaveMode = 'full') {
   const document = openPdf(bytes)
   try {
-    const applied = applyEdits(document, edits, fontResource)
+    const applied = applyEdits(document, edits, fontResources)
     expect(applied.errors).toEqual([])
     return { ...applied, ...saveDocument(document, mode) }
   } finally {
@@ -187,6 +203,18 @@ function countRedPixels(page: PDFPage, rect: Rect, scale = 2): number {
 
 function expectRect(actual: Rect, expected: Rect): void {
   for (let index = 0; index < 4; index += 1) expect(actual[index]).toBeCloseTo(expected[index], 2)
+}
+
+function expectPoint(actual: Point, expected: Point): void {
+  expect(actual[0]).toBeCloseTo(expected[0], 2)
+  expect(actual[1]).toBeCloseTo(expected[1], 2)
+}
+
+function expectColor(actual: RGB | null, expected: RGB): void {
+  expect(actual).not.toBeNull()
+  for (let index = 0; index < 3; index += 1) {
+    expect(actual![index]).toBeCloseTo(expected[index], 2)
+  }
 }
 
 function makeFirstAnnotation(bytes = sampleBytes) {
@@ -354,6 +382,180 @@ describe('annotation integration', () => {
     await fs.writeFile(resultPath, rotated.bytes)
   })
 
+  it('線・丸・蛍光ペン・手書き・白塗り・明朝を保存して属性を読み戻す', () => {
+    const arrowLine: [Point, Point] = [[300, 340], [470, 380]]
+    const highlightInk: Point[][] = [[[72, 450], [140, 455], [230, 450]]]
+    const handwritingInk: Point[][] = [
+      [[300, 500], [330, 480], [360, 510]],
+      [[370, 480], [400, 510], [430, 485]],
+    ]
+    const saved = applyAndSave(sampleBytes, [
+      {
+        kind: 'createLine', pageIndex: 0, line: arrowLine,
+        color: [1, 0, 0], borderWidth: 3,
+        lineEnding: { start: 'None', end: 'OpenArrow' },
+      },
+      {
+        kind: 'createCircle', pageIndex: 0, rect: [300, 400, 400, 465],
+        color: [0, 0, 1], borderWidth: 2, interiorColor: null,
+      },
+      {
+        kind: 'createInk', pageIndex: 0, inkList: highlightInk,
+        color: [1, 1, 0], borderWidth: 12, opacity: 0.35,
+      },
+      {
+        kind: 'createInk', pageIndex: 0, inkList: handwritingInk,
+        color: [0, 0.7, 0], borderWidth: 1.5, opacity: 1,
+      },
+      {
+        kind: 'createSquare', pageIndex: 0, rect: [300, 145, 450, 200],
+        color: [], borderWidth: 0, interiorColor: [1, 1, 1],
+      },
+      {
+        kind: 'createFreeText', pageIndex: 0, rect: [72, 560, 272, 605],
+        text: '明朝体の日本語', fontSize: 12, color: [0.8, 0, 0.8], font: 'BIZUDMincho',
+      },
+    ])
+    expect(saved.created).toHaveLength(6)
+
+    const document = openPdf(saved.bytes)
+    try {
+      const infos = saved.created.map((objNum) => (
+        listAnnotations(document, 0).find((info) => info.objNum === objNum)!
+      ))
+      const [line, circle, highlight, handwriting, whiteout, mincho] = infos
+
+      expect(line).toMatchObject({
+        type: 'Line', kind: 'arrow', editable: true,
+        strokeColor: [1, 0, 0], borderWidth: 3,
+        lineEnding: { start: 'None', end: 'OpenArrow' },
+      })
+      expectPoint(line.line![0], arrowLine[0])
+      expectPoint(line.line![1], arrowLine[1])
+
+      expect(circle).toMatchObject({
+        type: 'Circle', kind: 'circle', editable: true,
+        strokeColor: [0, 0, 1], interiorColor: null, borderWidth: 2,
+      })
+      expectRect(circle.rect, [300, 400, 400, 465])
+
+      expect(highlight).toMatchObject({
+        type: 'Ink', kind: 'highlight', editable: true,
+        strokeColor: [1, 1, 0], borderWidth: 12,
+      })
+      expect(highlight.opacity).toBeCloseTo(0.35, 2)
+      expect(highlight.inkList).toEqual(highlightInk)
+
+      expect(handwriting).toMatchObject({
+        type: 'Ink', kind: 'ink', editable: true, borderWidth: 1.5,
+      })
+      expectColor(handwriting.strokeColor, [0, 0.7, 0])
+      expect(handwriting.opacity).toBeCloseTo(1, 2)
+      expect(handwriting.inkList).toEqual(handwritingInk)
+
+      expect(whiteout).toMatchObject({
+        type: 'Square', kind: 'whiteout', editable: true,
+        strokeColor: null, interiorColor: [1, 1, 1], borderWidth: 0,
+      })
+
+      expect(mincho).toMatchObject({
+        type: 'FreeText', kind: 'freetext', editable: true,
+        fontName: 'BIZUDMincho', madeByKaru: true,
+      })
+      const inspection = inspectFreeText(document, 0, saved.created[5])
+      try {
+        expect(inspection.baseFont).toMatch(/^[A-Z]{6}\+BIZUDMincho/)
+        expect(inspection.embeddedFontBytes).toBeGreaterThan(0)
+        expect(inspection.embeddedFontBytes).toBeLessThan(300 * 1024)
+        expect(inspection.hasToUnicode).toBe(true)
+        expect(annotationText(inspection.annotation)).toContain('明朝体の日本語')
+        console.info(`ANNOT_METRIC mincho_subset_font_bytes=${inspection.embeddedFontBytes}`)
+      } finally {
+        closeInspection(inspection)
+      }
+    } finally {
+      document.destroy()
+    }
+  })
+
+  it('他ソフト由来相当の Line・Circle・Ink を editable として更新できる', () => {
+    const source = openPdf(sampleBytes)
+    const page = source.loadPage(1)
+    const objectNumbers: number[] = []
+    try {
+      const line = page.createAnnotation('Line')
+      const circle = page.createAnnotation('Circle')
+      const ink = page.createAnnotation('Ink')
+      try {
+        line.setLine([72, 100], [220, 130])
+        line.setColor([0, 0, 0])
+        line.setBorderWidth(1)
+        line.setLineEndingStyles('None', 'None')
+        line.update()
+        circle.setRect([72, 180, 180, 250])
+        circle.setColor([0, 0, 0])
+        circle.setBorderWidth(1)
+        circle.setInteriorColor([])
+        circle.update()
+        ink.setInkList([[[72, 300], [130, 320], [200, 300]]])
+        ink.setColor([0, 0, 0])
+        ink.setBorderWidth(1)
+        ink.setOpacity(1)
+        ink.update()
+        for (const annotation of [line, circle, ink]) {
+          const object = annotation.getObject()
+          try { objectNumbers.push(object.asIndirect()) } finally { object.destroy() }
+        }
+      } finally {
+        ink.destroy()
+        circle.destroy()
+        line.destroy()
+      }
+      const foreignBytes = saveDocument(source, 'full').bytes
+      const listed = listAnnotations(source, 1).filter((info) => objectNumbers.includes(info.objNum))
+      expect(listed).toHaveLength(3)
+      expect(listed.every((info) => info.editable)).toBe(true)
+
+      const updated = applyAndSave(foreignBytes, [
+        {
+          kind: 'updateLine', objNum: objectNumbers[0], pageIndex: 1,
+          line: [[90, 110], [250, 160]], color: [1, 0, 0], borderWidth: 2,
+          lineEnding: { start: 'None', end: 'OpenArrow' },
+        },
+        {
+          kind: 'updateCircle', objNum: objectNumbers[1], pageIndex: 1,
+          rect: [90, 190, 220, 270], color: [0, 0, 1], borderWidth: 3,
+          interiorColor: null,
+        },
+        {
+          kind: 'updateInk', objNum: objectNumbers[2], pageIndex: 1,
+          inkList: [[[90, 310], [160, 340], [240, 315]]],
+          color: [0, 0.7, 0], borderWidth: 2, opacity: 0.5,
+        },
+      ])
+      const reopened = openPdf(updated.bytes)
+      try {
+        const infos = listAnnotations(reopened, 1)
+        const lineInfo = infos.find((info) => info.objNum === objectNumbers[0])!
+        const circleInfo = infos.find((info) => info.objNum === objectNumbers[1])!
+        const inkInfo = infos.find((info) => info.objNum === objectNumbers[2])!
+        expect(lineInfo.kind).toBe('arrow')
+        expectPoint(lineInfo.line![0], [90, 110])
+        expectPoint(lineInfo.line![1], [250, 160])
+        expectRect(circleInfo.rect, [90, 190, 220, 270])
+        expect(circleInfo.borderWidth).toBeCloseTo(3, 2)
+        expect(inkInfo.kind).toBe('highlight')
+        expect(inkInfo.opacity).toBeCloseTo(0.5, 2)
+        expect(inkInfo.inkList).toEqual([[[90, 310], [160, 340], [240, 315]]])
+      } finally {
+        reopened.destroy()
+      }
+    } finally {
+      page.destroy()
+      source.destroy()
+    }
+  })
+
   it('Square を作成、移動、保存、削除できる', () => {
     const created = applyAndSave(sampleBytes, [{
       kind: 'createSquare', pageIndex: 0, rect: [300, 150, 400, 220], color: [1, 0, 0], borderWidth: 2,
@@ -386,7 +588,7 @@ describe('annotation integration', () => {
     try {
       const applied = applyEdits(document, [{
         kind: 'createSquare', pageIndex: 1, rect: [72, 72, 180, 130], color: [1, 0, 0], borderWidth: 1,
-      }], fontResource)
+      }], fontResources)
       expect(applied.errors).toEqual([])
       const saved = saveDocument(document, 'incremental')
       expect(saved.mode).toBe('incremental')

@@ -1,36 +1,73 @@
 import mupdf, {
   type PDFAnnotation,
+  type PDFAnnotationLineEndingStyle,
   type PDFAnnotationType,
   type PDFDocument,
   type PDFObject,
   type PDFPage,
+  type Point as MuPdfPoint,
 } from 'mupdf'
 import { createDefaultAppearance, parseDefaultAppearance } from './defaultAppearance'
-import { encodeCharacter, replaceMissingCharacters, type FontResource } from './fontMetrics'
+import {
+  encodeCharacter,
+  replaceMissingCharacters,
+  type FontName,
+  type FontResource,
+  type FontResources,
+} from './fontMetrics'
 import { layoutText } from './textLayout'
 
 export type Rect = [number, number, number, number]
 export type RGB = [number, number, number]
+export type Point = MuPdfPoint
+export type AnnotationColor = RGB | []
+export type LineEnding = {
+  start: PDFAnnotationLineEndingStyle
+  end: PDFAnnotationLineEndingStyle
+}
+export type AnnotationKind =
+  | 'freetext'
+  | 'line'
+  | 'arrow'
+  | 'square'
+  | 'circle'
+  | 'highlight'
+  | 'ink'
+  | 'whiteout'
+  | 'other'
 
 export interface AnnotationInfo {
   objNum: number
   pageIndex: number
   type: string
+  kind: AnnotationKind
   editable: boolean
   rect: Rect
   contents: string
+  fontName: string | null
   fontSize: number | null
   textColor: RGB | null
   strokeColor: RGB | null
+  interiorColor: RGB | null
   borderWidth: number | null
+  opacity: number | null
+  line: [Point, Point] | null
+  lineEnding: LineEnding | null
+  inkList: Point[][] | null
   madeByKaru: boolean
 }
 
 export type AnnotationEdit =
-  | { kind: 'createFreeText'; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: 'BIZUDGothic' }
-  | { kind: 'updateFreeText'; objNum: number; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: 'BIZUDGothic' }
-  | { kind: 'createSquare'; pageIndex: number; rect: Rect; color: RGB; borderWidth: number }
-  | { kind: 'updateSquare'; objNum: number; pageIndex: number; rect: Rect; color: RGB; borderWidth: number }
+  | { kind: 'createFreeText'; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: FontName }
+  | { kind: 'updateFreeText'; objNum: number; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: FontName }
+  | { kind: 'createSquare'; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null }
+  | { kind: 'updateSquare'; objNum: number; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null }
+  | { kind: 'createLine'; pageIndex: number; line: [Point, Point]; color: RGB; borderWidth: number; lineEnding: LineEnding }
+  | { kind: 'updateLine'; objNum: number; pageIndex: number; line: [Point, Point]; color: RGB; borderWidth: number; lineEnding: LineEnding }
+  | { kind: 'createCircle'; pageIndex: number; rect: Rect; color: RGB; borderWidth: number; interiorColor?: RGB | null }
+  | { kind: 'updateCircle'; objNum: number; pageIndex: number; rect: Rect; color: RGB; borderWidth: number; interiorColor?: RGB | null }
+  | { kind: 'createInk'; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number }
+  | { kind: 'updateInk'; objNum: number; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number }
   | { kind: 'delete'; objNum: number; pageIndex: number }
 
 export interface ApplyError {
@@ -56,6 +93,7 @@ interface AppearanceTask {
   text: string
   fontSize: number
   color: RGB
+  fontName: FontName
   temporaryPageIndex?: number
 }
 
@@ -91,6 +129,27 @@ function asRGB(color: number[]): RGB | null {
   return null
 }
 
+function isWhite(color: RGB | null): boolean {
+  return color !== null && color.every((component) => Math.abs(component - 1) < 0.001)
+}
+
+function annotationKind(
+  type: PDFAnnotationType,
+  interiorColor: RGB | null,
+  borderWidth: number | null,
+  lineEnding: LineEnding | null,
+  opacity: number | null,
+): AnnotationKind {
+  if (type === 'FreeText') return 'freetext'
+  if (type === 'Line') return lineEnding?.end === 'OpenArrow' ? 'arrow' : 'line'
+  if (type === 'Square') {
+    return isWhite(interiorColor) && borderWidth === 0 ? 'whiteout' : 'square'
+  }
+  if (type === 'Circle') return 'circle'
+  if (type === 'Ink') return opacity !== null && opacity < 1 ? 'highlight' : 'ink'
+  return 'other'
+}
+
 export function listAnnotations(doc: PDFDocument, pageIndex: number): AnnotationInfo[] {
   const page = doc.loadPage(pageIndex)
   try {
@@ -103,19 +162,41 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
           const parsed = da === null
             ? { fontName: null, fontSize: null, color: null }
             : parseDefaultAppearance(da)
+          const editable = type === 'FreeText'
+            || type === 'Square'
+            || type === 'Line'
+            || type === 'Circle'
+            || type === 'Ink'
+          const hasStroke = type === 'Square'
+            || type === 'Line'
+            || type === 'Circle'
+            || type === 'Ink'
+          const hasInterior = type === 'Square' || type === 'Circle'
+          const strokeColor = hasStroke ? asRGB(annotation.getColor()) : null
+          const interiorColor = hasInterior ? asRGB(annotation.getInteriorColor()) : null
+          const borderWidth = hasStroke ? annotation.getBorderWidth() : null
+          const opacity = type === 'Ink' ? annotation.getOpacity() : null
+          const lineEnding = type === 'Line' ? annotation.getLineEndingStyles() : null
           return {
             objNum: object.asIndirect(),
             pageIndex,
             type,
-            editable: type === 'FreeText' || type === 'Square',
+            kind: annotationKind(type, interiorColor, borderWidth, lineEnding, opacity),
+            editable,
             // 型定義上は全注釈に getRect() があるが、MuPDF 1.28.1 は
             // Highlight など /Rect を直接扱わない種類では例外にする。
             rect: [...(annotation.hasRect() ? annotation.getRect() : annotation.getBounds())] as Rect,
             contents: type === 'FreeText' ? annotation.getContents() : '',
+            fontName: type === 'FreeText' ? parsed.fontName : null,
             fontSize: type === 'FreeText' ? parsed.fontSize : null,
             textColor: type === 'FreeText' ? parsed.color : null,
-            strokeColor: type === 'Square' ? asRGB(annotation.getColor()) : null,
-            borderWidth: type === 'Square' ? annotation.getBorderWidth() : null,
+            strokeColor,
+            interiorColor,
+            borderWidth,
+            opacity,
+            line: type === 'Line' ? annotation.getLine() as [Point, Point] : null,
+            lineEnding,
+            inkList: type === 'Ink' ? annotation.getInkList() : null,
             madeByKaru: type === 'FreeText'
               && (parsed.fontName === 'BIZUDGothic' || parsed.fontName === 'BIZUDMincho'),
           }
@@ -173,13 +254,14 @@ function configureFreeText(
   text: string,
   fontSize: number,
   color: RGB,
+  fontName: FontName,
   isNew: boolean,
 ): void {
   annotation.setRect(rect)
   annotation.setContents(text)
   const object = annotation.getObject()
   try {
-    setPdfString(doc, object, 'DA', createDefaultAppearance('BIZUDGothic', fontSize, color))
+    setPdfString(doc, object, 'DA', createDefaultAppearance(fontName, fontSize, color))
     const borderStyle = doc.newDictionary()
     try {
       setPdfNumber(doc, borderStyle, 'W', 0)
@@ -210,13 +292,56 @@ function configureFreeText(
 function configureSquare(
   annotation: PDFAnnotation,
   rect: Rect,
-  color: RGB,
+  color: AnnotationColor,
   borderWidth: number,
+  interiorColor: RGB | null = null,
 ): void {
   annotation.setRect(rect)
   annotation.setColor(color)
   annotation.setBorderWidth(borderWidth)
-  annotation.setInteriorColor([])
+  annotation.setInteriorColor(interiorColor ?? [])
+  annotation.update()
+}
+
+function configureLine(
+  annotation: PDFAnnotation,
+  line: [Point, Point],
+  color: RGB,
+  borderWidth: number,
+  lineEnding: LineEnding,
+): void {
+  annotation.setLine(line[0], line[1])
+  annotation.setColor(color)
+  annotation.setBorderWidth(borderWidth)
+  annotation.setLineEndingStyles(lineEnding.start, lineEnding.end)
+  annotation.update()
+}
+
+function configureCircle(
+  annotation: PDFAnnotation,
+  rect: Rect,
+  color: RGB,
+  borderWidth: number,
+  interiorColor: RGB | null = null,
+): void {
+  annotation.setRect(rect)
+  annotation.setColor(color)
+  annotation.setBorderWidth(borderWidth)
+  annotation.setInteriorColor(interiorColor ?? [])
+  annotation.update()
+}
+
+function configureInk(
+  annotation: PDFAnnotation,
+  inkList: Point[][],
+  color: RGB,
+  borderWidth: number,
+  opacity: number,
+): void {
+  annotation.setInkList(inkList)
+  annotation.setColor(color)
+  annotation.setBorderWidth(borderWidth)
+  annotation.setOpacity(opacity)
   annotation.update()
 }
 
@@ -274,6 +399,7 @@ function makeTemporaryAppearance(
       task.text,
       task.fontSize,
       task.color,
+      task.fontName,
       true,
     )
     const layout = layoutText({
@@ -357,13 +483,17 @@ function orientAppearanceForAnnotation(
 function installTemporaryAppearances(
   doc: PDFDocument,
   tasks: AppearanceTask[],
-  fontResource: FontResource,
+  fontResources: FontResources,
 ): void {
   if (tasks.length === 0) return
   const temporaryDocument = new mupdf.PDFDocument()
   let graftMap: ReturnType<PDFDocument['newGraftMap']> | undefined
   try {
-    for (const task of tasks) makeTemporaryAppearance(temporaryDocument, task, fontResource)
+    for (const task of tasks) {
+      const fontResource = fontResources[task.fontName]
+      if (!fontResource) throw new Error(`${task.fontName} が読み込まれていません。`)
+      makeTemporaryAppearance(temporaryDocument, task, fontResource)
+    }
     // 元文書には subsetFonts() を呼ばない。一時文書のページ内容が参照する
     // 外観だけをサブセット化してから、外観オブジェクトを移す。
     temporaryDocument.subsetFonts()
@@ -409,7 +539,7 @@ function editObjectNumber(edit: AnnotationEdit): number | undefined {
 export function applyEdits(
   doc: PDFDocument,
   edits: readonly AnnotationEdit[],
-  fontResource: FontResource,
+  fontResources: FontResources,
 ): ApplyResult {
   const result: ApplyResult = { created: [], replacedCharacters: 0, errors: [] }
   const appearances: AppearanceTask[] = []
@@ -434,7 +564,43 @@ export function applyEdits(
           : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
         if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
         if (!isNew && annotation.getType() !== 'Square') throw new Error('更新対象は Square ではありません。')
-        configureSquare(annotation, edit.rect, edit.color, edit.borderWidth)
+        configureSquare(annotation, edit.rect, edit.color, edit.borderWidth, edit.interiorColor)
+        if (isNew) result.created.push(objectNumber(annotation))
+        continue
+      }
+
+      if (edit.kind === 'createLine' || edit.kind === 'updateLine') {
+        const isNew = edit.kind === 'createLine'
+        annotation = isNew
+          ? page.createAnnotation('Line')
+          : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
+        if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
+        if (!isNew && annotation.getType() !== 'Line') throw new Error('更新対象は Line ではありません。')
+        configureLine(annotation, edit.line, edit.color, edit.borderWidth, edit.lineEnding)
+        if (isNew) result.created.push(objectNumber(annotation))
+        continue
+      }
+
+      if (edit.kind === 'createCircle' || edit.kind === 'updateCircle') {
+        const isNew = edit.kind === 'createCircle'
+        annotation = isNew
+          ? page.createAnnotation('Circle')
+          : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
+        if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
+        if (!isNew && annotation.getType() !== 'Circle') throw new Error('更新対象は Circle ではありません。')
+        configureCircle(annotation, edit.rect, edit.color, edit.borderWidth, edit.interiorColor)
+        if (isNew) result.created.push(objectNumber(annotation))
+        continue
+      }
+
+      if (edit.kind === 'createInk' || edit.kind === 'updateInk') {
+        const isNew = edit.kind === 'createInk'
+        annotation = isNew
+          ? page.createAnnotation('Ink')
+          : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
+        if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
+        if (!isNew && annotation.getType() !== 'Ink') throw new Error('更新対象は Ink ではありません。')
+        configureInk(annotation, edit.inkList, edit.color, edit.borderWidth, edit.opacity)
         if (isNew) result.created.push(objectNumber(annotation))
         continue
       }
@@ -448,9 +614,11 @@ export function applyEdits(
       const width = edit.rect[2] - edit.rect[0]
       const height = edit.rect[3] - edit.rect[1]
       if (width <= 0 || height <= 0) throw new Error('FreeText の Rect は正の幅と高さが必要です。')
+      const fontResource = fontResources[edit.font]
+      if (!fontResource) throw new Error(`${edit.font} が読み込まれていません。`)
       const replaced = replaceMissingCharacters(fontResource.font, edit.text)
       result.replacedCharacters += replaced.replacedCharacters
-      configureFreeText(doc, annotation, edit.rect, replaced.text, edit.fontSize, edit.color, isNew)
+      configureFreeText(doc, annotation, edit.rect, replaced.text, edit.fontSize, edit.color, edit.font, isNew)
       if (isNew) result.created.push(objectNumber(annotation))
       appearances.push({
         editIndex,
@@ -461,6 +629,7 @@ export function applyEdits(
         text: replaced.text,
         fontSize: edit.fontSize,
         color: edit.color,
+        fontName: edit.font,
       })
       keepForAppearance = true
     } catch (error) {
@@ -480,7 +649,7 @@ export function applyEdits(
   }
 
   try {
-    installTemporaryAppearances(doc, appearances, fontResource)
+    installTemporaryAppearances(doc, appearances, fontResources)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     for (const task of appearances) {

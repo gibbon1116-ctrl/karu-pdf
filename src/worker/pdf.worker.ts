@@ -3,7 +3,14 @@ import { DisplayListCache } from '../core/displayListCache'
 import { openDocument, type OpenedDocument } from '../core/mupdfDoc'
 import { renderRegion } from '../core/render'
 import { applyEdits, listAnnotations } from '../core/annotations'
-import { createFontResource, encodeCharacter, replaceMissingCharacters, type FontResource } from '../core/fontMetrics'
+import {
+  createFontResource,
+  encodeCharacter,
+  replaceMissingCharacters,
+  type FontName,
+  type FontResource,
+  type FontResources,
+} from '../core/fontMetrics'
 import { layoutText } from '../core/textLayout'
 import { saveDocument } from '../core/save'
 import type {
@@ -24,7 +31,7 @@ interface WorkerDocument {
 }
 
 const documents = new Map<string, WorkerDocument>()
-let fontResource: FontResource | undefined
+const fontResources: FontResources = {}
 let sequence = 0
 let running = false
 let processedCount = 0
@@ -51,16 +58,21 @@ function disposeAllDocuments(): void {
   for (const docId of [...documents.keys()]) disposeDocument(docId)
 }
 
-function disposeFont(): void {
-  fontResource?.font.destroy()
-  fontResource = undefined
+function disposeFonts(): void {
+  for (const fontResource of Object.values(fontResources)) fontResource?.font.destroy()
+  delete fontResources.BIZUDGothic
+  delete fontResources.BIZUDMincho
 }
 
-async function getFontResource(): Promise<FontResource> {
-  if (fontResource) return fontResource
-  const response = await fetch(`${import.meta.env.BASE_URL}fonts/BIZUDGothic-Regular.ttf`)
-  if (!response.ok) throw new Error(`BIZ UDゴシックを読み込めませんでした (${response.status})。`)
-  fontResource = createFontResource(new Uint8Array(await response.arrayBuffer()))
+async function getFontResource(name: FontName): Promise<FontResource> {
+  const loaded = fontResources[name]
+  if (loaded) return loaded
+  const filename = name === 'BIZUDGothic' ? 'BIZUDGothic-Regular.ttf' : 'BIZUDMincho-Regular.ttf'
+  const label = name === 'BIZUDGothic' ? 'BIZ UDゴシック' : 'BIZ UD明朝'
+  const response = await fetch(`${import.meta.env.BASE_URL}fonts/${filename}`)
+  if (!response.ok) throw new Error(`${label}を読み込めませんでした (${response.status})。`)
+  const fontResource = createFontResource(new Uint8Array(await response.arrayBuffer()), name)
+  fontResources[name] = fontResource
   return fontResource
 }
 
@@ -113,7 +125,7 @@ async function execute(job: QueuedRequest): Promise<void> {
 async function executeCoreRequest(request: CoreRequest): Promise<void> {
   try {
     if (request.type === 'layoutText') {
-      const font = await getFontResource()
+      const font = await getFontResource('BIZUDGothic')
       const replaced = replaceMissingCharacters(font.font, request.text)
       post({
         type: 'textLaidOut',
@@ -150,8 +162,12 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       return
     }
 
-    const font = await getFontResource()
-    const applied = applyEdits(document, request.edits, font)
+    const requiredFonts = new Set<FontName>()
+    for (const edit of request.edits) {
+      if (edit.kind === 'createFreeText' || edit.kind === 'updateFreeText') requiredFonts.add(edit.font)
+    }
+    await Promise.all([...requiredFonts].map((fontName) => getFontResource(fontName)))
+    const applied = applyEdits(document, request.edits, fontResources)
     entry.displayLists.clear()
     const saved = saveDocument(document, request.mode)
     const bytes = saved.bytes.buffer as ArrayBuffer
@@ -256,7 +272,7 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
   }
   queue.splice(0, queue.length)
   disposeAllDocuments()
-  disposeFont()
+  disposeFonts()
 }
 
 post({ type: 'ready' })

@@ -1,5 +1,7 @@
 import mupdf, { type Font } from 'mupdf'
 
+export type FontName = 'BIZUDGothic' | 'BIZUDMincho'
+
 export interface FontMetrics {
   unitsPerEm: number
   ascender: number
@@ -7,8 +9,11 @@ export interface FontMetrics {
 }
 
 export interface FontResource extends FontMetrics {
+  name: FontName
   font: Font
 }
+
+export type FontResources = Partial<Record<FontName, FontResource>>
 
 export interface EncodedCharacter {
   character: string
@@ -46,9 +51,13 @@ export function readFontMetrics(bytes: Uint8Array): FontMetrics {
   return { unitsPerEm, ascender, ascent: ascender / unitsPerEm }
 }
 
-export function createFontResource(bytes: Uint8Array): FontResource {
+export function createFontResource(
+  bytes: Uint8Array,
+  name: FontName = 'BIZUDGothic',
+): FontResource {
   return {
-    font: new mupdf.Font('BIZUDGothic', bytes),
+    name,
+    font: new mupdf.Font(name, bytes),
     ...readFontMetrics(bytes),
   }
 }

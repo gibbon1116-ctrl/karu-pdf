@@ -4,11 +4,12 @@ import mupdf, { type PDFDocument, type PDFPage } from 'mupdf'
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { applyEdits, type Rect } from '../src/core/annotations'
-import { createFontResource, type FontResource } from '../src/core/fontMetrics'
+import { createFontResource, type FontResource, type FontResources } from '../src/core/fontMetrics'
 import { saveDocument } from '../src/core/save'
 import { ensureSamplePdf } from './fixtures'
 
 const fontPath = path.resolve('public/fonts/BIZUDGothic-Regular.ttf')
+const minchoFontPath = path.resolve('public/fonts/BIZUDMincho-Regular.ttf')
 const wasmPath = path.resolve('node_modules/@embedpdf/pdfium/dist/pdfium.wasm')
 const pageRect: Rect = [72, 320, 272, 362]
 const rotatedRect: Rect = [100, 100, 300, 145]
@@ -16,6 +17,9 @@ const scale = 2
 
 let pdfium: WrappedPdfiumModule
 let fontResource: FontResource
+let minchoFontResource: FontResource
+let fontResources: FontResources
+let sourceBytes: Uint8Array
 let annotatedBytes: Uint8Array
 
 beforeAll(async () => {
@@ -26,8 +30,13 @@ beforeAll(async () => {
   pdfium.FPDF_InitLibrary()
   pdfium.PDFiumExt_Init()
   fontResource = createFontResource(new Uint8Array(await fs.readFile(fontPath)))
-  const source = new Uint8Array(await fs.readFile(await ensureSamplePdf()))
-  const document = new mupdf.PDFDocument(source)
+  minchoFontResource = createFontResource(
+    new Uint8Array(await fs.readFile(minchoFontPath)),
+    'BIZUDMincho',
+  )
+  fontResources = { BIZUDGothic: fontResource, BIZUDMincho: minchoFontResource }
+  sourceBytes = new Uint8Array(await fs.readFile(await ensureSamplePdf()))
+  const document = new mupdf.PDFDocument(sourceBytes)
   try {
     const applied = applyEdits(document, [
       {
@@ -40,7 +49,35 @@ beforeAll(async () => {
         text: '回転ページの日本語', fontSize: 10.5,
         color: [1, 0, 0], font: 'BIZUDGothic',
       },
-    ], fontResource)
+      {
+        kind: 'createLine', pageIndex: 0, line: [[300, 340], [470, 380]],
+        color: [1, 0, 0], borderWidth: 3,
+        lineEnding: { start: 'None', end: 'OpenArrow' },
+      },
+      {
+        kind: 'createCircle', pageIndex: 0, rect: [300, 400, 400, 465],
+        color: [0, 0, 1], borderWidth: 2, interiorColor: null,
+      },
+      {
+        kind: 'createInk', pageIndex: 0,
+        inkList: [[[72, 450], [140, 455], [230, 450]]],
+        color: [1, 1, 0], borderWidth: 12, opacity: 0.35,
+      },
+      {
+        kind: 'createInk', pageIndex: 0,
+        inkList: [[[300, 500], [330, 480], [360, 510]], [[370, 480], [400, 510], [430, 485]]],
+        color: [0, 0.7, 0], borderWidth: 3, opacity: 1,
+      },
+      {
+        kind: 'createSquare', pageIndex: 0, rect: [300, 145, 450, 200],
+        color: [], borderWidth: 0, interiorColor: [1, 1, 1],
+      },
+      {
+        kind: 'createFreeText', pageIndex: 0, rect: [72, 560, 272, 605],
+        text: '明朝体の日本語', fontSize: 12,
+        color: [0.8, 0, 0.8], font: 'BIZUDMincho',
+      },
+    ], fontResources)
     expect(applied.errors).toEqual([])
     annotatedBytes = saveDocument(document, 'full').bytes
   } finally {
@@ -50,6 +87,7 @@ beforeAll(async () => {
 
 afterAll(() => {
   if (fontResource) fontResource.font.destroy()
+  if (minchoFontResource) minchoFontResource.font.destroy()
   if (pdfium) pdfium.FPDF_DestroyLibrary()
 })
 
@@ -114,6 +152,45 @@ function countPdfiumRed(pageIndex: number, rect: Rect): number {
   }
 }
 
+function countPdfiumPixels(
+  bytes: Uint8Array,
+  pageIndex: number,
+  rect: Rect,
+  matches: (red: number, green: number, blue: number) => boolean,
+): number {
+  const { pdfium: runtime } = pdfium
+  const heap = (runtime as unknown as { HEAPU8: Uint8Array }).HEAPU8
+  const sourcePointer = runtime.wasmExports.malloc(bytes.length)
+  heap.set(bytes, sourcePointer)
+  const document = pdfium.FPDF_LoadMemDocument64(sourcePointer, bytes.length, '')
+  if (!document) throw new Error(`PDFium が PDF を開けませんでした (${pdfium.FPDF_GetLastError()})。`)
+  const page = pdfium.FPDF_LoadPage(document, pageIndex)
+  if (!page) throw new Error(`PDFium が ${pageIndex + 1} ページ目を開けませんでした。`)
+  const width = Math.ceil(pdfium.FPDF_GetPageWidthF(page) * scale)
+  const height = Math.ceil(pdfium.FPDF_GetPageHeightF(page) * scale)
+  const bitmap = pdfium.FPDFBitmap_Create(width, height, 1)
+  if (!bitmap) throw new Error('PDFium がビットマップを作れませんでした。')
+  try {
+    pdfium.FPDFBitmap_FillRect(bitmap, 0, 0, width, height, 0xffffffff)
+    pdfium.FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, 0, 0x01)
+    const buffer = pdfium.FPDFBitmap_GetBuffer(bitmap)
+    const stride = pdfium.FPDFBitmap_GetStride(bitmap)
+    let count = 0
+    for (let y = Math.floor(rect[1] * scale); y < Math.min(height, Math.ceil(rect[3] * scale)); y += 1) {
+      for (let x = Math.floor(rect[0] * scale); x < Math.min(width, Math.ceil(rect[2] * scale)); x += 1) {
+        const offset = buffer + y * stride + x * 4
+        if (matches(heap[offset + 2], heap[offset + 1], heap[offset])) count += 1
+      }
+    }
+    return count
+  } finally {
+    pdfium.FPDFBitmap_Destroy(bitmap)
+    pdfium.FPDF_ClosePage(page)
+    pdfium.FPDF_CloseDocument(document)
+    runtime.wasmExports.free(sourcePointer)
+  }
+}
+
 function verifyPage(pageIndex: number, rect: Rect, label: string): void {
   const mupdfRed = countMuPdfRed(pageIndex, rect)
   const pdfiumRed = countPdfiumRed(pageIndex, rect)
@@ -130,5 +207,54 @@ describe('PDFium compatibility', () => {
 
   it('回転ページの日本語 FreeText を MuPDF の±30%の赤画素数で描く', () => {
     verifyPage(4, rotatedRect, 'rotated')
+  })
+
+  it('追加した注釈と明朝体を PDFium で描き、白塗りで下の内容を隠す', () => {
+    const red = countPdfiumPixels(
+      annotatedBytes, 0, [290, 330, 480, 390],
+      (r, g, b) => r > 160 && g < 140 && b < 140,
+    )
+    const blue = countPdfiumPixels(
+      annotatedBytes, 0, [290, 390, 410, 475],
+      (r, g, b) => b > 150 && r < 140 && g < 140,
+    )
+    const yellow = countPdfiumPixels(
+      annotatedBytes, 0, [60, 435, 245, 470],
+      (r, g, b) => r > 220 && g > 220 && b < 220,
+    )
+    const green = countPdfiumPixels(
+      annotatedBytes, 0, [290, 470, 440, 520],
+      (r, g, b) => g > 110 && r < 140 && b < 140,
+    )
+    const magenta = countPdfiumPixels(
+      annotatedBytes, 0, [72, 560, 272, 605],
+      (r, g, b) => r > 130 && b > 130 && g < 140,
+    )
+    expect(red).toBeGreaterThan(50)
+    expect(blue).toBeGreaterThan(50)
+    expect(yellow).toBeGreaterThan(100)
+    expect(green).toBeGreaterThan(50)
+    expect(magenta).toBeGreaterThan(50)
+
+    const whiteoutInner: Rect = [310, 155, 440, 190]
+    const sourceBlue = countPdfiumPixels(
+      sourceBytes, 0, whiteoutInner,
+      (r, g, b) => b > r && b > g && r < 245,
+    )
+    const hiddenBlue = countPdfiumPixels(
+      annotatedBytes, 0, whiteoutInner,
+      (r, g, b) => b > r && b > g && r < 245,
+    )
+    const white = countPdfiumPixels(
+      annotatedBytes, 0, whiteoutInner,
+      (r, g, b) => r > 250 && g > 250 && b > 250,
+    )
+    expect(sourceBlue).toBeGreaterThan(1_000)
+    expect(hiddenBlue).toBeLessThan(sourceBlue * 0.05)
+    expect(white).toBeGreaterThan(10_000)
+    console.info(
+      `PDFIUM_METRIC added red=${red} blue=${blue} yellow=${yellow} green=${green} mincho=${magenta} `
+      + `whiteout_source_blue=${sourceBlue} whiteout_hidden_blue=${hiddenBlue} whiteout_white=${white}`,
+    )
   })
 })
