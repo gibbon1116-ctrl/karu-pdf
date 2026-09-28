@@ -18,6 +18,7 @@ const realPath = path.resolve('test-data/real/公共建築工事標準仕様書_
 const fontPath = path.resolve('public/fonts/BIZUDGothic-Regular.ttf')
 const minchoFontPath = path.resolve('public/fonts/BIZUDMincho-Regular.ttf')
 const resultPath = path.resolve('test-results/annot-roundtrip.pdf')
+const calloutResultPath = path.resolve('test-results/callout-check.pdf')
 const firstText = '日本語の書き込みテスト①（半角ABC 123）'
 const firstRect: Rect = [72, 320, 272, 362]
 const rotatedRect: Rect = [100, 100, 300, 145]
@@ -69,13 +70,18 @@ function findAnnotation(page: PDFPage, objNum: number): PDFAnnotation {
   throw new Error(`注釈 ${objNum} が見つかりません。`)
 }
 
-function arrayValue(object: PDFObject, key: string): number[] {
-  const value = object.get(key)
+function arrayValue(object: PDFObject, ...keys: string[]): number[] {
+  const value = object.get(...keys)
   try {
     return value.asJS() as number[]
   } finally {
     value.destroy()
   }
+}
+
+function numberValue(object: PDFObject, ...keys: string[]): number {
+  const value = object.get(...keys)
+  try { return value.asNumber() } finally { value.destroy() }
 }
 
 function inspectFreeText(document: PDFDocument, pageIndex: number, objNum: number) {
@@ -382,7 +388,7 @@ describe('annotation integration', () => {
     await fs.writeFile(resultPath, rotated.bytes)
   })
 
-  it('線・丸・蛍光ペン・手書き・白塗り・明朝を保存して属性を読み戻す', () => {
+  it('線・丸・蛍光ペン・手書き・旧白塗り・明朝を保存して属性を読み戻す', () => {
     const arrowLine: [Point, Point] = [[300, 340], [470, 380]]
     const highlightInk: Point[][] = [[[72, 450], [140, 455], [230, 450]]]
     const handwritingInk: Point[][] = [
@@ -465,7 +471,7 @@ describe('annotation integration', () => {
       expect(handwriting.inkList).toEqual(handwritingInk)
 
       expect(whiteout).toMatchObject({
-        type: 'Square', kind: 'whiteout', editable: true,
+        type: 'Square', kind: 'square', editable: true,
         strokeColor: null, interiorColor: [1, 1, 1], borderWidth: 0,
       })
 
@@ -487,6 +493,112 @@ describe('annotation integration', () => {
     } finally {
       document.destroy()
     }
+  })
+
+  it('塗りつぶし、文字の背景と枠、吹き出しを往復保存する', async () => {
+    const textRect: Rect = [72, 390, 260, 435]
+    const calloutRect: Rect = [300, 430, 460, 480]
+    const calloutPoint: Point = [250, 360]
+    const saved = applyAndSave(sampleBytes, [
+      {
+        kind: 'createSquare', pageIndex: 0, rect: [72, 300, 190, 360],
+        color: [], borderWidth: 2, interiorColor: [0, 0.25, 1], opacity: 0.5,
+      },
+      {
+        kind: 'createCircle', pageIndex: 0, rect: [210, 300, 290, 370],
+        color: [], borderWidth: 2, interiorColor: [1, 0.9, 0], opacity: 0.5,
+      },
+      {
+        kind: 'createFreeText', pageIndex: 0, rect: textRect,
+        text: '背景と枠つきの文字', fontSize: 10.5, color: [1, 0, 0], font: 'BIZUDGothic',
+        backgroundColor: [1, 0.9, 0], borderColor: [0, 0, 0], borderWidth: 1.5,
+      },
+      {
+        kind: 'createCallout', pageIndex: 0, rect: calloutRect, point: calloutPoint,
+        text: '吹き出しの本文', fontSize: 10.5, color: [1, 0, 0], font: 'BIZUDGothic',
+        backgroundColor: [1, 1, 1], borderColor: [1, 0, 0], borderWidth: 1,
+      },
+    ])
+    expect(saved.created).toHaveLength(4)
+    const document = openPdf(saved.bytes)
+    try {
+      const infos = saved.created.map((objNum) => listAnnotations(document, 0).find((item) => item.objNum === objNum)!)
+      expect(infos[0]).toMatchObject({ kind: 'square', strokeColor: null, interiorColor: [0, 0.25, 1], borderWidth: 0 })
+      expect(infos[0].opacity).toBeCloseTo(0.5, 2)
+      expect(infos[1]).toMatchObject({ kind: 'circle', strokeColor: null, borderWidth: 0 })
+      expectColor(infos[1].interiorColor, [1, 0.9, 0])
+      expect(infos[1].opacity).toBeCloseTo(0.5, 2)
+
+      const shapePage = document.loadPage(0)
+      try {
+        for (const objNum of saved.created.slice(0, 2)) {
+          const shape = findAnnotation(shapePage, objNum)
+          const shapeObject = shape.getObject()
+          const resolvedShape = shapeObject.resolve()
+          try {
+            expect(arrayValue(resolvedShape, 'IC')).toHaveLength(3)
+            expect(arrayValue(resolvedShape, 'C')).toEqual([])
+            expect(numberValue(resolvedShape, 'CA')).toBeCloseTo(0.5, 2)
+            expect(numberValue(resolvedShape, 'BS', 'W')).toBe(0)
+          } finally {
+            resolvedShape.destroy()
+            shapeObject.destroy()
+            shape.destroy()
+          }
+        }
+      } finally {
+        shapePage.destroy()
+      }
+      expect(infos[2]).toMatchObject({
+        kind: 'freetext', contents: '背景と枠つきの文字',
+        strokeColor: [0, 0, 0], borderWidth: 1.5,
+      })
+      expectColor(infos[2].interiorColor, [1, 0.9, 0])
+      expectRect(infos[2].rect, textRect)
+      expect(infos[3]).toMatchObject({
+        kind: 'callout', contents: '吹き出しの本文',
+        interiorColor: [1, 1, 1], strokeColor: [1, 0, 0], borderWidth: 1,
+      })
+      expectRect(infos[3].rect, calloutRect)
+      expectPoint(infos[3].calloutPoint!, calloutPoint)
+      expectPoint(infos[3].calloutLine![1], [300, 455])
+
+      for (const index of [2, 3]) {
+        const inspection = inspectFreeText(document, 0, saved.created[index])
+        try {
+          expect(inspection.baseFont).toMatch(/^[A-Z]{6}\+BIZUDGothic/)
+          expect(inspection.embeddedFontBytes).toBeGreaterThan(0)
+          expect(inspection.embeddedFontBytes).toBeLessThan(300 * 1024)
+          expect(inspection.hasToUnicode).toBe(true)
+        } finally {
+          closeInspection(inspection)
+        }
+      }
+
+      const page = document.loadPage(0)
+      const callout = findAnnotation(page, saved.created[3])
+      const object = callout.getObject()
+      const resolved = object.resolve()
+      try {
+        expect(callout.getIntent()).toBe('FreeTextCallout')
+        expect(callout.getCalloutStyle()).toBe('OpenArrow')
+        expect(arrayValue(resolved, 'IC')).toEqual([1, 1, 1])
+        expect(arrayValue(resolved, 'C')).toEqual([1, 0, 0])
+        expect(arrayValue(resolved, 'RD').some((value) => value > 0)).toBe(true)
+        expect(arrayValue(resolved, 'Rect')).toHaveLength(4)
+        expect(arrayValue(resolved, 'KaruStyle', 'Fill')).toEqual([1, 1, 1])
+        expect(arrayValue(resolved, 'KaruStyle', 'Border')).toEqual([1, 0, 0])
+        expect(numberValue(resolved, 'KaruStyle', 'BorderWidth')).toBe(1)
+      } finally {
+        resolved.destroy()
+        object.destroy()
+        callout.destroy()
+        page.destroy()
+      }
+    } finally {
+      document.destroy()
+    }
+    await fs.writeFile(calloutResultPath, saved.bytes)
   })
 
   it('他ソフト由来相当の Line・Circle・Ink を editable として更新できる', () => {

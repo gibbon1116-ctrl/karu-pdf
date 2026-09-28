@@ -27,13 +27,13 @@ export type LineEnding = {
 }
 export type AnnotationKind =
   | 'freetext'
+  | 'callout'
   | 'line'
   | 'arrow'
   | 'square'
   | 'circle'
   | 'highlight'
   | 'ink'
-  | 'whiteout'
   | 'other'
 
 export interface AnnotationInfo {
@@ -54,18 +54,22 @@ export interface AnnotationInfo {
   line: [Point, Point] | null
   lineEnding: LineEnding | null
   inkList: Point[][] | null
+  calloutPoint: Point | null
+  calloutLine: [Point, Point] | null
   madeByKaru: boolean
 }
 
 export type AnnotationEdit =
-  | { kind: 'createFreeText'; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: FontName }
-  | { kind: 'updateFreeText'; objNum: number; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: FontName }
-  | { kind: 'createSquare'; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null }
-  | { kind: 'updateSquare'; objNum: number; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null }
+  | { kind: 'createFreeText'; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number }
+  | { kind: 'updateFreeText'; objNum: number; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number }
+  | { kind: 'createCallout'; pageIndex: number; rect: Rect; point: Point; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number }
+  | { kind: 'updateCallout'; objNum: number; pageIndex: number; rect: Rect; point: Point; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number }
+  | { kind: 'createSquare'; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null; opacity?: number }
+  | { kind: 'updateSquare'; objNum: number; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null; opacity?: number }
   | { kind: 'createLine'; pageIndex: number; line: [Point, Point]; color: RGB; borderWidth: number; lineEnding: LineEnding }
   | { kind: 'updateLine'; objNum: number; pageIndex: number; line: [Point, Point]; color: RGB; borderWidth: number; lineEnding: LineEnding }
-  | { kind: 'createCircle'; pageIndex: number; rect: Rect; color: RGB; borderWidth: number; interiorColor?: RGB | null }
-  | { kind: 'updateCircle'; objNum: number; pageIndex: number; rect: Rect; color: RGB; borderWidth: number; interiorColor?: RGB | null }
+  | { kind: 'createCircle'; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null; opacity?: number }
+  | { kind: 'updateCircle'; objNum: number; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null; opacity?: number }
   | { kind: 'createInk'; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number }
   | { kind: 'updateInk'; objNum: number; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number }
   | { kind: 'delete'; objNum: number; pageIndex: number }
@@ -94,6 +98,11 @@ interface AppearanceTask {
   fontSize: number
   color: RGB
   fontName: FontName
+  textRect: Rect
+  backgroundColor: RGB | null
+  borderColor: RGB | null
+  borderWidth: number
+  calloutLine: [Point, Point] | null
   temporaryPageIndex?: number
 }
 
@@ -129,22 +138,79 @@ function asRGB(color: number[]): RGB | null {
   return null
 }
 
-function isWhite(color: RGB | null): boolean {
-  return color !== null && color.every((component) => Math.abs(component - 1) < 0.001)
+function readNumberArray(object: PDFObject, key: string): number[] | null {
+  const value = object.get(key)
+  try {
+    if (!value.isArray()) return null
+    const result = value.asJS()
+    return Array.isArray(result) && result.every((item) => typeof item === 'number') ? result : null
+  } finally {
+    value.destroy()
+  }
+}
+
+function readNumber(object: PDFObject, key: string): number | null {
+  const value = object.get(key)
+  try {
+    return value.isNumber() ? value.asNumber() : null
+  } finally {
+    value.destroy()
+  }
+}
+
+interface KaruStyle {
+  present: boolean
+  fill: RGB | null
+  border: RGB | null
+  borderWidth: number | null
+}
+
+function readKaruStyle(object: PDFObject): KaruStyle {
+  const raw = object.get('KaruStyle')
+  let style: PDFObject | undefined
+  try {
+    if (raw.isNull()) return { present: false, fill: null, border: null, borderWidth: null }
+    style = raw.isIndirect() ? raw.resolve() : undefined
+    const dictionary = style ?? raw
+    if (!dictionary.isDictionary()) return { present: false, fill: null, border: null, borderWidth: null }
+    return {
+      present: true,
+      fill: asRGB(readNumberArray(dictionary, 'Fill') ?? []),
+      border: asRGB(readNumberArray(dictionary, 'Border') ?? []),
+      borderWidth: readNumber(dictionary, 'BorderWidth'),
+    }
+  } finally {
+    style?.destroy()
+    raw.destroy()
+  }
+}
+
+function transformPoint(point: Point, matrix: readonly number[]): Point {
+  return [
+    point[0] * matrix[0] + point[1] * matrix[2] + matrix[4],
+    point[0] * matrix[1] + point[1] * matrix[3] + matrix[5],
+  ]
+}
+
+function readCalloutLine(page: PDFPage, object: PDFObject): [Point, Point] | null {
+  const raw = readNumberArray(object, 'CL')
+  if (!raw || raw.length < 4) return null
+  const matrix = page.getTransform()
+  return [
+    transformPoint([raw[0], raw[1]], matrix),
+    transformPoint([raw[raw.length - 2], raw[raw.length - 1]], matrix),
+  ]
 }
 
 function annotationKind(
   type: PDFAnnotationType,
-  interiorColor: RGB | null,
-  borderWidth: number | null,
   lineEnding: LineEnding | null,
   opacity: number | null,
+  intent: string | null,
 ): AnnotationKind {
-  if (type === 'FreeText') return 'freetext'
+  if (type === 'FreeText') return intent === 'FreeTextCallout' ? 'callout' : 'freetext'
   if (type === 'Line') return lineEnding?.end === 'OpenArrow' ? 'arrow' : 'line'
-  if (type === 'Square') {
-    return isWhite(interiorColor) && borderWidth === 0 ? 'whiteout' : 'square'
-  }
+  if (type === 'Square') return 'square'
   if (type === 'Circle') return 'circle'
   if (type === 'Ink') return opacity !== null && opacity < 1 ? 'highlight' : 'ink'
   return 'other'
@@ -167,21 +233,29 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             || type === 'Line'
             || type === 'Circle'
             || type === 'Ink'
-          const hasStroke = type === 'Square'
+          const hasStroke = type === 'FreeText'
+            || type === 'Square'
             || type === 'Line'
             || type === 'Circle'
             || type === 'Ink'
-          const hasInterior = type === 'Square' || type === 'Circle'
-          const strokeColor = hasStroke ? asRGB(annotation.getColor()) : null
-          const interiorColor = hasInterior ? asRGB(annotation.getInteriorColor()) : null
+          const hasInterior = type === 'FreeText' || type === 'Square' || type === 'Circle'
+          const standardStroke = hasStroke ? asRGB(readNumberArray(object, 'C') ?? []) : null
+          const standardInterior = hasInterior ? asRGB(readNumberArray(object, 'IC') ?? []) : null
+          const style = type === 'FreeText' ? readKaruStyle(object) : null
+          const strokeColor = style?.present ? style.border : standardStroke
+          const interiorColor = style?.present ? style.fill : standardInterior
           const borderWidth = hasStroke ? annotation.getBorderWidth() : null
-          const opacity = type === 'Ink' ? annotation.getOpacity() : null
+          const opacity = type === 'Ink' || type === 'Square' || type === 'Circle' ? annotation.getOpacity() : null
           const lineEnding = type === 'Line' ? annotation.getLineEndingStyles() : null
+          const intent = type === 'FreeText' ? annotation.getIntent() : null
+          const calloutLine = type === 'FreeText' && intent === 'FreeTextCallout'
+            ? readCalloutLine(page, object)
+            : null
           return {
             objNum: object.asIndirect(),
             pageIndex,
             type,
-            kind: annotationKind(type, interiorColor, borderWidth, lineEnding, opacity),
+            kind: annotationKind(type, lineEnding, opacity, intent),
             editable,
             // 型定義上は全注釈に getRect() があるが、MuPDF 1.28.1 は
             // Highlight など /Rect を直接扱わない種類では例外にする。
@@ -192,11 +266,13 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             textColor: type === 'FreeText' ? parsed.color : null,
             strokeColor,
             interiorColor,
-            borderWidth,
+            borderWidth: style?.present ? style.borderWidth ?? borderWidth : borderWidth,
             opacity,
             line: type === 'Line' ? annotation.getLine() as [Point, Point] : null,
             lineEnding,
             inkList: type === 'Ink' ? annotation.getInkList() : null,
+            calloutPoint: calloutLine?.[0] ?? null,
+            calloutLine,
             madeByKaru: type === 'FreeText'
               && (parsed.fontName === 'BIZUDGothic' || parsed.fontName === 'BIZUDMincho'),
           }
@@ -239,6 +315,101 @@ function setPdfNumber(doc: PDFDocument, object: PDFObject, key: string, value: n
   }
 }
 
+function setPdfNumberArray(doc: PDFDocument, object: PDFObject, key: string, values: readonly number[]): void {
+  const array = doc.newArray()
+  try {
+    for (const value of values) array.push(value)
+    object.put(key, array)
+  } finally {
+    array.destroy()
+  }
+}
+
+export function nearestCalloutEdgePoint(rect: Rect, point: Point): Point {
+  const [x0, y0, x1, y1] = rect
+  const candidates: Point[] = [
+    [(x0 + x1) / 2, y0],
+    [x1, (y0 + y1) / 2],
+    [(x0 + x1) / 2, y1],
+    [x0, (y0 + y1) / 2],
+  ]
+  return candidates.reduce((nearest, candidate) => (
+    Math.hypot(candidate[0] - point[0], candidate[1] - point[1])
+      < Math.hypot(nearest[0] - point[0], nearest[1] - point[1])
+      ? candidate
+      : nearest
+  ))
+}
+
+function calloutOuterRect(textRect: Rect, point: Point, borderWidth: number): Rect {
+  const margin = Math.max(4, borderWidth * 4)
+  return [
+    Math.min(textRect[0], point[0] - margin),
+    Math.min(textRect[1], point[1] - margin),
+    Math.max(textRect[2], point[0] + margin),
+    Math.max(textRect[3], point[1] + margin),
+  ]
+}
+
+function writeFreeTextStyle(
+  doc: PDFDocument,
+  object: PDFObject,
+  backgroundColor: RGB | null,
+  borderColor: RGB | null,
+  borderWidth: number,
+): void {
+  if (backgroundColor) setPdfNumberArray(doc, object, 'IC', backgroundColor)
+  else object.delete('IC')
+  setPdfNumberArray(doc, object, 'C', borderColor ?? [])
+
+  const borderStyle = doc.newDictionary()
+  try {
+    setPdfNumber(doc, borderStyle, 'W', borderColor ? borderWidth : 0)
+    object.put('BS', borderStyle)
+  } finally {
+    borderStyle.destroy()
+  }
+
+  const karuStyle = doc.newDictionary()
+  try {
+    if (backgroundColor) setPdfNumberArray(doc, karuStyle, 'Fill', backgroundColor)
+    if (borderColor) setPdfNumberArray(doc, karuStyle, 'Border', borderColor)
+    setPdfNumber(doc, karuStyle, 'BorderWidth', borderWidth)
+    object.put('KaruStyle', karuStyle)
+  } finally {
+    karuStyle.destroy()
+  }
+}
+
+function writeCalloutGeometry(
+  doc: PDFDocument,
+  annotation: PDFAnnotation,
+  textRect: Rect,
+  point: Point,
+  borderWidth: number,
+): { outerRect: Rect; line: [Point, Point] } {
+  const outerRect = calloutOuterRect(textRect, point, borderWidth)
+  const line: [Point, Point] = [[...point], nearestCalloutEdgePoint(textRect, point)]
+  annotation.setIntent('FreeTextCallout')
+  annotation.setRect(outerRect)
+  annotation.setCalloutLine(line)
+  annotation.setCalloutStyle('OpenArrow')
+  const object = annotation.getObject()
+  try {
+    // /RD は PDF 座標で left, bottom, right, top の順。距離なので、
+    // y 下向きのページ座標では下辺と上辺の差だけを入れ替える。
+    setPdfNumberArray(doc, object, 'RD', [
+      textRect[0] - outerRect[0],
+      outerRect[3] - textRect[3],
+      outerRect[2] - textRect[2],
+      textRect[1] - outerRect[1],
+    ])
+  } finally {
+    object.destroy()
+  }
+  return { outerRect, line }
+}
+
 let annotationNameSequence = 0
 
 function newAnnotationName(): string {
@@ -255,6 +426,9 @@ function configureFreeText(
   fontSize: number,
   color: RGB,
   fontName: FontName,
+  backgroundColor: RGB | null,
+  borderColor: RGB | null,
+  borderWidth: number,
   isNew: boolean,
 ): void {
   annotation.setRect(rect)
@@ -262,13 +436,7 @@ function configureFreeText(
   const object = annotation.getObject()
   try {
     setPdfString(doc, object, 'DA', createDefaultAppearance(fontName, fontSize, color))
-    const borderStyle = doc.newDictionary()
-    try {
-      setPdfNumber(doc, borderStyle, 'W', 0)
-      object.put('BS', borderStyle)
-    } finally {
-      borderStyle.destroy()
-    }
+    writeFreeTextStyle(doc, object, backgroundColor, borderColor, borderWidth)
     setPdfNumber(doc, object, 'F', 4)
     if (isNew) setPdfString(doc, object, 'NM', newAnnotationName())
     object.delete('T')
@@ -295,12 +463,14 @@ function configureSquare(
   color: AnnotationColor,
   borderWidth: number,
   interiorColor: RGB | null = null,
+  opacity = 1,
 ): void {
   annotation.setFlags(annotation.getFlags() | 4)
   annotation.setRect(rect)
   annotation.setColor(color)
-  annotation.setBorderWidth(borderWidth)
+  annotation.setBorderWidth(color.length === 0 ? 0 : borderWidth)
   annotation.setInteriorColor(interiorColor ?? [])
+  annotation.setOpacity(opacity)
   annotation.update()
 }
 
@@ -322,15 +492,17 @@ function configureLine(
 function configureCircle(
   annotation: PDFAnnotation,
   rect: Rect,
-  color: RGB,
+  color: AnnotationColor,
   borderWidth: number,
   interiorColor: RGB | null = null,
+  opacity = 1,
 ): void {
   annotation.setFlags(annotation.getFlags() | 4)
   annotation.setRect(rect)
   annotation.setColor(color)
-  annotation.setBorderWidth(borderWidth)
+  annotation.setBorderWidth(color.length === 0 ? 0 : borderWidth)
   annotation.setInteriorColor(interiorColor ?? [])
+  annotation.setOpacity(opacity)
   annotation.update()
 }
 
@@ -404,25 +576,58 @@ function makeTemporaryAppearance(
       task.fontSize,
       task.color,
       task.fontName,
+      task.backgroundColor,
+      task.borderColor,
+      task.borderWidth,
       true,
     )
     const layout = layoutText({
       text: task.text,
       fontSize: task.fontSize,
-      boxWidth: task.width,
+      boxWidth: task.textRect[2] - task.textRect[0],
       ascent: fontResource.ascent,
       advance: (character) => encodeCharacter(fontResource.font, character).advance,
     })
 
+    if (task.backgroundColor) {
+      const background = new mupdf.Path()
+      try {
+        background.rect(task.textRect[0], task.textRect[1], task.textRect[2], task.textRect[3])
+        device.fillPath(background, false, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, task.backgroundColor, 1)
+      } finally {
+        background.destroy()
+      }
+    }
+
+    if (task.borderColor && task.borderWidth > 0) {
+      const inset = task.borderWidth / 2
+      const border = new mupdf.Path()
+      const stroke = new mupdf.StrokeState({
+        lineCap: 'Butt', lineJoin: 'Miter', lineWidth: task.borderWidth, miterLimit: 10,
+      })
+      try {
+        border.rect(
+          task.textRect[0] + inset,
+          task.textRect[1] + inset,
+          task.textRect[2] - inset,
+          task.textRect[3] - inset,
+        )
+        device.strokePath(border, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, task.borderColor, 1)
+      } finally {
+        stroke.destroy()
+        border.destroy()
+      }
+    }
+
     for (const line of layout.lines) {
-      let x = line.x
+      let x = task.textRect[0] + line.x
       for (const character of [...line.text]) {
         const encoded = encodeCharacter(fontResource.font, character)
         // MuPDF のページ座標は y 下向きだが、グリフ座標は y 上向き。
         // d=-fontSize として反転すると、baseline-ascent が箱の上側になる。
         text.showGlyph(
           fontResource.font,
-          [task.fontSize, 0, 0, -task.fontSize, x, line.baseline],
+          [task.fontSize, 0, 0, -task.fontSize, x, task.textRect[1] + line.baseline],
           encoded.glyph,
           encoded.unicode,
         )
@@ -430,6 +635,36 @@ function makeTemporaryAppearance(
       }
     }
     device.fillText(text, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, task.color, 1)
+
+    if (task.calloutLine) {
+      const [tip, end] = task.calloutLine
+      const lineColor = task.borderColor ?? task.color
+      const width = Math.max(0.5, task.borderWidth)
+      const arrowSize = Math.max(8, width * 5)
+      const angle = Math.atan2(end[1] - tip[1], end[0] - tip[0])
+      const linePath = new mupdf.Path()
+      const stroke = new mupdf.StrokeState({
+        lineCap: 'Butt', lineJoin: 'Miter', lineWidth: width, miterLimit: 10,
+      })
+      try {
+        linePath.moveTo(tip[0], tip[1])
+        linePath.lineTo(end[0], end[1])
+        linePath.moveTo(tip[0], tip[1])
+        linePath.lineTo(
+          tip[0] + Math.cos(angle - Math.PI / 6) * arrowSize,
+          tip[1] + Math.sin(angle - Math.PI / 6) * arrowSize,
+        )
+        linePath.moveTo(tip[0], tip[1])
+        linePath.lineTo(
+          tip[0] + Math.cos(angle + Math.PI / 6) * arrowSize,
+          tip[1] + Math.sin(angle + Math.PI / 6) * arrowSize,
+        )
+        device.strokePath(linePath, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, lineColor, 1)
+      } finally {
+        stroke.destroy()
+        linePath.destroy()
+      }
+    }
     device.close()
     annotation.setAppearanceFromDisplayList(null, null, mupdf.Matrix.identity, displayList)
     referenceAppearanceFromPage(temporaryDocument, page, annotation)
@@ -568,7 +803,7 @@ export function applyEdits(
           : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
         if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
         if (!isNew && annotation.getType() !== 'Square') throw new Error('更新対象は Square ではありません。')
-        configureSquare(annotation, edit.rect, edit.color, edit.borderWidth, edit.interiorColor)
+        configureSquare(annotation, edit.rect, edit.color, edit.borderWidth, edit.interiorColor, edit.opacity)
         if (isNew) result.created.push(objectNumber(annotation))
         continue
       }
@@ -592,7 +827,7 @@ export function applyEdits(
           : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
         if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
         if (!isNew && annotation.getType() !== 'Circle') throw new Error('更新対象は Circle ではありません。')
-        configureCircle(annotation, edit.rect, edit.color, edit.borderWidth, edit.interiorColor)
+        configureCircle(annotation, edit.rect, edit.color, edit.borderWidth, edit.interiorColor, edit.opacity)
         if (isNew) result.created.push(objectNumber(annotation))
         continue
       }
@@ -609,21 +844,44 @@ export function applyEdits(
         continue
       }
 
-      const isNew = edit.kind === 'createFreeText'
+      const isCallout = edit.kind === 'createCallout' || edit.kind === 'updateCallout'
+      const isNew = edit.kind === 'createFreeText' || edit.kind === 'createCallout'
       annotation = isNew
         ? page.createAnnotation('FreeText')
         : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
       if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
       if (!isNew && annotation.getType() !== 'FreeText') throw new Error('更新対象は FreeText ではありません。')
-      const width = edit.rect[2] - edit.rect[0]
-      const height = edit.rect[3] - edit.rect[1]
+      const borderWidth = edit.borderWidth ?? 1
+      const outerRect = isCallout ? calloutOuterRect(edit.rect, edit.point, borderWidth) : edit.rect
+      const width = outerRect[2] - outerRect[0]
+      const height = outerRect[3] - outerRect[1]
       if (width <= 0 || height <= 0) throw new Error('FreeText の Rect は正の幅と高さが必要です。')
       const fontResource = fontResources[edit.font]
       if (!fontResource) throw new Error(`${edit.font} が読み込まれていません。`)
       const replaced = replaceMissingCharacters(fontResource.font, edit.text)
       result.replacedCharacters += replaced.replacedCharacters
-      configureFreeText(doc, annotation, edit.rect, replaced.text, edit.fontSize, edit.color, edit.font, isNew)
+      configureFreeText(
+        doc,
+        annotation,
+        outerRect,
+        replaced.text,
+        edit.fontSize,
+        edit.color,
+        edit.font,
+        edit.backgroundColor ?? null,
+        edit.borderColor ?? null,
+        borderWidth,
+        isNew,
+      )
+      let calloutLine: [Point, Point] | null = null
+      if (isCallout) calloutLine = writeCalloutGeometry(doc, annotation, edit.rect, edit.point, borderWidth).line
       if (isNew) result.created.push(objectNumber(annotation))
+      const textRect: Rect = [
+        edit.rect[0] - outerRect[0],
+        edit.rect[1] - outerRect[1],
+        edit.rect[2] - outerRect[0],
+        edit.rect[3] - outerRect[1],
+      ]
       appearances.push({
         editIndex,
         page,
@@ -634,6 +892,14 @@ export function applyEdits(
         fontSize: edit.fontSize,
         color: edit.color,
         fontName: edit.font,
+        textRect,
+        backgroundColor: edit.backgroundColor ?? null,
+        borderColor: edit.borderColor ?? null,
+        borderWidth,
+        calloutLine: calloutLine ? [
+          [calloutLine[0][0] - outerRect[0], calloutLine[0][1] - outerRect[1]],
+          [calloutLine[1][0] - outerRect[0], calloutLine[1][1] - outerRect[1]],
+        ] : null,
       })
       keepForAppearance = true
     } catch (error) {

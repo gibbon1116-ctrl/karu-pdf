@@ -77,6 +77,20 @@ beforeAll(async () => {
         text: '明朝体の日本語', fontSize: 12,
         color: [0.8, 0, 0.8], font: 'BIZUDMincho',
       },
+      {
+        kind: 'createSquare', pageIndex: 1, rect: [72, 100, 190, 160],
+        color: [], borderWidth: 0, interiorColor: [0, 0.25, 1], opacity: 0.5,
+      },
+      {
+        kind: 'createFreeText', pageIndex: 1, rect: [72, 200, 260, 245],
+        text: '背景つき文字', fontSize: 10.5, color: [1, 0, 0], font: 'BIZUDGothic',
+        backgroundColor: [1, 0.9, 0], borderColor: [0, 0, 0], borderWidth: 1,
+      },
+      {
+        kind: 'createCallout', pageIndex: 1, rect: [300, 250, 460, 300], point: [250, 180],
+        text: '吹き出し', fontSize: 10.5, color: [1, 0, 0], font: 'BIZUDGothic',
+        backgroundColor: [1, 1, 1], borderColor: [1, 0, 0], borderWidth: 1,
+      },
     ], fontResources)
     expect(applied.errors).toEqual([])
     annotatedBytes = saveDocument(document, 'full').bytes
@@ -256,5 +270,24 @@ describe('PDFium compatibility', () => {
       `PDFIUM_METRIC added red=${red} blue=${blue} yellow=${yellow} green=${green} mincho=${magenta} `
       + `whiteout_source_blue=${sourceBlue} whiteout_hidden_blue=${hiddenBlue} whiteout_white=${white}`,
     )
+  })
+
+  it('半透明の塗り、背景つき文字、矢印つき吹き出しをPDFiumで描く', () => {
+    const blueFill = countPdfiumPixels(
+      annotatedBytes, 1, [80, 108, 182, 152],
+      (r, g, b) => b > r + 35 && b > g + 15,
+    )
+    const yellowBackground = countPdfiumPixels(
+      annotatedBytes, 1, [80, 205, 250, 240],
+      (r, g, b) => r > 220 && g > 190 && b < 190,
+    )
+    const calloutRed = countPdfiumPixels(
+      annotatedBytes, 1, [240, 170, 470, 310],
+      (r, g, b) => r > 160 && g < 150 && b < 150,
+    )
+    expect(blueFill).toBeGreaterThan(1_000)
+    expect(yellowBackground).toBeGreaterThan(1_000)
+    expect(calloutRed).toBeGreaterThan(100)
+    console.info(`PDFIUM_METRIC spec01e blue_fill=${blueFill} yellow_background=${yellowBackground} callout_red=${calloutRed}`)
   })
 })

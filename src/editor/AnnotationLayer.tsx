@@ -1,12 +1,12 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
-import type { Point, Rect } from '../core/annotations'
+import { nearestCalloutEdgePoint, type Point, type Rect } from '../core/annotations'
 import type { PageSize } from '../core/mupdfDoc'
 import { CSS_PX_PER_PT } from '../viewer/pageLayout'
 import { beginDragFrameMeasurement, TextEditor } from './TextEditor'
 import { AnnotationStore, type EditableAnnotation, type Kind } from './AnnotationStore'
 import type { FormatDefaults, FormatTool } from './formatDefaults'
-import { mergeInkAnnotationId, simplifyPoints, type PreviousInkStroke } from './ink'
+import { inkStrokePoints, mergeInkAnnotationId, simplifyPoints, type PreviousInkStroke } from './ink'
 
 export type EditorTool = 'select' | FormatTool
 export const EditorToolChangeContext = createContext<(tool: EditorTool) => void>(() => undefined)
@@ -30,7 +30,7 @@ interface Props {
 
 interface DragOperation {
   pointerId: number
-  mode: 'move' | 'text' | 'shape' | 'line' | 'ink' | 'resize' | 'line-end'
+  mode: 'move' | 'text' | 'callout' | 'shape' | 'line' | 'ink' | 'resize' | 'line-end' | 'callout-point'
   creationKind?: Kind
   start: Point
   latest: Point
@@ -39,6 +39,7 @@ interface DragOperation {
   frame: number
   moved: boolean
   shift: boolean
+  ctrl: boolean
   resizeHandle?: ResizeHandle
   lineHandle?: LineHandle
   originalRect?: Rect
@@ -93,10 +94,10 @@ function shapeRect(start: Point, end: Point, square: boolean): Rect {
 
 function resizedRect(rect: Rect, handle: ResizeHandle, point: Point, kind: EditableAnnotation['kind']): Rect {
   let [x0, y0, x1, y1] = rect
-  const minimumWidth = kind === 'freetext' ? 20 : 4
+  const minimumWidth = kind === 'freetext' || kind === 'callout' ? 20 : 4
   if (handle.includes('w')) x0 = Math.min(point[0], x1 - minimumWidth)
   if (handle.includes('e')) x1 = Math.max(point[0], x0 + minimumWidth)
-  if (kind !== 'freetext') {
+  if (kind !== 'freetext' && kind !== 'callout') {
     if (handle.includes('n')) y0 = Math.min(point[1], y1 - 4)
     if (handle.includes('s')) y1 = Math.max(point[1], y0 + 4)
   }
@@ -111,8 +112,16 @@ function arrowHead(line: [Point, Point], size: number): string {
   return `${left[0]},${left[1]} ${end[0]},${end[1]} ${right[0]},${right[1]}`
 }
 
+function calloutArrowHead(line: [Point, Point], size: number): string {
+  const [tip, end] = line
+  const angle = Math.atan2(end[1] - tip[1], end[0] - tip[0])
+  const left: Point = [tip[0] + Math.cos(angle - Math.PI / 6) * size, tip[1] + Math.sin(angle - Math.PI / 6) * size]
+  const right: Point = [tip[0] + Math.cos(angle + Math.PI / 6) * size, tip[1] + Math.sin(angle + Math.PI / 6) * size]
+  return `${left[0]},${left[1]} ${tip[0]},${tip[1]} ${right[0]},${right[1]}`
+}
+
 function allResizeHandles(kind: Kind): boolean {
-  return kind === 'square' || kind === 'circle' || kind === 'whiteout' || kind === 'highlight' || kind === 'ink'
+  return kind === 'square' || kind === 'circle' || kind === 'highlight' || kind === 'ink'
 }
 
 export function AnnotationLayer(props: Props) {
@@ -124,6 +133,7 @@ export function AnnotationLayer(props: Props) {
   const draftInkRef = useRef<SVGPolylineElement>(null)
   const resizePreviewRef = useRef<SVGRectElement>(null)
   const linePreviewRef = useRef<SVGLineElement>(null)
+  const calloutPreviewRef = useRef<SVGLineElement>(null)
   const dragRef = useRef<DragOperation | null>(null)
   const previousInkRef = useRef<PreviousInkStroke | null>(null)
   const loadingLayoutsRef = useRef(new Set<string>())
@@ -134,7 +144,7 @@ export function AnnotationLayer(props: Props) {
   useEffect(() => {
     for (const annotation of annotations) {
       const visible = annotation.objNum === null || touched.has(annotation.objNum)
-      if (!visible || annotation.kind !== 'freetext' || annotation.layout || loadingLayoutsRef.current.has(annotation.id)) continue
+      if (!visible || (annotation.kind !== 'freetext' && annotation.kind !== 'callout') || annotation.layout || loadingLayoutsRef.current.has(annotation.id)) continue
       loadingLayoutsRef.current.add(annotation.id)
       const width = annotation.rect[2] - annotation.rect[0]
       void props.pool.layoutText(annotation.text, annotation.fontSize, width, annotation.font).then((layout) => {
@@ -170,6 +180,17 @@ export function AnnotationLayer(props: Props) {
       preview?.setAttribute('y2', String(line[1][1]))
       return
     }
+    if (operation.mode === 'callout-point' && operation.id) {
+      const annotation = props.store.get(operation.id)
+      const preview = calloutPreviewRef.current
+      if (!annotation || !preview) return
+      const end = nearestCalloutEdgePoint(annotation.rect, operation.latest)
+      preview.setAttribute('x1', String(operation.latest[0]))
+      preview.setAttribute('y1', String(operation.latest[1]))
+      preview.setAttribute('x2', String(end[0]))
+      preview.setAttribute('y2', String(end[1]))
+      return
+    }
     if (operation.mode === 'line') {
       const end = constrainedEnd(operation.start, operation.latest, operation.shift)
       draftLineRef.current?.setAttribute('x1', String(operation.start[0]))
@@ -179,18 +200,33 @@ export function AnnotationLayer(props: Props) {
       return
     }
     if (operation.mode === 'ink') {
-      draftInkRef.current?.setAttribute('points', (operation.points ?? []).map((point) => `${point[0]},${point[1]}`).join(' '))
+      const points = inkStrokePoints(operation.points ?? [], operation.ctrl, operation.shift)
+      draftInkRef.current?.setAttribute('points', points.map((point) => `${point[0]},${point[1]}`).join(' '))
       return
     }
     const draft = draftRectRef.current
     if (!draft) return
     const rect = operation.mode === 'shape'
       ? shapeRect(operation.start, operation.latest, operation.creationKind === 'circle' && operation.shift)
+      : operation.mode === 'callout'
+        ? [
+            operation.moved ? operation.latest[0] : operation.start[0] + 40,
+            operation.moved ? operation.latest[1] : operation.start[1] - 40,
+            (operation.moved ? operation.latest[0] : operation.start[0] + 40) + 160,
+            (operation.moved ? operation.latest[1] : operation.start[1] - 40) + 16.6,
+          ] as Rect
       : [dx < 0 ? operation.latest[0] : operation.start[0], operation.start[1], dx < 0 ? operation.start[0] : operation.latest[0], operation.start[1] + 16.6] as Rect
     draft.setAttribute('x', String(rect[0]))
     draft.setAttribute('y', String(rect[1]))
     draft.setAttribute('width', String(rect[2] - rect[0]))
     draft.setAttribute('height', String(rect[3] - rect[1]))
+    if (operation.mode === 'callout') {
+      const end = nearestCalloutEdgePoint(rect, operation.start)
+      draftLineRef.current?.setAttribute('x1', String(operation.start[0]))
+      draftLineRef.current?.setAttribute('y1', String(operation.start[1]))
+      draftLineRef.current?.setAttribute('x2', String(end[0]))
+      draftLineRef.current?.setAttribute('y2', String(end[1]))
+    }
   }
 
   const scheduleDraft = (operation: DragOperation) => {
@@ -202,7 +238,7 @@ export function AnnotationLayer(props: Props) {
   }
 
   const hideDrafts = () => {
-    for (const element of [draftRectRef.current, draftLineRef.current, draftInkRef.current, resizePreviewRef.current, linePreviewRef.current]) {
+    for (const element of [draftRectRef.current, draftLineRef.current, draftInkRef.current, resizePreviewRef.current, linePreviewRef.current, calloutPreviewRef.current]) {
       if (element) element.style.display = 'none'
     }
   }
@@ -230,9 +266,13 @@ export function AnnotationLayer(props: Props) {
       props.store.updateLine(operation.id, line)
       return
     }
+    if (operation.mode === 'callout-point' && operation.id) {
+      props.store.updateCalloutPoint(operation.id, operation.latest)
+      return
+    }
     if (operation.mode === 'resize' && operation.id && operation.originalRect && operation.resizeHandle && operation.annotationKind) {
       const rect = resizedRect(operation.originalRect, operation.resizeHandle, operation.latest, operation.annotationKind)
-      if (operation.annotationKind !== 'freetext') props.store.resize(operation.id, rect)
+      if (operation.annotationKind !== 'freetext' && operation.annotationKind !== 'callout') props.store.resize(operation.id, rect)
       else {
         const annotation = props.store.get(operation.id)
         if (!annotation) return
@@ -244,7 +284,8 @@ export function AnnotationLayer(props: Props) {
       return
     }
     if (operation.mode === 'ink' && operation.creationKind && operation.points) {
-      const points = simplifyPoints(operation.points, 0.5)
+      const modePoints = inkStrokePoints(operation.points, operation.ctrl, operation.shift)
+      const points = operation.ctrl ? modePoints : simplifyPoints(modePoints, 0.5)
       if (points.length < 2) return
       let id = operation.mergeId
       if (id && props.store.get(id)) props.store.appendInkStroke(id, points)
@@ -286,30 +327,40 @@ export function AnnotationLayer(props: Props) {
     if (operation.mode === 'shape' && operation.creationKind) {
       const rect = shapeRect(operation.start, operation.latest, operation.creationKind === 'circle' && operation.shift)
       if (rect[2] - rect[0] < 4 || rect[3] - rect[1] < 4) return
-      const format = props.formatDefaults[operation.creationKind as 'square' | 'circle' | 'whiteout']
+      const format = props.formatDefaults[operation.creationKind as 'square' | 'circle']
       const annotation = props.store.create({
         pageIndex: props.pageIndex,
         kind: operation.creationKind,
         rect,
-        color: format.color,
-        borderWidth: operation.creationKind === 'whiteout' ? 0 : format.borderWidth,
-        interiorColor: operation.creationKind === 'whiteout' ? [1, 1, 1] : null,
+        color: format.borderColor ?? format.color,
+        borderColor: format.borderColor,
+        borderWidth: format.borderColor ? format.borderWidth : 0,
+        interiorColor: format.fillColor,
+        opacity: format.opacity,
       })
       props.onSelect(annotation.id)
       changeTool('select')
       return
     }
-    if (operation.mode === 'text') {
-      const format = props.formatDefaults.text
-      const width = operation.moved ? Math.max(20, Math.abs(dx)) : 200
-      const left = operation.moved && dx < 0 ? operation.start[0] - width : operation.start[0]
+    if (operation.mode === 'text' || operation.mode === 'callout') {
+      const callout = operation.mode === 'callout'
+      const format = props.formatDefaults[callout ? 'callout' : 'text']
+      const width = callout ? 160 : operation.moved ? Math.max(20, Math.abs(dx)) : 200
+      const left = callout
+        ? (operation.moved ? operation.latest[0] : operation.start[0] + 40)
+        : operation.moved && dx < 0 ? operation.start[0] - width : operation.start[0]
+      const top = callout ? (operation.moved ? operation.latest[1] : operation.start[1] - 40) : operation.start[1]
       const annotation = props.store.create({
         pageIndex: props.pageIndex,
-        kind: 'freetext',
+        kind: callout ? 'callout' : 'freetext',
         color: format.color,
         fontSize: format.fontSize,
         font: format.font,
-        rect: [left, operation.start[1], left + width, operation.start[1] + 16.6],
+        rect: [left, top, left + width, top + 16.6],
+        interiorColor: format.fillColor,
+        borderColor: format.borderColor,
+        borderWidth: format.borderWidth,
+        calloutPoint: callout ? operation.start : null,
         deferHistory: true,
       })
       props.onSelect(annotation.id)
@@ -327,15 +378,21 @@ export function AnnotationLayer(props: Props) {
           { handle: 'e', x: x1, y: (y0 + y1) / 2 }, { handle: 'se', x: x1, y: y1 }, { handle: 's', x: (x0 + x1) / 2, y: y1 },
           { handle: 'sw', x: x0, y: y1 }, { handle: 'w', x: x0, y: (y0 + y1) / 2 },
         ]
-      : annotation.kind === 'freetext'
+      : annotation.kind === 'freetext' || annotation.kind === 'callout'
         ? [{ handle: 'e', x: x1, y: (y0 + y1) / 2 }, { handle: 'w', x: x0, y: (y0 + y1) / 2 }]
         : []
     const line = annotation.line
+    const calloutLine = annotation.kind === 'callout' && annotation.calloutPoint
+      ? [[...annotation.calloutPoint], nearestCalloutEdgePoint(annotation.rect, annotation.calloutPoint)] as [Point, Point]
+      : null
+    const calloutColor = annotation.borderColor ?? annotation.color
+    const selectionRect: Rect = calloutLine
+      ? [Math.min(x0, calloutLine[0][0]), Math.min(y0, calloutLine[0][1]), Math.max(x1, calloutLine[0][0]), Math.max(y1, calloutLine[0][1])]
+      : annotation.rect
     return (
       <g key={annotation.id} data-annotation-id={annotation.id} className="annotation-item">
-        {visible && annotation.kind === 'square' && <rect className="annotation-square" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill="none" stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} />}
-        {visible && annotation.kind === 'circle' && <ellipse className="annotation-shape" cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} rx={(x1 - x0) / 2} ry={(y1 - y0) / 2} fill="none" stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} />}
-        {visible && annotation.kind === 'whiteout' && <rect className="annotation-whiteout" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill="#fff" />}
+        {visible && annotation.kind === 'square' && <rect className="annotation-square" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
+        {visible && annotation.kind === 'circle' && <ellipse className="annotation-shape" cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} rx={(x1 - x0) / 2} ry={(y1 - y0) / 2} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && line && <>
           <line className="annotation-line" x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]} stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} />
           {annotation.kind === 'arrow' && <polyline className="annotation-line" points={arrowHead(line, Math.max(8, annotation.borderWidth * 5))} fill="none" stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} />}
@@ -343,14 +400,23 @@ export function AnnotationLayer(props: Props) {
         {visible && (annotation.kind === 'highlight' || annotation.kind === 'ink') && annotation.inkList?.map((stroke, index) => (
           <polyline key={`${annotation.id}-stroke-${index}`} className="annotation-ink" points={stroke.map((point) => `${point[0]},${point[1]}`).join(' ')} fill="none" stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} opacity={annotation.opacity} />
         ))}
-        {visible && annotation.kind === 'freetext' && annotation.layout?.lines.map((lineLayout, index) => (
-          <text key={`${annotation.id}-line-${index}`} className="annotation-text" x={x0 + lineLayout.x} y={y0 + lineLayout.baseline} fill={color(annotation.color)} fontFamily={annotation.font === 'BIZUDMincho' ? 'KaruBIZUDMincho' : 'KaruBIZUDGothic'} fontSize={annotation.fontSize} style={{ fontKerning: 'none' }} xmlSpace="preserve">{lineLayout.text}</text>
-        ))}
+        {visible && calloutLine && <>
+          <line className="annotation-callout-line" x1={calloutLine[0][0]} y1={calloutLine[0][1]} x2={calloutLine[1][0]} y2={calloutLine[1][1]} stroke={color(calloutColor)} strokeWidth={Math.max(0.5, annotation.borderWidth)} />
+          <polyline className="annotation-callout-line" points={calloutArrowHead(calloutLine, Math.max(8, annotation.borderWidth * 5))} fill="none" stroke={color(calloutColor)} strokeWidth={Math.max(0.5, annotation.borderWidth)} />
+        </>}
+        {visible && (annotation.kind === 'freetext' || annotation.kind === 'callout') && <g className="annotation-text-frame">
+          <rect className="annotation-text-box" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} />
+          {annotation.layout?.lines.map((lineLayout, index) => (
+            <text key={`${annotation.id}-line-${index}`} className="annotation-text" x={x0 + lineLayout.x} y={y0 + lineLayout.baseline} fill={color(annotation.color)} fontFamily={annotation.font === 'BIZUDMincho' ? 'KaruBIZUDMincho' : 'KaruBIZUDGothic'} fontSize={annotation.fontSize} style={{ fontKerning: 'none' }} xmlSpace="preserve">{lineLayout.text}</text>
+          ))}
+        </g>}
         {line ? <line className="annotation-hit annotation-line-hit" data-annotation-id={annotation.id} x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]} /> : <rect className="annotation-hit" data-annotation-id={annotation.id} x={x0} y={y0} width={Math.max(1, x1 - x0)} height={Math.max(1, y1 - y0)} />}
+        {calloutLine && <line className="annotation-hit annotation-line-hit" data-annotation-id={annotation.id} x1={calloutLine[0][0]} y1={calloutLine[0][1]} x2={calloutLine[1][0]} y2={calloutLine[1][1]} />}
         {props.selectedId === annotation.id && <>
-          <rect className="annotation-selection" x={x0 - 1} y={y0 - 1} width={Math.max(2, x1 - x0 + 2)} height={Math.max(2, y1 - y0 + 2)} />
+          <rect className="annotation-selection" x={selectionRect[0] - 1} y={selectionRect[1] - 1} width={Math.max(2, selectionRect[2] - selectionRect[0] + 2)} height={Math.max(2, selectionRect[3] - selectionRect[1] + 2)} />
           {props.tool === 'select' && positions.map(({ handle, x, y }) => <rect key={`${annotation.id}-${handle}`} className="annotation-resize-handle" data-testid={`resize-handle-${handle}`} data-annotation-id={annotation.id} data-resize-handle={handle} x={x - handleSize / 2} y={y - handleSize / 2} width={handleSize} height={handleSize} />)}
           {props.tool === 'select' && line && line.map((point, index) => <rect key={`${annotation.id}-line-${index}`} className="annotation-resize-handle" data-testid={`line-handle-${index === 0 ? 'start' : 'end'}`} data-annotation-id={annotation.id} data-line-handle={index === 0 ? 'start' : 'end'} x={point[0] - handleSize / 2} y={point[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
+          {props.tool === 'select' && calloutLine && <rect className="annotation-resize-handle annotation-callout-handle" data-testid="callout-point-handle" data-annotation-id={annotation.id} data-callout-point="true" x={calloutLine[0][0] - handleSize / 2} y={calloutLine[0][1] - handleSize / 2} width={handleSize} height={handleSize} />}
         </>}
       </g>
     )
@@ -372,20 +438,26 @@ export function AnnotationLayer(props: Props) {
           const annotation = id ? props.store.get(id) : undefined
           const lineHandle = targetValue<LineHandle>(event.target, 'line-handle')
           const resizeHandle = targetValue<ResizeHandle>(event.target, 'resize-handle')
-          if (lineHandle && annotation?.line) {
+          const calloutPoint = targetValue<string>(event.target, 'callout-point')
+          if (calloutPoint && annotation?.kind === 'callout') {
+            props.store.touch(id!)
+            props.onSelect(id)
+            if (calloutPreviewRef.current) calloutPreviewRef.current.style.display = 'block'
+            dragRef.current = { pointerId: event.pointerId, mode: 'callout-point', start, latest: start, id, element: null, frame: 0, moved: false, shift: false, ctrl: false, stopMeasurement: beginDragFrameMeasurement() }
+          } else if (lineHandle && annotation?.line) {
             props.store.touch(id!)
             props.onSelect(id)
             if (linePreviewRef.current) linePreviewRef.current.style.display = 'block'
-            dragRef.current = { pointerId: event.pointerId, mode: 'line-end', start, latest: start, id, element: null, frame: 0, moved: false, shift: false, lineHandle, originalLine: annotation.line, stopMeasurement: beginDragFrameMeasurement() }
+            dragRef.current = { pointerId: event.pointerId, mode: 'line-end', start, latest: start, id, element: null, frame: 0, moved: false, shift: false, ctrl: false, lineHandle, originalLine: annotation.line, stopMeasurement: beginDragFrameMeasurement() }
           } else if (resizeHandle && annotation) {
             props.store.touch(id!)
             props.onSelect(id)
             if (resizePreviewRef.current) resizePreviewRef.current.style.display = 'block'
-            dragRef.current = { pointerId: event.pointerId, mode: 'resize', start, latest: start, id, element: null, frame: 0, moved: false, shift: false, resizeHandle, originalRect: annotation.rect, annotationKind: annotation.kind, stopMeasurement: beginDragFrameMeasurement() }
+            dragRef.current = { pointerId: event.pointerId, mode: 'resize', start, latest: start, id, element: null, frame: 0, moved: false, shift: false, ctrl: false, resizeHandle, originalRect: annotation.rect, annotationKind: annotation.kind, stopMeasurement: beginDragFrameMeasurement() }
           } else if (id) {
             props.store.touch(id)
             props.onSelect(id)
-            dragRef.current = { pointerId: event.pointerId, mode: 'move', start, latest: start, id, element: svg.querySelector(`g[data-annotation-id="${id}"]`), frame: 0, moved: false, shift: false, stopMeasurement: beginDragFrameMeasurement() }
+            dragRef.current = { pointerId: event.pointerId, mode: 'move', start, latest: start, id, element: svg.querySelector(annotation?.kind === 'callout' ? `g[data-annotation-id="${id}"] .annotation-text-frame` : `g[data-annotation-id="${id}"]`), frame: 0, moved: false, shift: false, ctrl: false, stopMeasurement: beginDragFrameMeasurement() }
           } else {
             props.onSelect(null)
             return
@@ -393,9 +465,10 @@ export function AnnotationLayer(props: Props) {
         } else {
           props.onSelect(null)
           const kind = props.tool === 'text' ? 'freetext' : props.tool
-          const mode = props.tool === 'text' ? 'text' : props.tool === 'line' || props.tool === 'arrow' ? 'line' : props.tool === 'highlight' || props.tool === 'ink' ? 'ink' : 'shape'
+          const mode = props.tool === 'text' ? 'text' : props.tool === 'callout' ? 'callout' : props.tool === 'line' || props.tool === 'arrow' ? 'line' : props.tool === 'highlight' || props.tool === 'ink' ? 'ink' : 'shape'
           const shown = mode === 'line' ? draftLineRef.current : mode === 'ink' ? draftInkRef.current : draftRectRef.current
           if (shown) shown.style.display = 'block'
+          if (mode === 'callout' && draftLineRef.current) draftLineRef.current.style.display = 'block'
           const startedAt = performance.now()
           dragRef.current = {
             pointerId: event.pointerId,
@@ -408,6 +481,7 @@ export function AnnotationLayer(props: Props) {
             frame: 0,
             moved: false,
             shift: event.shiftKey,
+            ctrl: event.ctrlKey,
             points: mode === 'ink' ? [start] : undefined,
             mergeId: mode === 'ink' ? mergeInkAnnotationId(previousInkRef.current, props.pageIndex, kind as 'highlight' | 'ink', startedAt) : null,
             stopMeasurement: beginDragFrameMeasurement(mode === 'ink' ? 'ink' : 'drag'),
@@ -420,6 +494,7 @@ export function AnnotationLayer(props: Props) {
         if (!operation || operation.pointerId !== event.pointerId) return
         operation.latest = pointInPage(event.currentTarget, event)
         operation.shift = event.shiftKey
+        operation.ctrl = event.ctrlKey
         if (operation.mode === 'ink') operation.points?.push(operation.latest)
         if (Math.abs(operation.latest[0] - operation.start[0]) >= 2 || Math.abs(operation.latest[1] - operation.start[1]) >= 2) operation.moved = true
         scheduleDraft(operation)
@@ -429,6 +504,7 @@ export function AnnotationLayer(props: Props) {
         if (!operation || operation.pointerId !== event.pointerId) return
         operation.latest = pointInPage(event.currentTarget, event)
         operation.shift = event.shiftKey
+        operation.ctrl = event.ctrlKey
         if (operation.mode === 'ink') operation.points?.push(operation.latest)
         if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
         finishDrag(true)
@@ -438,7 +514,7 @@ export function AnnotationLayer(props: Props) {
         if (props.tool !== 'select') return
         const id = annotationIdFromTarget(event.target) ?? props.selectedId
         const annotation = id ? props.store.touch(id) : undefined
-        if (annotation?.kind === 'freetext') { props.onSelect(annotation.id); props.onEdit(annotation.id) }
+        if (annotation?.kind === 'freetext' || annotation?.kind === 'callout') { props.onSelect(annotation.id); props.onEdit(annotation.id) }
       }}
     >
       <rect className="annotation-surface" x="0" y="0" width={props.pageSize.width} height={props.pageSize.height} />
@@ -448,10 +524,11 @@ export function AnnotationLayer(props: Props) {
       <polyline ref={draftInkRef} className="annotation-ink-draft" points="" />
       <rect ref={resizePreviewRef} className="annotation-resize-preview" x="0" y="0" width="0" height="0" />
       <line ref={linePreviewRef} className="annotation-line-preview" x1="0" y1="0" x2="0" y2="0" />
+      <line ref={calloutPreviewRef} className="annotation-line-preview" x1="0" y1="0" x2="0" y2="0" />
     </svg>
     {editing && <TextEditor annotation={editing} zoom={props.zoom} pool={props.pool} store={props.store} onClose={(removed) => {
       props.onEdit(null)
-      if (props.tool === 'text') { props.onSelect(removed ? null : editing.id); changeTool('select') }
+      if (props.tool === 'text' || props.tool === 'callout') { props.onSelect(removed ? null : editing.id); changeTool('select') }
     }} registerCommit={props.registerCommit} />}
   </>
 }

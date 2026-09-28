@@ -1,9 +1,9 @@
-import type { AnnotationColor, AnnotationEdit, AnnotationInfo, Point, Rect, RGB } from '../core/annotations'
+import { nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type Point, type Rect, type RGB } from '../core/annotations'
 import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
 import { History, type HistoryStep } from './history'
 
-export type Kind = 'freetext' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'whiteout'
+export type Kind = 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink'
 
 export interface EditableAnnotation {
   id: string
@@ -18,8 +18,11 @@ export interface EditableAnnotation {
   borderWidth: number
   opacity: number
   interiorColor: RGB | null
+  borderColor: RGB | null
   line: [Point, Point] | null
   inkList: Point[][] | null
+  calloutPoint: Point | null
+  calloutLine: [Point, Point] | null
   layout: LayoutResult | null
   dirty: boolean
   madeByKaru: boolean
@@ -58,11 +61,17 @@ function cloneState(annotation: AnnotationState): AnnotationState {
     rect: [...annotation.rect],
     color: [...annotation.color],
     interiorColor: annotation.interiorColor ? [...annotation.interiorColor] : null,
+    borderColor: annotation.borderColor ? [...annotation.borderColor] : null,
     line: annotation.line ? [
       [...annotation.line[0]],
       [...annotation.line[1]],
     ] : null,
     inkList: annotation.inkList?.map(clonePoints) ?? null,
+    calloutPoint: annotation.calloutPoint ? [...annotation.calloutPoint] : null,
+    calloutLine: annotation.calloutLine ? [
+      [...annotation.calloutLine[0]],
+      [...annotation.calloutLine[1]],
+    ] : null,
     layout: annotation.layout ? {
       ...annotation.layout,
       lines: annotation.layout.lines.map((line) => ({ ...line })),
@@ -86,8 +95,11 @@ function persistedState(state: AnnotationState): unknown {
     borderWidth: state.borderWidth,
     opacity: state.opacity,
     interiorColor: state.interiorColor,
+    borderColor: state.borderColor,
     line: state.line,
     inkList: state.inkList,
+    calloutPoint: state.calloutPoint,
+    calloutLine: state.calloutLine,
   }
 }
 
@@ -168,12 +180,15 @@ export class AnnotationStore {
           text: info.contents,
           fontSize: info.fontSize ?? DEFAULT_FONT_SIZE,
           font: info.fontName === 'BIZUDMincho' ? 'BIZUDMincho' : 'BIZUDGothic',
-          color: [...((kind === 'freetext' ? info.textColor : info.strokeColor) ?? DEFAULT_COLOR)],
+          color: [...((kind === 'freetext' || kind === 'callout' ? info.textColor : info.strokeColor) ?? DEFAULT_COLOR)],
           borderWidth: info.borderWidth ?? DEFAULT_BORDER_WIDTH,
           opacity: info.opacity ?? 1,
           interiorColor: info.interiorColor ? [...info.interiorColor] : null,
+          borderColor: info.strokeColor ? [...info.strokeColor] : null,
           line: info.line ? [[...info.line[0]], [...info.line[1]]] : null,
           inkList: info.inkList?.map(clonePoints) ?? null,
+          calloutPoint: info.calloutPoint ? [...info.calloutPoint] : null,
+          calloutLine: info.calloutLine ? [[...info.calloutLine[0]], [...info.calloutLine[1]]] : null,
           layout: null,
           madeByKaru: info.madeByKaru,
           deleted: false,
@@ -215,8 +230,10 @@ export class AnnotationStore {
     borderWidth?: number
     opacity?: number
     interiorColor?: RGB | null
+    borderColor?: RGB | null
     line?: [Point, Point] | null
     inkList?: Point[][] | null
+    calloutPoint?: Point | null
     layout?: LayoutResult | null
     deferHistory?: boolean
   }): EditableAnnotation {
@@ -234,10 +251,15 @@ export class AnnotationStore {
       borderWidth: input.borderWidth ?? DEFAULT_BORDER_WIDTH,
       opacity: input.opacity ?? 1,
       interiorColor: input.interiorColor ? [...input.interiorColor] : null,
+      borderColor: input.borderColor === undefined
+        ? (input.kind === 'square' || input.kind === 'circle' ? [...(input.color ?? DEFAULT_COLOR)] : null)
+        : input.borderColor ? [...input.borderColor] : null,
       line: input.line ? [[...input.line[0]], [...input.line[1]]] : null,
       inkList: input.inkList?.map(clonePoints) ?? null,
+      calloutPoint: input.calloutPoint ? [...input.calloutPoint] : null,
+      calloutLine: input.calloutPoint ? [[...input.calloutPoint], nearestCalloutEdgePoint(input.rect, input.calloutPoint)] : null,
       layout: input.layout ?? null,
-      madeByKaru: input.kind === 'freetext',
+      madeByKaru: input.kind === 'freetext' || input.kind === 'callout',
       deleted: false,
       revision: 1,
     }
@@ -268,6 +290,9 @@ export class AnnotationStore {
       annotation.rect = [annotation.rect[0] + dx, annotation.rect[1] + dy, annotation.rect[2] + dx, annotation.rect[3] + dy]
       if (annotation.line) annotation.line = annotation.line.map((point) => [point[0] + dx, point[1] + dy]) as [Point, Point]
       if (annotation.inkList) annotation.inkList = annotation.inkList.map((stroke) => stroke.map((point) => [point[0] + dx, point[1] + dy]))
+      if (annotation.kind === 'callout' && annotation.calloutPoint) {
+        annotation.calloutLine = [[...annotation.calloutPoint], nearestCalloutEdgePoint(annotation.rect, annotation.calloutPoint)]
+      }
     })
   }
 
@@ -277,6 +302,9 @@ export class AnnotationStore {
       if (annotation.line) annotation.line = annotation.line.map((point) => mapPoint(point, previous, rect)) as [Point, Point]
       if (annotation.inkList) annotation.inkList = annotation.inkList.map((stroke) => stroke.map((point) => mapPoint(point, previous, rect)))
       annotation.rect = [...rect]
+      if (annotation.kind === 'callout' && annotation.calloutPoint) {
+        annotation.calloutLine = [[...annotation.calloutPoint], nearestCalloutEdgePoint(rect, annotation.calloutPoint)]
+      }
     })
   }
 
@@ -294,9 +322,17 @@ export class AnnotationStore {
     })
   }
 
+  updateCalloutPoint(id: string, point: Point): void {
+    this.mutate(id, (annotation) => {
+      if (annotation.kind !== 'callout') return
+      annotation.calloutPoint = [...point]
+      annotation.calloutLine = [[...point], nearestCalloutEdgePoint(annotation.rect, point)]
+    })
+  }
+
   updateText(id: string, text: string, layout: LayoutResult, rect?: Rect): void {
     const annotation = this.annotations.get(id)
-    if (!annotation || annotation.deleted || annotation.kind !== 'freetext') return
+    if (!annotation || annotation.deleted || (annotation.kind !== 'freetext' && annotation.kind !== 'callout')) return
     const pendingCreation = this.pendingCreations.delete(id)
     const before = pendingCreation ? null : cloneState(annotation)
     this.markTouched(annotation)
@@ -311,7 +347,7 @@ export class AnnotationStore {
 
   setLayout(id: string, layout: LayoutResult): void {
     const annotation = this.annotations.get(id)
-    if (!annotation || annotation.deleted || annotation.kind !== 'freetext') return
+    if (!annotation || annotation.deleted || (annotation.kind !== 'freetext' && annotation.kind !== 'callout')) return
     annotation.layout = layout
     this.notify()
   }
@@ -323,14 +359,23 @@ export class AnnotationStore {
     font?: FontName
     layout?: LayoutResult
     rect?: Rect
+    interiorColor?: RGB | null
+    borderColor?: RGB | null
+    opacity?: number
   }): void {
     this.mutate(id, (annotation) => {
       if (values.color) annotation.color = [...values.color]
       if (values.borderWidth !== undefined) annotation.borderWidth = values.borderWidth
-      if (values.fontSize !== undefined && annotation.kind === 'freetext') annotation.fontSize = values.fontSize
-      if (values.font !== undefined && annotation.kind === 'freetext') annotation.font = values.font
-      if (values.layout && annotation.kind === 'freetext') annotation.layout = values.layout
+      if (values.interiorColor !== undefined) annotation.interiorColor = values.interiorColor ? [...values.interiorColor] : null
+      if (values.borderColor !== undefined) annotation.borderColor = values.borderColor ? [...values.borderColor] : null
+      if (values.opacity !== undefined) annotation.opacity = values.opacity
+      if (values.fontSize !== undefined && (annotation.kind === 'freetext' || annotation.kind === 'callout')) annotation.fontSize = values.fontSize
+      if (values.font !== undefined && (annotation.kind === 'freetext' || annotation.kind === 'callout')) annotation.font = values.font
+      if (values.layout && (annotation.kind === 'freetext' || annotation.kind === 'callout')) annotation.layout = values.layout
       if (values.rect) annotation.rect = [...values.rect]
+      if (annotation.kind === 'callout' && annotation.calloutPoint) {
+        annotation.calloutLine = [[...annotation.calloutPoint], nearestCalloutEdgePoint(annotation.rect, annotation.calloutPoint)]
+      }
     })
   }
 
@@ -470,7 +515,7 @@ export class AnnotationStore {
 
   private toEdit(annotation: StoredAnnotation, savedObjNum: number | null): AnnotationEdit {
     const create = savedObjNum === null
-    if (annotation.kind === 'freetext') {
+    if (annotation.kind === 'freetext' || annotation.kind === 'callout') {
       const common = {
         pageIndex: annotation.pageIndex,
         rect: annotation.rect,
@@ -478,6 +523,13 @@ export class AnnotationStore {
         fontSize: annotation.fontSize,
         color: annotation.color,
         font: annotation.font,
+        backgroundColor: annotation.interiorColor,
+        borderColor: annotation.borderColor,
+        borderWidth: annotation.borderWidth,
+      }
+      if (annotation.kind === 'callout') {
+        const callout = { ...common, point: annotation.calloutPoint ?? [annotation.rect[0] - 40, annotation.rect[1] + 40] as Point }
+        return create ? { kind: 'createCallout', ...callout } : { kind: 'updateCallout', objNum: savedObjNum, ...callout }
       }
       return create ? { kind: 'createFreeText', ...common } : { kind: 'updateFreeText', objNum: savedObjNum, ...common }
     }
@@ -492,16 +544,16 @@ export class AnnotationStore {
       return create ? { kind: 'createLine', ...common } : { kind: 'updateLine', objNum: savedObjNum, ...common }
     }
     if (annotation.kind === 'circle') {
-      const common = { pageIndex: annotation.pageIndex, rect: annotation.rect, color: annotation.color, borderWidth: annotation.borderWidth, interiorColor: annotation.interiorColor }
+      const color: AnnotationColor = annotation.borderColor ?? []
+      const common = { pageIndex: annotation.pageIndex, rect: annotation.rect, color, borderWidth: annotation.borderColor ? annotation.borderWidth : 0, interiorColor: annotation.interiorColor, opacity: annotation.opacity }
       return create ? { kind: 'createCircle', ...common } : { kind: 'updateCircle', objNum: savedObjNum, ...common }
     }
     if (annotation.kind === 'highlight' || annotation.kind === 'ink') {
       const common = { pageIndex: annotation.pageIndex, inkList: annotation.inkList!, color: annotation.color, borderWidth: annotation.borderWidth, opacity: annotation.opacity }
       return create ? { kind: 'createInk', ...common } : { kind: 'updateInk', objNum: savedObjNum, ...common }
     }
-    const color: AnnotationColor = annotation.kind === 'whiteout' ? [] : annotation.color
-    const interiorColor = annotation.kind === 'whiteout' ? [1, 1, 1] as RGB : annotation.interiorColor
-    const common = { pageIndex: annotation.pageIndex, rect: annotation.rect, color, borderWidth: annotation.borderWidth, interiorColor }
+    const color: AnnotationColor = annotation.borderColor ?? []
+    const common = { pageIndex: annotation.pageIndex, rect: annotation.rect, color, borderWidth: annotation.borderColor ? annotation.borderWidth : 0, interiorColor: annotation.interiorColor, opacity: annotation.opacity }
     return create ? { kind: 'createSquare', ...common } : { kind: 'updateSquare', objNum: savedObjNum, ...common }
   }
 

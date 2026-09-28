@@ -20,6 +20,8 @@ const existingFreeText: AnnotationInfo = {
   line: null,
   lineEnding: null,
   inkList: null,
+  calloutPoint: null,
+  calloutLine: null,
   madeByKaru: false,
 }
 
@@ -175,5 +177,34 @@ describe('AnnotationStore', () => {
     store.markApplied({ created: [], errors: [] })
     store.undo()
     expect(store.toEdits()).toEqual([expect.objectContaining({ kind: 'updateSquare', objNum: 72, rect: [10, 20, 110, 40] })])
+  })
+
+  it('塗り・枠線なし・透明度と吹き出しの指示点を編集内容へ変換する', () => {
+    const store = new AnnotationStore()
+    store.create({
+      pageIndex: 0, kind: 'square', rect: [10, 20, 110, 80],
+      color: [1, 0, 0], borderColor: null, borderWidth: 2,
+      interiorColor: [0, 0.25, 1], opacity: 0.5,
+    })
+    const callout = store.create({
+      pageIndex: 0, kind: 'callout', rect: [200, 100, 360, 145],
+      text: '指摘', color: [1, 0, 0], interiorColor: [1, 1, 1],
+      borderColor: [1, 0, 0], borderWidth: 1, calloutPoint: [150, 70],
+    })
+    expect(store.toEdits()).toEqual([
+      expect.objectContaining({
+        kind: 'createSquare', color: [], borderWidth: 0,
+        interiorColor: [0, 0.25, 1], opacity: 0.5,
+      }),
+      expect.objectContaining({
+        kind: 'createCallout', rect: [200, 100, 360, 145], point: [150, 70],
+        backgroundColor: [1, 1, 1], borderColor: [1, 0, 0], borderWidth: 1,
+      }),
+    ])
+
+    store.move(callout.id, 20, 10)
+    expect(store.get(callout.id)).toMatchObject({ rect: [220, 110, 380, 155], calloutPoint: [150, 70] })
+    store.updateCalloutPoint(callout.id, [175, 90])
+    expect(store.get(callout.id)?.calloutLine?.[0]).toEqual([175, 90])
   })
 })

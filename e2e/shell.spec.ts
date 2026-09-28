@@ -86,7 +86,7 @@ test('書式パネルの青・3ptと文字14ptを作成と保存へ反映する'
   if (!box) throw new Error('注釈レイヤーがありません。')
 
   await page.getByRole('button', { name: '四角', exact: true }).click()
-  await page.getByTestId('format-panel').getByRole('button', { name: '青' }).click()
+  await page.getByLabel('枠線の色 青').click()
   await page.getByLabel('線の太さ').selectOption('3')
   await page.mouse.move(box.x + 250, box.y + 220)
   await page.mouse.down()

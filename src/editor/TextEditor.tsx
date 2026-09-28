@@ -155,6 +155,12 @@ export function TextEditor({ annotation, zoom, pool, store, onClose, registerCom
         fontSize: annotation.fontSize * scale,
         fontFamily: annotation.font === 'BIZUDMincho' ? 'KaruBIZUDMincho' : 'KaruBIZUDGothic',
         color: `rgb(${annotation.color.map((component) => Math.round(component * 255)).join(' ')})`,
+        background: annotation.interiorColor
+          ? `rgb(${annotation.interiorColor.map((component) => Math.round(component * 255)).join(' ')})`
+          : 'transparent',
+        border: annotation.borderColor
+          ? `${annotation.borderWidth * scale}px solid rgb(${annotation.borderColor.map((component) => Math.round(component * 255)).join(' ')})`
+          : '0',
       }}
       onChange={(event) => {
         valueRef.current = event.currentTarget.value

@@ -1,5 +1,19 @@
 import type { Point } from '../core/annotations'
 
+export function inkStrokePoints(points: readonly Point[], straight: boolean, snap45: boolean): Point[] {
+  if (points.length === 0) return []
+  if (!straight || points.length === 1) return points.map((point) => [...point])
+  const start = points[0]
+  const latest = points[points.length - 1]
+  if (!snap45) return [[...start], [...latest]]
+  const dx = latest[0] - start[0]
+  const dy = latest[1] - start[1]
+  const distance = Math.hypot(dx, dy)
+  if (distance === 0) return [[...start], [...latest]]
+  const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * Math.PI / 4
+  return [[...start], [start[0] + Math.cos(angle) * distance, start[1] + Math.sin(angle) * distance]]
+}
+
 function distanceToSegment(point: Point, start: Point, end: Point): number {
   const dx = end[0] - start[0]
   const dy = end[1] - start[1]

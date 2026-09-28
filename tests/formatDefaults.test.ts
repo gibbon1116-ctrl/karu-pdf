@@ -18,6 +18,7 @@ describe('formatDefaults', () => {
     saveFormatDefaults(value, storage)
     expect(loadFormatDefaults(storage)).toEqual(value)
     expect(value.highlight.borderWidth).toBe(12)
+    expect(value.callout).toMatchObject({ fillColor: [1, 1, 1], borderColor: [1, 0, 0], opacity: 1 })
   })
 
   it('旧版の値を全ツールへ引き継ぐ', () => {
@@ -35,6 +36,18 @@ describe('formatDefaults', () => {
     expect(loaded.text.color).toEqual(DEFAULT_FORMAT.text.color)
     expect(loaded.text.fontSize).toBe(DEFAULT_FORMAT.text.fontSize)
     expect(loaded.line.borderWidth).toBe(2)
+  })
+
+  it('旧whiteoutの値が残っていても四角と吹き出しの既定値を移行する', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(FORMAT_STORAGE_KEY, JSON.stringify({
+      whiteout: { color: [1, 1, 1], borderWidth: 0 },
+      square: { color: [0, 0.25, 1], borderWidth: 2 },
+    }))
+    const loaded = loadFormatDefaults(storage)
+    expect(loaded.square).toMatchObject({ color: [0, 0.25, 1], borderColor: [0, 0.25, 1], borderWidth: 2, fillColor: null })
+    expect(loaded.callout).toEqual(DEFAULT_FORMAT.callout)
+    expect('whiteout' in loaded).toBe(false)
   })
 
   it('Storageが例外を投げても落ちない', () => {

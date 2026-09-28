@@ -181,7 +181,6 @@ test('全種類の書き込みを作成し、保存して開き直せる', async
   await dragOnLayer(page, '矢印', { x: 200, y: 150 }, { x: 300, y: 205 })
   await dragOnLayer(page, '四角', { x: 335, y: 145 }, { x: 415, y: 205 })
   await dragOnLayer(page, '丸', { x: 450, y: 145 }, { x: 525, y: 210 })
-  await dragOnLayer(page, '白塗り', { x: 70, y: 250 }, { x: 165, y: 300 })
   await dragOnLayer(page, '蛍光ペン', { x: 205, y: 270 }, { x: 340, y: 280 }, 20)
   await dragOnLayer(page, '手書き', { x: 380, y: 260 }, { x: 445, y: 295 }, 12)
   await dragOnLayer(page, '手書き', { x: 450, y: 295 }, { x: 500, y: 260 }, 12)
@@ -195,7 +194,7 @@ test('全種類の書き込みを作成し、保存して開き直せる', async
       mincho: items.some((item) => item.kind === 'freetext' && item.text === '明朝の文字' && item.font === 'BIZUDMincho'),
     }
   })).toEqual({
-    kinds: ['arrow', 'circle', 'freetext', 'highlight', 'ink', 'line', 'square', 'whiteout'],
+    kinds: ['arrow', 'circle', 'freetext', 'highlight', 'ink', 'line', 'square'],
     joinedInk: true,
     mincho: true,
   })
@@ -210,11 +209,91 @@ test('全種類の書き込みを作成し、保存して開き直せる', async
       mincho: items.some((item) => item.text === '明朝の文字' && item.font === 'BIZUDMincho'),
     }
   })).toEqual({
-    kinds: ['arrow', 'circle', 'freetext', 'highlight', 'ink', 'line', 'square', 'whiteout'],
+    kinds: ['arrow', 'circle', 'freetext', 'highlight', 'ink', 'line', 'square'],
     joinedInk: true,
     highlight: true,
     mincho: true,
   })
+})
+
+test('塗り・白塗り・文字枠・吹き出し・Ctrl直線を保存して再編集できる', async ({ page }) => {
+  await page.goto('/karu-pdf/?test=1')
+  await page.getByTestId('file-input').setInputFiles(sample)
+  await waitForPage(page)
+  const layer = page.getByTestId('annotation-layer-0')
+  const box = await layer.boundingBox()
+  if (!box) throw new Error('1ページ目の注釈レイヤーがありません。')
+
+  await dragOnLayer(page, '四角', { x: 70, y: 150 }, { x: 170, y: 215 })
+  await page.getByLabel('塗り 青').click()
+  await page.getByLabel('透明度').selectOption('0.5')
+
+  await dragOnLayer(page, '四角', { x: 195, y: 150 }, { x: 290, y: 210 })
+  await page.getByRole('button', { name: '白塗りにする' }).click()
+  expect(await page.evaluate(() => {
+    const squares = window.__karu!.getEditableAnnotations(0).filter((item) => item.kind === 'square' && item.objNum === null)
+    return squares.some((item) => item.interiorColor?.every((value) => value === 1) && item.borderColor === null && item.opacity === 1)
+  })).toBe(true)
+
+  await page.getByRole('button', { name: '文字', exact: true }).click()
+  await page.getByLabel('背景色 黄').click()
+  await page.getByLabel('枠線の色 黒').click()
+  await layer.click({ position: { x: 80, y: 260 } })
+  await page.getByTestId('text-editor').fill('背景と枠')
+  await page.keyboard.press('Control+Enter')
+
+  await page.getByRole('button', { name: '吹き出し', exact: true }).click()
+  await page.mouse.move(box.x + 260, box.y + 280)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 350, box.y + 350, { steps: 8 })
+  await page.mouse.up()
+  await expect(page.getByTestId('text-editor')).toBeVisible()
+  await page.getByTestId('text-editor').fill('吹き出し本文')
+  await page.keyboard.press('Control+Enter')
+
+  await page.getByRole('button', { name: '蛍光ペン', exact: true }).click()
+  await page.keyboard.down('Control')
+  await page.mouse.move(box.x + 80, box.y + 400)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 130, box.y + 430)
+  await page.mouse.move(box.x + 190, box.y + 390)
+  await page.mouse.move(box.x + 250, box.y + 420)
+  await page.mouse.up()
+  await page.keyboard.up('Control')
+  expect(await page.evaluate(() => window.__karu!.getEditableAnnotations(0).find((item) => item.kind === 'highlight' && item.objNum === null)?.inkList?.[0].length)).toBe(2)
+
+  await saveAndReopen(page)
+  const restored = await page.evaluate(() => {
+    const items = window.__karu!.getEditableAnnotations(0)
+    const callout = items.find((item) => item.kind === 'callout' && item.text === '吹き出し本文')
+    return {
+      blue: items.some((item) => item.kind === 'square' && item.interiorColor?.[2] === 1 && Math.abs(item.opacity - 0.5) < 0.01),
+      whiteout: items.some((item) => item.kind === 'square' && item.interiorColor?.every((value) => value === 1) && item.borderColor === null),
+      textStyle: items.some((item) => item.kind === 'freetext' && item.text === '背景と枠' && item.interiorColor?.[0] === 1 && item.borderColor?.every((value) => value === 0)),
+      calloutId: callout?.id ?? null,
+      calloutPoint: callout?.calloutPoint ?? null,
+      straight: items.some((item) => item.kind === 'highlight' && item.inkList?.[0].length === 2),
+    }
+  })
+  expect(restored).toMatchObject({ blue: true, whiteout: true, textStyle: true, straight: true })
+  expect(restored.calloutId).not.toBeNull()
+  expect(restored.calloutPoint).not.toBeNull()
+
+  await layer.locator(`g[data-annotation-id="${restored.calloutId}"] .annotation-hit`).first().click()
+  const handle = page.getByTestId('callout-point-handle')
+  const handleBox = await handle.boundingBox()
+  if (!handleBox) throw new Error('吹き出しの指示点の取っ手がありません。')
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(handleBox.x - 35, handleBox.y + 25, { steps: 6 })
+  await page.mouse.up()
+  const movedPoint = await page.evaluate((id) => window.__karu!.getEditableAnnotations(0).find((item) => item.id === id)?.calloutPoint, restored.calloutId!)
+  expect(movedPoint).not.toEqual(restored.calloutPoint)
+  await saveAndReopen(page)
+  await expect.poll(() => page.evaluate((point) => {
+    const callout = window.__karu!.getEditableAnnotations(0).find((item) => item.kind === 'callout' && item.text === '吹き出し本文')
+    return Boolean(callout?.calloutPoint && point && callout.calloutPoint.every((value, index) => Math.abs(value - point[index]) < 0.05))
+  }, movedPoint)).toBe(true)
 })
 
 test('四角の移動を元に戻し、やり直せる', async ({ page }) => {

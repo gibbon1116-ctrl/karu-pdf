@@ -115,16 +115,18 @@ button, input { font: inherit; }
 .annotation-item { cursor: move; }
 .annotation-layer:not(.tool-select) { cursor: crosshair; }
 .annotation-surface { fill: transparent; pointer-events: all; }
-.annotation-text, .annotation-square, .annotation-shape, .annotation-whiteout, .annotation-line, .annotation-ink { pointer-events: none; }
+.annotation-text, .annotation-text-box, .annotation-square, .annotation-shape, .annotation-line, .annotation-ink, .annotation-callout-line { pointer-events: none; }
 .annotation-hit { fill: transparent; stroke: none; pointer-events: all; }
 .annotation-line-hit { stroke: transparent; stroke-width: 8px; vector-effect: non-scaling-stroke; }
 .annotation-line, .annotation-ink { stroke-linecap: round; stroke-linejoin: round; }
+.annotation-callout-line { fill: none; stroke-linecap: butt; stroke-linejoin: miter; }
 .annotation-selection { fill: none; stroke: #1473e6; stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
 .annotation-draft { display: none; fill: none; stroke: #e00000; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
 .annotation-line-draft, .annotation-line-preview, .annotation-ink-draft { display: none; fill: none; stroke: #e00000; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 .annotation-line-preview { stroke: #1473e6; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
 .annotation-resize-preview { display: none; fill: none; stroke: #1473e6; stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
 .annotation-resize-handle { fill: #fff; stroke: #1473e6; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: all; }
+.annotation-callout-handle { cursor: crosshair; }
 .annotation-resize-handle[data-resize-handle="nw"], .annotation-resize-handle[data-resize-handle="se"] { cursor: nwse-resize; }
 .annotation-resize-handle[data-resize-handle="ne"], .annotation-resize-handle[data-resize-handle="sw"] { cursor: nesw-resize; }
 .annotation-resize-handle[data-resize-handle="e"], .annotation-resize-handle[data-resize-handle="w"] { cursor: ew-resize; }
@@ -134,13 +136,15 @@ button, input { font: inherit; }
   z-index: 4;
   overflow: hidden;
   resize: none;
-  background: rgb(255 255 255 / 82%);
-  border: 1px solid #75a9e8;
+  box-sizing: border-box;
   outline: none;
   font-family: "KaruBIZUDGothic", sans-serif;
   font-kerning: none;
   line-height: 1.2;
 }
+.text-editor:focus { box-shadow: 0 0 0 1px #75a9e8; }
+.color-grid .color-none { width: auto; min-width: 42px; padding: 0 4px; font-size: 12px; }
+.whiteout-button { margin-top: 8px; }
 .error { position: absolute; z-index: 20; top: 92px; left: 50%; transform: translateX(-50%); padding: 10px 16px; color: #8b0000; background: #fff1f1; border: 1px solid #c44; }
 .debug-panel {
   position: absolute;
