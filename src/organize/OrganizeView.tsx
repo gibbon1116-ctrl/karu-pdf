@@ -216,7 +216,12 @@ export function OrganizeView(props: Props) {
       ref={scrollerRef}
       className="organize-grid-scroller"
       tabIndex={0}
-      onScroll={(event) => setViewport((current) => ({ ...current, top: event.currentTarget.scrollTop, height: event.currentTarget.clientHeight }))}
+      onScroll={(event) => {
+        // currentTarget はイベントの処理が終わると null になる。更新関数は後で
+        // 実行されることがあるため、値はここで読んでおく。
+        const { scrollTop, clientHeight } = event.currentTarget
+        setViewport((current) => ({ ...current, top: scrollTop, height: clientHeight }))
+      }}
       onKeyDown={(event) => {
         const key = event.key.toLowerCase()
         if ((event.ctrlKey || event.metaKey) && key === 'a') { event.preventDefault(); setSelection(new Set(cards.map((card) => card.id))); return }
