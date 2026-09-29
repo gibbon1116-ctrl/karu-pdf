@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import mupdf from 'mupdf'
 import { expect, test, type Page } from '@playwright/test'
@@ -208,4 +209,57 @@ test('ページ番号で選んで抽出し、下書きから削除して適用�
   await expect(page.getByText('選択: 0ページ ／ 全1ページ（下書き）')).toBeVisible()
   await page.getByRole('button', { name: '適用', exact: true }).click()
   await expect.poll(() => pageInfo(page).then((items) => items.length)).toBe(1)
+})
+
+test('材料PDFの確認失敗を行に表示し、成功したPDFだけ挿入する', async ({ page }) => {
+  await openSample(page)
+  await page.evaluate(() => window.__karu!.openOrganize())
+  await page.getByTestId('organize-file-input').setInputFiles([
+    { name: 'valid.pdf', mimeType: 'application/pdf', buffer: makePdf(['Valid page']) },
+    { name: 'broken.txt', mimeType: 'text/plain', buffer: Buffer.from('not a pdf') },
+  ])
+  const dialog = page.getByTestId('organize-source-dialog')
+  await expect(dialog.getByText('valid.pdf')).toBeVisible()
+  await expect(dialog.getByText('broken.txt')).toBeVisible()
+  await expect(dialog.locator('.organize-dialog-error')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '挿入', exact: true })).toBeEnabled()
+  await dialog.getByRole('button', { name: '挿入', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => window.__karu!.organizeDraft()!.getCards().length)).toBe(6)
+})
+
+test('重い図面の描画中でも挿入ダイアログをすぐ表示してページ数を確認する', async ({ page }) => {
+  const realDirectory = path.resolve('test-data/real')
+  const realDrawing = path.join(realDirectory, '七ヶ浜町_実施設計図.pdf')
+  const drawing = fs.existsSync(realDrawing) ? realDrawing : path.resolve('test-data/heavy-300p.pdf')
+  const threePages = path.join(realDirectory, '建築工事標準詳細図_R4.pdf')
+  const manyPages = path.join(realDirectory, '設備工事標準図_機械_R7.pdf')
+  const materials = fs.existsSync(threePages) && fs.existsSync(manyPages)
+    ? [threePages, manyPages]
+    : [
+        { name: 'three-pages.pdf', mimeType: 'application/pdf', buffer: makePdf(Array.from({ length: 3 }, (_, index) => `Three ${index + 1}`)) },
+        { name: 'many-pages.pdf', mimeType: 'application/pdf', buffer: makePdf(Array.from({ length: 174 }, (_, index) => `Many ${index + 1}`)) },
+      ]
+
+  await page.goto('/karu-pdf/?test=1&workers=3')
+  await page.getByTestId('file-input').setInputFiles(drawing)
+  await expect(page.locator('.page-view').first()).toBeVisible({ timeout: 180_000 })
+  await page.evaluate(() => window.__karu!.openOrganize())
+  await expect(page.getByTestId('organize-view')).toBeVisible()
+  await expect.poll(
+    () => page.evaluate(() => window.__karu!.getWorkerStats().then((stats) => stats.queueLength)),
+    { timeout: 10_000 },
+  ).toBeGreaterThan(0)
+
+  const started = await page.evaluate(() => performance.now())
+  await page.getByTestId('organize-file-input').setInputFiles(materials)
+  const dialog = page.getByTestId('organize-source-dialog')
+  await expect(dialog).toBeVisible()
+  const dialogMs = await page.evaluate((value) => performance.now() - value, started)
+  const insert = dialog.getByRole('button', { name: '挿入', exact: true })
+  await expect(insert).toBeEnabled({ timeout: 10_000 })
+  const pageCountsMs = await page.evaluate((value) => performance.now() - value, started)
+  console.log(`[organize-insert-dialog] ${JSON.stringify({ dialogMs, pageCountsMs, drawing: path.basename(drawing) })}`)
+  expect(dialogMs).toBeLessThanOrEqual(300)
+  expect(pageCountsMs).toBeLessThanOrEqual(2_000)
+  await dialog.getByRole('button', { name: 'キャンセル' }).click()
 })

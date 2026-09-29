@@ -79,6 +79,7 @@ interface ActiveOrganize {
   docId: string
   draft: OrganizeDraft
   sources: Map<string, OrganizeSourceInfo>
+  sourceFiles: Map<string, File>
   busy: boolean
 }
 
@@ -86,9 +87,16 @@ const noopSubscribe = () => () => undefined
 const zeroSnapshot = () => 0
 const PANEL_STORAGE_KEY = 'karu-pdf:panels'
 
+// Worker 0 は文書の操作（書き込みの反映、保存、ページ整理、材料の文書）を受け持ち、
+// 描画は残りの Worker で行う。スレッドに余裕があれば描画用を 3 本にする。
+function defaultWorkerCount(): number {
+  return (navigator.hardwareConcurrency ?? 4) >= 6 ? 4 : 3
+}
+
 function workerCountFromUrl(): number {
-  const value = Number(new URLSearchParams(location.search).get('workers') ?? '3')
-  return Number.isFinite(value) ? Math.max(1, Math.min(3, Math.trunc(value))) : 3
+  const fallback = defaultWorkerCount()
+  const value = Number(new URLSearchParams(location.search).get('workers') ?? String(fallback))
+  return Number.isFinite(value) ? Math.max(1, Math.min(4, Math.trunc(value))) : fallback
 }
 
 // エラーバウンダリが React ツリーを作り直しても、開いている文書・注釈ストア・
@@ -535,6 +543,7 @@ export default function App() {
       docId: session.docId,
       draft: new OrganizeDraft(session.docId, session.pageSizes),
       sources: new Map(),
+      sourceFiles: new Map(),
       busy: false,
     }
     organizeRef.current = next
@@ -542,30 +551,41 @@ export default function App() {
     setTool('select')
   }, [])
 
-  const loadOrganizeFiles = useCallback(async (files: File[]): Promise<OrganizeSourceInfo[]> => {
+  const loadOrganizeFile = useCallback(async (file: File): Promise<OrganizeSourceInfo> => {
     const current = organizeRef.current
-    if (!current || current.busy) return []
-    const loaded: OrganizeSourceInfo[] = []
-    for (const file of files) {
-      const sourceId = `src-${createDocId()}`
-      try {
-        const result = await pool.openSource(sourceId, await file.arrayBuffer())
-        if (organizeRef.current?.draft !== current.draft) {
-          pool.close(sourceId)
-          return loaded
-        }
-        const info: OrganizeSourceInfo = { docId: sourceId, name: file.name, pageSizes: result.pageSizes, temporary: true }
-        current.sources.set(sourceId, info)
-        loaded.push(info)
-        const next = { ...current, sources: new Map(current.sources) }
-        organizeRef.current = next
-        setOrganize(next)
-      } catch (reason) {
+    if (!current || current.busy) throw new Error('ページ整理を開いてください。')
+    const sourceId = `src-${createDocId()}`
+    try {
+      const result = await pool.openSource(sourceId, await file.arrayBuffer())
+      if (organizeRef.current?.draft !== current.draft) {
         pool.close(sourceId)
-        setError(`追加するPDFを開けませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
+        throw new Error('ページ整理が閉じられました。')
       }
+      const info: OrganizeSourceInfo = { docId: sourceId, name: file.name, pageSizes: result.pageSizes, temporary: true }
+      current.sources.set(sourceId, info)
+      current.sourceFiles.set(sourceId, file)
+      const next = { ...current, sources: new Map(current.sources), sourceFiles: new Map(current.sourceFiles) }
+      organizeRef.current = next
+      setOrganize(next)
+      return info
+    } catch (reason) {
+      pool.close(sourceId)
+      throw reason
     }
-    return loaded
+  }, [pool])
+
+  const prepareOrganizeSources = useCallback((docIds: string[]) => {
+    const current = organizeRef.current
+    if (!current || current.busy) return
+    for (const docId of docIds) {
+      const file = current.sourceFiles.get(docId)
+      if (!file) continue
+      void pool.openSourceDisplays(docId, file).catch((reason) => {
+        if (organizeRef.current?.draft === current.draft) {
+          console.warn(`表示用Workerで材料PDFを開けませんでした: ${docId}`, reason)
+        }
+      })
+    }
   }, [pool])
 
   const discardOrganizeSources = useCallback((docIds: string[]) => {
@@ -577,10 +597,11 @@ export default function App() {
       if (!source?.temporary) continue
       pool.close(docId)
       current.sources.delete(docId)
+      current.sourceFiles.delete(docId)
       changed = true
     }
     if (changed) {
-      const next = { ...current, sources: new Map(current.sources) }
+      const next = { ...current, sources: new Map(current.sources), sourceFiles: new Map(current.sourceFiles) }
       organizeRef.current = next
       setOrganize(next)
     }
@@ -953,7 +974,8 @@ export default function App() {
     draft: organize.draft,
     sources: organize.sources,
     busy: organize.busy,
-    onLoadFiles: loadOrganizeFiles,
+    onLoadFile: loadOrganizeFile,
+    onPrepareSources: prepareOrganizeSources,
     onDiscardSources: discardOrganizeSources,
     onCopy: copyOrganizeCards,
     onPaste: pasteOrganizeCards,

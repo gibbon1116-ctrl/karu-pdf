@@ -251,11 +251,11 @@ async function measureZoomFull(page: Page, pageIndex: number): Promise<ZoomFullR
   return { durationMs, requestLog, workerRequestLog }
 }
 
-test('Worker 3本・warmなしの表示性能を計測する', async ({ browser }) => {
+test('Worker 4本（文書1＋描画3）・warmなしの表示性能を計測する', async ({ browser }) => {
   await fs.access(pdf)
   const rows: BenchRow[] = []
 
-  const workers = 3
+  const workers = 4
   const warm = false
   const openValues: number[] = []
   const sharpValues: number[] = []

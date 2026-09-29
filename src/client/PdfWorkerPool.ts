@@ -151,11 +151,12 @@ export class PdfWorkerPool {
   private readonly pageAssignments = new Map<string, number>()
   private readonly renderLogEntries: WorkerRenderLogEntry[] = []
   private readonly assignedCounts: number[] = []
+  private readonly documentVersions = new Map<string, number>()
   private activeDocId: string | null = null
   private nextId = 1
 
   constructor(count = 1) {
-    this.workerCount = Math.max(1, Math.min(3, Math.trunc(count)))
+    this.workerCount = Math.max(1, Math.min(4, Math.trunc(count)))
     this.slots = Array.from({ length: this.workerCount }, (_, index) => {
       const worker = new Worker(new URL('../worker/pdf.worker.ts', import.meta.url), { type: 'module' })
       let markReady: () => void = () => {}
@@ -184,11 +185,16 @@ export class PdfWorkerPool {
   }
 
   async openSource(docId: string, bytes: ArrayBuffer): Promise<OpenResult> {
-    await Promise.all(this.slots.map((slot) => slot.ready))
-    const copies = this.slots.map((_, index) => (index === 0 ? bytes : bytes.slice(0)))
-    const responses = await Promise.all(this.slots.map((slot, index) => this.openOnSlot(slot, docId, copies[index])))
-    const first = responses[0]
-    return { pageCount: first.pageCount, pageSizes: first.pageSizes, openMs: first.openMs, sizesMs: first.sizesMs }
+    const response = await this.openOnSlot(this.slots[this.primaryWorkerIndex], docId, bytes)
+    return { pageCount: response.pageCount, pageSizes: response.pageSizes, openMs: response.openMs, sizesMs: response.sizesMs }
+  }
+
+  async openSourceDisplays(docId: string, file: Blob): Promise<void> {
+    const displaySlots = this.slots.slice(1)
+    if (displaySlots.length === 0) return
+    const bytes = await file.arrayBuffer()
+    const copies = displaySlots.map((_, index) => index === displaySlots.length - 1 ? bytes : bytes.slice(0))
+    await Promise.all(displaySlots.map((slot, index) => this.openOnSlot(slot, docId, copies[index])))
   }
 
   async activate(docId: string): Promise<void> {
@@ -206,8 +212,8 @@ export class PdfWorkerPool {
   }
 
   close(docId: string): void {
+    this.documentVersions.set(docId, (this.documentVersions.get(docId) ?? 0) + 1)
     for (const slot of this.slots) {
-      if (!slot.documents.has(docId)) continue
       slot.worker.postMessage({ type: 'close', docId })
       slot.documents.delete(docId)
     }
@@ -229,7 +235,10 @@ export class PdfWorkerPool {
     const key = `${docId}:${pageIndex}`
     const assigned = this.pageAssignments.get(key)
     if (assigned !== undefined) return this.slots[assigned]
-    const chosen = this.slots.reduce((best, current) => {
+    // 複数WorkerのときはWorker 0を文書操作専用にする。重いページの描画中でも、
+    // 材料PDFのページ数確認や保存などを表示Workerの待ち行列から切り離せる。
+    const renderSlots = this.slots.length > 1 ? this.slots.slice(1) : this.slots
+    const chosen = renderSlots.reduce((best, current) => {
       if (current.queueLength !== best.queueLength) return current.queueLength < best.queueLength ? current : best
       return (this.assignedCounts[current.index] ?? 0) < (this.assignedCounts[best.index] ?? 0) ? current : best
     })
@@ -463,15 +472,20 @@ export class PdfWorkerPool {
   }
 
   private async openOnSlot(slot: WorkerSlot, docId: string, buffer: ArrayBuffer): Promise<OpenResponse> {
+    const version = this.documentVersions.get(docId) ?? 0
     await slot.ready
+    if ((this.documentVersions.get(docId) ?? 0) !== version) throw new Error('PDF は閉じられました。')
     const requestId = this.nextId++
-    return new Promise<OpenResponse>((resolve, reject) => {
+    const response = await new Promise<OpenResponse>((resolve, reject) => {
       this.pendingRequests.set(requestId, { resolve: (value) => resolve(value as OpenResponse), reject })
       slot.worker.postMessage({ type: 'open', requestId, docId, bytes: buffer }, [buffer])
-    }).then((response) => {
-      slot.documents.add(docId)
-      return response
     })
+    if ((this.documentVersions.get(docId) ?? 0) !== version) {
+      slot.worker.postMessage({ type: 'close', docId })
+      throw new Error('PDF は閉じられました。')
+    }
+    slot.documents.add(docId)
+    return response
   }
 
   private async exportBuffer(docId: string): Promise<ArrayBuffer> {

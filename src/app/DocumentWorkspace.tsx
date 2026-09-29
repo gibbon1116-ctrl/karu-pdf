@@ -18,7 +18,8 @@ export interface OrganizeWorkspaceState {
   draft: OrganizeDraft
   sources: ReadonlyMap<string, OrganizeSourceInfo>
   busy: boolean
-  onLoadFiles(files: File[]): Promise<OrganizeSourceInfo[]>
+  onLoadFile(file: File): Promise<OrganizeSourceInfo>
+  onPrepareSources(docIds: string[]): void
   onDiscardSources(docIds: string[]): void
   onCopy(cards: readonly PageCard[]): void
   onPaste(beforeIndex: number): PageCard[]
@@ -81,7 +82,8 @@ export function DocumentWorkspace(props: Props) {
         scheduler={scheduler}
         annotationStore={props.session.annotationStore}
         busy={props.organize.busy}
-        onLoadFiles={props.organize.onLoadFiles}
+        onLoadFile={props.organize.onLoadFile}
+        onPrepareSources={props.organize.onPrepareSources}
         onDiscardSources={props.organize.onDiscardSources}
         onCopy={props.organize.onCopy}
         onPaste={props.organize.onPaste}

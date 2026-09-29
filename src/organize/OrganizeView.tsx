@@ -42,7 +42,8 @@ interface Props {
   scheduler: RenderScheduler
   annotationStore: AnnotationStore
   busy: boolean
-  onLoadFiles(files: File[]): Promise<OrganizeSourceInfo[]>
+  onLoadFile(file: File): Promise<OrganizeSourceInfo>
+  onPrepareSources(docIds: string[]): void
   onDiscardSources(docIds: string[]): void
   onCopy(cards: readonly PageCard[]): void
   onPaste(beforeIndex: number): PageCard[]
@@ -53,7 +54,11 @@ interface Props {
 }
 
 interface SourceChoice {
-  info: OrganizeSourceInfo
+  key: string
+  name: string
+  status: 'loading' | 'ready' | 'error'
+  info?: OrganizeSourceInfo
+  error?: string
   range: string
   all: boolean
 }
@@ -177,12 +182,13 @@ export function OrganizeView(props: Props) {
   const dragIdsRef = useRef<string[]>([])
   const fileModeRef = useRef<'insert' | 'replace'>('insert')
   const fixedDropIndexRef = useRef<number | null>(null)
+  const nextSourceKeyRef = useRef(1)
+  const dismissedSourceKeysRef = useRef(new Set<string>())
   const [selection, setSelection] = useState<Set<string>>(new Set())
   const [viewport, setViewport] = useState({ top: 0, height: 700, width: 900 })
   const [dropIndex, setDropIndex] = useState<number | null>(null)
   const [displaySize, setDisplaySize] = useState<DisplaySize>('medium')
   const [sourceDialog, setSourceDialog] = useState<SourceDialogState | null>(null)
-  const [sourceLoading, setSourceLoading] = useState(false)
   const [dialogError, setDialogError] = useState('')
   const [position, setPosition] = useState<InsertPosition>('after')
   const [afterPage, setAfterPage] = useState(1)
@@ -245,24 +251,48 @@ export function OrganizeView(props: Props) {
 
   const currentInsertionIndex = () => insertionIndex(position, cards, selectedIds, afterPage)
 
-  const loadFiles = async (files: File[], mode: 'insert' | 'replace', fixedIndex: number | null, append = false) => {
-    const pdfs = files.filter((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
-    if (pdfs.length === 0) return
-    setSourceLoading(true)
+  const loadFiles = (files: File[], mode: 'insert' | 'replace', fixedIndex: number | null, append = false) => {
+    if (files.length === 0) return
+    const pending = files.map((file) => ({
+      file,
+      entry: {
+        key: `pending-${nextSourceKeyRef.current++}`,
+        name: file.name,
+        status: 'loading' as const,
+        range: '',
+        all: true,
+      },
+    }))
     setDialogError('')
-    try {
-      const infos = await props.onLoadFiles(pdfs)
-      const choices = infos.map((info) => ({ info, range: '', all: true }))
-      setSourceDialog((current) => ({
-        mode,
-        fixedIndex,
-        entries: append && current ? [...current.entries, ...choices] : choices,
-      }))
-      setPosition(mode === 'replace' ? 'after' : 'after')
-      setAfterPage(Math.max(0, cards.length))
-    } catch (reason) {
-      setDialogError(reason instanceof Error ? reason.message : String(reason))
-    } finally { setSourceLoading(false) }
+    setSourceDialog((current) => ({
+      mode,
+      fixedIndex,
+      entries: append && current ? [...current.entries, ...pending.map((item) => item.entry)] : pending.map((item) => item.entry),
+    }))
+    setPosition('after')
+    setAfterPage(Math.max(0, cards.length))
+    for (const item of pending) {
+      void props.onLoadFile(item.file).then((info) => {
+        if (dismissedSourceKeysRef.current.delete(item.entry.key)) {
+          props.onDiscardSources([info.docId])
+          return
+        }
+        setSourceDialog((current) => current ? {
+          ...current,
+          entries: current.entries.map((entry) => entry.key === item.entry.key
+            ? { ...entry, status: 'ready', info, name: info.name }
+            : entry),
+        } : current)
+      }).catch((reason) => {
+        if (dismissedSourceKeysRef.current.delete(item.entry.key)) return
+        setSourceDialog((current) => current ? {
+          ...current,
+          entries: current.entries.map((entry) => entry.key === item.entry.key
+            ? { ...entry, status: 'error', error: reason instanceof Error ? reason.message : String(reason) }
+            : entry),
+        } : current)
+      })
+    }
   }
 
   const pickFiles = async (mode: 'insert' | 'replace', append = false) => {
@@ -271,7 +301,7 @@ export function OrganizeView(props: Props) {
     if (window.showOpenFilePicker) {
       try {
         const handles = await window.showOpenFilePicker({ id: `karu-pdf-organize-${mode}`, multiple: mode === 'insert', types: PDF_PICKER_TYPES })
-        await loadFiles(await Promise.all(handles.map((handle) => handle.getFile())), mode, null, append)
+        loadFiles(await Promise.all(handles.map((handle) => handle.getFile())), mode, null, append)
       } catch (reason) {
         if (!(reason instanceof DOMException && reason.name === 'AbortError')) setDialogError(reason instanceof Error ? reason.message : String(reason))
       }
@@ -281,7 +311,11 @@ export function OrganizeView(props: Props) {
   }
 
   const cancelSourceDialog = () => {
-    if (sourceDialog) props.onDiscardSources(sourceDialog.entries.map((entry) => entry.info.docId))
+    if (sourceDialog) {
+      const loaded = sourceDialog.entries.flatMap((entry) => entry.info ? [entry.info.docId] : [])
+      sourceDialog.entries.filter((entry) => entry.status === 'loading').forEach((entry) => dismissedSourceKeysRef.current.add(entry.key))
+      props.onDiscardSources(loaded)
+    }
     setSourceDialog(null)
     setDialogError('')
   }
@@ -290,6 +324,7 @@ export function OrganizeView(props: Props) {
     if (!sourceDialog) return
     const pageCards: PageCard[] = []
     for (const entry of sourceDialog.entries) {
+      if (entry.status !== 'ready' || !entry.info) continue
       const parsed = entry.all
         ? { pages: entry.info.pageSizes.map((_, index) => index), error: null }
         : parsePageRange(entry.range, entry.info.pageSizes.length)
@@ -301,6 +336,7 @@ export function OrganizeView(props: Props) {
       })
     }
     if (pageCards.length === 0) { setDialogError('挿入するページがありません。'); return }
+    const sourceIds = [...new Set(pageCards.flatMap((card) => card.source.kind === 'page' ? [card.source.docId] : []))]
     if (sourceDialog.mode === 'replace') {
       if (selectedIds.length === 0) { setDialogError('置き換えるページを選んでください。'); return }
       if (selectedIds.length !== pageCards.length && !window.confirm(`選んだ ${selectedIds.length} ページを、${pageCards.length} ページで置き換えます。`)) return
@@ -311,6 +347,7 @@ export function OrganizeView(props: Props) {
       const inserted = props.draft.paste(at, pageCards)
       setSelection(new Set(inserted.map((card) => card.id)))
     }
+    props.onPrepareSources(sourceIds)
     setSourceDialog(null)
     setDialogError('')
   }
@@ -368,7 +405,7 @@ export function OrganizeView(props: Props) {
     <header className="organize-toolbar">
       <strong>ページ整理</strong>
       <Menu label="挿入">
-        <button type="button" title="複数のPDFをまとめて選べます" disabled={props.busy || sourceLoading} onClick={() => void pickFiles('insert')}>他のPDFから（複数選択可）</button>
+        <button type="button" title="複数のPDFをまとめて選べます" disabled={props.busy} onClick={() => void pickFiles('insert')}>他のPDFから（複数選択可）</button>
         <button type="button" disabled={props.busy} onClick={() => { setPosition('after'); setBlankOpen(true); setDialogError('') }}>白紙のページ</button>
         <button type="button" disabled={props.busy} onClick={paste}>クリップボードのページを貼り付け</button>
       </Menu>
@@ -381,7 +418,7 @@ export function OrganizeView(props: Props) {
       <button type="button" disabled={props.busy || selectedIds.length === 0} onClick={() => {
         const created = props.draft.duplicate(selectedIds); setSelection(new Set(created.map((card) => card.id)))
       }}>複製</button>
-      <button type="button" disabled={props.busy || selectedIds.length === 0 || sourceLoading} onClick={() => void pickFiles('replace')}>置換</button>
+      <button type="button" disabled={props.busy || selectedIds.length === 0} onClick={() => void pickFiles('replace')}>置換</button>
       <button type="button" disabled={props.busy || selectedIds.length === 0} onClick={() => { setExtractOpen(true); setDialogError('') }}>抽出</button>
       <button type="button" disabled={props.busy || cards.length < 2} onClick={() => { setSplitOpen(true); setDialogError('') }}>分割</button>
       <Menu label="並び">
@@ -487,7 +524,7 @@ export function OrganizeView(props: Props) {
       <div className="organize-dialog-body">
         <p>選んだファイル（［↑］［↓］で挿入順を変更できます）</p>
         <ol className="organize-source-list">
-          {sourceDialog.entries.map((entry, index) => <li key={entry.info.docId} draggable onDragStart={(event) => event.dataTransfer.setData('text/plain', String(index))}
+          {sourceDialog.entries.map((entry, index) => <li key={entry.key} draggable onDragStart={(event) => event.dataTransfer.setData('text/plain', String(index))}
             onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
               event.preventDefault(); const from = Number(event.dataTransfer.getData('text/plain'))
               if (!Number.isInteger(from) || from === index) return
@@ -497,33 +534,35 @@ export function OrganizeView(props: Props) {
                 return { ...current, entries }
               })
             }}>
-            <span><strong>{entry.info.name}</strong>（{entry.info.pageSizes.length}ページ）</span>
-            <button type="button" aria-label={`${entry.info.name}を上へ`} disabled={index === 0} onClick={() => setSourceDialog((current) => {
+            <span><strong>{entry.name}</strong>（<span data-testid="organize-source-page-status">{entry.status === 'loading' ? '確認中…' : entry.status === 'ready' ? `${entry.info!.pageSizes.length}ページ` : '対象外'}</span>）</span>
+            <button type="button" aria-label={`${entry.name}を上へ`} disabled={index === 0} onClick={() => setSourceDialog((current) => {
               if (!current) return current; const entries = [...current.entries]; [entries[index - 1], entries[index]] = [entries[index], entries[index - 1]]; return { ...current, entries }
             })}>↑</button>
-            <button type="button" aria-label={`${entry.info.name}を下へ`} disabled={index === sourceDialog.entries.length - 1} onClick={() => setSourceDialog((current) => {
+            <button type="button" aria-label={`${entry.name}を下へ`} disabled={index === sourceDialog.entries.length - 1} onClick={() => setSourceDialog((current) => {
               if (!current) return current; const entries = [...current.entries]; [entries[index], entries[index + 1]] = [entries[index + 1], entries[index]]; return { ...current, entries }
             })}>↓</button>
-            <button type="button" aria-label={`${entry.info.name}を外す`} onClick={() => {
-              props.onDiscardSources([entry.info.docId])
+            <button type="button" aria-label={`${entry.name}を外す`} onClick={() => {
+              if (entry.info) props.onDiscardSources([entry.info.docId])
+              else if (entry.status === 'loading') dismissedSourceKeysRef.current.add(entry.key)
               setSourceDialog((current) => current ? { ...current, entries: current.entries.filter((_, itemIndex) => itemIndex !== index) } : current)
             }}>×</button>
-            <label><input type="radio" name={`range-${entry.info.docId}`} checked={entry.all} onChange={() => setSourceDialog((current) => current ? { ...current, entries: current.entries.map((item, itemIndex) => itemIndex === index ? { ...item, all: true } : item) } : current)} />すべて</label>
-            <label><input type="radio" name={`range-${entry.info.docId}`} checked={!entry.all} onChange={() => setSourceDialog((current) => current ? { ...current, entries: current.entries.map((item, itemIndex) => itemIndex === index ? { ...item, all: false } : item) } : current)} />範囲
-              <input aria-label={`${entry.info.name}のページ範囲`} placeholder="例: 1-3,5" value={entry.range} onChange={(event) => {
+            <label><input type="radio" name={`range-${entry.key}`} disabled={entry.status === 'error'} checked={entry.all} onChange={() => setSourceDialog((current) => current ? { ...current, entries: current.entries.map((item, itemIndex) => itemIndex === index ? { ...item, all: true } : item) } : current)} />すべて</label>
+            <label><input type="radio" name={`range-${entry.key}`} disabled={entry.status === 'error'} checked={!entry.all} onChange={() => setSourceDialog((current) => current ? { ...current, entries: current.entries.map((item, itemIndex) => itemIndex === index ? { ...item, all: false } : item) } : current)} />範囲
+              <input aria-label={`${entry.name}のページ範囲`} disabled={entry.status === 'error'} placeholder="例: 1-3,5" value={entry.range} onChange={(event) => {
                 const range = event.target.value
                 setSourceDialog((current) => current ? { ...current, entries: current.entries.map((item, itemIndex) => itemIndex === index ? { ...item, range, all: false } : item) } : current)
               }} />
             </label>
+            {entry.status === 'error' && <p className="organize-dialog-error" role="alert">{entry.error}</p>}
           </li>)}
         </ol>
-        <button type="button" disabled={sourceLoading} onClick={() => void pickFiles(sourceDialog.mode, true)}>ファイルを追加</button>
+        <button type="button" onClick={() => void pickFiles(sourceDialog.mode, true)}>ファイルを追加</button>
         {sourceDialog.mode === 'insert' && sourceDialog.fixedIndex === null && <PositionFields position={position} setPosition={setPosition} afterPage={afterPage} setAfterPage={setAfterPage} selectedCount={selectedIds.length} />}
         {sourceDialog.fixedIndex !== null && <p>ドロップした位置へ挿入します。</p>}
         <p className="organize-note">追加したPDFのしおり・リンク・フォームは引き継がれません。</p>
         {dialogError && <p className="organize-dialog-error" role="alert">{dialogError}</p>}
       </div>
-      <footer><button type="button" onClick={cancelSourceDialog}>キャンセル</button><button type="button" disabled={sourceDialog.entries.length === 0} onClick={confirmSourceDialog}>{sourceDialog.mode === 'replace' ? '置換' : '挿入'}</button></footer>
+      <footer><button type="button" onClick={cancelSourceDialog}>キャンセル</button><button type="button" disabled={sourceDialog.entries.some((entry) => entry.status === 'loading') || !sourceDialog.entries.some((entry) => entry.status === 'ready')} onClick={confirmSourceDialog}>{sourceDialog.mode === 'replace' ? '置換' : '挿入'}</button></footer>
     </Dialog>}
 
     {blankOpen && <Dialog title="白紙のページを挿入" onCancel={() => setBlankOpen(false)} testId="organize-blank-dialog">

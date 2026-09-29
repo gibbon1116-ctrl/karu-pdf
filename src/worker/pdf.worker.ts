@@ -31,6 +31,7 @@ import type {
   GetPageInfoRequest,
   LayoutTextRequest,
   ListAnnotationsRequest,
+  OpenRequest,
   PrepareOutputRequest,
   RenderRequest,
   SplitPagesRequest,
@@ -53,6 +54,7 @@ let sequence = 0
 let running = false
 let processedCount = 0
 type CoreRequest =
+  | OpenRequest
   | ListAnnotationsRequest
   | LayoutTextRequest
   | ApplyAndSaveRequest
@@ -183,6 +185,21 @@ async function execute(job: QueuedRequest): Promise<void> {
 
 async function executeCoreRequest(request: CoreRequest): Promise<void> {
   try {
+    if (request.type === 'open') {
+      disposeDocument(request.docId)
+      const opened = openDocument(new Uint8Array(request.bytes))
+      documents.set(request.docId, { opened, displayLists: new DisplayListCache(opened.document) })
+      post({
+        type: 'opened',
+        requestId: request.requestId,
+        pageCount: opened.pageCount,
+        pageSizes: opened.pageSizes,
+        openMs: opened.openMs,
+        sizesMs: opened.sizesMs,
+      })
+      return
+    }
+
     if (request.type === 'layoutText') {
       const font = await getFontResource(request.font ?? 'BIZUDGothic')
       const fallback = getDingbatsResource()
@@ -393,22 +410,10 @@ function cancelQueuedForDocument(docId: string, message: string): void {
 scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const message = event.data
   if (message.type === 'open') {
-    try {
-      cancelQueuedForDocument(message.docId, 'PDF が開き直されました。')
-      disposeDocument(message.docId)
-      const opened = openDocument(new Uint8Array(message.bytes))
-      documents.set(message.docId, { opened, displayLists: new DisplayListCache(opened.document) })
-      post({
-        type: 'opened',
-        requestId: message.requestId,
-        pageCount: opened.pageCount,
-        pageSizes: opened.pageSizes,
-        openMs: opened.openMs,
-        sizesMs: opened.sizesMs,
-      })
-    } catch (error) {
-      post({ type: 'error', requestId: message.requestId, message: error instanceof Error ? error.message : String(error) })
-    }
+    cancelQueuedForDocument(message.docId, 'PDF が開き直されました。')
+    queue.push({ ...message, priority: -1, sequence: sequence++ })
+    queue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence)
+    schedule()
     return
   }
   if (message.type === 'close') {
