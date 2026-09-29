@@ -5,6 +5,7 @@ import { renderRegion } from '../core/render'
 import { applyEdits, listAnnotations } from '../core/annotations'
 import {
   createFontResource,
+  createDingbatsFontResource,
   encodeCharacter,
   replaceMissingCharacters,
   type FontName,
@@ -111,6 +112,15 @@ function disposeFonts(): void {
   for (const fontResource of Object.values(fontResources)) fontResource?.font.destroy()
   delete fontResources.BIZUDGothic
   delete fontResources.BIZUDMincho
+  delete fontResources.ZapfDingbats
+}
+
+function getDingbatsResource(): FontResource {
+  const loaded = fontResources.ZapfDingbats
+  if (loaded) return loaded
+  const resource = createDingbatsFontResource()
+  fontResources.ZapfDingbats = resource
+  return resource
 }
 
 async function getFontResource(name: FontName): Promise<FontResource> {
@@ -175,7 +185,8 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
   try {
     if (request.type === 'layoutText') {
       const font = await getFontResource(request.font ?? 'BIZUDGothic')
-      const replaced = replaceMissingCharacters(font.font, request.text)
+      const fallback = getDingbatsResource()
+      const replaced = replaceMissingCharacters(font.font, request.text, fallback.font)
       post({
         type: 'textLaidOut',
         requestId: request.requestId,
@@ -184,7 +195,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
           fontSize: request.fontSize,
           boxWidth: request.boxWidth,
           ascent: font.ascent,
-          advance: (character) => encodeCharacter(font.font, character).advance,
+          advance: (character) => encodeCharacter(font.font, character, fallback.font).advance,
         }),
       })
       return
@@ -219,9 +230,11 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
     if (request.type === 'prepareOutput') {
       const requiredFonts = new Set<FontName>()
       for (const edit of request.edits) {
-        if (edit.kind === 'createFreeText' || edit.kind === 'updateFreeText') requiredFonts.add(edit.font)
+        if (edit.kind === 'createFreeText' || edit.kind === 'updateFreeText'
+          || edit.kind === 'createCallout' || edit.kind === 'updateCallout') requiredFonts.add(edit.font)
       }
       await Promise.all([...requiredFonts].map((fontName) => getFontResource(fontName)))
+      if (requiredFonts.size > 0) getDingbatsResource()
       const source = saveDocument(document, 'incremental').bytes
       const output = prepareDocumentOutput(source, request.edits, fontResources, request.bake)
       const bytes = output.bytes.buffer as ArrayBuffer
@@ -229,6 +242,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         type: 'outputPrepared', requestId: request.requestId, bytes,
         ms: output.ms,
         replacedCharacters: output.applied.replacedCharacters,
+        unsupportedCharacters: output.applied.unsupportedCharacters,
         errors: output.applied.errors,
       }, [bytes])
       return
@@ -326,9 +340,11 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
 
     const requiredFonts = new Set<FontName>()
     for (const edit of request.edits) {
-      if (edit.kind === 'createFreeText' || edit.kind === 'updateFreeText') requiredFonts.add(edit.font)
+      if (edit.kind === 'createFreeText' || edit.kind === 'updateFreeText'
+        || edit.kind === 'createCallout' || edit.kind === 'updateCallout') requiredFonts.add(edit.font)
     }
     await Promise.all([...requiredFonts].map((fontName) => getFontResource(fontName)))
+    if (requiredFonts.size > 0) getDingbatsResource()
     const applied = applyEdits(document, request.edits, fontResources)
     entry.displayLists.clear()
     if (request.type === 'applyEdits') {
@@ -336,6 +352,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         type: 'editsApplied', requestId: request.requestId,
         created: applied.created,
         replacedCharacters: applied.replacedCharacters,
+        unsupportedCharacters: applied.unsupportedCharacters,
         errors: applied.errors,
       })
       return
@@ -351,6 +368,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       ms: saved.ms,
       created: applied.created,
       replacedCharacters: applied.replacedCharacters,
+      unsupportedCharacters: applied.unsupportedCharacters,
       errors: applied.errors,
     }, [bytes])
   } catch (error) {

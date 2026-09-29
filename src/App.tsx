@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { DocumentTabs } from './app/DocumentTabs'
 import { DocumentWorkspace } from './app/DocumentWorkspace'
 import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
 import { HelpDialog } from './app/HelpDialog'
 import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS } from './app/documentModel'
 import { StartScreen } from './app/StartScreen'
+import { ErrorBoundary } from './app/ErrorBoundary'
 import { PdfWorkerPool, type ApplyAndSaveResult, type PageLayoutTimings, type PreparedOutputResult } from './client/PdfWorkerPool'
 import type { EditorTool } from './editor/AnnotationLayer'
 import type { EditableAnnotation } from './editor/AnnotationStore'
@@ -90,13 +91,30 @@ function workerCountFromUrl(): number {
   return Number.isFinite(value) ? Math.max(1, Math.min(3, Math.trunc(value))) : 3
 }
 
+// エラーバウンダリが React ツリーを作り直しても、開いている文書・注釈ストア・
+// Worker は同じインスタンスを使い続ける。
+const appRuntime = {
+  pool: new PdfWorkerPool(workerCountFromUrl()),
+  tabs: new DocumentTabsModel(),
+}
+
+function WorkspaceFailureProbe({ fail, children }: { fail: boolean; children: ReactNode }) {
+  if (fail) throw new Error('テスト用の作業領域エラー')
+  return children
+}
+
 function copyToArrayBuffer(bytes: Uint8Array | number[] | ArrayBuffer): ArrayBuffer {
   if (bytes instanceof ArrayBuffer) return bytes.slice(0)
   const view = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes)
   return new Uint8Array(view).buffer
 }
 
+function unsupportedCharactersMessage(characters: readonly string[]): string {
+  return `使えない文字がありました（〓で表示）: ${characters.join(' ')}`
+}
+
 function saveMessage(result: ApplyAndSaveResult): string {
+  if (result.unsupportedCharacters.length > 0) return unsupportedCharactersMessage(result.unsupportedCharacters)
   if (result.mode === 'full') return `ファイルを整理して保存しました（全体保存・${(result.ms / 1000).toFixed(1)}秒）`
   return `保存しました（増分保存・${(result.ms / 1000).toFixed(1)}秒）`
 }
@@ -115,8 +133,8 @@ function loadPanels(): { thumbnails: boolean; format: boolean } {
 }
 
 export default function App() {
-  const pool = useMemo(() => new PdfWorkerPool(workerCountFromUrl()), [])
-  const tabs = useRef(new DocumentTabsModel()).current
+  const pool = appRuntime.pool
+  const tabs = appRuntime.tabs
   const viewerRef = useRef<ViewerHandle>(null)
   const activeRef = useRef<DocumentSession | null>(null)
   const openEndRef = useRef<(() => number) | null>(null)
@@ -128,19 +146,22 @@ export default function App() {
   const organizeRef = useRef<ActiveOrganize | null>(null)
   const updateServiceWorkerRef = useRef<((reloadPage?: boolean) => Promise<void>) | null>(null)
   const [, setTabsVersion] = useState(0)
-  const [page, setPage] = useState(0)
-  const [zoom, setZoom] = useState(1)
+  const [page, setPage] = useState(() => tabs.active?.view.page ?? 0)
+  const [zoom, setZoom] = useState(() => tabs.active?.view.zoom ?? 1)
   const [tool, setTool] = useState<EditorTool>('select')
   const [formatDefaults, setFormatDefaults] = useState<FormatDefaults>(() => loadFormatDefaults())
   const [panels, setPanels] = useState(loadPanels)
   const [recent, setRecent] = useState<RecentFile[]>([])
   const [error, setError] = useState('')
+  const [runtimeError, setRuntimeError] = useState('')
   const [status, setStatus] = useState('')
   const [saving, setSaving] = useState(false)
   const [organize, setOrganize] = useState<ActiveOrganize | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
   const [debug, setDebug] = useState(() => new URLSearchParams(location.search).get('debug') === '1')
+  const [workspaceFailure, setWorkspaceFailure] = useState(false)
+  const testMode = new URLSearchParams(location.search).get('test') === '1'
   const active = tabs.active
   activeRef.current = active
   organizeRef.current = organize
@@ -154,9 +175,25 @@ export default function App() {
     return () => {
       window.clearTimeout(statusTimerRef.current)
       window.clearTimeout(viewSaveTimerRef.current)
-      pool.destroy()
     }
   }, [pool, refreshRecent])
+
+  useEffect(() => {
+    const onError = (event: ErrorEvent) => {
+      console.error('アプリで予期しないエラーが発生しました。', event.error ?? event.message)
+      setRuntimeError('画面の処理で問題が起きました。書き込みは保持されています。')
+    }
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      console.error('未処理の Promise エラーが発生しました。', event.reason)
+      setRuntimeError('画面の処理で問題が起きました。書き込みは保持されています。')
+    }
+    window.addEventListener('error', onError)
+    window.addEventListener('unhandledrejection', onUnhandledRejection)
+    return () => {
+      window.removeEventListener('error', onError)
+      window.removeEventListener('unhandledrejection', onUnhandledRejection)
+    }
+  }, [])
 
   const showStatus = useCallback((message: string) => {
     setStatus(message)
@@ -337,11 +374,12 @@ export default function App() {
       viewerRef.current?.clearSelection()
       refreshTabs()
       if (result.errors.length > 0) throw new Error(result.errors.map((item) => item.message).join(' / '))
+      if (result.unsupportedCharacters.length > 0) showStatus(saveMessage(result))
       return { bytes: result.bytes, result }
     } finally {
       endSave()
     }
-  }, [beginSave, endSave, pool, refreshTabs])
+  }, [beginSave, endSave, pool, refreshTabs, showStatus])
 
   const saveDocument = useCallback(async (saveAs: boolean) => {
     const session = activeRef.current
@@ -400,7 +438,9 @@ export default function App() {
       if (!result) return
       if (handle) await writePdf(handle, result.bytes)
       else downloadPdf(result.bytes, name)
-      showStatus('確定版を保存しました。確定版の書き込みは編集できません。')
+      showStatus(result.unsupportedCharacters.length > 0
+        ? unsupportedCharactersMessage(result.unsupportedCharacters)
+        : '確定版を保存しました。確定版の書き込みは編集できません。')
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === 'AbortError') return
       setError(`確定版を保存できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
@@ -427,7 +467,9 @@ export default function App() {
       const url = URL.createObjectURL(new Blob([new Uint8Array(result.bytes)], { type: 'application/pdf' }))
       printWindow.location.replace(url)
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
-      showStatus('新しいタブの印刷ボタンから印刷してください')
+      showStatus(result.unsupportedCharacters.length > 0
+        ? unsupportedCharactersMessage(result.unsupportedCharacters)
+        : '新しいタブの印刷ボタンから印刷してください')
     } catch (reason) {
       printWindow.close()
       setError(`印刷用PDFを開けませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
@@ -477,7 +519,8 @@ export default function App() {
     viewerRef.current?.clearSelection()
     refreshTabs()
     if (result.errors.length > 0) throw new Error(result.errors.map((item) => item.message).join(' / '))
-  }, [pool, refreshTabs])
+    if (result.unsupportedCharacters.length > 0) showStatus(unsupportedCharactersMessage(result.unsupportedCharacters))
+  }, [pool, refreshTabs, showStatus])
 
   const openOrganize = useCallback(async () => {
     const session = activeRef.current
@@ -742,6 +785,7 @@ export default function App() {
       else if (key === 'o') void changeTool('circle')
       else if (key === 'h') void changeTool('highlight')
       else if (key === 'p') void changeTool('ink')
+      else if (key === 's') void changeTool('symbol')
       else if (key === 'c') void changeTool('callout')
       else if (event.key === 'Escape') { setTool('select'); viewerRef.current?.clearSelection() }
     }
@@ -866,6 +910,7 @@ export default function App() {
         <button type="button" className={tool === 'arrow' ? 'active' : ''} aria-pressed={tool === 'arrow'} disabled={!active} onClick={() => void changeTool('arrow')}>矢印</button>
         <button type="button" className={tool === 'square' ? 'active' : ''} aria-pressed={tool === 'square'} disabled={!active} onClick={() => void changeTool('square')}>四角</button>
         <button type="button" className={tool === 'circle' ? 'active' : ''} aria-pressed={tool === 'circle'} disabled={!active} onClick={() => void changeTool('circle')}>丸</button>
+        <button type="button" className={tool === 'symbol' ? 'active' : ''} aria-pressed={tool === 'symbol'} disabled={!active} onClick={() => void changeTool('symbol')}>記号</button>
         <button type="button" className={tool === 'highlight' ? 'active' : ''} aria-pressed={tool === 'highlight'} disabled={!active} onClick={() => void changeTool('highlight')}>蛍光ペン</button>
         <button type="button" className={tool === 'ink' ? 'active' : ''} aria-pressed={tool === 'ink'} disabled={!active} onClick={() => void changeTool('ink')}>手書き</button>
         <span className="toolbar-separator" />
@@ -882,6 +927,7 @@ export default function App() {
         <button type="button" onClick={() => viewerRef.current?.fitWidth()} disabled={!active}>幅に合わせる</button>
         <output className="zoom-output">{Math.round(zoom * 100)}%</output>
         <button type="button" onClick={() => setHelpOpen(true)}>使い方</button>
+        {testMode && <button type="button" data-testid="throw-workspace-error" onClick={() => setWorkspaceFailure(true)}>作業領域エラー</button>}
       </header>
       <input
         hidden
@@ -897,7 +943,19 @@ export default function App() {
       />
       {error && <div className="error" role="alert">{error}</div>}
       {active ? (
-        <DocumentWorkspace
+        <ErrorBoundary
+          resetKey={`${active.docId}:${active.pageRevision}`}
+          onReset={() => setWorkspaceFailure(false)}
+          fallback={(_reason, reset) => <section className="workspace-error" role="alert">
+            <p>表示中に問題が起きました。書き込みは消えていません。</p>
+            <div>
+              <button type="button" onClick={reset}>表示し直す</button>
+              <button type="button" onClick={() => void saveDocument(true)}>保存する</button>
+            </div>
+          </section>}
+        >
+          <WorkspaceFailureProbe fail={workspaceFailure}>
+          <DocumentWorkspace
           key={`${active.docId}:${active.pageRevision}`}
           session={active}
           pool={pool}
@@ -914,7 +972,9 @@ export default function App() {
           onFirstBitmap={() => { openEndRef.current?.(); openEndRef.current = null }}
           onFirstSharp={() => { openSharpEndRef.current?.(); openSharpEndRef.current = null }}
           organize={workspaceOrganize}
-        />
+          />
+          </WorkspaceFailureProbe>
+        </ErrorBoundary>
       ) : (
         <StartScreen
           recent={recent}
@@ -926,7 +986,7 @@ export default function App() {
       )}
       <footer className="status-bar">
         <span>{active ? `${page} / ${active.pageSizes.length} ページ` : 'PDFを開いてください'}</span>
-        <span role="status">{status}</span>
+        <span role="status">{runtimeError || status}</span>
       </footer>
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
     </main>

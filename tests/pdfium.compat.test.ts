@@ -3,8 +3,8 @@ import path from 'node:path'
 import mupdf, { type PDFDocument, type PDFPage } from 'mupdf'
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { applyEdits, type Rect } from '../src/core/annotations'
-import { createFontResource, type FontResource, type FontResources } from '../src/core/fontMetrics'
+import { applyEdits, SYMBOL_OPTIONS, type Rect } from '../src/core/annotations'
+import { createDingbatsFontResource, createFontResource, type FontResource, type FontResources } from '../src/core/fontMetrics'
 import { saveDocument } from '../src/core/save'
 import { ensureSamplePdf } from './fixtures'
 
@@ -18,6 +18,7 @@ const scale = 2
 let pdfium: WrappedPdfiumModule
 let fontResource: FontResource
 let minchoFontResource: FontResource
+let dingbatsFontResource: FontResource
 let fontResources: FontResources
 let sourceBytes: Uint8Array
 let annotatedBytes: Uint8Array
@@ -34,7 +35,12 @@ beforeAll(async () => {
     new Uint8Array(await fs.readFile(minchoFontPath)),
     'BIZUDMincho',
   )
-  fontResources = { BIZUDGothic: fontResource, BIZUDMincho: minchoFontResource }
+  dingbatsFontResource = createDingbatsFontResource()
+  fontResources = {
+    BIZUDGothic: fontResource,
+    BIZUDMincho: minchoFontResource,
+    ZapfDingbats: dingbatsFontResource,
+  }
   sourceBytes = new Uint8Array(await fs.readFile(await ensureSamplePdf()))
   const document = new mupdf.PDFDocument(sourceBytes)
   try {
@@ -91,6 +97,22 @@ beforeAll(async () => {
         text: '吹き出し', fontSize: 10.5, color: [1, 0, 0], font: 'BIZUDGothic',
         backgroundColor: [1, 1, 1], borderColor: [1, 0, 0], borderWidth: 1,
       },
+      ...SYMBOL_OPTIONS.map((option, index) => {
+        const x = 72 + (index % 4) * 70
+        const y = 100 + Math.floor(index / 4) * 70
+        return {
+          kind: 'createSymbol' as const,
+          pageIndex: 2,
+          rect: [x, y, x + 32, y + 32] as Rect,
+          color: [1, 0, 0] as [number, number, number],
+          symbol: option.name,
+        }
+      }),
+      {
+        kind: 'createFreeText', pageIndex: 2, rect: [72, 360, 300, 405],
+        text: '確認✔済み✗', fontSize: 14,
+        color: [1, 0, 0], font: 'BIZUDGothic',
+      },
     ], fontResources)
     expect(applied.errors).toEqual([])
     annotatedBytes = saveDocument(document, 'full').bytes
@@ -102,6 +124,7 @@ beforeAll(async () => {
 afterAll(() => {
   if (fontResource) fontResource.font.destroy()
   if (minchoFontResource) minchoFontResource.font.destroy()
+  if (dingbatsFontResource) dingbatsFontResource.font.destroy()
   if (pdfium) pdfium.FPDF_DestroyLibrary()
 })
 
@@ -289,5 +312,19 @@ describe('PDFium compatibility', () => {
     expect(yellowBackground).toBeGreaterThan(1_000)
     expect(calloutRed).toBeGreaterThan(100)
     console.info(`PDFIUM_METRIC spec01e blue_fill=${blueFill} yellow_background=${yellowBackground} callout_red=${calloutRed}`)
+  })
+
+  it('12種類の記号とZapfDingbatsの文字をPDFiumで描く', () => {
+    const symbols = countPdfiumPixels(
+      annotatedBytes, 2, [65, 90, 360, 285],
+      (r, g, b) => r > 150 && g < 150 && b < 150,
+    )
+    const fallbackText = countPdfiumPixels(
+      annotatedBytes, 2, [65, 350, 310, 415],
+      (r, g, b) => r > 150 && g < 150 && b < 150,
+    )
+    expect(symbols).toBeGreaterThan(300)
+    expect(fallbackText).toBeGreaterThan(50)
+    console.info(`PDFIUM_METRIC symbols=${symbols} fallback_text=${fallbackText}`)
   })
 })

@@ -1,9 +1,11 @@
+import { useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
-import type { RGB } from '../core/annotations'
+import { SYMBOL_OPTIONS, type RGB, type SymbolName } from '../core/annotations'
 import type { FontName } from '../core/fontMetrics'
 import type { EditorTool } from '../editor/AnnotationLayer'
 import type { AnnotationStore, EditableAnnotation, Kind } from '../editor/AnnotationStore'
 import { updateToolFormat, type FormatDefaults, type FormatTool, type ToolFormat } from '../editor/formatDefaults'
+import { getActiveTextEditorSnapshot, insertIntoActiveTextEditor, subscribeActiveTextEditor } from '../editor/TextEditor'
 
 const COLORS: Array<{ name: string; value: RGB; css: string }> = [
   { name: '赤', value: [1, 0, 0], css: '#e00000' },
@@ -25,6 +27,7 @@ const WIDTHS = [0.5, 1, 1.5, 2, 3, 5]
 const TEXT_BORDER_WIDTHS = [0.5, 1, 1.5, 2]
 const HIGHLIGHT_WIDTHS = [6, 9, 12, 18]
 const FONT_SIZES = [8, 9, 10.5, 12, 14, 18, 24, 36]
+const TEXT_INSERT_SYMBOLS = [...'✓✔○◎×△□☆★※→←↑↓⇒①②③〒℃±']
 
 function sameColor(left: readonly number[] | null, right: readonly number[] | null): boolean {
   if (left === null || right === null) return left === right
@@ -62,12 +65,17 @@ function formatTool(kind: Kind | EditorTool): FormatTool | null {
 }
 
 export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsChange }: Props) {
+  const textEditorOpen = useSyncExternalStore(
+    subscribeActiveTextEditor,
+    getActiveTextEditorSnapshot,
+    getActiveTextEditorSnapshot,
+  )
   const activeSelection = tool === 'select' ? selected : null
   const target = formatTool(activeSelection?.kind ?? (tool === 'select' ? 'text' : tool))
   const values: EditableAnnotation | ToolFormat | null = activeSelection ?? (target ? defaults[target] : null)
   const textTarget = target === 'text' || target === 'callout'
   const shapeTarget = target === 'square' || target === 'circle'
-  const simpleColorTarget = target === 'line' || target === 'arrow' || target === 'highlight' || target === 'ink'
+  const simpleColorTarget = target === 'line' || target === 'arrow' || target === 'highlight' || target === 'ink' || target === 'symbol'
 
   const changeDefault = (changes: Partial<ToolFormat>) => {
     if (target) onDefaultsChange(updateToolFormat(defaults, target, changes))
@@ -95,6 +103,10 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     if (activeSelection) store.update(activeSelection.id, { opacity: next })
     else changeDefault({ opacity: next })
   }
+  const changeSymbol = (next: SymbolName) => {
+    if (activeSelection?.kind === 'symbol') store.update(activeSelection.id, { symbol: next })
+    else changeDefault({ symbol: next })
+  }
   const makeWhiteout = () => {
     if (activeSelection) store.update(activeSelection.id, { interiorColor: [1, 1, 1], borderColor: null, opacity: 1 })
     else changeDefault({ fillColor: [1, 1, 1], borderColor: null, opacity: 1 })
@@ -120,6 +132,20 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     <h2>書式</h2>
     {!target && <p>道具または書き込みを選んでください。</p>}
     {simpleColorTarget && values && <ColorField label="色" value={values.color} choices={target === 'highlight' ? HIGHLIGHT_COLORS : COLORS} onChange={(next) => next && changeColor(next)} />}
+    {target === 'symbol' && values && <fieldset>
+      <legend>記号の種類</legend>
+      <div className="symbol-grid">
+        {SYMBOL_OPTIONS.map((item) => <button
+          key={item.name}
+          type="button"
+          title={item.label}
+          aria-label={`記号 ${item.glyph}（${item.label}）`}
+          aria-pressed={values.symbol === item.name}
+          className={values.symbol === item.name ? 'selected' : ''}
+          onClick={() => changeSymbol(item.name)}
+        >{item.glyph}</button>)}
+      </div>
+    </fieldset>}
     {textTarget && values && <ColorField label="文字の色" value={values.color} onChange={(next) => next && changeColor(next)} />}
     {(shapeTarget || textTarget) && <ColorField label={textTarget ? '背景色' : '塗り'} value={fillColor} allowNone onChange={changeFill} />}
     {(shapeTarget || textTarget) && <ColorField label="枠線の色" value={borderColor} allowNone onChange={changeBorder} />}
@@ -151,6 +177,19 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
         </select>
       </label>
     </>}
+    {textEditorOpen && <fieldset>
+      <legend>記号を挿入</legend>
+      <div className="text-symbol-grid">
+        {TEXT_INSERT_SYMBOLS.map((item) => <button
+          key={item}
+          type="button"
+          data-text-symbol={item}
+          aria-label={`記号を挿入 ${item}`}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => insertIntoActiveTextEditor(item)}
+        >{item}</button>)}
+      </div>
+    </fieldset>}
     {target && <p className="format-target">{activeSelection ? '選択中の書き込み' : '次に作る書き込み'}</p>}
   </aside>
 }

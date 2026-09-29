@@ -43,12 +43,14 @@ export interface ApplyAndSaveResult {
   ms: number
   created: number[]
   replacedCharacters: number
+  unsupportedCharacters: string[]
   errors: ApplyError[]
 }
 
 export interface ApplyEditsResult {
   created: number[]
   replacedCharacters: number
+  unsupportedCharacters: string[]
   errors: ApplyError[]
 }
 
@@ -56,6 +58,7 @@ export interface PreparedOutputResult {
   bytes: Uint8Array
   ms: number
   replacedCharacters: number
+  unsupportedCharacters: string[]
   errors: ApplyError[]
 }
 
@@ -330,6 +333,7 @@ export class PdfWorkerPool {
       ms: response.ms,
       created: response.created,
       replacedCharacters: response.replacedCharacters,
+      unsupportedCharacters: response.unsupportedCharacters,
       errors: response.errors,
     }
   }
@@ -341,6 +345,7 @@ export class PdfWorkerPool {
     return {
       created: response.created,
       replacedCharacters: response.replacedCharacters,
+      unsupportedCharacters: response.unsupportedCharacters,
       errors: response.errors,
     }
   }
@@ -353,6 +358,7 @@ export class PdfWorkerPool {
       bytes: new Uint8Array(response.bytes),
       ms: response.ms,
       replacedCharacters: response.replacedCharacters,
+      unsupportedCharacters: response.unsupportedCharacters,
       errors: response.errors,
     }
   }

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
-import { nearestCalloutEdgePoint, type Point, type Rect } from '../core/annotations'
+import { nearestCalloutEdgePoint, resizeSymbolRect, SYMBOL_OPTIONS, symbolRectFromDrag, type Point, type Rect } from '../core/annotations'
 import type { PageSize } from '../core/mupdfDoc'
 import { CSS_PX_PER_PT } from '../viewer/pageLayout'
 import { beginDragFrameMeasurement, TextEditor } from './TextEditor'
@@ -30,7 +30,7 @@ interface Props {
 
 interface DragOperation {
   pointerId: number
-  mode: 'move' | 'text' | 'callout' | 'shape' | 'line' | 'ink' | 'resize' | 'line-end' | 'callout-point'
+  mode: 'move' | 'text' | 'callout' | 'shape' | 'symbol' | 'line' | 'ink' | 'resize' | 'line-end' | 'callout-point'
   creationKind?: Kind
   start: Point
   latest: Point
@@ -93,6 +93,9 @@ function shapeRect(start: Point, end: Point, square: boolean): Rect {
 }
 
 function resizedRect(rect: Rect, handle: ResizeHandle, point: Point, kind: EditableAnnotation['kind']): Rect {
+  if (kind === 'symbol' && (handle === 'nw' || handle === 'ne' || handle === 'se' || handle === 'sw')) {
+    return resizeSymbolRect(rect, handle, point)
+  }
   let [x0, y0, x1, y1] = rect
   const minimumWidth = kind === 'freetext' || kind === 'callout' ? 20 : 4
   if (handle.includes('w')) x0 = Math.min(point[0], x1 - minimumWidth)
@@ -208,6 +211,8 @@ export function AnnotationLayer(props: Props) {
     if (!draft) return
     const rect = operation.mode === 'shape'
       ? shapeRect(operation.start, operation.latest, operation.creationKind === 'circle' && operation.shift)
+      : operation.mode === 'symbol'
+        ? symbolRectFromDrag(operation.start, operation.latest, operation.moved)
       : operation.mode === 'callout'
         ? [
             operation.moved ? operation.latest[0] : operation.start[0] + 40,
@@ -342,6 +347,21 @@ export function AnnotationLayer(props: Props) {
       changeTool('select')
       return
     }
+    if (operation.mode === 'symbol') {
+      const rect = symbolRectFromDrag(operation.start, operation.latest, operation.moved)
+      if (rect[2] - rect[0] < 4) return
+      const format = props.formatDefaults.symbol
+      const annotation = props.store.create({
+        pageIndex: props.pageIndex,
+        kind: 'symbol',
+        rect,
+        color: format.color,
+        symbol: format.symbol,
+      })
+      props.onSelect(annotation.id)
+      if (!operation.shift) changeTool('select')
+      return
+    }
     if (operation.mode === 'text' || operation.mode === 'callout') {
       const callout = operation.mode === 'callout'
       const format = props.formatDefaults[callout ? 'callout' : 'text']
@@ -378,6 +398,11 @@ export function AnnotationLayer(props: Props) {
           { handle: 'e', x: x1, y: (y0 + y1) / 2 }, { handle: 'se', x: x1, y: y1 }, { handle: 's', x: (x0 + x1) / 2, y: y1 },
           { handle: 'sw', x: x0, y: y1 }, { handle: 'w', x: x0, y: (y0 + y1) / 2 },
         ]
+      : annotation.kind === 'symbol'
+        ? [
+            { handle: 'nw', x: x0, y: y0 }, { handle: 'ne', x: x1, y: y0 },
+            { handle: 'se', x: x1, y: y1 }, { handle: 'sw', x: x0, y: y1 },
+          ]
       : annotation.kind === 'freetext' || annotation.kind === 'callout'
         ? [{ handle: 'e', x: x1, y: (y0 + y1) / 2 }, { handle: 'w', x: x0, y: (y0 + y1) / 2 }]
         : []
@@ -386,11 +411,14 @@ export function AnnotationLayer(props: Props) {
       ? [[...annotation.calloutPoint], nearestCalloutEdgePoint(annotation.rect, annotation.calloutPoint)] as [Point, Point]
       : null
     const calloutColor = annotation.borderColor ?? annotation.color
+    const symbolGlyph = annotation.symbol
+      ? SYMBOL_OPTIONS.find((item) => item.name === annotation.symbol)?.glyph
+      : undefined
     const selectionRect: Rect = calloutLine
       ? [Math.min(x0, calloutLine[0][0]), Math.min(y0, calloutLine[0][1]), Math.max(x1, calloutLine[0][0]), Math.max(y1, calloutLine[0][1])]
       : annotation.rect
     return (
-      <g key={annotation.id} data-annotation-id={annotation.id} className="annotation-item">
+      <g key={annotation.id} data-annotation-id={annotation.id} data-symbol={annotation.symbol ?? undefined} className="annotation-item">
         {visible && annotation.kind === 'square' && <rect className="annotation-square" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && annotation.kind === 'circle' && <ellipse className="annotation-shape" cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} rx={(x1 - x0) / 2} ry={(y1 - y0) / 2} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && line && <>
@@ -400,6 +428,15 @@ export function AnnotationLayer(props: Props) {
         {visible && (annotation.kind === 'highlight' || annotation.kind === 'ink') && annotation.inkList?.map((stroke, index) => (
           <polyline key={`${annotation.id}-stroke-${index}`} className="annotation-ink" points={stroke.map((point) => `${point[0]},${point[1]}`).join(' ')} fill="none" stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} opacity={annotation.opacity} />
         ))}
+        {visible && annotation.kind === 'symbol' && symbolGlyph && <text
+          className="annotation-symbol"
+          x={(x0 + x1) / 2}
+          y={(y0 + y1) / 2}
+          fill={color(annotation.color)}
+          fontSize={Math.min(x1 - x0, y1 - y0) * 0.92}
+          textAnchor="middle"
+          dominantBaseline="central"
+        >{symbolGlyph}</text>}
         {visible && calloutLine && <>
           <line className="annotation-callout-line" x1={calloutLine[0][0]} y1={calloutLine[0][1]} x2={calloutLine[1][0]} y2={calloutLine[1][1]} stroke={color(calloutColor)} strokeWidth={Math.max(0.5, annotation.borderWidth)} />
           <polyline className="annotation-callout-line" points={calloutArrowHead(calloutLine, Math.max(8, annotation.borderWidth * 5))} fill="none" stroke={color(calloutColor)} strokeWidth={Math.max(0.5, annotation.borderWidth)} />
@@ -465,7 +502,7 @@ export function AnnotationLayer(props: Props) {
         } else {
           props.onSelect(null)
           const kind = props.tool === 'text' ? 'freetext' : props.tool
-          const mode = props.tool === 'text' ? 'text' : props.tool === 'callout' ? 'callout' : props.tool === 'line' || props.tool === 'arrow' ? 'line' : props.tool === 'highlight' || props.tool === 'ink' ? 'ink' : 'shape'
+          const mode = props.tool === 'text' ? 'text' : props.tool === 'callout' ? 'callout' : props.tool === 'symbol' ? 'symbol' : props.tool === 'line' || props.tool === 'arrow' ? 'line' : props.tool === 'highlight' || props.tool === 'ink' ? 'ink' : 'shape'
           const shown = mode === 'line' ? draftLineRef.current : mode === 'ink' ? draftInkRef.current : draftRectRef.current
           if (shown) shown.style.display = 'block'
           if (mode === 'callout' && draftLineRef.current) draftLineRef.current.style.display = 'block'

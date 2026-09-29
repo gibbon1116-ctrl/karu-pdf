@@ -9,8 +9,9 @@ import {
   type Point,
   type Rect,
   type RGB,
+  SYMBOL_OPTIONS,
 } from '../src/core/annotations'
-import { createFontResource, type FontResource, type FontResources } from '../src/core/fontMetrics'
+import { createDingbatsFontResource, createFontResource, type FontResource, type FontResources } from '../src/core/fontMetrics'
 import { saveDocument, type SaveMode } from '../src/core/save'
 import { ensureSamplePdf } from './fixtures'
 
@@ -19,12 +20,14 @@ const fontPath = path.resolve('public/fonts/BIZUDGothic-Regular.ttf')
 const minchoFontPath = path.resolve('public/fonts/BIZUDMincho-Regular.ttf')
 const resultPath = path.resolve('test-results/annot-roundtrip.pdf')
 const calloutResultPath = path.resolve('test-results/callout-check.pdf')
+const symbolResultPath = path.resolve('test-results/symbol-check.pdf')
 const firstText = '日本語の書き込みテスト①（半角ABC 123）'
 const firstRect: Rect = [72, 320, 272, 362]
 const rotatedRect: Rect = [100, 100, 300, 145]
 
 let fontResource: FontResource
 let minchoFontResource: FontResource
+let dingbatsFontResource: FontResource
 let fontResources: FontResources
 let sampleBytes: Uint8Array
 
@@ -35,13 +38,19 @@ beforeAll(async () => {
     new Uint8Array(await fs.readFile(minchoFontPath)),
     'BIZUDMincho',
   )
-  fontResources = { BIZUDGothic: fontResource, BIZUDMincho: minchoFontResource }
+  dingbatsFontResource = createDingbatsFontResource()
+  fontResources = {
+    BIZUDGothic: fontResource,
+    BIZUDMincho: minchoFontResource,
+    ZapfDingbats: dingbatsFontResource,
+  }
   await fs.mkdir(path.dirname(resultPath), { recursive: true })
 })
 
 afterAll(() => {
   fontResource.font.destroy()
   minchoFontResource.font.destroy()
+  dingbatsFontResource.font.destroy()
 })
 
 function openPdf(bytes: Uint8Array): PDFDocument {
@@ -172,6 +181,67 @@ function closeInspection(inspection: ReturnType<typeof inspectFreeText>): void {
   inspection.object.destroy()
   inspection.annotation.destroy()
   inspection.page.destroy()
+}
+
+function appearanceFonts(document: PDFDocument, pageIndex: number, objNum: number): Array<{
+  name: string
+  embedded: boolean
+  hasToUnicode: boolean
+}> {
+  const page = document.loadPage(pageIndex)
+  const annotation = findAnnotation(page, objNum)
+  const object = annotation.getObject()
+  const appearance = object.get('AP', 'N')
+  const fonts = appearance.get('Resources', 'Font')
+  const result: Array<{ name: string; embedded: boolean; hasToUnicode: boolean }> = []
+  try {
+    fonts.forEach((fontReference) => {
+      const font = fontReference.resolve()
+      const name = font.get('BaseFont')
+      const toUnicode = font.get('ToUnicode')
+      let descendant = font.get('DescendantFonts', 0)
+      let resolvedDescendant: PDFObject | undefined
+      let descriptor = font.get('FontDescriptor')
+      let resolvedDescriptor: PDFObject | undefined
+      try {
+        if (descriptor.isNull() && !descendant.isNull()) {
+          descriptor.destroy()
+          resolvedDescendant = descendant.resolve()
+          descriptor = resolvedDescendant.get('FontDescriptor')
+        }
+        if (!descriptor.isNull() && descriptor.isIndirect()) resolvedDescriptor = descriptor.resolve()
+        const dictionary = resolvedDescriptor ?? descriptor
+        const fontFile2 = dictionary.get('FontFile2')
+        const fontFile3 = dictionary.get('FontFile3')
+        try {
+          result.push({
+            name: name.isName() ? name.asName() : String(name.valueOf()),
+            embedded: fontFile2.isStream() || fontFile3.isStream(),
+            hasToUnicode: toUnicode.isStream(),
+          })
+        } finally {
+          fontFile3.destroy()
+          fontFile2.destroy()
+        }
+      } finally {
+        resolvedDescriptor?.destroy()
+        descriptor.destroy()
+        resolvedDescendant?.destroy()
+        descendant.destroy()
+        toUnicode.destroy()
+        name.destroy()
+        font.destroy()
+        fontReference.destroy()
+      }
+    })
+    return result
+  } finally {
+    fonts.destroy()
+    appearance.destroy()
+    object.destroy()
+    annotation.destroy()
+    page.destroy()
+  }
 }
 
 function annotationText(annotation: PDFAnnotation): string {
@@ -703,6 +773,74 @@ describe('annotation integration', () => {
       expect(listAnnotations(deletedDocument, 0).some((item) => item.objNum === created.created[0])).toBe(false)
     } finally {
       deletedDocument.destroy()
+    }
+  })
+
+  it('12種類の記号とZapfDingbats代替文字を往復保存する', async () => {
+    const symbolEdits: AnnotationEdit[] = SYMBOL_OPTIONS.map((option, index) => {
+      const size = 16 + index
+      const x = 72 + (index % 4) * 80
+      const y = 100 + Math.floor(index / 4) * 80
+      return {
+        kind: 'createSymbol',
+        pageIndex: 2,
+        rect: [x, y, x + size, y + size],
+        color: index % 2 === 0 ? [1, 0, 0] : [0, 0.25, 1],
+        symbol: option.name,
+      }
+    })
+    const text = '確認✔済み✗'
+    const saved = applyAndSave(sampleBytes, [
+      ...symbolEdits,
+      {
+        kind: 'createFreeText', pageIndex: 2, rect: [72, 380, 300, 425],
+        text, fontSize: 14, color: [1, 0, 0], font: 'BIZUDGothic',
+      },
+    ])
+    expect(saved.replacedCharacters).toBe(0)
+    expect(saved.unsupportedCharacters).toEqual([])
+    await fs.writeFile(symbolResultPath, saved.bytes)
+
+    const document = openPdf(saved.bytes)
+    try {
+      const listed = listAnnotations(document, 2)
+      const symbols = listed.filter((item) => item.kind === 'symbol')
+      expect(symbols).toHaveLength(SYMBOL_OPTIONS.length)
+      for (const [index, option] of SYMBOL_OPTIONS.entries()) {
+        const symbol = symbols.find((item) => item.symbol === option.name)
+        expect(symbol).toBeDefined()
+        expect(symbol).toMatchObject({ type: 'Stamp', editable: true, madeByKaru: true })
+        expectRect(symbol!.rect, (symbolEdits[index] as Extract<AnnotationEdit, { kind: 'createSymbol' }>).rect)
+        expect(symbol!.strokeColor).toEqual((symbolEdits[index] as Extract<AnnotationEdit, { kind: 'createSymbol' }>).color)
+
+        const page = document.loadPage(2)
+        const annotation = findAnnotation(page, symbol!.objNum)
+        const object = annotation.getObject()
+        const flags = object.get('F')
+        const author = object.get('T')
+        const fontDictionary = object.get('AP', 'N', 'Resources', 'Font')
+        try {
+          expect(flags.asNumber() & 4).toBe(4)
+          expect(author.isNull()).toBe(true)
+          expect(fontDictionary.isNull()).toBe(true)
+        } finally {
+          fontDictionary.destroy()
+          author.destroy()
+          flags.destroy()
+          object.destroy()
+          annotation.destroy()
+          page.destroy()
+        }
+      }
+
+      const freeText = listed.find((item) => item.kind === 'freetext' && item.contents === text)
+      expect(freeText).toBeDefined()
+      expect(freeText!.contents).not.toContain('〓')
+      const fonts = appearanceFonts(document, 2, freeText!.objNum)
+      expect(fonts.some((font) => font.name.includes('BIZUDGothic') && font.embedded && font.hasToUnicode)).toBe(true)
+      expect(fonts.some((font) => font.name.includes('ZapfDingbats') && font.embedded && font.hasToUnicode)).toBe(true)
+    } finally {
+      document.destroy()
     }
   })
 

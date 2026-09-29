@@ -22,6 +22,7 @@ const existingFreeText: AnnotationInfo = {
   inkList: null,
   calloutPoint: null,
   calloutLine: null,
+  symbol: null,
   madeByKaru: false,
 }
 

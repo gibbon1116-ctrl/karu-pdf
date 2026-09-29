@@ -5,6 +5,8 @@ import mupdf, {
   type PDFDocument,
   type PDFObject,
   type PDFPage,
+  type Path,
+  type DisplayListDevice,
   type Point as MuPdfPoint,
 } from 'mupdf'
 import { createDefaultAppearance, parseDefaultAppearance } from './defaultAppearance'
@@ -21,6 +23,21 @@ export type Rect = [number, number, number, number]
 export type RGB = [number, number, number]
 export type Point = MuPdfPoint
 export type AnnotationColor = RGB | []
+export const SYMBOL_OPTIONS = [
+  { name: 'check', glyph: '✓', label: 'チェック' },
+  { name: 'heavyCheck', glyph: '✔', label: '太いチェック' },
+  { name: 'circle', glyph: '○', label: '丸' },
+  { name: 'doubleCircle', glyph: '◎', label: '二重丸' },
+  { name: 'filledCircle', glyph: '●', label: '黒丸' },
+  { name: 'cross', glyph: '×', label: 'バツ' },
+  { name: 'triangle', glyph: '△', label: '三角' },
+  { name: 'filledTriangle', glyph: '▲', label: '黒三角' },
+  { name: 'square', glyph: '□', label: '四角' },
+  { name: 'filledSquare', glyph: '■', label: '黒四角' },
+  { name: 'star', glyph: '☆', label: '星' },
+  { name: 'filledStar', glyph: '★', label: '黒星' },
+] as const
+export type SymbolName = typeof SYMBOL_OPTIONS[number]['name']
 export type LineEnding = {
   start: PDFAnnotationLineEndingStyle
   end: PDFAnnotationLineEndingStyle
@@ -34,6 +51,7 @@ export type AnnotationKind =
   | 'circle'
   | 'highlight'
   | 'ink'
+  | 'symbol'
   | 'other'
 
 export interface AnnotationInfo {
@@ -56,6 +74,7 @@ export interface AnnotationInfo {
   inkList: Point[][] | null
   calloutPoint: Point | null
   calloutLine: [Point, Point] | null
+  symbol: SymbolName | null
   madeByKaru: boolean
 }
 
@@ -72,6 +91,8 @@ export type AnnotationEdit =
   | { kind: 'updateCircle'; objNum: number; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null; opacity?: number }
   | { kind: 'createInk'; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number }
   | { kind: 'updateInk'; objNum: number; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number }
+  | { kind: 'createSymbol'; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName }
+  | { kind: 'updateSymbol'; objNum: number; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName }
   | { kind: 'delete'; objNum: number; pageIndex: number }
 
 export interface ApplyError {
@@ -85,6 +106,7 @@ export interface ApplyError {
 export interface ApplyResult {
   created: number[]
   replacedCharacters: number
+  unsupportedCharacters: string[]
   errors: ApplyError[]
 }
 
@@ -122,6 +144,19 @@ function readString(object: PDFObject, key: string): string | null {
   } finally {
     value.destroy()
   }
+}
+
+function readName(object: PDFObject, key: string): string | null {
+  const value = object.get(key)
+  try {
+    return value.isName() ? value.asName() : null
+  } finally {
+    value.destroy()
+  }
+}
+
+function asSymbolName(value: string | null): SymbolName | null {
+  return SYMBOL_OPTIONS.some((item) => item.name === value) ? value as SymbolName : null
 }
 
 function asRGB(color: number[]): RGB | null {
@@ -207,12 +242,14 @@ function annotationKind(
   lineEnding: LineEnding | null,
   opacity: number | null,
   intent: string | null,
+  symbol: SymbolName | null,
 ): AnnotationKind {
   if (type === 'FreeText') return intent === 'FreeTextCallout' ? 'callout' : 'freetext'
   if (type === 'Line') return lineEnding?.end === 'OpenArrow' ? 'arrow' : 'line'
   if (type === 'Square') return 'square'
   if (type === 'Circle') return 'circle'
   if (type === 'Ink') return opacity !== null && opacity < 1 ? 'highlight' : 'ink'
+  if (type === 'Stamp' && symbol) return 'symbol'
   return 'other'
 }
 
@@ -233,13 +270,15 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             || type === 'Line'
             || type === 'Circle'
             || type === 'Ink'
+            || (type === 'Stamp' && asSymbolName(readName(object, 'KaruSymbol')) !== null)
           const hasStroke = type === 'FreeText'
             || type === 'Square'
             || type === 'Line'
             || type === 'Circle'
             || type === 'Ink'
+          const hasColor = hasStroke || type === 'Stamp'
           const hasInterior = type === 'FreeText' || type === 'Square' || type === 'Circle'
-          const standardStroke = hasStroke ? asRGB(readNumberArray(object, 'C') ?? []) : null
+          const standardStroke = hasColor ? asRGB(readNumberArray(object, 'C') ?? []) : null
           const standardInterior = hasInterior ? asRGB(readNumberArray(object, 'IC') ?? []) : null
           const style = type === 'FreeText' ? readKaruStyle(object) : null
           const strokeColor = style?.present ? style.border : standardStroke
@@ -251,11 +290,12 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
           const calloutLine = type === 'FreeText' && intent === 'FreeTextCallout'
             ? readCalloutLine(page, object)
             : null
+          const symbol = type === 'Stamp' ? asSymbolName(readName(object, 'KaruSymbol')) : null
           return {
             objNum: object.asIndirect(),
             pageIndex,
             type,
-            kind: annotationKind(type, lineEnding, opacity, intent),
+            kind: annotationKind(type, lineEnding, opacity, intent, symbol),
             editable,
             // 型定義上は全注釈に getRect() があるが、MuPDF 1.28.1 は
             // Highlight など /Rect を直接扱わない種類では例外にする。
@@ -273,8 +313,10 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             inkList: type === 'Ink' ? annotation.getInkList() : null,
             calloutPoint: calloutLine?.[0] ?? null,
             calloutLine,
-            madeByKaru: type === 'FreeText'
-              && (parsed.fontName === 'BIZUDGothic' || parsed.fontName === 'BIZUDMincho'),
+            symbol,
+            madeByKaru: (type === 'FreeText'
+              && (parsed.fontName === 'BIZUDGothic' || parsed.fontName === 'BIZUDMincho'))
+              || symbol !== null,
           }
         } finally {
           object.destroy()
@@ -303,6 +345,15 @@ function setPdfString(doc: PDFDocument, object: PDFObject, key: string, value: s
     object.put(key, string)
   } finally {
     string.destroy()
+  }
+}
+
+function setPdfName(doc: PDFDocument, object: PDFObject, key: string, value: string): void {
+  const name = doc.newName(value)
+  try {
+    object.put(key, name)
+  } finally {
+    name.destroy()
   }
 }
 
@@ -521,6 +572,175 @@ function configureInk(
   annotation.update()
 }
 
+export function symbolBounds(rect: Rect): Rect {
+  const width = Math.max(0, rect[2] - rect[0])
+  const height = Math.max(0, rect[3] - rect[1])
+  const size = Math.min(width, height)
+  const x = rect[0] + (width - size) / 2
+  const y = rect[1] + (height - size) / 2
+  return [x, y, x + size, y + size]
+}
+
+export function symbolRectFromDrag(start: Point, end: Point, dragged: boolean, defaultSize = 16): Rect {
+  if (!dragged) {
+    const half = defaultSize / 2
+    return [start[0] - half, start[1] - half, start[0] + half, start[1] + half]
+  }
+  const raw: Rect = [
+    Math.min(start[0], end[0]),
+    Math.min(start[1], end[1]),
+    Math.max(start[0], end[0]),
+    Math.max(start[1], end[1]),
+  ]
+  return symbolBounds(raw)
+}
+
+export function resizeSymbolRect(rect: Rect, handle: 'nw' | 'ne' | 'se' | 'sw', point: Point): Rect {
+  const anchors = {
+    nw: [rect[2], rect[3]],
+    ne: [rect[0], rect[3]],
+    se: [rect[0], rect[1]],
+    sw: [rect[2], rect[1]],
+  } as const
+  const anchor = anchors[handle]
+  const size = Math.max(4, Math.max(Math.abs(point[0] - anchor[0]), Math.abs(point[1] - anchor[1])))
+  const x = handle.includes('w') ? anchor[0] - size : anchor[0]
+  const y = handle.includes('n') ? anchor[1] - size : anchor[1]
+  return [x, y, x + size, y + size]
+}
+
+function ellipse(path: Path, x0: number, y0: number, x1: number, y1: number): void {
+  const k = 0.5522847498307936
+  const cx = (x0 + x1) / 2
+  const cy = (y0 + y1) / 2
+  const rx = (x1 - x0) / 2
+  const ry = (y1 - y0) / 2
+  path.moveTo(cx + rx, cy)
+  path.curveTo(cx + rx, cy + k * ry, cx + k * rx, cy + ry, cx, cy + ry)
+  path.curveTo(cx - k * rx, cy + ry, cx - rx, cy + k * ry, cx - rx, cy)
+  path.curveTo(cx - rx, cy - k * ry, cx - k * rx, cy - ry, cx, cy - ry)
+  path.curveTo(cx + k * rx, cy - ry, cx + rx, cy - k * ry, cx + rx, cy)
+  path.closePath()
+}
+
+function polygon(path: Path, points: readonly Point[]): void {
+  path.moveTo(points[0][0], points[0][1])
+  for (const point of points.slice(1)) path.lineTo(point[0], point[1])
+  path.closePath()
+}
+
+function starPoints(cx: number, cy: number, radius: number): Point[] {
+  const points: Point[] = []
+  for (let index = 0; index < 10; index += 1) {
+    const angle = -Math.PI / 2 + index * Math.PI / 5
+    const currentRadius = index % 2 === 0 ? radius : radius * 0.42
+    points.push([cx + Math.cos(angle) * currentRadius, cy + Math.sin(angle) * currentRadius])
+  }
+  return points
+}
+
+function drawSymbol(
+  device: DisplayListDevice,
+  width: number,
+  height: number,
+  symbol: SymbolName,
+  color: RGB,
+): void {
+  const content = symbolBounds([0, 0, width, height])
+  const size = content[2] - content[0]
+  const margin = size * 0.12
+  const x0 = content[0] + margin
+  const y0 = content[1] + margin
+  const x1 = content[2] - margin
+  const y1 = content[3] - margin
+  const cx = (x0 + x1) / 2
+  const cy = (y0 + y1) / 2
+  const path = new mupdf.Path()
+  const filled = symbol === 'filledCircle' || symbol === 'filledTriangle'
+    || symbol === 'filledSquare' || symbol === 'filledStar'
+  let strokeWidth = Math.max(0.8, size * 0.075)
+  try {
+    if (symbol === 'check' || symbol === 'heavyCheck') {
+      path.moveTo(x0, cy)
+      path.lineTo(cx - size * 0.08, y1)
+      path.lineTo(x1, y0)
+      if (symbol === 'heavyCheck') strokeWidth = Math.max(1.2, size * 0.14)
+    } else if (symbol === 'circle' || symbol === 'filledCircle') {
+      ellipse(path, x0, y0, x1, y1)
+    } else if (symbol === 'doubleCircle') {
+      ellipse(path, x0, y0, x1, y1)
+      const inner = size * 0.19
+      ellipse(path, x0 + inner, y0 + inner, x1 - inner, y1 - inner)
+    } else if (symbol === 'cross') {
+      path.moveTo(x0, y0)
+      path.lineTo(x1, y1)
+      path.moveTo(x1, y0)
+      path.lineTo(x0, y1)
+    } else if (symbol === 'triangle' || symbol === 'filledTriangle') {
+      polygon(path, [[cx, y0], [x1, y1], [x0, y1]])
+    } else if (symbol === 'square' || symbol === 'filledSquare') {
+      path.rect(x0, y0, x1, y1)
+    } else {
+      polygon(path, starPoints(cx, cy, (x1 - x0) / 2))
+    }
+
+    if (filled) {
+      device.fillPath(path, false, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, color, 1)
+    } else {
+      const stroke = new mupdf.StrokeState({
+        lineCap: symbol === 'check' || symbol === 'heavyCheck' || symbol === 'cross' ? 'Round' : 'Butt',
+        lineJoin: 'Round',
+        lineWidth: strokeWidth,
+        miterLimit: 10,
+      })
+      try {
+        device.strokePath(path, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, color, 1)
+      } finally {
+        stroke.destroy()
+      }
+    }
+  } finally {
+    path.destroy()
+  }
+}
+
+function configureSymbol(
+  doc: PDFDocument,
+  annotation: PDFAnnotation,
+  rect: Rect,
+  color: RGB,
+  symbol: SymbolName,
+  isNew: boolean,
+): void {
+  const width = rect[2] - rect[0]
+  const height = rect[3] - rect[1]
+  if (width <= 0 || height <= 0) throw new Error('記号の Rect は正の幅と高さが必要です。')
+  annotation.setFlags(annotation.getFlags() | 4)
+  annotation.setRect(rect)
+  annotation.setColor(color)
+  const object = annotation.getObject()
+  try {
+    setPdfName(doc, object, 'KaruSymbol', symbol)
+    setPdfNumber(doc, object, 'F', 4)
+    if (isNew) setPdfString(doc, object, 'NM', newAnnotationName())
+    object.delete('T')
+  } finally {
+    object.destroy()
+  }
+
+  const displayList = new mupdf.DisplayList([0, 0, width, height])
+  const device = new mupdf.DisplayListDevice(displayList)
+  try {
+    drawSymbol(device, width, height, symbol, color)
+    device.close()
+    // Stamp は update() を呼ばず、このフォント非依存の AP をそのまま使う。
+    annotation.setAppearanceFromDisplayList(null, null, mupdf.Matrix.identity, displayList)
+  } finally {
+    device.destroy()
+    displayList.destroy()
+  }
+}
+
 function addTemporaryPage(doc: PDFDocument, width: number, height: number): number {
   const pageObject = doc.addPage([0, 0, width, height], 0, {}, '')
   try {
@@ -559,6 +779,7 @@ function makeTemporaryAppearance(
   temporaryDocument: PDFDocument,
   task: AppearanceTask,
   fontResource: FontResource,
+  fallbackResource?: FontResource,
 ): void {
   const pageIndex = addTemporaryPage(temporaryDocument, task.width, task.height)
   task.temporaryPageIndex = pageIndex
@@ -586,7 +807,7 @@ function makeTemporaryAppearance(
       fontSize: task.fontSize,
       boxWidth: task.textRect[2] - task.textRect[0],
       ascent: fontResource.ascent,
-      advance: (character) => encodeCharacter(fontResource.font, character).advance,
+      advance: (character) => encodeCharacter(fontResource.font, character, fallbackResource?.font).advance,
     })
 
     if (task.backgroundColor) {
@@ -622,11 +843,11 @@ function makeTemporaryAppearance(
     for (const line of layout.lines) {
       let x = task.textRect[0] + line.x
       for (const character of [...line.text]) {
-        const encoded = encodeCharacter(fontResource.font, character)
+        const encoded = encodeCharacter(fontResource.font, character, fallbackResource?.font)
         // MuPDF のページ座標は y 下向きだが、グリフ座標は y 上向き。
         // d=-fontSize として反転すると、baseline-ascent が箱の上側になる。
         text.showGlyph(
-          fontResource.font,
+          encoded.font,
           [task.fontSize, 0, 0, -task.fontSize, x, task.textRect[1] + line.baseline],
           encoded.glyph,
           encoded.unicode,
@@ -731,7 +952,7 @@ function installTemporaryAppearances(
     for (const task of tasks) {
       const fontResource = fontResources[task.fontName]
       if (!fontResource) throw new Error(`${task.fontName} が読み込まれていません。`)
-      makeTemporaryAppearance(temporaryDocument, task, fontResource)
+      makeTemporaryAppearance(temporaryDocument, task, fontResource, fontResources.ZapfDingbats)
     }
     // 元文書には subsetFonts() を呼ばない。一時文書のページ内容が参照する
     // 外観だけをサブセット化してから、外観オブジェクトを移す。
@@ -780,7 +1001,8 @@ export function applyEdits(
   edits: readonly AnnotationEdit[],
   fontResources: FontResources,
 ): ApplyResult {
-  const result: ApplyResult = { created: [], replacedCharacters: 0, errors: [] }
+  const result: ApplyResult = { created: [], replacedCharacters: 0, unsupportedCharacters: [], errors: [] }
+  const unsupportedCharacters = new Set<string>()
   const appearances: AppearanceTask[] = []
 
   for (const [editIndex, edit] of edits.entries()) {
@@ -844,6 +1066,26 @@ export function applyEdits(
         continue
       }
 
+      if (edit.kind === 'createSymbol' || edit.kind === 'updateSymbol') {
+        const isNew = edit.kind === 'createSymbol'
+        annotation = isNew
+          ? page.createAnnotation('Stamp')
+          : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
+        if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
+        if (!isNew && annotation.getType() !== 'Stamp') throw new Error('更新対象は Stamp ではありません。')
+        const object = annotation.getObject()
+        try {
+          if (!isNew && asSymbolName(readName(object, 'KaruSymbol')) === null) {
+            throw new Error('他のソフトで作られた Stamp は編集できません。')
+          }
+        } finally {
+          object.destroy()
+        }
+        configureSymbol(doc, annotation, edit.rect, edit.color, edit.symbol, isNew)
+        if (isNew) result.created.push(objectNumber(annotation))
+        continue
+      }
+
       const isCallout = edit.kind === 'createCallout' || edit.kind === 'updateCallout'
       const isNew = edit.kind === 'createFreeText' || edit.kind === 'createCallout'
       annotation = isNew
@@ -858,8 +1100,13 @@ export function applyEdits(
       if (width <= 0 || height <= 0) throw new Error('FreeText の Rect は正の幅と高さが必要です。')
       const fontResource = fontResources[edit.font]
       if (!fontResource) throw new Error(`${edit.font} が読み込まれていません。`)
-      const replaced = replaceMissingCharacters(fontResource.font, edit.text)
+      const replaced = replaceMissingCharacters(
+        fontResource.font,
+        edit.text,
+        fontResources.ZapfDingbats?.font,
+      )
       result.replacedCharacters += replaced.replacedCharacters
+      for (const character of replaced.unsupportedCharacters) unsupportedCharacters.add(character)
       configureFreeText(
         doc,
         annotation,
@@ -938,5 +1185,6 @@ export function applyEdits(
     }
   }
 
+  result.unsupportedCharacters = [...unsupportedCharacters]
   return result
 }

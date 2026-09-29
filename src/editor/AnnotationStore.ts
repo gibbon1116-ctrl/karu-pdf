@@ -1,9 +1,9 @@
-import { nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type Point, type Rect, type RGB } from '../core/annotations'
+import { nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type Point, type Rect, type RGB, type SymbolName } from '../core/annotations'
 import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
 import { History, type HistoryStep } from './history'
 
-export type Kind = 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink'
+export type Kind = 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'symbol'
 
 export interface EditableAnnotation {
   id: string
@@ -23,6 +23,7 @@ export interface EditableAnnotation {
   inkList: Point[][] | null
   calloutPoint: Point | null
   calloutLine: [Point, Point] | null
+  symbol: SymbolName | null
   layout: LayoutResult | null
   dirty: boolean
   madeByKaru: boolean
@@ -72,6 +73,7 @@ function cloneState(annotation: AnnotationState): AnnotationState {
       [...annotation.calloutLine[0]],
       [...annotation.calloutLine[1]],
     ] : null,
+    symbol: annotation.symbol,
     layout: annotation.layout ? {
       ...annotation.layout,
       lines: annotation.layout.lines.map((line) => ({ ...line })),
@@ -100,6 +102,7 @@ function persistedState(state: AnnotationState): unknown {
     inkList: state.inkList,
     calloutPoint: state.calloutPoint,
     calloutLine: state.calloutLine,
+    symbol: state.symbol,
   }
 }
 
@@ -189,6 +192,7 @@ export class AnnotationStore {
           inkList: info.inkList?.map(clonePoints) ?? null,
           calloutPoint: info.calloutPoint ? [...info.calloutPoint] : null,
           calloutLine: info.calloutLine ? [[...info.calloutLine[0]], [...info.calloutLine[1]]] : null,
+          symbol: info.symbol,
           layout: null,
           madeByKaru: info.madeByKaru,
           deleted: false,
@@ -234,6 +238,7 @@ export class AnnotationStore {
     line?: [Point, Point] | null
     inkList?: Point[][] | null
     calloutPoint?: Point | null
+    symbol?: SymbolName | null
     layout?: LayoutResult | null
     deferHistory?: boolean
   }): EditableAnnotation {
@@ -258,8 +263,9 @@ export class AnnotationStore {
       inkList: input.inkList?.map(clonePoints) ?? null,
       calloutPoint: input.calloutPoint ? [...input.calloutPoint] : null,
       calloutLine: input.calloutPoint ? [[...input.calloutPoint], nearestCalloutEdgePoint(input.rect, input.calloutPoint)] : null,
+      symbol: input.symbol ?? null,
       layout: input.layout ?? null,
-      madeByKaru: input.kind === 'freetext' || input.kind === 'callout',
+      madeByKaru: input.kind === 'freetext' || input.kind === 'callout' || input.kind === 'symbol',
       deleted: false,
       revision: 1,
     }
@@ -362,6 +368,7 @@ export class AnnotationStore {
     interiorColor?: RGB | null
     borderColor?: RGB | null
     opacity?: number
+    symbol?: SymbolName
   }): void {
     this.mutate(id, (annotation) => {
       if (values.color) annotation.color = [...values.color]
@@ -369,6 +376,7 @@ export class AnnotationStore {
       if (values.interiorColor !== undefined) annotation.interiorColor = values.interiorColor ? [...values.interiorColor] : null
       if (values.borderColor !== undefined) annotation.borderColor = values.borderColor ? [...values.borderColor] : null
       if (values.opacity !== undefined) annotation.opacity = values.opacity
+      if (values.symbol !== undefined && annotation.kind === 'symbol') annotation.symbol = values.symbol
       if (values.fontSize !== undefined && (annotation.kind === 'freetext' || annotation.kind === 'callout')) annotation.fontSize = values.fontSize
       if (values.font !== undefined && (annotation.kind === 'freetext' || annotation.kind === 'callout')) annotation.font = values.font
       if (values.layout && (annotation.kind === 'freetext' || annotation.kind === 'callout')) annotation.layout = values.layout
@@ -551,6 +559,15 @@ export class AnnotationStore {
     if (annotation.kind === 'highlight' || annotation.kind === 'ink') {
       const common = { pageIndex: annotation.pageIndex, inkList: annotation.inkList!, color: annotation.color, borderWidth: annotation.borderWidth, opacity: annotation.opacity }
       return create ? { kind: 'createInk', ...common } : { kind: 'updateInk', objNum: savedObjNum, ...common }
+    }
+    if (annotation.kind === 'symbol') {
+      const common = {
+        pageIndex: annotation.pageIndex,
+        rect: annotation.rect,
+        color: annotation.color,
+        symbol: annotation.symbol ?? 'check' as const,
+      }
+      return create ? { kind: 'createSymbol', ...common } : { kind: 'updateSymbol', objNum: savedObjNum, ...common }
     }
     const color: AnnotationColor = annotation.borderColor ?? []
     const common = { pageIndex: annotation.pageIndex, rect: annotation.rect, color, borderWidth: annotation.borderColor ? annotation.borderWidth : 0, interiorColor: annotation.interiorColor, opacity: annotation.opacity }

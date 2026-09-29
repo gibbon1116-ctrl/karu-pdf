@@ -19,6 +19,26 @@ export interface FrameStats {
 const emptyTiming = (): TimingSummary => ({ samples: 0, p95: 0, max: 0 })
 const frameStats: FrameStats = { drag: emptyTiming(), ink: emptyTiming(), input: emptyTiming() }
 const inputSamples: number[] = []
+let activeTextInserter: ((text: string) => void) | null = null
+const activeTextEditorListeners = new Set<() => void>()
+
+export const subscribeActiveTextEditor = (listener: () => void): (() => void) => {
+  activeTextEditorListeners.add(listener)
+  return () => activeTextEditorListeners.delete(listener)
+}
+
+export const getActiveTextEditorSnapshot = (): boolean => activeTextInserter !== null
+
+export function insertIntoActiveTextEditor(text: string): boolean {
+  if (!activeTextInserter) return false
+  activeTextInserter(text)
+  return true
+}
+
+function setActiveTextInserter(inserter: ((text: string) => void) | null): void {
+  activeTextInserter = inserter
+  for (const listener of activeTextEditorListeners) listener()
+}
 
 function summarize(samples: readonly number[]): TimingSummary {
   if (samples.length === 0) return emptyTiming()
@@ -84,6 +104,21 @@ export function TextEditor({ annotation, zoom, pool, store, onClose, registerCom
   const [value, setValue] = useState(annotation.text)
   const scale = zoom * CSS_PX_PER_PT
 
+  const insertText = useCallback((text: string) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const start = textarea.selectionStart ?? valueRef.current.length
+    const end = textarea.selectionEnd ?? start
+    const next = `${valueRef.current.slice(0, start)}${text}${valueRef.current.slice(end)}`
+    valueRef.current = next
+    setValue(next)
+    recordInputFrame()
+    requestAnimationFrame(() => {
+      textarea.focus()
+      textarea.setSelectionRange(start + text.length, start + text.length)
+    })
+  }, [])
+
   const commit = useCallback((): Promise<void> => {
     if (commitPromiseRef.current) return commitPromiseRef.current
     const promise = (async () => {
@@ -120,8 +155,16 @@ export function TextEditor({ annotation, zoom, pool, store, onClose, registerCom
   }, [commit, registerCommit])
 
   useEffect(() => {
+    setActiveTextInserter(insertText)
+    return () => {
+      if (activeTextInserter === insertText) setActiveTextInserter(null)
+    }
+  }, [insertText])
+
+  useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
       if (textareaRef.current?.contains(event.target as Node)) return
+      if ((event.target as Element | null)?.closest('[data-text-symbol]')) return
       void commit()
     }
     document.addEventListener('pointerdown', onPointerDown, true)

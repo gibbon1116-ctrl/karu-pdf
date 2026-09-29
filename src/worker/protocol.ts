@@ -218,6 +218,7 @@ export interface ApplyAndSaveResponse {
   ms: number
   created: number[]
   replacedCharacters: number
+  unsupportedCharacters: string[]
   errors: ApplyError[]
 }
 
@@ -226,6 +227,7 @@ export interface AppliedEditsResponse {
   requestId: number
   created: number[]
   replacedCharacters: number
+  unsupportedCharacters: string[]
   errors: ApplyError[]
 }
 
@@ -235,6 +237,7 @@ export interface OutputPreparedResponse {
   bytes: ArrayBuffer
   ms: number
   replacedCharacters: number
+  unsupportedCharacters: string[]
   errors: ApplyError[]
 }
 
