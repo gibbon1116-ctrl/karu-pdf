@@ -218,6 +218,10 @@ export class PdfWorkerPool {
     }
   }
 
+  hasDocument(docId: string): boolean {
+    return this.slots[this.primaryWorkerIndex].documents.has(docId)
+  }
+
   // ページ番号の剰余で固定すると、図面が周期的に並ぶ文書で重いページが
   // 1本の Worker に集中する。最初の要求のときに最も空いている Worker を
   // 選び、以後はそのページを同じ Worker に任せる（DisplayList を1つで済ませる）。

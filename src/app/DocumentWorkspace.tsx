@@ -9,18 +9,23 @@ import { Viewer, type ViewerHandle } from '../viewer/Viewer'
 import type { DocumentSession } from './documentModel'
 import { FormatPanel } from './FormatPanel'
 import { ThumbnailPanel } from './ThumbnailPanel'
-import { OrganizeView, type OrganizeSourceInfo } from '../organize/OrganizeView'
+import { OrganizeView, type ExtractOptions, type OrganizeSourceInfo } from '../organize/OrganizeView'
 import type { OrganizeDraft } from '../organize/OrganizeDraft'
+import type { PageCard } from '../organize/OrganizeDraft'
+import type { OrganizeSplitMode } from '../organize/organizeUtils'
 
 export interface OrganizeWorkspaceState {
   draft: OrganizeDraft
   sources: ReadonlyMap<string, OrganizeSourceInfo>
   busy: boolean
-  onAddFiles(files: File[], beforeIndex: number): Promise<void>
+  onLoadFiles(files: File[]): Promise<OrganizeSourceInfo[]>
+  onDiscardSources(docIds: string[]): void
+  onCopy(cards: readonly PageCard[]): void
+  onPaste(beforeIndex: number): PageCard[]
   onApply(): void
   onCancel(): void
-  onExtract(cardIds: string[]): void
-  onSplit(cardIds: string[]): void
+  onExtract(cardIds: string[], options: ExtractOptions): void
+  onSplit(mode: OrganizeSplitMode): void
 }
 
 interface Props {
@@ -76,7 +81,10 @@ export function DocumentWorkspace(props: Props) {
         scheduler={scheduler}
         annotationStore={props.session.annotationStore}
         busy={props.organize.busy}
-        onAddFiles={props.organize.onAddFiles}
+        onLoadFiles={props.organize.onLoadFiles}
+        onDiscardSources={props.organize.onDiscardSources}
+        onCopy={props.organize.onCopy}
+        onPaste={props.organize.onPaste}
         onApply={props.organize.onApply}
         onCancel={props.organize.onCancel}
         onExtract={props.organize.onExtract}

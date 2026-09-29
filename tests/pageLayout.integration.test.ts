@@ -183,6 +183,29 @@ describe('pageOps', () => {
     }
   })
 
+  it('別文書から貼り付けたページと置換したページを下書き順に適用する', () => {
+    const main = makeDocument(['Main 1', 'Main 2', 'Main 3'])
+    const copied = makeDocument(['Copied 1', 'Copied 2'])
+    const replacement = makeDocument(['Replacement 1', 'Replacement 2'])
+    try {
+      const layout: PageLayoutCard[] = [
+        cards('main', 3)[0],
+        cards('copied', 2)[1],
+        cards('replacement', 2)[0],
+        cards('replacement', 2)[1],
+        cards('main', 3)[2],
+      ]
+      applyPageLayout('main', main, layout, new Map([['copied', copied], ['replacement', replacement]]))
+      expect(getPageInfo(main).map((item) => item.text)).toEqual([
+        'Main 1', 'Copied 2', 'Replacement 1', 'Replacement 2', 'Main 3',
+      ])
+    } finally {
+      replacement.destroy()
+      copied.destroy()
+      main.destroy()
+    }
+  })
+
   it('適用前のバイト列を開き直すと元の並びへ戻る', () => {
     const document = makeDocument(['Page 1', 'Page 2', 'Page 3'])
     let backup: Uint8Array

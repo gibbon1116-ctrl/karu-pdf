@@ -25,7 +25,9 @@ import { getFrameStats, type FrameStats } from './editor/TextEditor'
 import { getMetrics, resetBlankFrames, startMeasure } from './perf/metrics'
 import type { ViewerHandle } from './viewer/Viewer'
 import { OrganizeDraft } from './organize/OrganizeDraft'
-import type { OrganizeSourceInfo } from './organize/OrganizeView'
+import type { PageCard } from './organize/OrganizeDraft'
+import type { ExtractOptions, OrganizeSourceInfo } from './organize/OrganizeView'
+import { splitCardGroups, type OrganizeSplitMode } from './organize/organizeUtils'
 import type { PageLayoutCard } from './core/pageOps'
 import { registerPwa } from './pwa'
 import './styles.css'
@@ -65,9 +67,7 @@ declare global {
   interface Navigator { deviceMemory?: number }
 }
 
-export type OrganizeSplitMode =
-  | { kind: 'every'; count: number }
-  | { kind: 'before'; cardIds: string[] }
+export type { OrganizeSplitMode } from './organize/organizeUtils'
 
 export interface OrganizeApplyTimings extends PageLayoutTimings {
   applyEditsMs: number
@@ -123,6 +123,10 @@ function finalizedName(fileName: string): string {
   return `${fileName.replace(/\.pdf$/i, '')}_確定.pdf`
 }
 
+function sourceIdsForCards(targetDocId: string, cards: readonly PageLayoutCard[]): string[] {
+  return [...new Set(cards.flatMap((card) => card.source.kind === 'page' && card.source.docId !== targetDocId ? [card.source.docId] : []))]
+}
+
 function loadPanels(): { thumbnails: boolean; format: boolean } {
   try {
     const value = JSON.parse(localStorage.getItem(PANEL_STORAGE_KEY) ?? '{}') as { thumbnails?: unknown; format?: unknown }
@@ -144,6 +148,7 @@ export default function App() {
   const savingRef = useRef(false)
   const openQueueRef = useRef<Promise<void>>(Promise.resolve())
   const organizeRef = useRef<ActiveOrganize | null>(null)
+  const organizeClipboardRef = useRef<{ cards: PageCard[]; sources: OrganizeSourceInfo[] } | null>(null)
   const updateServiceWorkerRef = useRef<((reloadPage?: boolean) => Promise<void>) | null>(null)
   const [, setTabsVersion] = useState(0)
   const [page, setPage] = useState(() => tabs.active?.view.page ?? 0)
@@ -222,7 +227,7 @@ export default function App() {
 
   const closeOrganizeSources = useCallback((state: ActiveOrganize | null) => {
     if (!state) return
-    for (const sourceId of state.sources.keys()) pool.close(sourceId)
+    for (const source of state.sources.values()) if (source.temporary) pool.close(source.docId)
   }, [pool])
 
   const discardOrganize = useCallback((confirmChanged = true): boolean => {
@@ -537,21 +542,21 @@ export default function App() {
     setTool('select')
   }, [])
 
-  const addOrganizeFiles = useCallback(async (files: File[], beforeIndex: number) => {
+  const loadOrganizeFiles = useCallback(async (files: File[]): Promise<OrganizeSourceInfo[]> => {
     const current = organizeRef.current
-    if (!current || current.busy) return
-    let insertion = beforeIndex
+    if (!current || current.busy) return []
+    const loaded: OrganizeSourceInfo[] = []
     for (const file of files) {
       const sourceId = `src-${createDocId()}`
       try {
         const result = await pool.openSource(sourceId, await file.arrayBuffer())
-        if (organizeRef.current !== current) {
+        if (organizeRef.current?.draft !== current.draft) {
           pool.close(sourceId)
-          return
+          return loaded
         }
-        current.sources.set(sourceId, { docId: sourceId, name: file.name, pageSizes: result.pageSizes })
-        current.draft.insertPages(insertion, sourceId, result.pageSizes)
-        insertion += result.pageCount
+        const info: OrganizeSourceInfo = { docId: sourceId, name: file.name, pageSizes: result.pageSizes, temporary: true }
+        current.sources.set(sourceId, info)
+        loaded.push(info)
         const next = { ...current, sources: new Map(current.sources) }
         organizeRef.current = next
         setOrganize(next)
@@ -560,6 +565,60 @@ export default function App() {
         setError(`追加するPDFを開けませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
       }
     }
+    return loaded
+  }, [pool])
+
+  const discardOrganizeSources = useCallback((docIds: string[]) => {
+    const current = organizeRef.current
+    if (!current || current.busy) return
+    let changed = false
+    for (const docId of docIds) {
+      const source = current.sources.get(docId)
+      if (!source?.temporary) continue
+      pool.close(docId)
+      current.sources.delete(docId)
+      changed = true
+    }
+    if (changed) {
+      const next = { ...current, sources: new Map(current.sources) }
+      organizeRef.current = next
+      setOrganize(next)
+    }
+  }, [pool])
+
+  const copyOrganizeCards = useCallback((cards: readonly PageCard[]) => {
+    const current = organizeRef.current
+    if (!current || cards.length === 0) return
+    const sourceIds = new Set(cards.flatMap((card) => card.source.kind === 'page' ? [card.source.docId] : []))
+    const sources: OrganizeSourceInfo[] = []
+    for (const docId of sourceIds) {
+      const known = current.sources.get(docId)
+      if (known) { sources.push({ ...known, pageSizes: [...known.pageSizes], temporary: false }); continue }
+      const session = tabs.list().find((item) => item.docId === docId)
+      if (session) sources.push({ docId, name: session.name, pageSizes: [...session.pageSizes], temporary: false })
+    }
+    organizeClipboardRef.current = {
+      cards: cards.map((card) => ({ ...card, source: { ...card.source } })),
+      sources,
+    }
+    showStatus(`${cards.length}ページをコピーしました`)
+  }, [showStatus, tabs])
+
+  const pasteOrganizeCards = useCallback((beforeIndex: number): PageCard[] => {
+    const current = organizeRef.current
+    const clipboard = organizeClipboardRef.current
+    if (!current) throw new Error('ページ整理を開いてください。')
+    if (!clipboard || clipboard.cards.length === 0) throw new Error('コピーされたページがありません。')
+    const missing = clipboard.cards.some((card) => card.source.kind === 'page' && !pool.hasDocument(card.source.docId))
+    if (missing) throw new Error('コピー元のファイルが閉じられたため、貼り付けられません。')
+    for (const source of clipboard.sources) {
+      if (source.docId !== current.docId) current.sources.set(source.docId, { ...source, temporary: false })
+    }
+    const inserted = current.draft.paste(beforeIndex, clipboard.cards)
+    const next = { ...current, sources: new Map(current.sources) }
+    organizeRef.current = next
+    setOrganize(next)
+    return inserted
   }, [pool])
 
   const finishPageLayout = useCallback((session: DocumentSession, result: { pageSizes: typeof session.pageSizes; hasBackup: boolean }) => {
@@ -575,6 +634,13 @@ export default function App() {
     const current = organizeRef.current
     const session = activeRef.current
     if (!current || !session || current.docId !== session.docId || current.busy) return null
+    const missingSourceIds = new Set(sourceIdsForCards(session.docId, current.draft.getCards()).filter((docId) => !pool.hasDocument(docId)))
+    if (missingSourceIds.size > 0) {
+      const invalidCards = current.draft.getCards().filter((card) => card.source.kind === 'page' && missingSourceIds.has(card.source.docId)).map((card) => card.id)
+      current.draft.delete(invalidCards)
+      setError('コピー元のファイルが閉じられたため、貼り付けたページを取り込めません。該当するカードを下書きから外しました。')
+      return null
+    }
     const busyState = { ...current, busy: true }
     organizeRef.current = busyState
     setOrganize(busyState)
@@ -583,7 +649,7 @@ export default function App() {
       const editsStarted = performance.now()
       await applyPendingEdits(session)
       const applyEditsMs = performance.now() - editsStarted
-      const result = await pool.applyPageLayout(session.docId, current.draft.getCards(), [...current.sources.keys()])
+      const result = await pool.applyPageLayout(session.docId, current.draft.getCards(), sourceIdsForCards(session.docId, current.draft.getCards()))
       const mainUpdateStarted = performance.now()
       finishPageLayout(session, result)
       closeOrganizeSources(current)
@@ -636,26 +702,14 @@ export default function App() {
     const session = activeRef.current
     if (!current || !session || current.docId !== session.docId) throw new Error('ページ整理を開いてください。')
     await applyPendingEdits(session)
-    return pool.extractPages(session.docId, selectedCards(cardIds), [...current.sources.keys()])
+    const cards = selectedCards(cardIds)
+    return pool.extractPages(session.docId, cards, sourceIdsForCards(session.docId, cards))
   }, [applyPendingEdits, pool, selectedCards])
 
   const splitGroups = useCallback((mode: OrganizeSplitMode): PageLayoutCard[][] => {
     const current = organizeRef.current
     if (!current) throw new Error('ページ整理を開いてください。')
-    const cards = [...current.draft.getCards()]
-    if (mode.kind === 'every') {
-      const count = Math.trunc(mode.count)
-      if (count < 1) throw new Error('分割するページ数は1以上にしてください。')
-      const groups: PageLayoutCard[][] = []
-      for (let index = 0; index < cards.length; index += count) groups.push(cards.slice(index, index + count))
-      return groups
-    }
-    const boundaries = new Set(mode.cardIds)
-    const starts = cards.map((card, index) => boundaries.has(card.id) ? index : -1).filter((index) => index > 0)
-    const points = [0, ...starts, cards.length]
-    const groups = points.slice(0, -1).map((start, index) => cards.slice(start, points[index + 1])).filter((group) => group.length > 0)
-    if (groups.length < 2) throw new Error('区切りにするページを選んでください。')
-    return groups
+    return splitCardGroups(current.draft.getCards(), mode)
   }, [])
 
   const splitToBytes = useCallback(async (mode: OrganizeSplitMode): Promise<Uint8Array[]> => {
@@ -663,37 +717,61 @@ export default function App() {
     const session = activeRef.current
     if (!current || !session || current.docId !== session.docId) throw new Error('ページ整理を開いてください。')
     await applyPendingEdits(session)
-    return pool.splitPages(session.docId, splitGroups(mode), [...current.sources.keys()])
+    const groups = splitGroups(mode)
+    const cards = groups.flat()
+    return pool.splitPages(session.docId, groups, sourceIdsForCards(session.docId, cards))
   }, [applyPendingEdits, pool, splitGroups])
 
-  const extractAndSave = useCallback(async (cardIds: string[]) => {
+  const extractAndSave = useCallback(async (cardIds: string[], options: ExtractOptions) => {
     const session = activeRef.current
-    if (!session) return
+    const current = organizeRef.current
+    if (!session || !current) return
     try {
-      const bytes = await extractToBytes(cardIds)
-      const fileName = `${session.name.replace(/\.pdf$/i, '')}_抜粋.pdf`
-      const handle = window.showSaveFilePicker ? await pickSaveHandle(fileName) : null
-      if (handle) await writePdf(handle, bytes)
-      else downloadPdf(bytes, fileName)
-      showStatus('選んだページを抽出しました')
+      const stem = session.name.replace(/\.pdf$/i, '')
+      if (options.onePerFile) {
+        const cards = selectedCards(cardIds)
+        await applyPendingEdits(session)
+        const outputs = await Promise.all(cards.map((card) => pool.extractPages(
+          session.docId,
+          [card],
+          sourceIdsForCards(session.docId, [card]),
+        )))
+        const positions = cards.map((card) => current.draft.getCards().findIndex((item) => item.id === card.id) + 1)
+        if (window.showDirectoryPicker) {
+          const directory = await window.showDirectoryPicker({ id: 'karu-pdf-extract-pages', mode: 'readwrite' })
+          for (let index = 0; index < outputs.length; index += 1) {
+            await writePdfWithoutOverwrite(directory, `${stem}_p${positions[index]}.pdf`, outputs[index])
+          }
+        } else outputs.forEach((bytes, index) => downloadPdf(bytes, `${stem}_p${positions[index]}.pdf`))
+        showStatus(`${outputs.length}ページを別々のPDFに抽出しました`)
+      } else {
+        const bytes = await extractToBytes(cardIds)
+        const fileName = `${stem}_抜粋.pdf`
+        if (window.showSaveFilePicker) {
+          let attempt = 1
+          for (;;) {
+            const suggestedName = attempt === 1 ? fileName : `${stem}_抜粋 (${attempt}).pdf`
+            const handle = await pickSaveHandle(suggestedName)
+            if (!handle) break
+            const existing = await handle.getFile()
+            if (existing.size === 0) { await writePdf(handle, bytes); break }
+            attempt += 1
+            showStatus('同名のファイルは上書きしません。別の名前を選んでください。')
+          }
+        } else downloadPdf(bytes, fileName)
+        showStatus('選んだページを抽出しました')
+      }
+      if (options.removeFromDraft) current.draft.delete(cardIds)
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === 'AbortError') return
       setError(`抽出できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
     }
-  }, [extractToBytes, showStatus])
+  }, [applyPendingEdits, extractToBytes, pool, selectedCards, showStatus])
 
-  const splitAndSave = useCallback(async (cardIds: string[]) => {
+  const splitAndSave = useCallback(async (mode: OrganizeSplitMode) => {
     const session = activeRef.current
     if (!session) return
     try {
-      let mode: OrganizeSplitMode
-      if (cardIds.length > 0 && window.confirm('選んだカードの前で区切りますか？\n「キャンセル」でNページごとに分割します。')) {
-        mode = { kind: 'before', cardIds }
-      } else {
-        const raw = window.prompt('何ページごとに分割しますか？', '1')
-        if (raw === null) return
-        mode = { kind: 'every', count: Number(raw) }
-      }
       const outputs = await splitToBytes(mode)
       const stem = session.name.replace(/\.pdf$/i, '')
       if (window.showDirectoryPicker) {
@@ -875,11 +953,14 @@ export default function App() {
     draft: organize.draft,
     sources: organize.sources,
     busy: organize.busy,
-    onAddFiles: addOrganizeFiles,
+    onLoadFiles: loadOrganizeFiles,
+    onDiscardSources: discardOrganizeSources,
+    onCopy: copyOrganizeCards,
+    onPaste: pasteOrganizeCards,
     onApply: () => void applyOrganize(),
     onCancel: () => { discardOrganize() },
-    onExtract: (cardIds) => void extractAndSave(cardIds),
-    onSplit: (cardIds) => void splitAndSave(cardIds),
+    onExtract: (cardIds, options) => void extractAndSave(cardIds, options),
+    onSplit: (mode) => void splitAndSave(mode),
   } : null
   return (
     <main className={`app${updateReady ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => void handleDrop(event)}>

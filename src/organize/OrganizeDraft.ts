@@ -83,10 +83,10 @@ export class OrganizeDraft {
     this.move(cardIds, index < 0 ? this.cards.length : index)
   }
 
-  rotate(cardIds: readonly string[], degrees: 90 | -90): void {
+  rotate(cardIds: readonly string[], degrees: 90 | -90 | 180): void {
     const wanted = new Set(cardIds)
     if (!this.cards.some((card) => wanted.has(card.id))) return
-    const delta = degrees === 90 ? 90 : 270
+    const delta = degrees === -90 ? 270 : degrees
     this.commit(this.cards.map((card) => wanted.has(card.id)
       ? { ...cloneCard(card), rotation: ((card.rotation + delta) % 360) as PageCard['rotation'] }
       : cloneCard(card)))
@@ -108,6 +108,17 @@ export class OrganizeDraft {
     return cloneCard(card)
   }
 
+  insertBlanks(beforeIndex: number, count: number, width: number, height: number): PageCard[] {
+    const boundedCount = Math.max(0, Math.trunc(count))
+    const cards = Array.from({ length: boundedCount }, (): PageCard => ({
+      id: this.newId('blank'),
+      source: { kind: 'blank', width, height },
+      rotation: 0,
+    }))
+    this.insertCards(beforeIndex, cards)
+    return cards.map(cloneCard)
+  }
+
   insertPages(beforeIndex: number, docId: string, pageSizes: readonly PageSize[]): PageCard[] {
     const cards = pageSizes.map((_, pageIndex): PageCard => ({
       id: this.newId('source'),
@@ -116,6 +127,62 @@ export class OrganizeDraft {
     }))
     this.insertCards(beforeIndex, cards)
     return cards.map(cloneCard)
+  }
+
+  insertPageIndexes(beforeIndex: number, docId: string, pageIndexes: readonly number[]): PageCard[] {
+    const cards = pageIndexes.map((pageIndex): PageCard => ({
+      id: this.newId('source'),
+      source: { kind: 'page', docId, pageIndex },
+      rotation: 0,
+    }))
+    this.insertCards(beforeIndex, cards)
+    return cards.map(cloneCard)
+  }
+
+  paste(beforeIndex: number, cards: readonly PageCard[]): PageCard[] {
+    const pasted = cards.map((card): PageCard => ({
+      ...cloneCard(card),
+      id: this.newId('paste'),
+    }))
+    this.insertCards(beforeIndex, pasted)
+    return pasted.map(cloneCard)
+  }
+
+  duplicate(cardIds: readonly string[]): PageCard[] {
+    const wanted = new Set(cardIds)
+    const selected = this.cards.filter((card) => wanted.has(card.id))
+    if (selected.length === 0) return []
+    const lastIndex = Math.max(...selected.map((card) => this.cards.findIndex((item) => item.id === card.id)))
+    const copies = selected.map((card): PageCard => ({ ...cloneCard(card), id: this.newId('copy') }))
+    this.insertCards(lastIndex + 1, copies)
+    return copies.map(cloneCard)
+  }
+
+  reverse(cardIds: readonly string[] = []): void {
+    const wanted = new Set(cardIds)
+    const indexes = this.cards
+      .map((card, index) => wanted.has(card.id) ? index : -1)
+      .filter((index) => index >= 0)
+    const targets = indexes.length > 0 ? indexes : this.cards.map((_, index) => index)
+    if (targets.length < 2) return
+    const reversed = targets.map((index) => cloneCard(this.cards[index])).reverse()
+    const next = this.cards.map(cloneCard)
+    targets.forEach((index, offset) => { next[index] = reversed[offset] })
+    this.commit(next)
+  }
+
+  replace(cardIds: readonly string[], replacements: readonly PageCard[]): PageCard[] {
+    const wanted = new Set(cardIds)
+    const first = this.cards.findIndex((card) => wanted.has(card.id))
+    if (first < 0) return []
+    const inserted = replacements.map((card): PageCard => ({
+      ...cloneCard(card),
+      id: this.newId('replace'),
+    }))
+    const remaining = this.cards.filter((card) => !wanted.has(card.id)).map(cloneCard)
+    remaining.splice(first, 0, ...inserted.map(cloneCard))
+    this.commit(remaining)
+    return inserted.map(cloneCard)
   }
 
   undo(): void {

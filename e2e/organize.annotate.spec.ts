@@ -48,11 +48,14 @@ test('ページ整理をドラッグ・回転・削除・白紙挿入し、保�
   await page.mouse.up()
 
   await page.getByTestId('organize-card-2').click()
-  await page.getByRole('button', { name: '右に回転' }).click()
+  await page.getByRole('button', { name: '回転▼' }).click()
+  await page.getByRole('button', { name: '右に90°' }).click()
   await page.getByTestId('organize-card-3').click()
   await page.getByRole('button', { name: '削除', exact: true }).click()
   await page.getByTestId('organize-card-3').click()
-  await page.getByRole('button', { name: '白紙を挿入' }).click()
+  await page.getByRole('button', { name: '挿入▼' }).click()
+  await page.getByRole('button', { name: '白紙のページ' }).click()
+  await page.getByTestId('organize-blank-dialog').getByRole('button', { name: '挿入' }).click()
   await page.getByRole('button', { name: '適用', exact: true }).click()
   await expect(page.getByTestId('organize-view')).toBeHidden()
 
@@ -90,6 +93,7 @@ test('別PDFの追加、抽出、分割をバイト列で確認する', async ({
   await page.getByTestId('organize-file-input').setInputFiles({
     name: 'material.pdf', mimeType: 'application/pdf', buffer: makePdf(['Material 1', 'Material 2']),
   })
+  await page.getByTestId('organize-source-dialog').getByRole('button', { name: '挿入', exact: true }).click()
   await expect.poll(() => page.evaluate(() => window.__karu!.organizeDraft()!.getCards().length)).toBe(7)
 
   const extracted = await page.evaluate(async () => {
@@ -122,4 +126,86 @@ test('別PDFの追加、抽出、分割をバイト列で確認する', async ({
   await page.evaluate(() => window.__karu!.applyOrganize())
   await expect.poll(() => page.evaluate(() => window.__karu!.getPageInfo().then((items) => items.length))).toBe(7)
   expect((await pageInfo(page)).slice(-2).map((item) => item.text)).toEqual(['Material 1', 'Material 2'])
+})
+
+test('複数PDFの順番と範囲と挿入位置をダイアログで指定する', async ({ page }) => {
+  await openSample(page)
+  const original = await pageInfo(page)
+  await page.evaluate(() => window.__karu!.openOrganize())
+  await page.getByTestId('organize-card-1').click()
+  await page.getByTestId('organize-file-input').setInputFiles([
+    { name: 'first.pdf', mimeType: 'application/pdf', buffer: makePdf(['First 1', 'First 2']) },
+    { name: 'second.pdf', mimeType: 'application/pdf', buffer: makePdf(['Second 1']) },
+  ])
+  const dialog = page.getByTestId('organize-source-dialog')
+  await expect(dialog.getByText('first.pdf')).toBeVisible()
+  await dialog.getByLabel('second.pdfを上へ').click()
+  await dialog.getByLabel('first.pdfのページ範囲').fill('2')
+  await dialog.getByRole('button', { name: '挿入', exact: true }).click()
+  await page.getByRole('button', { name: '適用', exact: true }).click()
+  await expect.poll(() => pageInfo(page).then((items) => items.length)).toBe(7)
+  expect((await pageInfo(page)).map((item) => item.text)).toEqual([
+    original[0].text, original[1].text, 'Second 1', 'First 2', original[2].text, original[3].text, original[4].text,
+  ])
+})
+
+test('A3横の白紙を2枚末尾へ挿入する', async ({ page }) => {
+  await openSample(page)
+  await page.evaluate(() => window.__karu!.openOrganize())
+  await page.getByRole('button', { name: '挿入▼' }).click()
+  await page.getByRole('button', { name: '白紙のページ' }).click()
+  const dialog = page.getByTestId('organize-blank-dialog')
+  await dialog.getByLabel('白紙の枚数').fill('2')
+  await dialog.getByLabel('白紙の大きさ').selectOption('a3')
+  await dialog.getByLabel('白紙の向き').selectOption('landscape')
+  await dialog.getByLabel('末尾').check()
+  await dialog.getByRole('button', { name: '挿入' }).click()
+  await page.getByRole('button', { name: '適用', exact: true }).click()
+  const info = await pageInfo(page)
+  expect(info).toHaveLength(7)
+  for (const blank of info.slice(-2)) {
+    expect(blank.text).toBe('')
+    expect(blank.width).toBeCloseTo(1190.55, 0)
+    expect(blank.height).toBeCloseTo(841.89, 0)
+  }
+})
+
+test('別タブでコピーしたページを貼り付けて適用する', async ({ page }) => {
+  await openSample(page)
+  const copiedText = (await pageInfo(page))[0].text
+  const firstTab = await page.evaluate(() => window.__karu!.listTabs()[0])
+  await page.evaluate(async (bytes) => window.__karu!.openBytes(bytes, 'tab-b.pdf'), Array.from(makePdf(['Tab B 1', 'Tab B 2'])))
+  const secondTab = await page.evaluate(() => window.__karu!.listTabs()[1])
+
+  await page.evaluate((docId) => window.__karu!.activateTab(docId), firstTab.docId)
+  await page.evaluate(() => window.__karu!.openOrganize())
+  await page.getByTestId('organize-card-0').click()
+  await page.keyboard.press('Control+c')
+
+  await page.evaluate((docId) => window.__karu!.activateTab(docId), secondTab.docId)
+  await page.evaluate(() => window.__karu!.openOrganize())
+  await page.getByTestId('organize-card-1').click()
+  await page.keyboard.press('Control+v')
+  await page.getByRole('button', { name: '適用', exact: true }).click()
+  expect((await pageInfo(page)).map((item) => item.text)).toEqual(['Tab B 1', 'Tab B 2', copiedText])
+})
+
+test('ページ番号で選んで抽出し、下書きから削除して適用する', async ({ page }) => {
+  await openSample(page)
+  await page.evaluate(() => window.__karu!.openOrganize())
+  await page.getByRole('button', { name: '選択▼' }).click()
+  await page.getByRole('button', { name: 'ページ番号で選ぶ' }).click()
+  const selectionDialog = page.getByTestId('organize-page-selection-dialog')
+  await selectionDialog.getByLabel('選ぶページ番号').fill('1-3,5')
+  await selectionDialog.getByRole('button', { name: '選択', exact: true }).click()
+  await page.getByRole('button', { name: '抽出', exact: true }).click()
+  const extractDialog = page.getByTestId('organize-extract-dialog')
+  await extractDialog.getByLabel('抽出したページを元の文書から削除する').check()
+  await page.evaluate(() => { Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true }) })
+  const download = page.waitForEvent('download')
+  await extractDialog.getByRole('button', { name: '抽出', exact: true }).click()
+  await download
+  await expect(page.getByText('選択: 0ページ ／ 全1ページ（下書き）')).toBeVisible()
+  await page.getByRole('button', { name: '適用', exact: true }).click()
+  await expect.poll(() => pageInfo(page).then((items) => items.length)).toBe(1)
 })
