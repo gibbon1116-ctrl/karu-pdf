@@ -54,11 +54,13 @@ interface BenchRow {
   renderAverageMs: number
   renderP95Ms: number
   workerProcessed: number[]
+  detailRecoveryCount: number
 }
 
 const pdf = path.resolve('test-data/heavy-300p.pdf')
 const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
 const urlFor = (workers: number, warm: boolean) => `/karu-pdf/?test=1&workers=${workers}&warm=${warm ? 1 : 0}`
+let closedContextRecoveryCounts: number[] = []
 
 async function isolatedPage(browser: Browser): Promise<{ page: Page; close(): Promise<void> }> {
   const context = await browser.newContext({
@@ -66,7 +68,20 @@ async function isolatedPage(browser: Browser): Promise<{ page: Page; close(): Pr
     viewport: { width: 1440, height: 900 },
   })
   const page = await context.newPage()
-  return { page, close: () => context.close() }
+  page.on('pageerror', (error) => console.error('[pageerror]', error.stack ?? error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error') console.error('[browser-console]', message.text())
+  })
+  return {
+    page,
+    close: async () => {
+      const count = await page.evaluate(() => (
+        (window as Window & { __karuGetDetailRecoveryCount?: () => number }).__karuGetDetailRecoveryCount?.() ?? 0
+      )).catch(() => 0)
+      closedContextRecoveryCounts.push(count)
+      await context.close()
+    },
+  }
 }
 
 async function renderDiagnostics(page: Page, label: string): Promise<void> {
@@ -84,9 +99,17 @@ async function renderDiagnostics(page: Page, label: string): Promise<void> {
       usesDetail: element.dataset.usesDetail,
       detailStage: element.dataset.detailStage,
       detailKey: element.querySelector<HTMLElement>('.detail-canvas')?.dataset.detailKey ?? null,
+      desiredKey: element.dataset.detailDesiredKey,
+      syncKey: element.dataset.detailSyncKey,
+      syncDisposed: element.dataset.detailSyncDisposed,
+      safetyWatch: element.dataset.detailSafetyWatch,
     }))
     const requests = ((window as Window & { __karuRenderRequests?: RenderRequestLogEntry[] }).__karuRenderRequests ?? []).slice(-100)
     const workerRequests = ((window as Window & { __karuWorkerRenderRequests?: WorkerRenderLogEntry[] }).__karuWorkerRenderRequests ?? []).slice(-100)
+    const detailWindow = window as Window & {
+      __karuGetDetailRecoveryCount?: () => number
+      __karuDetailTransitions?: Array<{ pageIndex: number; event: string; key: string | null; at: number }>
+    }
     return {
       scroll: viewer ? { left: viewer.scrollLeft, top: viewer.scrollTop } : null,
       zoomText: document.querySelector('.zoom-output')?.textContent ?? null,
@@ -94,6 +117,8 @@ async function renderDiagnostics(page: Page, label: string): Promise<void> {
       unsharpPages: visiblePages.filter((item) => item.sharp !== 'true').map((item) => item.page),
       requests,
       workerRequests,
+      detailRecoveryCount: detailWindow.__karuGetDetailRecoveryCount?.() ?? 0,
+      detailTransitions: (detailWindow.__karuDetailTransitions ?? []).slice(-100),
       workers: await Promise.race([
         window.__karu?.getWorkerStats(),
         new Promise((resolve) => window.setTimeout(() => resolve({ timedOut: true }), 2_000)),
@@ -165,8 +190,18 @@ async function measurePan(
     await page.waitForTimeout(150)
   }
   const before = await page.evaluate(() => window.__karu?.getMetrics().panSettle.count ?? 0)
-  await viewer.evaluate((element, value) => { element.scrollLeft += value }, distance)
-  await expect.poll(() => page.evaluate((count) => (window.__karu?.getMetrics().panSettle.count ?? 0) > count, before), { timeout: 180_000 }).toBe(true)
+  const scroll = await viewer.evaluate((element, value) => {
+    const start = element.scrollLeft
+    element.scrollLeft += value
+    return { start, end: element.scrollLeft, maximum: element.scrollWidth - element.clientWidth }
+  }, distance)
+  if (scroll.end === scroll.start) throw new Error(`横移動できません: ${JSON.stringify({ pageIndex, distance, scroll })}`)
+  try {
+    await expect.poll(() => page.evaluate((count) => (window.__karu?.getMetrics().panSettle.count ?? 0) > count, before), { timeout: 180_000 }).toBe(true)
+  } catch (error) {
+    await renderDiagnostics(page, `pan-settle p${pageIndex + 1} ${distance}px ${JSON.stringify(scroll)}`)
+    throw error
+  }
   await waitSharp(page)
   return page.evaluate(() => window.__karu?.getMetrics().panSettle.latest ?? 0)
 }
@@ -253,6 +288,7 @@ async function measureZoomFull(page: Page, pageIndex: number): Promise<ZoomFullR
 
 test('Worker 4本（文書1＋描画3）・warmなしの表示性能を計測する', async ({ browser }) => {
   await fs.access(pdf)
+  closedContextRecoveryCounts = []
   const rows: BenchRow[] = []
 
   const workers = 4
@@ -360,6 +396,7 @@ test('Worker 4本（文書1＋描画3）・warmなしの表示性能を計測す
     renderAverageMs,
     renderP95Ms,
     workerProcessed,
+    detailRecoveryCount: closedContextRecoveryCounts.reduce((sum, count) => sum + count, 0),
   })
 
   const hardwareRun = await isolatedPage(browser)
@@ -397,7 +434,9 @@ test('Worker 4本（文書1＋描画3）・warmなしの表示性能を計測す
     render_avg_ms: row.renderAverageMs.toFixed(1),
     render_p95_ms: row.renderP95Ms.toFixed(1),
     processed: row.workerProcessed.join('/'),
+    detail_recovery_count: row.detailRecoveryCount,
   })))
   console.log(hardware)
   expect(rows).toHaveLength(1)
+  expect(rows[0].detailRecoveryCount).toBe(0)
 })

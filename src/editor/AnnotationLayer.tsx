@@ -351,15 +351,13 @@ export function AnnotationLayer(props: Props) {
       const rect = symbolRectFromDrag(operation.start, operation.latest, operation.moved)
       if (rect[2] - rect[0] < 4) return
       const format = props.formatDefaults.symbol
-      const annotation = props.store.create({
+      props.store.create({
         pageIndex: props.pageIndex,
         kind: 'symbol',
         rect,
         color: format.color,
         symbol: format.symbol,
       })
-      props.onSelect(annotation.id)
-      if (!operation.shift) changeTool('select')
       return
     }
     if (operation.mode === 'text' || operation.mode === 'callout') {

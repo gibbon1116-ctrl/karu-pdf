@@ -1,4 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { createPortal } from 'react-dom'
 import type { PdfWorkerPool, WorkerRenderLogEntry } from '../client/PdfWorkerPool'
 import type { RenderScheduler } from '../client/RenderScheduler'
 import type { PageSize } from '../core/mupdfDoc'
@@ -9,7 +10,8 @@ import { getMetrics, recordBlankFrame, recordMetric, resetBlankFrames, startMeas
 import type { Priority } from '../worker/protocol'
 import { BitmapCache } from './BitmapCache'
 import { type Box } from './detailRegion'
-import { computePageLayout, pagesInRange } from './pageLayout'
+import { getDetailRecoveryCount, subscribeDetailRecovery } from './detailRequestSync'
+import { computePageLayout, pagesInRange, type PageLayout } from './pageLayout'
 import { PageView } from './PageView'
 
 export const ZOOM_STEPS = [0.25, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8]
@@ -61,9 +63,21 @@ interface RenderRequestLogEntry {
   endMs: number | null
 }
 
+function visiblePages(layout: ReturnType<typeof computePageLayout>, viewport: Box): PageLayout[] {
+  const contentWidth = Math.max(layout.maxWidth, viewport.width)
+  return pagesInRange(layout.pages, viewport.y, viewport.y + viewport.height).filter((page) => {
+    const left = (contentWidth - page.width) / 2
+    return page.top + page.height > viewport.y
+      && page.top < viewport.y + viewport.height
+      && left + page.width > viewport.x
+      && left < viewport.x + viewport.width
+  })
+}
+
 type RenderLogWindow = Window & typeof globalThis & {
   __karuRenderRequests?: RenderRequestLogEntry[]
   __karuWorkerRenderRequests?: readonly WorkerRenderLogEntry[]
+  __karuGetDetailRecoveryCount?: () => number
 }
 
 export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref) {
@@ -99,20 +113,49 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   const [isScrolling, setIsScrolling] = useState(false)
   const [prefetchDistance, setPrefetchDistance] = useState(4)
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null)
+  const [debugPanelTarget, setDebugPanelTarget] = useState<HTMLElement | null>(null)
+  const detailRecoveryCount = useSyncExternalStore(
+    subscribeDetailRecovery,
+    getDetailRecoveryCount,
+    getDetailRecoveryCount,
+  )
 
   const scheduler = props.scheduler
   ;(window as RenderLogWindow).__karuWorkerRenderRequests = props.pool.renderLog()
   const warmEnabled = new URLSearchParams(location.search).get('warm') === '1'
+  const debugEnabled = new URLSearchParams(location.search).get('debug') === '1'
   const layout = useMemo(() => computePageLayout(props.pageSizes, zoom), [props.pageSizes, zoom])
   layoutRef.current = layout
+  const scroller = scrollerRef.current
+  const renderedViewport = scroller
+    ? { x: scroller.scrollLeft, y: scroller.scrollTop, width: scroller.clientWidth, height: scroller.clientHeight }
+    : viewport
   const contentWidth = Math.max(layout.maxWidth, viewport.width)
   const virtualPages = useMemo(
-    () => pagesInRange(layout.pages, Math.max(0, viewport.y - viewport.height * 2), viewport.y + viewport.height * 3),
-    [layout.pages, viewport.y, viewport.height],
+    () => pagesInRange(layout.pages, Math.max(0, renderedViewport.y - renderedViewport.height * 2), renderedViewport.y + renderedViewport.height * 3),
+    [layout.pages, renderedViewport.y, renderedViewport.height],
   )
   const visibleIndexes = useMemo(() => new Set(
-    pagesInRange(layout.pages, viewport.y, viewport.y + viewport.height).map((page) => page.index),
-  ), [layout.pages, viewport.y, viewport.height])
+    visiblePages(layout, renderedViewport).map((page) => page.index),
+  ), [layout, renderedViewport.x, renderedViewport.y, renderedViewport.width, renderedViewport.height])
+
+  useEffect(() => {
+    const target = window as RenderLogWindow
+    const getter = () => getDetailRecoveryCount()
+    target.__karuGetDetailRecoveryCount = getter
+    return () => {
+      if (target.__karuGetDetailRecoveryCount === getter) delete target.__karuGetDetailRecoveryCount
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!debugEnabled) {
+      setDebugPanelTarget(null)
+      return
+    }
+    const frame = requestAnimationFrame(() => setDebugPanelTarget(document.querySelector<HTMLElement>('[data-testid="debug-panel"]')))
+    return () => cancelAnimationFrame(frame)
+  }, [debugEnabled])
 
   const onRenderRequest = useCallback((pageIndex: number, priority: Priority, key: string) => {
     const entry: RenderRequestLogEntry = {
@@ -132,8 +175,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   const isSharpNow = useCallback(() => {
     const scroller = scrollerRef.current
     if (!scroller || props.pageSizes.length === 0) return true
-    const visible = pagesInRange(layoutRef.current.pages, scroller.scrollTop, scroller.scrollTop + scroller.clientHeight)
-    if (visible.length === 0) return false
+    const visible = visiblePages(layoutRef.current, {
+      x: scroller.scrollLeft,
+      y: scroller.scrollTop,
+      width: scroller.clientWidth,
+      height: scroller.clientHeight,
+    })
+    if (visible.length === 0) return true
     return visible.every((page) => scroller.querySelector<HTMLElement>(`.page-view[data-page-index="${page.index}"]`)?.dataset.sharp === 'true')
   }, [props.pageSizes.length])
 
@@ -172,8 +220,22 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       const x = anchor?.x ?? scroller.clientWidth / 2
       const y = anchor?.y ?? scroller.clientHeight / 2
       const ratio = bounded / previousZoom
-      const nextLeft = (scroller.scrollLeft + x) * ratio - x
-      const nextTop = (scroller.scrollTop + y) * ratio - y
+      const previousLayout = layoutRef.current
+      const nextLayout = computePageLayout(props.pageSizes, bounded)
+      const anchorY = scroller.scrollTop + y
+      const previousPage = previousLayout.pages.find((page) => page.top <= anchorY && page.top + page.height >= anchorY)
+        ?? pagesInRange(previousLayout.pages, scroller.scrollTop, scroller.scrollTop + scroller.clientHeight)[0]
+      const nextPage = previousPage ? nextLayout.pages[previousPage.index] : undefined
+      const previousContentWidth = Math.max(previousLayout.maxWidth, scroller.clientWidth)
+      const nextContentWidth = Math.max(nextLayout.maxWidth, scroller.clientWidth)
+      const previousPageLeft = previousPage ? (previousContentWidth - previousPage.width) / 2 : 0
+      const nextPageLeft = nextPage ? (nextContentWidth - nextPage.width) / 2 : 0
+      const nextLeft = previousPage && nextPage
+        ? nextPageLeft + (scroller.scrollLeft + x - previousPageLeft) * ratio - x
+        : (scroller.scrollLeft + x) * ratio - x
+      const nextTop = previousPage && nextPage
+        ? nextPage.top + (anchorY - previousPage.top) * ratio - y
+        : (scroller.scrollTop + y) * ratio - y
       lastPositionRef.current = { left: nextLeft, top: nextTop }
       setViewport({ x: nextLeft, y: nextTop, width: scroller.clientWidth, height: scroller.clientHeight })
       setZoomState(bounded)
@@ -188,7 +250,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     } else setZoomState(bounded)
     props.onZoomChange(bounded)
     commitZoom(bounded)
-  }, [commitZoom, props.onScrollPositionChange, props.onZoomChange])
+  }, [commitZoom, props.onScrollPositionChange, props.onZoomChange, props.pageSizes])
 
   const fitWidth = useCallback(() => {
     const scroller = scrollerRef.current
@@ -226,6 +288,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     props.onPageChange((current?.index ?? 0) + 1)
   }, [props.onPageChange, props.onScrollPositionChange])
 
+  useLayoutEffect(() => {
+    updateViewport()
+  }, [layout, committedZoom, updateViewport])
+
   const sampleBlankFrame = useCallback(() => {
     const scroller = scrollerRef.current
     if (!scroller) return
@@ -257,19 +323,25 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       if (verticalMovement) scrollSampleRef.current = { top: scroller.scrollTop, at: now }
       if (!blankRafRef.current) blankRafRef.current = requestAnimationFrame(blankLoop)
       window.clearTimeout(scrollStopTimerRef.current)
-      scrollStopTimerRef.current = window.setTimeout(() => {
+      const settleScroll = () => {
+        const suppressedFor = suppressPanUntilRef.current - performance.now()
+        if (horizontalScrollRef.current && suppressedFor > 0) {
+          scrollStopTimerRef.current = window.setTimeout(settleScroll, suppressedFor)
+          return
+        }
         setIsScrolling(false)
         setPrefetchDistance(4)
         cancelAnimationFrame(blankRafRef.current)
         blankRafRef.current = 0
         recordBlankFrame(false)
-        if (horizontalScrollRef.current && performance.now() >= suppressPanUntilRef.current) {
+        if (horizontalScrollRef.current) {
           const sequence = ++panSequenceRef.current
           const finish = startMeasure('pan-settle')
           waitForSharp('pan-settle', sequence, finish)
         }
         horizontalScrollRef.current = false
-      }, 100)
+      }
+      scrollStopTimerRef.current = window.setTimeout(settleScroll, 100)
     }
     const resize = new ResizeObserver(updateViewport)
     resize.observe(scroller)
@@ -474,7 +546,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
             zoom={committedZoom}
             priority={pagePriority(page.top, page.height, visible)}
             visible={visible}
-            viewport={viewport}
+            viewport={renderedViewport}
             pageLeft={(contentWidth - page.width) / 2}
             warmEnabled={warmEnabled}
             onFirstBitmap={firstBitmap}
@@ -484,6 +556,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
         } )}
       </div>
       </div>
+      {debugPanelTarget && createPortal(
+        <span data-testid="detail-recovery-count">詳細要求の安全網: {detailRecoveryCount} 回</span>,
+        debugPanelTarget,
+      )}
     </EditorToolChangeContext.Provider>
   )
 })

@@ -53,17 +53,21 @@ test('記号の道具でチェックを置き、保存して開き直せる', as
   await expect.poll(() => page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter((item) => item.kind === 'symbol' && item.symbol === 'check').length)).toBe(1)
 })
 
-test('Shiftを押しながら2回クリックすると記号を続けて置ける', async ({ page }) => {
+test('記号を3つ続けて置き、Escで選択へ戻れる', async ({ page }) => {
   await page.goto('/karu-pdf/?test=1')
   await page.getByTestId('file-input').setInputFiles(sample)
   await waitForPage(page)
   const layer = page.getByTestId('annotation-layer-0')
 
   await page.getByRole('button', { name: '記号', exact: true }).click()
-  await layer.click({ position: { x: 160, y: 190 }, modifiers: ['Shift'] })
-  await layer.click({ position: { x: 230, y: 190 }, modifiers: ['Shift'] })
+  await layer.click({ position: { x: 160, y: 190 } })
+  await layer.click({ position: { x: 230, y: 190 } })
+  await layer.click({ position: { x: 300, y: 190 }, modifiers: ['Shift'] })
   await expect(page.getByRole('button', { name: '記号', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await expect.poll(() => page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter((item) => item.kind === 'symbol').length)).toBe(2)
+  await expect.poll(() => page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter((item) => item.kind === 'symbol').length)).toBe(3)
+  await expect(layer.locator('.annotation-selection')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: '選択', exact: true })).toHaveAttribute('aria-pressed', 'true')
 })
 
 test('文字の入力中に太いチェックをカーソル位置へ挿入できる', async ({ page }) => {

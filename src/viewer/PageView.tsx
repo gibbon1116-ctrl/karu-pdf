@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import type { RenderScheduler } from '../client/RenderScheduler'
 import type { PageSize } from '../core/mupdfDoc'
@@ -8,6 +8,14 @@ import type { FormatDefaults } from '../editor/formatDefaults'
 import type { DeviceRect, Priority } from '../worker/protocol'
 import { completedBandsCover, isBandedRender, makeRenderBands, type RenderBand } from './bandedRender'
 import { computeDetailRegion, computeVisibleRegion, visiblePartOfPage, type Box } from './detailRegion'
+import {
+  DetailRequestSync,
+  getDetailRecoveryCount,
+  recordDetailRecovery,
+  type DetailRequest,
+  type DetailRequestPlan,
+  type DetailSyncEvent,
+} from './detailRequestSync'
 import { CSS_PX_PER_PT, type PageLayout } from './pageLayout'
 
 interface Props {
@@ -46,13 +54,23 @@ interface DetailState {
   canvas: HTMLCanvasElement
 }
 
-interface DetailRequest {
-  stage: 'visible' | 'full'
-  region: DeviceRect
+interface DetailTransitionLogEntry {
+  pageIndex: number
+  event: DetailSyncEvent | 'want' | 'release' | 'complete'
+  key: string | null
+  at: number
 }
 
-function sameRegion(left: DeviceRect, right: DeviceRect): boolean {
-  return left.every((value, index) => value === right[index])
+type DetailLogWindow = Window & typeof globalThis & {
+  __karuDetailTransitions?: DetailTransitionLogEntry[]
+}
+
+function logDetailTransition(pageIndex: number, event: DetailTransitionLogEntry['event'], key: string | null): void {
+  const target = window as DetailLogWindow
+  const log = target.__karuDetailTransitions ?? []
+  log.push({ pageIndex, event, key, at: performance.now() })
+  if (log.length > 5_000) log.splice(0, log.length - 5_000)
+  target.__karuDetailTransitions = log
 }
 
 function draw(canvas: HTMLCanvasElement | null, bitmap: ImageBitmap): void {
@@ -74,11 +92,20 @@ export function PageView(props: Props) {
   const previewRef = useRef<HTMLCanvasElement>(null)
   const detailRef = useRef<HTMLCanvasElement>(null)
   const qualityRef = useRef(0)
-  const lastScaleRef = useRef<number | null>(null)
+  const activeDetailRequestRef = useRef<{ key: string; stage: 'visible' | 'full' } | null>(null)
+  const visibleDeviceRef = useRef<DeviceRect | null>(null)
+  const safetyStateRef = useRef({ watch: false, hasDetail: false })
   const [hasBitmap, setHasBitmap] = useState(false)
   const [drawnPreviewKey, setDrawnPreviewKey] = useState('')
   const [detailRequest, setDetailRequest] = useState<DetailRequest | null>(null)
   const [detail, setDetail] = useState<DetailState | null>(null)
+  const detailRequestSyncRef = useRef<DetailRequestSync | null>(null)
+  if (!detailRequestSyncRef.current) {
+    detailRequestSyncRef.current = new DetailRequestSync(
+      setDetailRequest,
+      (event, request) => logDetailTransition(props.layout.index, event, request?.key ?? null),
+    )
+  }
 
   useEffect(() => {
     void props.annotationStore.ensurePageLoaded(
@@ -126,6 +153,65 @@ export function PageView(props: Props) {
     && detail.baseKey.endsWith(excludeKey)
     && completedBandsCover(detail.region, detail.bands, detail.completed, visibleDevice)
   const detailFull = detailSharp && detail?.stage === 'full' && detail.complete
+  visibleDeviceRef.current = visibleDevice
+
+  const desiredDetailRequest = useMemo<DetailRequestPlan | null>(() => {
+    if (!usesDetail || !visibleDevice) return null
+    const validDetail = detail?.renderScale === renderScale && detail.baseKey.endsWith(excludeKey)
+    let stage: 'visible' | 'full'
+    let region: DeviceRect
+    let delayMs = 0
+    if (validDetail && completedBandsCover(detail.region, detail.bands, detail.completed, visibleDevice)) {
+      stage = 'full'
+      region = detail.stage === 'full' ? detail.region : computeDetailRegion(visibleDevice, pageDeviceSize)
+    } else {
+      stage = 'visible'
+      region = computeVisibleRegion(visibleDevice, pageDeviceSize)
+      // 同じ倍率の古い詳細を表示できるスクロールだけを間引く。倍率変更後は即時に出す。
+      delayMs = validDetail ? 60 : 0
+    }
+    return {
+      key: `${props.layout.index}:${renderScale.toFixed(6)}:detail-${stage}:${region.join(',')}${excludeKey}`,
+      stage,
+      region,
+      delayMs,
+    }
+  }, [usesDetail, visibleDevice, detail, renderScale, excludeKey, pageDeviceSize, props.layout.index])
+
+  useLayoutEffect(() => {
+    detailRequestSyncRef.current?.sync(desiredDetailRequest)
+  })
+
+  useEffect(() => () => {
+    detailRequestSyncRef.current?.dispose()
+    detailRequestSyncRef.current = null
+  }, [])
+
+  safetyStateRef.current = {
+    watch: props.visible && zoomStable && usesDetail && visibleDevice !== null,
+    hasDetail: Boolean(detailSharp),
+  }
+
+  useEffect(() => {
+    let missingSince: number | null = null
+    const timer = window.setInterval(() => {
+      const state = safetyStateRef.current
+      const hasVisibleRequest = activeDetailRequestRef.current?.stage === 'visible'
+      if (!state.watch || state.hasDetail || hasVisibleRequest) {
+        missingSince = null
+        return
+      }
+      const now = performance.now()
+      if (missingSince === null) {
+        missingSince = now
+        return
+      }
+      if (now - missingSince < 500) return
+      if (detailRequestSyncRef.current?.recover()) recordDetailRecovery()
+      missingSince = now
+    }, 100)
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     if (!props.warmEnabled) return
@@ -245,48 +331,10 @@ export function PageView(props: Props) {
     }
   }, [props.scheduler, previewKey, previewScale, props.layout.index, props.pageSize, props.visible, props.onRenderRequest, usesDetail, detailFull])
 
-  useEffect(() => {
-    const firstScale = lastScaleRef.current === null
-    const scaleChanged = !firstScale && Math.abs(lastScaleRef.current! - renderScale) > 0.000001
-    lastScaleRef.current = renderScale
-    if (scaleChanged) setDetail(null)
-    if (!usesDetail || !visibleDevice) {
-      setDetailRequest(null)
-      return
-    }
-    if (!scaleChanged
-      && detail?.renderScale === renderScale
-      && completedBandsCover(detail.region, detail.bands, detail.completed, visibleDevice)) return
-    const next: DetailRequest = {
-      stage: 'visible',
-      region: computeVisibleRegion(visibleDevice, pageDeviceSize),
-    }
-    const updateRequest = () => setDetailRequest((current) => (
-      current?.stage === next.stage && sameRegion(current.region, next.region) ? current : next
-    ))
-    if (firstScale || scaleChanged) {
-      updateRequest()
-      return
-    }
-    const timer = window.setTimeout(updateRequest, 60)
-    return () => window.clearTimeout(timer)
-  }, [usesDetail, visibleDevice, renderScale, pageDeviceSize, detail])
+  const detailKey = detailRequest?.key ?? ''
 
   useEffect(() => {
-    if (!usesDetail || !visibleDevice || !detailSharp || detail?.stage !== 'visible' || detailRequest?.stage === 'full') return
-    const next: DetailRequest = {
-      stage: 'full',
-      region: computeDetailRegion(visibleDevice, pageDeviceSize),
-    }
-    setDetailRequest(next)
-  }, [usesDetail, visibleDevice, detailSharp, detail, detailRequest, pageDeviceSize])
-
-  const detailKey = detailRequest
-    ? `${props.layout.index}:${renderScale.toFixed(6)}:detail-${detailRequest.stage}:${detailRequest.region.join(',')}${excludeKey}`
-    : ''
-
-  useEffect(() => {
-    if (!detailRequest || !detailKey || !props.visible) return
+    if (!detailRequest || !detailKey) return
     const priority: Priority = detailRequest.stage === 'visible' ? 0 : 1
     const bands = detailRequest.stage === 'full'
       ? makeRenderBands(detailKey, detailRequest.region)
@@ -298,6 +346,8 @@ export function PageView(props: Props) {
     const context = buffer.getContext('2d')
     let active = true
     let displayed = false
+    activeDetailRequestRef.current = { key: detailKey, stage: detailRequest.stage }
+    logDetailTransition(props.layout.index, 'want', detailKey)
     const releases: Array<{ finishLog(completed?: boolean): void; release(): void }> = []
     const requestBand = (index: number) => {
       if (!active || index >= bands.length) return
@@ -326,7 +376,7 @@ export function PageView(props: Props) {
             detailRequest.region,
             bands,
             completed,
-            visibleDevice,
+            visibleDeviceRef.current,
           )
           if (detailRequest.stage === 'visible' || displayed || coversRequestedVisible) {
             displayed = true
@@ -343,6 +393,7 @@ export function PageView(props: Props) {
           }
           setHasBitmap(true)
           if (!complete) requestBand(index + 1)
+          else logDetailTransition(props.layout.index, 'complete', detailKey)
         }),
       }
       releases.push(item)
@@ -350,12 +401,14 @@ export function PageView(props: Props) {
     requestBand(0)
     return () => {
       active = false
+      if (activeDetailRequestRef.current?.key === detailKey) activeDetailRequestRef.current = null
+      logDetailTransition(props.layout.index, 'release', detailKey)
       for (const item of releases) {
         item.finishLog()
         item.release()
       }
     }
-  }, [props.scheduler, props.layout.index, props.visible, props.onRenderRequest, renderScale, detailKey, detailRequest])
+  }, [props.scheduler, props.layout.index, props.onRenderRequest, renderScale, detailKey, detailRequest?.generation])
 
   useEffect(() => {
     if (detail) drawCanvas(detailRef.current, detail.canvas)
@@ -381,6 +434,12 @@ export function PageView(props: Props) {
       data-zoom-stable={zoomStable ? 'true' : 'false'}
       data-uses-detail={usesDetail ? 'true' : 'false'}
       data-detail-stage={showDetail ? (detail.complete ? detail.stage : `${detail.stage}-partial`) : 'none'}
+      data-detail-request-key={activeDetailRequestRef.current?.key ?? ''}
+      data-detail-desired-key={desiredDetailRequest?.key ?? ''}
+      data-detail-sync-key={detailRequestSyncRef.current?.desiredKey ?? ''}
+      data-detail-sync-disposed={detailRequestSyncRef.current?.isDisposed ? 'true' : 'false'}
+      data-detail-safety-watch={safetyStateRef.current.watch ? 'true' : 'false'}
+      data-detail-recovery-count={getDetailRecoveryCount()}
       style={{ top: props.layout.top, left: props.pageLeft, width: props.layout.width, height: props.layout.height }}
     >
       <span className="page-placeholder">{props.layout.index + 1}</span>
