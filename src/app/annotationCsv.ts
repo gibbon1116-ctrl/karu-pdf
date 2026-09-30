@@ -8,13 +8,15 @@ export const ANNOTATION_CSV_HEADER = ['番号', 'ページ', '種類', '本文',
 export function annotationKindLabel(kind: EditableAnnotation['kind']): string {
   const labels: Record<EditableAnnotation['kind'], string> = {
     freetext: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角',
-    circle: '丸', highlight: '蛍光ペン', ink: '手書き', symbol: '記号',
+    circle: '丸', highlight: '蛍光ペン', ink: '手書き', textHighlight: 'ハイライト',
+    underline: '下線', strikeout: '取り消し線', symbol: '記号',
   }
   return labels[kind]
 }
 
 export function annotationBody(annotation: EditableAnnotation): string {
   if (annotation.kind === 'freetext' || annotation.kind === 'callout') return annotation.text
+  if (annotation.kind === 'textHighlight' || annotation.kind === 'underline' || annotation.kind === 'strikeout') return annotation.text
   if (annotation.kind === 'symbol') return SYMBOL_OPTIONS.find((option) => option.name === annotation.symbol)?.label ?? '記号'
   return annotationKindLabel(annotation.kind)
 }

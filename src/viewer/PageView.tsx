@@ -43,6 +43,7 @@ interface Props {
   onFirstBitmap(): void
   onSharpChange(pageIndex: number, sharp: boolean): void
   onRenderRequest(pageIndex: number, priority: Priority, key: string): () => void
+  onStatus(message: string): void
 }
 
 interface DetailState {
@@ -472,6 +473,7 @@ export function PageView(props: Props) {
         )))}
       </svg>}
       <AnnotationLayer
+        docId={props.docId}
         pageIndex={props.layout.index}
         pageSize={props.pageSize}
         zoom={props.zoom}
@@ -484,6 +486,7 @@ export function PageView(props: Props) {
         onEdit={props.onEditAnnotation}
         registerCommit={props.registerEditorCommit}
         formatDefaults={props.formatDefaults}
+        onStatus={props.onStatus}
       />
     </div>
   )

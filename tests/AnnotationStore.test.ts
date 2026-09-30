@@ -20,6 +20,8 @@ const existingFreeText: AnnotationInfo = {
   line: null,
   lineEnding: null,
   inkList: null,
+  quads: null,
+  markedText: null,
   calloutPoint: null,
   calloutLine: null,
   symbol: null,
@@ -256,6 +258,25 @@ describe('AnnotationStore', () => {
     expect(store.getPageAnnotations(0)).toHaveLength(0)
     store.undo()
     expect(store.getPageAnnotations(0)).toHaveLength(2)
+  })
+
+  it('700ms以内の方向キー移動を1手にまとめ、文字への印は動かさない', () => {
+    const store = new AnnotationStore()
+    const first = store.create({ pageIndex: 0, kind: 'square', rect: [10, 10, 20, 20] })
+    const second = store.create({ pageIndex: 0, kind: 'symbol', rect: [30, 30, 40, 40] })
+    const markup = store.create({
+      pageIndex: 0, kind: 'textHighlight', rect: [50, 50, 80, 60], text: '印',
+      quads: [[50, 50, 80, 50, 50, 60, 80, 60]],
+    })
+    const ids = [first.id, second.id, markup.id]
+    store.nudgeMany(ids, 1, 0, 'selection', 100)
+    store.nudgeMany(ids, 2, 10, 'selection', 600)
+    expect(store.get(first.id)?.rect).toEqual([13, 20, 23, 30])
+    expect(store.get(second.id)?.rect).toEqual([33, 40, 43, 50])
+    expect(store.get(markup.id)?.rect).toEqual([50, 50, 80, 60])
+    store.undo()
+    expect(store.get(first.id)?.rect).toEqual([10, 10, 20, 20])
+    expect(store.get(second.id)?.rect).toEqual([30, 30, 40, 40])
   })
 
   it('文字と背景の透明度を別々の編集属性にする', () => {

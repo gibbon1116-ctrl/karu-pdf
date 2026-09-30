@@ -51,6 +51,7 @@ interface Props {
   onScrollPositionChange(left: number, top: number): void
   onFirstBitmap(): void
   onFirstSharp(): void
+  onStatus(message: string): void
 }
 
 interface PrefetchEntry {
@@ -531,6 +532,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       ref={scrollerRef}
       className="viewer"
       data-testid="viewer"
+      tabIndex={0}
+      aria-label="PDF表示"
       onWheel={(event) => {
         if (!event.ctrlKey) return
         event.preventDefault()
@@ -574,6 +577,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
             onFirstBitmap={firstBitmap}
             onSharpChange={onSharpChange}
             onRenderRequest={onRenderRequest}
+            onStatus={props.onStatus}
           />
         } )}
       </div>

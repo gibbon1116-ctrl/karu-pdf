@@ -20,6 +20,13 @@ export class History<T> {
     this.redoStack = []
   }
 
+  replaceLast(expected: HistoryStep<T>, step: HistoryStep<T>): boolean {
+    if (this.undoStack.at(-1) !== expected) return false
+    this.undoStack[this.undoStack.length - 1] = step
+    this.redoStack = []
+    return true
+  }
+
   undo(): HistoryStep<T> | null {
     const step = this.undoStack.pop()
     if (!step) return null

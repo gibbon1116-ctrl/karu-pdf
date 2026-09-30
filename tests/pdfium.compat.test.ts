@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { applyEdits, SYMBOL_OPTIONS, type Rect } from '../src/core/annotations'
 import { createDingbatsFontResource, createFontResource, type FontResource, type FontResources } from '../src/core/fontMetrics'
 import { saveDocument } from '../src/core/save'
+import { searchPage } from '../src/core/search'
 import { ensureSamplePdf } from './fixtures'
 
 const fontPath = path.resolve('public/fonts/BIZUDGothic-Regular.ttf')
@@ -44,6 +45,17 @@ beforeAll(async () => {
   sourceBytes = new Uint8Array(await fs.readFile(await ensureSamplePdf()))
   const document = new mupdf.PDFDocument(sourceBytes)
   try {
+    const markups = (['Highlight', 'Underline', 'StrikeOut'] as const).map((markup, pageIndex) => {
+      const page = document.loadPage(pageIndex)
+      try {
+        const markedText = `Sample page ${pageIndex + 1}`
+        const quads = searchPage(page, pageIndex, markedText, { caseSensitive: true, normalizeWidth: false }).matches[0].quads
+        return {
+          kind: 'createTextMarkup' as const, pageIndex, markup, quads, markedText,
+          color: [1, 0, 0] as [number, number, number], opacity: markup === 'Highlight' ? 0.4 : 1,
+        }
+      } finally { page.destroy() }
+    })
     const applied = applyEdits(document, [
       {
         kind: 'createFreeText', pageIndex: 0, rect: pageRect,
@@ -123,6 +135,7 @@ beforeAll(async () => {
         backgroundColor: [1, 1, 0], borderColor: null, borderWidth: 1,
         textOpacity: 0.5, boxOpacity: 0.25,
       },
+      ...markups,
     ], fontResources)
     expect(applied.errors).toEqual([])
     annotatedBytes = saveDocument(document, 'full').bytes
@@ -336,6 +349,15 @@ describe('PDFium compatibility', () => {
     expect(symbols).toBeGreaterThan(300)
     expect(fallbackText).toBeGreaterThan(50)
     console.info(`PDFIUM_METRIC symbols=${symbols} fallback_text=${fallbackText}`)
+  })
+
+  it('ハイライト・下線・取り消し線をPDFiumで描く', () => {
+    const redPixels = [0, 1, 2].map((pageIndex) => countPdfiumPixels(
+      annotatedBytes, pageIndex, [60, 35, 280, 100],
+      (r, g, b) => r > 140 && g < 140 && b < 140,
+    ))
+    expect(redPixels.every((count) => count > 10)).toBe(true)
+    console.info(`PDFIUM_METRIC text_markup=${redPixels.join(',')}`)
   })
 
   it('文字50%と背景25%を別々の濃さでPDFium描画する', () => {

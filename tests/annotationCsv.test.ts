@@ -7,7 +7,7 @@ function annotation(values: Partial<EditableAnnotation> = {}): EditableAnnotatio
     id: 'new-1', objNum: null, pageIndex: 1, kind: 'freetext', rect: [72, 144, 216, 216],
     text: '引用 "A",\n二行目', fontSize: 10.5, font: 'BIZUDGothic', color: [1, 0, 0],
     borderWidth: 1, opacity: 1, textOpacity: 1, boxOpacity: 1, interiorColor: null,
-    borderColor: null, line: null, inkList: null, calloutPoint: null, calloutLine: null,
+    borderColor: null, line: null, inkList: null, quads: null, calloutPoint: null, calloutLine: null,
     symbol: null, layout: null, dirty: true, madeByKaru: true, ...values,
   }
 }

@@ -40,6 +40,8 @@ export function HelpDialog({ open, onClose }: Props) {
           <p>文字と吹き出しには背景色と枠線を付けられ、文字と背景・枠の透明度を別々に選べます。吹き出しは指摘する点から文字枠までドラッグしてください。</p>
           <p>蛍光ペンと手書きは、<kbd>Ctrl</kbd>を押しながら描くと直線になり、<kbd>Ctrl</kbd>+<kbd>Shift</kbd>で45度刻みに揃います。蛍光ペンは1本描くと選択へ戻り、手書きは続けて描けます。</p>
           <p>選択中に <kbd>Shift</kbd> を押しながらクリックすると、複数の書き込みを選べます。何もない所から囲むようにドラッグしてもまとめて選べます。<kbd>Ctrl</kbd>+<kbd>C</kbd>／<kbd>X</kbd>／<kbd>V</kbd> でコピー・切り取り・貼り付け、<kbd>Ctrl</kbd>+<kbd>D</kbd> で複製します。</p>
+          <p>「文字に印」（M）では、文字の選択・コピーと、選んだ文字へのハイライト・下線・取り消し線ができます。</p>
+          <p>書き込みを選んで方向キーを押すと1pt、<kbd>Shift</kbd>+方向キーでは10ptずつ動かせます。文字への印は文字に結び付いているため動かせません。</p>
           <p><kbd>Esc</kbd> で選択を外します。<kbd>Ctrl</kbd>+<kbd>Z</kbd> で元に戻し、<kbd>Ctrl</kbd>+<kbd>Y</kbd> でやり直します。</p>
         </section>
         <section>

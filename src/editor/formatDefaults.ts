@@ -3,7 +3,7 @@ import type { FontName } from '../core/fontMetrics'
 
 export const FORMAT_STORAGE_KEY = 'karu-pdf:format'
 
-export type FormatTool = 'text' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'symbol'
+export type FormatTool = 'text' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
 export interface ToolFormat {
   color: RGB
@@ -58,6 +58,9 @@ export const DEFAULT_FORMAT: FormatDefaults = {
   circle: format(red, 1, 10.5, 'BIZUDGothic', null, red),
   highlight: format(yellow, 12, 10.5, 'BIZUDGothic', null, null, 0.35),
   ink: format(red, 1.5),
+  textHighlight: format(yellow, 1, 10.5, 'BIZUDGothic', null, null, 0.4),
+  underline: format(red),
+  strikeout: format(red),
   symbol: format(red),
 }
 
@@ -77,7 +80,7 @@ function readTool(value: unknown, fallback: ToolFormat): ToolFormat {
     font: item.font === 'BIZUDMincho' || item.font === 'BIZUDGothic' ? item.font : fallback.font,
     fillColor: item.fillColor === null ? null : validColor(item.fillColor) ? [...item.fillColor] : fallback.fillColor ? [...fallback.fillColor] : null,
     borderColor: item.borderColor === null ? null : validColor(item.borderColor) ? [...item.borderColor] : legacyBorder ? [...legacyBorder] : null,
-    opacity: typeof item.opacity === 'number' && [0.25, 0.35, 0.5, 0.75, 1].includes(item.opacity) ? item.opacity : fallback.opacity,
+    opacity: typeof item.opacity === 'number' && [0.25, 0.35, 0.4, 0.5, 0.75, 1].includes(item.opacity) ? item.opacity : fallback.opacity,
     textOpacity: typeof item.textOpacity === 'number' && [0.25, 0.5, 0.75, 1].includes(item.textOpacity) ? item.textOpacity : fallback.textOpacity,
     boxOpacity: typeof item.boxOpacity === 'number' && [0.25, 0.5, 0.75, 1].includes(item.boxOpacity) ? item.boxOpacity : fallback.boxOpacity,
     symbolSize: typeof item.symbolSize === 'number' && [8, 12, 16, 24, 32, 48, 72].includes(item.symbolSize) ? item.symbolSize : fallback.symbolSize,

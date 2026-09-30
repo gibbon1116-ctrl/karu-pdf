@@ -2,7 +2,6 @@ import fs from 'node:fs/promises'
 import mupdf from 'mupdf'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { listAnnotations } from '../src/core/annotations'
-import { loadOutline } from '../src/core/outline'
 import { findTextMatchRanges, searchPage } from '../src/core/search'
 import { ensureSamplePdf, samplePath } from './fixtures'
 
@@ -34,24 +33,6 @@ describe('左の欄の Worker 用処理', () => {
     expect(findTextMatchRanges('番号 ＡＢＣ１２３ / ABC123', 'ABC123', { caseSensitive: true, normalizeWidth: true }))
       .toEqual([{ start: 3, end: 9 }, { start: 12, end: 18 }])
     expect(findTextMatchRanges('番号 ＡＢＣ１２３', 'ABC123', { caseSensitive: true, normalizeWidth: false })).toEqual([])
-  })
-
-  it('入れ子のしおりと移動先を返す', async () => {
-    const document = new mupdf.PDFDocument(await fs.readFile(samplePath))
-    const iterator = document.outlineIterator()
-    try {
-      iterator.insert({ title: '第1章', uri: '#page=2&zoom=100,72,100', open: true })
-      iterator.prev()
-      iterator.down()
-      iterator.insert({ title: '第1節', uri: '#page=3&zoom=100,80,120', open: true })
-      const outline = loadOutline(document)
-      expect(outline).toHaveLength(1)
-      expect(outline[0]).toMatchObject({ title: '第1章', pageIndex: 1 })
-      expect(outline[0].children[0]).toMatchObject({ title: '第1節', pageIndex: 2 })
-    } finally {
-      iterator.destroy()
-      document.destroy()
-    }
   })
 
   it('全ページの書き込みをページごとに読み出す', async () => {

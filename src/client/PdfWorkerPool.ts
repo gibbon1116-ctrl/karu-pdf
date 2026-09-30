@@ -6,7 +6,8 @@ import type { SaveMode } from '../core/save'
 import type { PageInfo, PageLayoutCard } from '../core/pageOps'
 import type { RasterizeOptions } from '../core/rasterize'
 import type { SearchOptions } from '../core/search'
-import type { OutlineEntry } from '../core/outline'
+import type { Point } from '../core/annotations'
+import type { TextSelectionMode, TextSelectionResult } from '../core/textSelection'
 import { MemoryPdfWriteTarget, PdfStreamWriter, type PdfImageBand, type PdfWriteTarget } from '../core/pdfStreamWriter'
 import type {
   AppliedEditsResponse,
@@ -16,7 +17,7 @@ import type {
   ExportBytesResponse,
   LayoutTextResponse,
   ListAnnotationsResponse,
-  OutlineLoadedResponse,
+  PageHasTextResponse,
   OpenResponse,
   PageInfoResponse,
   PageLayoutResponse,
@@ -31,6 +32,7 @@ import type {
   RasterBandRenderedResponse,
   RasterizeBegunResponse,
   SearchProgressResponse,
+  TextSelectedResponse,
 } from '../worker/protocol'
 
 export interface OpenResult {
@@ -396,10 +398,24 @@ export class PdfWorkerPool {
     return response.annotations
   }
 
-  loadOutline(docId: string): Promise<OutlineEntry[]> {
-    return this.request<OutlineLoadedResponse>(this.slots[0], (requestId) => ({
-      type: 'loadOutline', requestId, docId,
-    })).then((response) => response.outline)
+  async pageHasText(docId: string, pageIndex: number): Promise<boolean> {
+    const response = await this.request<PageHasTextResponse>(this.slots[0], (requestId) => ({
+      type: 'pageHasText', requestId, docId, pageIndex,
+    }))
+    return response.hasText
+  }
+
+  async selectText(
+    docId: string,
+    pageIndex: number,
+    from: Point,
+    to: Point,
+    mode: TextSelectionMode,
+  ): Promise<TextSelectionResult> {
+    const response = await this.request<TextSelectedResponse>(this.slots[0], (requestId) => ({
+      type: 'selectText', requestId, docId, pageIndex, from, to, mode,
+    }))
+    return response.result
   }
 
   searchDocument(

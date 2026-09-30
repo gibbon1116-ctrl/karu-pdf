@@ -6,7 +6,6 @@ import { expect, test, type Page } from '@playwright/test'
 
 const sample = path.resolve('test-data/sample-small.pdf')
 const realPdf = path.resolve('test-data/real/公共建築工事標準仕様書_建築_R7.pdf')
-const outlinePdf = path.resolve('test-results/sidebar-outline.tmp.pdf')
 const blankPdf = path.resolve('test-results/sidebar-blank.tmp.pdf')
 
 function savedBytes(document: PDFDocument): Uint8Array {
@@ -15,17 +14,7 @@ function savedBytes(document: PDFDocument): Uint8Array {
 }
 
 async function createFixtures(): Promise<void> {
-  await fs.mkdir(path.dirname(outlinePdf), { recursive: true })
-  const outlined = new mupdf.PDFDocument(await fs.readFile(sample))
-  const iterator = outlined.outlineIterator()
-  try {
-    iterator.insert({ title: '第1章', uri: '#page=2&zoom=100,72,100', open: true })
-    iterator.prev()
-    iterator.down()
-    iterator.insert({ title: '第1節', uri: '#page=3&zoom=100,80,120', open: true })
-  } finally { iterator.destroy() }
-  try { await fs.writeFile(outlinePdf, savedBytes(outlined)) } finally { outlined.destroy() }
-
+  await fs.mkdir(path.dirname(blankPdf), { recursive: true })
   const blank = new mupdf.PDFDocument()
   const page = blank.addPage([0, 0, 595, 842], 0, {}, '')
   try { blank.insertPage(-1, page) } finally { page.destroy() }
@@ -38,7 +27,6 @@ async function waitForPage(page: Page, pageIndex = 0): Promise<void> {
 
 test.beforeAll(createFixtures)
 test.afterAll(async () => {
-  await fs.rm(outlinePdf, { force: true })
   await fs.rm(blankPdf, { force: true })
 })
 
@@ -52,19 +40,13 @@ test('Ctrl+F で検索し、結果から3ページ目へ移る', async ({ page }
   await input.fill('Sample page 3')
   await input.press('Enter')
   await expect(page.getByTestId('search-results').locator('li')).toHaveCount(1)
-  await page.getByTestId('search-results').locator('button').click()
+  // 1回目の Enter で、最初の結果へ本体が移る
+  await expect(page.getByText('3 / 5 ページ')).toBeVisible()
+  await page.getByTestId('viewer').evaluate((viewer) => { viewer.scrollTop = 0 })
+  await expect(page.getByText('1 / 5 ページ')).toBeVisible()
+  await input.press('Enter')
   await expect(page.getByText('3 / 5 ページ')).toBeVisible()
   await expect(page.locator('.search-highlight-layer polygon.active')).toHaveCount(1)
-})
-
-test('しおりの入れ子を表示し、項目からページへ移る', async ({ page }) => {
-  await page.goto('/karu-pdf/?test=1')
-  await page.getByTestId('file-input').setInputFiles(outlinePdf)
-  await waitForPage(page)
-  await page.getByRole('tab', { name: 'しおり' }).click()
-  await page.getByRole('button', { name: '第1章' }).click()
-  await expect(page.getByText('2 / 5 ページ')).toBeVisible()
-  await expect(page.getByRole('button', { name: '第1節' })).toBeVisible()
 })
 
 test('3件の書き込みを一覧・選択し、CSVに出力する', async ({ page }) => {

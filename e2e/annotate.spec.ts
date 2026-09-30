@@ -217,7 +217,7 @@ test('全種類の書き込みを作成し、保存して開き直せる', async
       mincho: items.some((item) => item.text === '明朝の文字' && item.font === 'BIZUDMincho'),
     }
   })).toEqual({
-    kinds: ['arrow', 'circle', 'freetext', 'highlight', 'ink', 'line', 'square'],
+    kinds: ['arrow', 'circle', 'freetext', 'highlight', 'ink', 'line', 'square', 'textHighlight'],
     joinedInk: true,
     highlight: true,
     mincho: true,

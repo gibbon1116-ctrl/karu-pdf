@@ -83,7 +83,6 @@ export function MenuBar(props: Props) {
         if (props.showThumbnails && props.sidePanelTab === 'pages') props.onToggleThumbnails()
         else props.onOpenSidePanel('pages')
       } },
-      { label: 'しおり', checked: props.showThumbnails && props.sidePanelTab === 'outline', onSelect: () => props.onOpenSidePanel('outline') },
       { label: '検索', shortcut: 'Ctrl+F', checked: props.showThumbnails && props.sidePanelTab === 'search', onSelect: () => props.onOpenSidePanel('search') },
       { label: '書き込みの一覧', checked: props.showThumbnails && props.sidePanelTab === 'annotations', onSelect: () => props.onOpenSidePanel('annotations') },
       { label: '書式パネル', checked: props.showFormat, onSelect: props.onToggleFormat },

@@ -5,12 +5,11 @@ import type { EditableAnnotation } from '../editor/AnnotationStore'
 import type { RenderScheduler } from '../client/RenderScheduler'
 import type { DocumentSession, SidePanelTab } from './documentModel'
 import { AnnotationListPanel } from './AnnotationListPanel'
-import { OutlinePanel } from './OutlinePanel'
 import { SearchPanel, type SearchHighlightState } from './SearchPanel'
 import { ThumbnailPanel } from './ThumbnailPanel'
 
 const WIDTH_KEY = 'karu-pdf:side-panel-width'
-const MIN_WIDTH = 160
+const MIN_WIDTH = 220
 const MAX_WIDTH = 480
 
 function initialWidth(): number {
@@ -28,15 +27,13 @@ interface Props {
   focusSearchVersion: number
   onTabChange(tab: SidePanelTab): void
   onPageClick(index: number): void
-  onNavigate(pageIndex: number, x: number | null, y: number | null): void
   onSearchNavigate(match: SearchMatch): void
   onSearchHighlights(value: SearchHighlightState): void
   onSelectAnnotation(annotation: EditableAnnotation): void
 }
 
 const tabs: Array<{ id: SidePanelTab; label: string }> = [
-  { id: 'pages', label: 'ページ' }, { id: 'outline', label: 'しおり' },
-  { id: 'search', label: '検索' }, { id: 'annotations', label: '書き込み' },
+  { id: 'pages', label: 'ページ' }, { id: 'search', label: '検索' }, { id: 'annotations', label: '書き込み' },
 ]
 
 export function SidePanel(props: Props) {
@@ -67,7 +64,6 @@ export function SidePanel(props: Props) {
     docId={props.session.docId} pageSizes={props.session.pageSizes} currentPage={props.session.view.page}
     scheduler={props.scheduler} annotationStore={props.session.annotationStore} onPageClick={props.onPageClick}
   />
-  else if (props.activeTab === 'outline') content = <OutlinePanel docId={props.session.docId} pool={props.pool} onNavigate={props.onNavigate} />
   else if (props.activeTab === 'search') content = <SearchPanel
     docId={props.session.docId} pool={props.pool} focusVersion={props.focusSearchVersion}
     onHighlightsChange={props.onSearchHighlights} onNavigate={props.onSearchNavigate}

@@ -4,6 +4,7 @@ import {
   DocumentTabsModel,
   MAX_INCREMENTAL_GROWTH,
   MAX_OPEN_DOCUMENTS,
+  normalizeSidePanelTab,
 } from '../src/app/documentModel'
 import type { PdfFileHandle } from '../src/editor/fileAccess'
 
@@ -61,6 +62,14 @@ describe('DocumentTabsModel', () => {
 })
 
 describe('DocumentSession の保存量管理', () => {
+  it('古いしおりタブの保存値はページへ戻す', () => {
+    expect(normalizeSidePanelTab('outline')).toBe('pages')
+    expect(normalizeSidePanelTab('search')).toBe('search')
+    const target = session(1)
+    ;(target as unknown as { sidePanelTab: string }).sidePanelTab = 'outline'
+    expect(target.sidePanelTab).toBe('pages')
+  })
+
   it('6回の増分保存後は次を全体保存にし、全体保存後に数値を戻す', () => {
     const target = new DocumentSession({
       docId: 'large-save-budget', name: 'large.pdf', byteLength: 10_000_000, handle: null, pageSizes: [],

@@ -1,19 +1,26 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { Quad } from 'mupdf'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { nearestCalloutEdgePoint, resizeSymbolRect, SYMBOL_OPTIONS, symbolRectFromDrag, type Point, type Rect } from '../core/annotations'
 import type { PageSize } from '../core/mupdfDoc'
 import { CSS_PX_PER_PT } from '../viewer/pageLayout'
 import { beginDragFrameMeasurement, TextEditor } from './TextEditor'
-import { AnnotationStore, type EditableAnnotation, type Kind } from './AnnotationStore'
+import { AnnotationStore, isTextMarkup, type EditableAnnotation, type Kind } from './AnnotationStore'
 import type { FormatDefaults, FormatTool } from './formatDefaults'
 import { inkStrokePoints, mergeInkAnnotationId, simplifyPoints, type PreviousInkStroke } from './ink'
+import { TextSelectionQueue } from './textSelectionQueue'
+import type { TextSelectionMode, TextSelectionResult } from '../core/textSelection'
 
-export type EditorTool = 'select' | FormatTool
+export type EditorTool = 'select' | 'textSelect' | FormatTool
+const TEXT_SELECTION_START = 'karu-pdf:text-selection-start'
+const MULTI_CLICK_MS = 500
+const MULTI_CLICK_DISTANCE = 4
 export const EditorToolChangeContext = createContext<(tool: EditorTool) => void>(() => undefined)
 type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 type LineHandle = 'start' | 'end'
 
 interface Props {
+  docId: string
   pageIndex: number
   pageSize: PageSize
   zoom: number
@@ -26,11 +33,12 @@ interface Props {
   onEdit(id: string | null): void
   registerCommit(commit: (() => Promise<void>) | null): void
   formatDefaults: FormatDefaults
+  onStatus(message: string): void
 }
 
 interface DragOperation {
   pointerId: number
-  mode: 'move' | 'marquee' | 'text' | 'callout' | 'shape' | 'symbol' | 'line' | 'ink' | 'resize' | 'line-end' | 'callout-point'
+  mode: 'move' | 'marquee' | 'text' | 'callout' | 'shape' | 'symbol' | 'line' | 'ink' | 'resize' | 'line-end' | 'callout-point' | 'text-selection'
   creationKind?: Kind
   start: Point
   latest: Point
@@ -49,7 +57,16 @@ interface DragOperation {
   annotationKind?: EditableAnnotation['kind']
   points?: Point[]
   mergeId?: string | null
+  selectionMode?: TextSelectionMode
   stopMeasurement(publish?: boolean): void
+}
+
+interface NudgeOperation {
+  ids: string[]
+  elements: SVGGElement[]
+  dx: number
+  dy: number
+  timer: number
 }
 
 function color(rgb: readonly number[]): string {
@@ -129,6 +146,17 @@ function allResizeHandles(kind: Kind): boolean {
   return kind === 'square' || kind === 'circle' || kind === 'highlight' || kind === 'ink'
 }
 
+function quadPoints(quad: Quad): string {
+  return `${quad[0]},${quad[1]} ${quad[2]},${quad[3]} ${quad[6]},${quad[7]} ${quad[4]},${quad[5]}`
+}
+
+function selectionBounds(quads: readonly Quad[]): Rect | null {
+  if (quads.length === 0) return null
+  const xs = quads.flatMap((quad) => [quad[0], quad[2], quad[4], quad[6]])
+  const ys = quads.flatMap((quad) => [quad[1], quad[3], quad[5], quad[7]])
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
+}
+
 export function AnnotationLayer(props: Props) {
   const changeTool = useContext(EditorToolChangeContext)
   const version = useSyncExternalStore(props.store.subscribe, props.store.getSnapshot)
@@ -139,14 +167,168 @@ export function AnnotationLayer(props: Props) {
   const resizePreviewRef = useRef<SVGRectElement>(null)
   const linePreviewRef = useRef<SVGLineElement>(null)
   const calloutPreviewRef = useRef<SVGLineElement>(null)
+  const textSelectionRef = useRef<SVGGElement>(null)
   const dragRef = useRef<DragOperation | null>(null)
+  const nudgeRef = useRef<NudgeOperation | null>(null)
+  const clickRef = useRef<{ at: number; x: number; y: number; count: number } | null>(null)
   const previousInkRef = useRef<PreviousInkStroke | null>(null)
   const loadingLayoutsRef = useRef(new Set<string>())
+  const [textSelection, setTextSelection] = useState<TextSelectionResult | null>(null)
+  const textQueue = useMemo(() => new TextSelectionQueue(
+    (input: { from: Point; to: Point; mode: TextSelectionMode }) => props.pool.selectText(
+      props.docId, props.pageIndex, input.from, input.to, input.mode,
+    ),
+  ), [props.docId, props.pageIndex, props.pool])
   const annotations = props.store.getPageAnnotations(props.pageIndex)
   const selectedIds = new Set(props.store.selectedIds())
   const singleSelection = selectedIds.size === 1
   const touched = useMemo(() => new Set(props.store.touchedObjNums(props.pageIndex)), [version, props.pageIndex, props.store])
   const editing = props.editingId ? annotations.find((annotation) => annotation.id === props.editingId) : undefined
+
+  useEffect(() => () => textQueue.dispose(), [textQueue])
+
+  const flushNudge = () => {
+    const operation = nudgeRef.current
+    if (!operation) return
+    nudgeRef.current = null
+    window.clearTimeout(operation.timer)
+    for (const element of operation.elements) element.removeAttribute('transform')
+    if (operation.dx !== 0 || operation.dy !== 0) {
+      props.store.nudgeMany(operation.ids, operation.dx, operation.dy, operation.ids.slice().sort().join('|'))
+    }
+  }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const isInput = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false
+      if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'z' || event.key.toLowerCase() === 'y')) {
+        flushNudge()
+        return
+      }
+      if (props.tool !== 'select' || props.editingId || isInput || event.ctrlKey || event.metaKey || event.altKey) return
+      const movement: Record<string, Point> = {
+        ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+      }
+      const direction = movement[event.key]
+      if (!direction) return
+      const primary = props.store.primarySelection()
+      const primaryAnnotation = primary ? props.store.get(primary) : undefined
+      if (!primaryAnnotation || primaryAnnotation.pageIndex !== props.pageIndex) return
+      const ids = props.store.selectedIds().filter((id) => {
+        const annotation = props.store.get(id)
+        return annotation?.pageIndex === props.pageIndex && !isTextMarkup(annotation.kind)
+      })
+      if (ids.length === 0) return
+      event.preventDefault()
+
+      let operation = nudgeRef.current
+      if (!operation || operation.ids.join('\0') !== ids.join('\0')) {
+        flushNudge()
+        const svg = svgRef.current
+        if (!svg) return
+        operation = {
+          ids,
+          elements: ids.flatMap((id) => {
+            const element = svg.querySelector<SVGGElement>(`g[data-annotation-id="${id}"]`)
+            return element ? [element] : []
+          }),
+          dx: 0,
+          dy: 0,
+          timer: 0,
+        }
+        nudgeRef.current = operation
+      }
+
+      const rects = operation.ids.flatMap((id) => {
+        const annotation = props.store.get(id)
+        return annotation ? [annotation.rect] : []
+      })
+      if (rects.length === 0) return
+      const bounds: Rect = [
+        Math.min(...rects.map((rect) => rect[0])), Math.min(...rects.map((rect) => rect[1])),
+        Math.max(...rects.map((rect) => rect[2])), Math.max(...rects.map((rect) => rect[3])),
+      ]
+      const distance = event.shiftKey ? 10 : 1
+      operation.dx = Math.max(-bounds[0], Math.min(props.pageSize.width - bounds[2], operation.dx + direction[0] * distance))
+      operation.dy = Math.max(-bounds[1], Math.min(props.pageSize.height - bounds[3], operation.dy + direction[1] * distance))
+      for (const element of operation.elements) element.setAttribute('transform', `translate(${operation.dx} ${operation.dy})`)
+      window.clearTimeout(operation.timer)
+      operation.timer = window.setTimeout(flushNudge, 150)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('pointerdown', flushNudge, true)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('pointerdown', flushNudge, true)
+      flushNudge()
+    }
+  }, [props.editingId, props.pageIndex, props.pageSize.height, props.pageSize.width, props.store, props.tool])
+
+  const drawTextSelection = (result: TextSelectionResult | null) => {
+    const group = textSelectionRef.current
+    if (!group) return
+    group.replaceChildren(...(result?.quads ?? []).map((quad) => {
+      const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon')
+      polygon.setAttribute('points', quadPoints(quad))
+      return polygon
+    }))
+  }
+
+  useEffect(() => {
+    if (props.tool !== 'textSelect') {
+      setTextSelection(null)
+      drawTextSelection(null)
+    }
+  }, [props.tool])
+
+  // 文字の選択は、同時に1ページだけにする。他のページの選択が残ると、
+  // Ctrl+C でどちらの文字がコピーされるか決まらなくなる。
+  const layerKey = `${props.docId}:${props.pageIndex}`
+  useEffect(() => {
+    const onStart = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === layerKey) return
+      setTextSelection(null)
+      drawTextSelection(null)
+    }
+    window.addEventListener(TEXT_SELECTION_START, onStart)
+    return () => window.removeEventListener(TEXT_SELECTION_START, onStart)
+  }, [layerKey])
+
+  const copySelectedText = () => {
+    if (!textSelection?.text) return
+    void navigator.clipboard.writeText(textSelection.text).then(() => props.onStatus('選んだ文字をコピーしました'))
+  }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (props.tool !== 'textSelect' || !textSelection?.text || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'c') return
+      event.preventDefault()
+      copySelectedText()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  })
+
+  const createMarkup = (kind: 'textHighlight' | 'underline' | 'strikeout', result = textSelection) => {
+    if (!result || result.quads.length === 0) return
+    const format = props.formatDefaults[kind]
+    const rect = selectionBounds(result.quads)
+    if (!rect) return
+    const annotation = props.store.create({
+      pageIndex: props.pageIndex,
+      kind,
+      rect,
+      text: result.text,
+      quads: result.quads,
+      color: format.color,
+      opacity: kind === 'textHighlight' ? format.opacity : 1,
+    })
+    props.onSelect(annotation.id)
+    // 印を付けたら、青い選択の表示は消す（ハイライトの色が青く濁って見えるため）。
+    setTextSelection(null)
+    drawTextSelection(null)
+  }
 
   useEffect(() => {
     for (const annotation of annotations) {
@@ -163,6 +345,11 @@ export function AnnotationLayer(props: Props) {
   const updateDraft = (operation: DragOperation) => {
     const dx = operation.latest[0] - operation.start[0]
     const dy = operation.latest[1] - operation.start[1]
+    if (operation.mode === 'text-selection') {
+      const input = { from: operation.start, to: operation.latest, mode: operation.selectionMode ?? 'chars' as TextSelectionMode }
+      textQueue.request(input, drawTextSelection)
+      return
+    }
     if (operation.mode === 'move') {
       for (const element of operation.elements ?? (operation.element ? [operation.element] : [])) {
         element.setAttribute('transform', `translate(${dx} ${dy})`)
@@ -263,6 +450,20 @@ export function AnnotationLayer(props: Props) {
     operation.stopMeasurement(operation.moved)
     for (const element of operation.elements ?? (operation.element ? [operation.element] : [])) element.removeAttribute('transform')
     hideDrafts()
+    if (operation.mode === 'text-selection') {
+      if (!commit) {
+        drawTextSelection(null)
+        return
+      }
+      const input = { from: operation.start, to: operation.latest, mode: operation.selectionMode ?? 'chars' as TextSelectionMode }
+      void textQueue.finish(input).then((result) => {
+        drawTextSelection(result)
+        if (result.quads.length === 0) return
+        if (props.tool === 'textSelect') setTextSelection(result)
+        else if (props.tool === 'textHighlight' || props.tool === 'underline' || props.tool === 'strikeout') createMarkup(props.tool, result)
+      }).catch((reason) => props.onStatus(`文字を選択できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`))
+      return
+    }
     if (!commit) return
 
     const dx = operation.latest[0] - operation.start[0]
@@ -448,6 +649,13 @@ export function AnnotationLayer(props: Props) {
         {visible && (annotation.kind === 'highlight' || annotation.kind === 'ink') && annotation.inkList?.map((stroke, index) => (
           <polyline key={`${annotation.id}-stroke-${index}`} className="annotation-ink" points={stroke.map((point) => `${point[0]},${point[1]}`).join(' ')} fill="none" stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} opacity={annotation.opacity} />
         ))}
+        {visible && annotation.quads?.map((quad, index) => annotation.kind === 'textHighlight' ? (
+          <polygon key={`${annotation.id}-quad-${index}`} className="annotation-text-highlight" points={quadPoints(quad)} fill={color(annotation.color)} opacity={annotation.opacity} />
+        ) : annotation.kind === 'underline' ? (
+          <line key={`${annotation.id}-quad-${index}`} className="annotation-text-mark-line" x1={quad[4]} y1={quad[5]} x2={quad[6]} y2={quad[7]} stroke={color(annotation.color)} />
+        ) : annotation.kind === 'strikeout' ? (
+          <line key={`${annotation.id}-quad-${index}`} className="annotation-text-mark-line" x1={(quad[0] + quad[4]) / 2} y1={(quad[1] + quad[5]) / 2} x2={(quad[2] + quad[6]) / 2} y2={(quad[3] + quad[7]) / 2} stroke={color(annotation.color)} />
+        ) : null)}
         {visible && annotation.kind === 'symbol' && symbolGlyph && <text
           className="annotation-symbol"
           x={(x0 + x1) / 2}
@@ -488,6 +696,7 @@ export function AnnotationLayer(props: Props) {
       viewBox={`0 0 ${props.pageSize.width} ${props.pageSize.height}`}
       onPointerDown={(event) => {
         if (event.button !== 0 || props.editingId) return
+        event.currentTarget.closest<HTMLElement>('.viewer')?.focus({ preventScroll: true })
         event.preventDefault()
         const svg = event.currentTarget
         const start = pointInPage(svg, event)
@@ -522,6 +731,7 @@ export function AnnotationLayer(props: Props) {
             const ids = props.store.selectedIds()
             for (const selectedId of ids) props.store.touch(selectedId)
             props.onSelect(id)
+            if (annotation && isTextMarkup(annotation.kind)) return
             const pageIds = new Set(annotations.map((item) => item.id))
             const elements = ids.filter((selectedId) => pageIds.has(selectedId)).flatMap((selectedId) => {
               const element = svg.querySelector<SVGGElement>(`g[data-annotation-id="${selectedId}"]`)
@@ -534,6 +744,27 @@ export function AnnotationLayer(props: Props) {
           }
         } else {
           props.onSelect(null)
+          if (props.tool === 'textSelect' || props.tool === 'textHighlight' || props.tool === 'underline' || props.tool === 'strikeout') {
+            setTextSelection(null)
+            drawTextSelection(null)
+            window.dispatchEvent(new CustomEvent(TEXT_SELECTION_START, { detail: layerKey }))
+            // Edge と Chrome では pointerdown の detail が常に 0 のため、クリックの回数は自分で数える。
+            const now = performance.now()
+            const previousClick = clickRef.current
+            const clicks = previousClick
+              && now - previousClick.at <= MULTI_CLICK_MS
+              && Math.abs(event.clientX - previousClick.x) <= MULTI_CLICK_DISTANCE
+              && Math.abs(event.clientY - previousClick.y) <= MULTI_CLICK_DISTANCE
+              ? previousClick.count + 1 : 1
+            clickRef.current = { at: now, x: event.clientX, y: event.clientY, count: clicks }
+            const selectionMode: TextSelectionMode = clicks >= 3 ? 'lines' : clicks === 2 ? 'words' : 'chars'
+            dragRef.current = { pointerId: event.pointerId, mode: 'text-selection', start, latest: start, id: null, element: null, frame: 0, moved: false, shift: false, ctrl: false, selectionMode, stopMeasurement: beginDragFrameMeasurement('drag') }
+            void props.pool.pageHasText(props.docId, props.pageIndex).then((hasText) => {
+              if (!hasText) props.onStatus('このページには選択できる文字がありません（スキャン画像など）')
+            })
+            svg.setPointerCapture(event.pointerId)
+            return
+          }
           const kind = props.tool === 'text' ? 'freetext' : props.tool
           const mode = props.tool === 'text' ? 'text' : props.tool === 'callout' ? 'callout' : props.tool === 'symbol' ? 'symbol' : props.tool === 'line' || props.tool === 'arrow' ? 'line' : props.tool === 'highlight' || props.tool === 'ink' ? 'ink' : 'shape'
           const shown = mode === 'line' ? draftLineRef.current : mode === 'ink' ? draftInkRef.current : draftRectRef.current
@@ -589,6 +820,7 @@ export function AnnotationLayer(props: Props) {
     >
       <rect className="annotation-surface" x="0" y="0" width={props.pageSize.width} height={props.pageSize.height} />
       {annotations.map(renderAnnotation)}
+      <g ref={textSelectionRef} className="text-selection-quads" aria-hidden="true" />
       <rect ref={draftRectRef} className="annotation-draft" x="0" y="0" width="0" height="0" />
       <line ref={draftLineRef} className="annotation-line-draft" x1="0" y1="0" x2="0" y2="0" />
       <polyline ref={draftInkRef} className="annotation-ink-draft" points="" />
@@ -596,6 +828,15 @@ export function AnnotationLayer(props: Props) {
       <line ref={linePreviewRef} className="annotation-line-preview" x1="0" y1="0" x2="0" y2="0" />
       <line ref={calloutPreviewRef} className="annotation-line-preview" x1="0" y1="0" x2="0" y2="0" />
     </svg>
+    {props.tool === 'textSelect' && textSelection && selectionBounds(textSelection.quads) && <div className="text-selection-toolbar" style={{
+      left: `${Math.max(0, Math.min(100, (selectionBounds(textSelection.quads)![0] / props.pageSize.width) * 100))}%`,
+      top: `${Math.max(0, Math.min(100, (selectionBounds(textSelection.quads)![1] / props.pageSize.height) * 100))}%`,
+    }}>
+      <button type="button" onClick={copySelectedText}>コピー</button>
+      <button type="button" onClick={() => createMarkup('textHighlight')}>ハイライト</button>
+      <button type="button" onClick={() => createMarkup('underline')}>下線</button>
+      <button type="button" onClick={() => createMarkup('strikeout')}>取り消し線</button>
+    </div>}
     {editing && <TextEditor annotation={editing} zoom={props.zoom} pool={props.pool} store={props.store} onClose={(removed) => {
       props.onEdit(null)
       if (props.tool === 'text' || props.tool === 'callout') { props.onSelect(removed ? null : editing.id); changeTool('select') }

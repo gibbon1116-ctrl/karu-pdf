@@ -6,7 +6,8 @@ import type { SaveMode } from '../core/save'
 import type { PageInfo, PageLayoutCard } from '../core/pageOps'
 import type { RasterPagePlan, RasterizeOptions } from '../core/rasterize'
 import type { SearchMatch, SearchOptions } from '../core/search'
-import type { OutlineEntry } from '../core/outline'
+import type { Point } from '../core/annotations'
+import type { TextSelectionMode, TextSelectionResult } from '../core/textSelection'
 
 export type DeviceRect = [number, number, number, number]
 export type Priority = 0 | 1 | 2 | 3
@@ -93,10 +94,21 @@ export interface CancelSearchRequest {
   docId: string
 }
 
-export interface LoadOutlineRequest {
-  type: 'loadOutline'
+export interface SelectTextRequest {
+  type: 'selectText'
   requestId: number
   docId: string
+  pageIndex: number
+  from: Point
+  to: Point
+  mode: TextSelectionMode
+}
+
+export interface PageHasTextRequest {
+  type: 'pageHasText'
+  requestId: number
+  docId: string
+  pageIndex: number
 }
 
 export interface LayoutTextRequest {
@@ -209,7 +221,8 @@ export type WorkerRequest =
   | CancelListAllAnnotationsRequest
   | SearchDocumentRequest
   | CancelSearchRequest
-  | LoadOutlineRequest
+  | SelectTextRequest
+  | PageHasTextRequest
   | LayoutTextRequest
   | ApplyAndSaveRequest
   | ApplyEditsRequest
@@ -290,10 +303,16 @@ export interface SearchProgressResponse {
   cancelled: boolean
 }
 
-export interface OutlineLoadedResponse {
-  type: 'outlineLoaded'
+export interface TextSelectedResponse {
+  type: 'textSelected'
   requestId: number
-  outline: OutlineEntry[]
+  result: TextSelectionResult
+}
+
+export interface PageHasTextResponse {
+  type: 'pageHasTextResult'
+  requestId: number
+  hasText: boolean
 }
 
 export interface LayoutTextResponse {
@@ -404,7 +423,8 @@ export type WorkerResponse =
   | ListAnnotationsResponse
   | AllAnnotationsProgressResponse
   | SearchProgressResponse
-  | OutlineLoadedResponse
+  | TextSelectedResponse
+  | PageHasTextResponse
   | LayoutTextResponse
   | ApplyAndSaveResponse
   | AppliedEditsResponse

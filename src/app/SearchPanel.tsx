@@ -22,6 +22,9 @@ export function SearchPanel({ docId, pool, focusVersion, onHighlightsChange, onN
   const timerRef = useRef<number | undefined>(undefined)
   const taskRef = useRef<StreamingTask<SearchSummary> | null>(null)
   const resultsRef = useRef<SearchMatch[]>([])
+  const navigatedRef = useRef(false)
+  // Enter で検索したときは、最初の結果が届いた時点で本体をそこへ移す。
+  const navigateOnFirstRef = useRef(false)
   const [query, setQuery] = useState('')
   const [searchedQuery, setSearchedQuery] = useState('')
   const [options, setOptions] = useState(defaultOptions)
@@ -49,6 +52,8 @@ export function SearchPanel({ docId, pool, focusVersion, onHighlightsChange, onN
     taskRef.current = null
     const needle = query.trim()
     resultsRef.current = []
+    navigatedRef.current = false
+    navigateOnFirstRef.current = false
     setResults([])
     setActiveIndex(-1)
     setProgress({ processed: 0, total: 0 })
@@ -62,7 +67,13 @@ export function SearchPanel({ docId, pool, focusVersion, onHighlightsChange, onN
     const task = pool.searchDocument(docId, needle, options, (response) => {
       if (taskRef.current?.requestId !== response.requestId) return
       if (response.matches.length > 0) {
+        const first = resultsRef.current.length === 0
         resultsRef.current = [...resultsRef.current, ...response.matches]
+        if (first && navigateOnFirstRef.current) {
+          navigateOnFirstRef.current = false
+          navigatedRef.current = true
+          onNavigate(resultsRef.current[0])
+        }
         setResults(resultsRef.current)
         setActiveIndex((current) => {
           const next = current < 0 ? 0 : current
@@ -110,8 +121,14 @@ export function SearchPanel({ docId, pool, focusVersion, onHighlightsChange, onN
     if (resultsRef.current.length === 0) return
     const next = (index + resultsRef.current.length) % resultsRef.current.length
     setActiveIndex(next)
+    navigatedRef.current = true
     publish(resultsRef.current, next)
     onNavigate(resultsRef.current[next])
+  }
+
+  const selectRelative = (direction: -1 | 1) => {
+    const start = navigatedRef.current ? activeIndex : direction > 0 ? -1 : 0
+    select(start + direction)
   }
 
   const countLabel = truncated ? '1,000 件以上' : `${results.length} 件`
@@ -128,12 +145,17 @@ export function SearchPanel({ docId, pool, focusVersion, onHighlightsChange, onN
         onKeyDown={(event) => {
           if (event.key !== 'Enter') return
           event.preventDefault()
-          if (!searching && searchedQuery === query.trim() && resultsRef.current.length > 0) select(activeIndex + (event.shiftKey ? -1 : 1))
-          else startSearch()
+          const needle = query.trim()
+          if (needle && searchedQuery === needle && resultsRef.current.length > 0) selectRelative(event.shiftKey ? -1 : 1)
+          else if (needle && searchedQuery === needle && searching) navigateOnFirstRef.current = true
+          else {
+            startSearch()
+            navigateOnFirstRef.current = true
+          }
         }}
       />
-      <button type="button" aria-label="前の検索結果" disabled={results.length === 0} onClick={() => select(activeIndex - 1)}>↑</button>
-      <button type="button" aria-label="次の検索結果" disabled={results.length === 0} onClick={() => select(activeIndex + 1)}>↓</button>
+      <button type="button" aria-label="前の検索結果" disabled={results.length === 0} onClick={() => selectRelative(-1)}>↑</button>
+      <button type="button" aria-label="次の検索結果" disabled={results.length === 0} onClick={() => selectRelative(1)}>↓</button>
     </div>
     <label><input type="checkbox" checked={options.caseSensitive} onChange={(event) => setOptions({ ...options, caseSensitive: event.currentTarget.checked })} />大文字・小文字を区別</label>
     <label><input type="checkbox" checked={options.normalizeWidth} onChange={(event) => setOptions({ ...options, normalizeWidth: event.currentTarget.checked })} />全角と半角を同じとみなす</label>

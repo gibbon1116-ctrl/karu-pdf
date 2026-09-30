@@ -1,9 +1,10 @@
 import { nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type Point, type Rect, type RGB, type SymbolName } from '../core/annotations'
+import type { Quad } from 'mupdf'
 import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
 import { History, type HistoryStep } from './history'
 
-export type Kind = 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'symbol'
+export type Kind = 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
 export interface EditableAnnotation {
   id: string
@@ -23,6 +24,7 @@ export interface EditableAnnotation {
   borderColor: RGB | null
   line: [Point, Point] | null
   inkList: Point[][] | null
+  quads: Quad[] | null
   calloutPoint: Point | null
   calloutLine: [Point, Point] | null
   symbol: SymbolName | null
@@ -70,6 +72,7 @@ function cloneState(annotation: AnnotationState): AnnotationState {
       [...annotation.line[1]],
     ] : null,
     inkList: annotation.inkList?.map(clonePoints) ?? null,
+    quads: annotation.quads?.map((quad) => [...quad] as Quad) ?? null,
     calloutPoint: annotation.calloutPoint ? [...annotation.calloutPoint] : null,
     calloutLine: annotation.calloutLine ? [
       [...annotation.calloutLine[0]],
@@ -104,6 +107,7 @@ function persistedState(state: AnnotationState): unknown {
     borderColor: state.borderColor,
     line: state.line,
     inkList: state.inkList,
+    quads: state.quads,
     calloutPoint: state.calloutPoint,
     calloutLine: state.calloutLine,
     symbol: state.symbol,
@@ -135,6 +139,10 @@ export function annotationInsideSelection(annotation: EditableAnnotation, select
   const area = annotationBounds(annotation)
   return area[0] >= selection[0] && area[1] >= selection[1]
     && area[2] <= selection[2] && area[3] <= selection[3]
+}
+
+export function isTextMarkup(kind: Kind): boolean {
+  return kind === 'textHighlight' || kind === 'underline' || kind === 'strikeout'
 }
 
 export function translationToFit(rect: Rect, pageSize: { width: number; height: number }, offset: number): Point {
@@ -174,6 +182,7 @@ export class AnnotationStore {
   private nextNewId = 1
   private version = 0
   private generation = 0
+  private lastNudge: { key: string; step: HistoryStep<AnnotationState[]>; at: number } | null = null
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
@@ -217,7 +226,7 @@ export class AnnotationStore {
           pageIndex,
           kind,
           rect: [...info.rect],
-          text: info.contents,
+          text: isTextMarkup(kind) ? info.markedText ?? '' : info.contents,
           fontSize: info.fontSize ?? DEFAULT_FONT_SIZE,
           font: info.fontName === 'BIZUDMincho' ? 'BIZUDMincho' : 'BIZUDGothic',
           color: [...((kind === 'freetext' || kind === 'callout' ? info.textColor : info.strokeColor) ?? DEFAULT_COLOR)],
@@ -229,6 +238,7 @@ export class AnnotationStore {
           borderColor: info.strokeColor ? [...info.strokeColor] : null,
           line: info.line ? [[...info.line[0]], [...info.line[1]]] : null,
           inkList: info.inkList?.map(clonePoints) ?? null,
+          quads: info.quads?.map((quad) => [...quad] as Quad) ?? null,
           calloutPoint: info.calloutPoint ? [...info.calloutPoint] : null,
           calloutLine: info.calloutLine ? [[...info.calloutLine[0]], [...info.calloutLine[1]]] : null,
           symbol: info.symbol,
@@ -311,7 +321,7 @@ export class AnnotationStore {
   copySelected(): EditableAnnotation[] {
     return this.selectedIds().flatMap((id) => {
       const annotation = this.annotations.get(id)
-      return annotation && !annotation.deleted ? [publicAnnotation(annotation, this.isAnnotationDirty(annotation))] : []
+      return annotation && !annotation.deleted && !isTextMarkup(annotation.kind) ? [publicAnnotation(annotation, this.isAnnotationDirty(annotation))] : []
     })
   }
 
@@ -331,6 +341,7 @@ export class AnnotationStore {
     borderColor?: RGB | null
     line?: [Point, Point] | null
     inkList?: Point[][] | null
+    quads?: Quad[] | null
     calloutPoint?: Point | null
     symbol?: SymbolName | null
     layout?: LayoutResult | null
@@ -357,6 +368,7 @@ export class AnnotationStore {
         : input.borderColor ? [...input.borderColor] : null,
       line: input.line ? [[...input.line[0]], [...input.line[1]]] : null,
       inkList: input.inkList?.map(clonePoints) ?? null,
+      quads: input.quads?.map((quad) => [...quad] as Quad) ?? null,
       calloutPoint: input.calloutPoint ? [...input.calloutPoint] : null,
       calloutLine: input.calloutPoint ? [[...input.calloutPoint], nearestCalloutEdgePoint(input.rect, input.calloutPoint)] : null,
       symbol: input.symbol ?? null,
@@ -410,6 +422,48 @@ export class AnnotationStore {
         annotation.calloutLine = [[...annotation.calloutPoint], nearestCalloutEdgePoint(annotation.rect, annotation.calloutPoint)]
       }
     })
+  }
+
+  nudgeMany(ids: readonly string[], dx: number, dy: number, groupKey: string, now = performance.now()): void {
+    if (dx === 0 && dy === 0) return
+    const movableIds = [...new Set(ids)].filter((id) => {
+      const annotation = this.annotations.get(id)
+      return annotation && !annotation.deleted && !isTextMarkup(annotation.kind)
+    })
+    const before = movableIds.flatMap((id) => {
+      const annotation = this.annotations.get(id)
+      return annotation ? [cloneState(annotation)] : []
+    })
+    if (before.length === 0) return
+    for (const id of movableIds) {
+      const annotation = this.annotations.get(id)!
+      annotation.rect = [annotation.rect[0] + dx, annotation.rect[1] + dy, annotation.rect[2] + dx, annotation.rect[3] + dy]
+      if (annotation.line) annotation.line = annotation.line.map((point) => [point[0] + dx, point[1] + dy]) as [Point, Point]
+      if (annotation.inkList) annotation.inkList = annotation.inkList.map((stroke) => stroke.map((point) => [point[0] + dx, point[1] + dy]))
+      if (annotation.kind === 'callout' && annotation.calloutPoint) {
+        annotation.calloutPoint = [annotation.calloutPoint[0] + dx, annotation.calloutPoint[1] + dy]
+        annotation.calloutLine = [[...annotation.calloutPoint], nearestCalloutEdgePoint(annotation.rect, annotation.calloutPoint)]
+      }
+      this.markTouched(annotation)
+      annotation.revision += 1
+    }
+    const after = movableIds.map((id) => cloneState(this.annotations.get(id)!))
+    const previous = this.lastNudge
+    if (previous && previous.key === groupKey && now - previous.at <= 700) {
+      const replacement = { before: previous.step.before, after }
+      if (this.history.replaceLast(previous.step, replacement)) {
+        this.lastNudge = { key: groupKey, step: replacement, at: now }
+      } else {
+        const step = { before, after }
+        this.history.push(step)
+        this.lastNudge = { key: groupKey, step, at: now }
+      }
+    } else {
+      const step = { before, after }
+      this.history.push(step)
+      this.lastNudge = { key: groupKey, step, at: now }
+    }
+    this.notify()
   }
 
   resize(id: string, rect: Rect): void {
@@ -574,6 +628,7 @@ export class AnnotationStore {
         borderColor: item.borderColor,
         line: item.line ? item.line.map((point) => [point[0] + dx, point[1] + dy]) as [Point, Point] : null,
         inkList: item.inkList?.map((stroke) => stroke.map((point) => [point[0] + dx, point[1] + dy])) ?? null,
+        quads: null,
         calloutPoint: item.calloutPoint ? [item.calloutPoint[0] + dx, item.calloutPoint[1] + dy] : null,
         symbol: item.symbol,
         layout: item.layout,
@@ -774,6 +829,19 @@ export class AnnotationStore {
     if (annotation.kind === 'highlight' || annotation.kind === 'ink') {
       const common = { pageIndex: annotation.pageIndex, inkList: annotation.inkList!, color: annotation.color, borderWidth: annotation.borderWidth, opacity: annotation.opacity, inkKind: annotation.kind }
       return create ? { kind: 'createInk', ...common } : { kind: 'updateInk', objNum: savedObjNum, ...common }
+    }
+    if (isTextMarkup(annotation.kind)) {
+      const markup = annotation.kind === 'textHighlight' ? 'Highlight' as const
+        : annotation.kind === 'underline' ? 'Underline' as const : 'StrikeOut' as const
+      const common = {
+        pageIndex: annotation.pageIndex,
+        markup,
+        quads: annotation.quads ?? [],
+        color: annotation.color,
+        opacity: annotation.opacity,
+        markedText: annotation.text,
+      }
+      return create ? { kind: 'createTextMarkup', ...common } : { kind: 'updateTextMarkup', objNum: savedObjNum, ...common }
     }
     if (annotation.kind === 'symbol') {
       const common = {

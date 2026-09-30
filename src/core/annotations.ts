@@ -8,6 +8,7 @@ import mupdf, {
   type Path,
   type DisplayListDevice,
   type Point as MuPdfPoint,
+  type Quad,
 } from 'mupdf'
 import { createDefaultAppearance, parseDefaultAppearance } from './defaultAppearance'
 import {
@@ -51,6 +52,9 @@ export type AnnotationKind =
   | 'circle'
   | 'highlight'
   | 'ink'
+  | 'textHighlight'
+  | 'underline'
+  | 'strikeout'
   | 'symbol'
   | 'other'
 
@@ -74,6 +78,8 @@ export interface AnnotationInfo {
   line: [Point, Point] | null
   lineEnding: LineEnding | null
   inkList: Point[][] | null
+  quads: Quad[] | null
+  markedText: string | null
   calloutPoint: Point | null
   calloutLine: [Point, Point] | null
   symbol: SymbolName | null
@@ -93,6 +99,8 @@ export type AnnotationEdit =
   | { kind: 'updateCircle'; objNum: number; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null; opacity?: number }
   | { kind: 'createInk'; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number; inkKind?: 'highlight' | 'ink' }
   | { kind: 'updateInk'; objNum: number; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number; inkKind?: 'highlight' | 'ink' }
+  | { kind: 'createTextMarkup'; pageIndex: number; markup: 'Highlight' | 'Underline' | 'StrikeOut'; quads: Quad[]; color: RGB; opacity: number; markedText: string }
+  | { kind: 'updateTextMarkup'; objNum: number; pageIndex: number; markup: 'Highlight' | 'Underline' | 'StrikeOut'; quads: Quad[]; color: RGB; opacity: number; markedText: string }
   | { kind: 'createSymbol'; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName; opacity?: number }
   | { kind: 'updateSymbol'; objNum: number; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName; opacity?: number }
   | { kind: 'delete'; objNum: number; pageIndex: number }
@@ -262,6 +270,9 @@ function annotationKind(
     if (inkKind === 'Ink') return 'ink'
     return opacity !== null && opacity < 1 ? 'highlight' : 'ink'
   }
+  if (type === 'Highlight') return 'textHighlight'
+  if (type === 'Underline') return 'underline'
+  if (type === 'StrikeOut') return 'strikeout'
   if (type === 'Stamp' && symbol) return 'symbol'
   return 'other'
 }
@@ -278,18 +289,20 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
           const parsed = da === null
             ? { fontName: null, fontSize: null, color: null }
             : parseDefaultAppearance(da)
+          const isTextMarkup = type === 'Highlight' || type === 'Underline' || type === 'StrikeOut'
           const editable = type === 'FreeText'
             || type === 'Square'
             || type === 'Line'
             || type === 'Circle'
             || type === 'Ink'
+            || isTextMarkup
             || (type === 'Stamp' && asSymbolName(readName(object, 'KaruSymbol')) !== null)
           const hasStroke = type === 'FreeText'
             || type === 'Square'
             || type === 'Line'
             || type === 'Circle'
             || type === 'Ink'
-          const hasColor = hasStroke || type === 'Stamp'
+          const hasColor = hasStroke || type === 'Stamp' || isTextMarkup
           const hasInterior = type === 'FreeText' || type === 'Square' || type === 'Circle'
           const standardStroke = hasColor ? asRGB(readNumberArray(object, 'C') ?? []) : null
           const standardInterior = hasInterior ? asRGB(readNumberArray(object, 'IC') ?? []) : null
@@ -297,7 +310,7 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
           const strokeColor = style?.present ? style.border : standardStroke
           const interiorColor = style?.present ? style.fill : standardInterior
           const borderWidth = hasStroke ? annotation.getBorderWidth() : null
-          const opacity = type === 'Ink' || type === 'Square' || type === 'Circle' || type === 'Line' || type === 'Stamp'
+          const opacity = type === 'Ink' || type === 'Square' || type === 'Circle' || type === 'Line' || type === 'Stamp' || isTextMarkup
             ? annotation.getOpacity()
             : null
           const lineEnding = type === 'Line' ? annotation.getLineEndingStyles() : null
@@ -329,6 +342,8 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             line: type === 'Line' ? annotation.getLine() as [Point, Point] : null,
             lineEnding,
             inkList: type === 'Ink' ? annotation.getInkList() : null,
+            quads: isTextMarkup ? annotation.getQuadPoints() : null,
+            markedText: isTextMarkup ? annotation.getContents() : null,
             calloutPoint: calloutLine?.[0] ?? null,
             calloutLine,
             symbol,
@@ -605,6 +620,21 @@ function configureInk(
   } finally {
     object.destroy()
   }
+  annotation.update()
+}
+
+function configureTextMarkup(
+  annotation: PDFAnnotation,
+  quads: Quad[],
+  color: RGB,
+  opacity: number,
+  markedText: string,
+): void {
+  annotation.setFlags(annotation.getFlags() | 4)
+  annotation.setQuadPoints(quads)
+  annotation.setColor(color)
+  annotation.setOpacity(opacity)
+  annotation.setContents(markedText)
   annotation.update()
 }
 
@@ -1102,6 +1132,18 @@ export function applyEdits(
         if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
         if (!isNew && annotation.getType() !== 'Ink') throw new Error('更新対象は Ink ではありません。')
         configureInk(doc, annotation, edit.inkList, edit.color, edit.borderWidth, edit.opacity, edit.inkKind ?? (edit.opacity < 1 ? 'highlight' : 'ink'))
+        if (isNew) result.created.push(objectNumber(annotation))
+        continue
+      }
+
+      if (edit.kind === 'createTextMarkup' || edit.kind === 'updateTextMarkup') {
+        const isNew = edit.kind === 'createTextMarkup'
+        annotation = isNew
+          ? page.createAnnotation(edit.markup)
+          : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
+        if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
+        if (!isNew && annotation.getType() !== edit.markup) throw new Error(`更新対象は ${edit.markup} ではありません。`)
+        configureTextMarkup(annotation, edit.quads, edit.color, edit.opacity, edit.markedText)
         if (isNew) result.created.push(objectNumber(annotation))
         continue
       }

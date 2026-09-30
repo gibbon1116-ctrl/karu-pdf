@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react'
 import type { EditorTool } from '../editor/AnnotationLayer'
 import { Dropdown, type DropdownItem } from '../ui/Dropdown'
 
-export type SplitToolGroup = 'text' | 'shape' | 'pen'
+export type SplitToolGroup = 'text' | 'shape' | 'pen' | 'mark'
 export type LastSplitTools = Record<SplitToolGroup, EditorTool>
 
 export const LAST_TOOLS_STORAGE_KEY = 'karu-pdf:last-tools'
-export const DEFAULT_LAST_TOOLS: LastSplitTools = { text: 'text', shape: 'line', pen: 'highlight' }
+export const DEFAULT_LAST_TOOLS: LastSplitTools = { text: 'text', shape: 'line', pen: 'highlight', mark: 'textSelect' }
 
 const groups: Record<SplitToolGroup, Array<{ tool: EditorTool; label: string; shortcut: string }>> = {
   text: [{ tool: 'text', label: '文字', shortcut: 'T' }, { tool: 'callout', label: '吹き出し', shortcut: 'C' }],
@@ -17,6 +17,12 @@ const groups: Record<SplitToolGroup, Array<{ tool: EditorTool; label: string; sh
     { tool: 'circle', label: '丸', shortcut: 'O' },
   ],
   pen: [{ tool: 'highlight', label: '蛍光ペン', shortcut: 'H' }, { tool: 'ink', label: '手書き', shortcut: 'P' }],
+  mark: [
+    { tool: 'textSelect', label: '文字を選択', shortcut: 'M' },
+    { tool: 'textHighlight', label: 'ハイライト', shortcut: '' },
+    { tool: 'underline', label: '下線', shortcut: '' },
+    { tool: 'strikeout', label: '取り消し線', shortcut: '' },
+  ],
 }
 
 function storageOrNull(): Storage | null {
@@ -106,6 +112,7 @@ export function ToolRow(props: Props) {
     {splitButton('text', '文字')}
     {splitButton('shape', '図形')}
     {splitButton('pen', 'ペン')}
+    {splitButton('mark', '文字に印')}
     <button type="button" className={props.tool === 'symbol' ? 'active' : ''} aria-pressed={props.tool === 'symbol'} disabled={!props.hasDocument} onClick={() => props.onToolChange('symbol')}>記号</button>
     <span className="tool-row-separator" />
     <button type="button" className="icon-button" title="元に戻す" aria-label="元に戻す" disabled={!props.canUndo} onClick={props.onUndo}>↶ 戻す</button>

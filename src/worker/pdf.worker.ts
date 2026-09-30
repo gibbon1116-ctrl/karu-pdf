@@ -17,7 +17,7 @@ import { saveDocument } from '../core/save'
 import { prepareDocumentOutput } from '../core/output'
 import { planRasterPages, renderRasterBand } from '../core/rasterize'
 import { searchPage } from '../core/search'
-import { loadOutline } from '../core/outline'
+import { StructuredTextCache } from '../core/textSelection'
 import {
   applyPageLayout,
   extractPages,
@@ -36,12 +36,13 @@ import type {
   LayoutTextRequest,
   ListAllAnnotationsRequest,
   ListAnnotationsRequest,
-  LoadOutlineRequest,
+  PageHasTextRequest,
   OpenRequest,
   PrepareOutputRequest,
   RenderRequest,
   RenderRasterBandRequest,
   SearchDocumentRequest,
+  SelectTextRequest,
   SplitPagesRequest,
   UndoPageLayoutRequest,
   WorkerRequest,
@@ -53,6 +54,7 @@ const scope = self as unknown as DedicatedWorkerGlobalScope
 interface WorkerDocument {
   opened: OpenedDocument
   displayLists: DisplayListCache
+  textSelections: StructuredTextCache
 }
 
 const documents = new Map<string, WorkerDocument>()
@@ -70,7 +72,8 @@ type CoreRequest =
   | ListAnnotationsRequest
   | ListAllAnnotationsRequest
   | SearchDocumentRequest
-  | LoadOutlineRequest
+  | SelectTextRequest
+  | PageHasTextRequest
   | LayoutTextRequest
   | ApplyAndSaveRequest
   | ApplyEditsRequest
@@ -101,6 +104,7 @@ function disposeDocument(docId: string): void {
   const entry = documents.get(docId)
   if (!entry) return
   entry.displayLists.destroy()
+  entry.textSelections.destroy()
   entry.opened.document.destroy()
   documents.delete(docId)
   pageLayoutBackups.delete(docId)
@@ -111,7 +115,12 @@ function replaceDocument(docId: string, bytes: Uint8Array, keepBackup = false): 
   disposeDocument(docId)
   if (backup) pageLayoutBackups.set(docId, backup)
   const opened = openDocument(bytes)
-  const entry = { opened, displayLists: new DisplayListCache(opened.document) }
+  const pdf = opened.document.asPDF()
+  if (!pdf) {
+    opened.document.destroy()
+    throw new Error('PDF 文書ではありません。')
+  }
+  const entry = { opened, displayLists: new DisplayListCache(opened.document), textSelections: new StructuredTextCache(pdf) }
   documents.set(docId, entry)
   return entry
 }
@@ -182,6 +191,24 @@ scheduler.port1.onmessage = () => {
   })
 }
 
+// 検索と全書き込みの読み出しは、全ページが終わるまで列を占有する（330 ページで約 8 秒）。
+// その間も文字の選択や書き込みの読み込みが待たされないよう、1 ページごとに、
+// 文書を変えない短い要求だけを先に片付ける。
+const INTERACTIVE_REQUESTS = new Set<WorkerRequest['type']>(['selectText', 'pageHasText', 'listAnnotations', 'layoutText'])
+
+async function yieldToInteractiveRequests(): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  for (let index = 0; index < queue.length;) {
+    const job = queue[index]
+    if (job.type === 'render' || !INTERACTIVE_REQUESTS.has(job.type)) {
+      index += 1
+      continue
+    }
+    queue.splice(index, 1)
+    await executeCoreRequest(job)
+  }
+}
+
 async function execute(job: QueuedRequest): Promise<void> {
   if (job.type !== 'render') {
     await executeCoreRequest(job)
@@ -219,7 +246,12 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
     if (request.type === 'open') {
       disposeDocument(request.docId)
       const opened = openDocument(new Uint8Array(request.bytes))
-      documents.set(request.docId, { opened, displayLists: new DisplayListCache(opened.document) })
+      const pdf = opened.document.asPDF()
+      if (!pdf) {
+        opened.document.destroy()
+        throw new Error('PDF 文書ではありません。')
+      }
+      documents.set(request.docId, { opened, displayLists: new DisplayListCache(opened.document), textSelections: new StructuredTextCache(pdf) })
       post({
         type: 'opened',
         requestId: request.requestId,
@@ -263,8 +295,17 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       return
     }
 
-    if (request.type === 'loadOutline') {
-      post({ type: 'outlineLoaded', requestId: request.requestId, outline: loadOutline(document) })
+    if (request.type === 'pageHasText') {
+      post({ type: 'pageHasTextResult', requestId: request.requestId, hasText: entry.textSelections.pageHasText(request.pageIndex) })
+      return
+    }
+
+    if (request.type === 'selectText') {
+      post({
+        type: 'textSelected',
+        requestId: request.requestId,
+        result: entry.textSelections.select(request.pageIndex, request.from, request.to, request.mode),
+      })
       return
     }
 
@@ -297,7 +338,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
           done: truncated, cancelled: false,
         })
         if (truncated) break
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        await yieldToInteractiveRequests()
       }
       const cancelled = cancelledSearches.delete(request.requestId)
       if (!truncated) post({
@@ -320,7 +361,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
           type: 'allAnnotationsProgress', requestId: request.requestId, pageIndex, annotations,
           processedPages, totalPages, done: false, cancelled: false,
         })
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        await yieldToInteractiveRequests()
       }
       const cancelled = cancelledAnnotationLists.delete(request.requestId)
       post({
@@ -583,7 +624,8 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     message.type === 'listAnnotations'
     || message.type === 'listAllAnnotations'
     || message.type === 'searchDocument'
-    || message.type === 'loadOutline'
+    || message.type === 'selectText'
+    || message.type === 'pageHasText'
     || message.type === 'layoutText'
     || message.type === 'applyAndSave'
     || message.type === 'applyEdits'

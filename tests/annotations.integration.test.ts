@@ -13,6 +13,7 @@ import {
 } from '../src/core/annotations'
 import { createDingbatsFontResource, createFontResource, type FontResource, type FontResources } from '../src/core/fontMetrics'
 import { saveDocument, type SaveMode } from '../src/core/save'
+import { searchPage } from '../src/core/search'
 import { ensureSamplePdf } from './fixtures'
 
 const realPath = path.resolve('test-data/real/公共建築工事標準仕様書_建築_R7.pdf')
@@ -518,7 +519,7 @@ describe('annotation integration', () => {
         kind: 'createFreeText', pageIndex: 0, rect: [72, 560, 272, 605],
         text: '明朝体の日本語', fontSize: 12, color: [0.8, 0, 0.8], font: 'BIZUDMincho',
       },
-    ])
+    ], 'incremental')
     expect(saved.created).toHaveLength(6)
 
     const document = openPdf(saved.bytes)
@@ -931,6 +932,38 @@ describe('annotation integration', () => {
     } finally {
       document.destroy()
     }
+  })
+
+  it('ハイライト・下線・取り消し線を保存し、Quad・色・透明度・印の文字を復元する', () => {
+    const source = openPdf(sampleBytes)
+    let quads
+    try {
+      const page = source.loadPage(0)
+      try {
+        quads = searchPage(page, 0, 'Sample page 1', { caseSensitive: true, normalizeWidth: false }).matches[0].quads
+      } finally { page.destroy() }
+    } finally { source.destroy() }
+
+    const markedText = 'Sample page 1'
+    const saved = applyAndSave(sampleBytes, [
+      { kind: 'createTextMarkup', pageIndex: 0, markup: 'Highlight', quads, color: [1, 1, 0], opacity: 0.4, markedText },
+      { kind: 'createTextMarkup', pageIndex: 0, markup: 'Underline', quads, color: [1, 0, 0], opacity: 1, markedText },
+      { kind: 'createTextMarkup', pageIndex: 0, markup: 'StrikeOut', quads, color: [0, 0, 1], opacity: 1, markedText },
+    ])
+    expect(saved.created).toHaveLength(3)
+    const reopened = openPdf(saved.bytes)
+    try {
+      const listed = listAnnotations(reopened, 0).filter((item) => (
+        ['textHighlight', 'underline', 'strikeout'].includes(item.kind) && item.markedText === markedText
+      ))
+      expect(listed).toHaveLength(3)
+      expect(listed.map((item) => item.kind).sort()).toEqual(['strikeout', 'textHighlight', 'underline'])
+      expect(listed.every((item) => item.editable && item.quads?.length === quads.length && item.markedText === markedText)).toBe(true)
+      expect(listed.find((item) => item.kind === 'textHighlight')?.opacity).toBeCloseTo(0.4, 2)
+      expect(listed.find((item) => item.kind === 'textHighlight')?.strokeColor).toEqual([1, 1, 0])
+      expect(listed.find((item) => item.kind === 'underline')?.strokeColor).toEqual([1, 0, 0])
+      expect(listed.find((item) => item.kind === 'strikeout')?.strokeColor).toEqual([0, 0, 1])
+    } finally { reopened.destroy() }
   })
 
   it('増分保存では元バイト列を先頭に残す', () => {

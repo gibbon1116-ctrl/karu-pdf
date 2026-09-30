@@ -15,7 +15,11 @@ export interface DocumentViewState {
   scrollTop: number
 }
 
-export type SidePanelTab = 'pages' | 'outline' | 'search' | 'annotations'
+export type SidePanelTab = 'pages' | 'search' | 'annotations'
+
+export function normalizeSidePanelTab(value: unknown): SidePanelTab {
+  return value === 'search' || value === 'annotations' ? value : 'pages'
+}
 
 export interface DocumentSessionInit {
   docId: string
@@ -35,7 +39,7 @@ export class DocumentSession {
   readonly annotationStore = new AnnotationStore()
   view: DocumentViewState
   fileOutdated = false
-  sidePanelTab: SidePanelTab = 'pages'
+  private _sidePanelTab: SidePanelTab = 'pages'
   canUndoOrganize = false
   pageRevision = 0
   fitOnFirstView: boolean
@@ -61,6 +65,12 @@ export class DocumentSession {
       scrollLeft: init.view?.scrollLeft ?? 0,
       scrollTop: init.view?.scrollTop ?? 0,
     }
+  }
+
+  get sidePanelTab(): SidePanelTab { return this._sidePanelTab }
+
+  set sidePanelTab(value: SidePanelTab | string) {
+    this._sidePanelTab = normalizeSidePanelTab(value)
   }
 
   get dirty(): boolean {

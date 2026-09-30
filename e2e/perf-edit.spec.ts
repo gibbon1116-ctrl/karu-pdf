@@ -13,6 +13,7 @@ interface EditResult {
 
 const heavy = path.resolve('test-data/heavy-300p.pdf')
 const real = path.resolve('test-data/real/七ヶ浜町_実施設計図.pdf')
+const textHeavy = path.resolve('test-data/real/公共建築工事標準仕様書_建築_R7.pdf')
 
 async function isolatedPage(browser: Browser): Promise<{ page: Page; close(): Promise<void> }> {
   const context = await browser.newContext({
@@ -159,4 +160,43 @@ test('書き込み操作のフレーム時間を計測する', async ({ browser 
   }
   await fs.mkdir('bench-results', { recursive: true })
   await fs.writeFile(`bench-results/perf-edit-${timestamp}.json`, JSON.stringify(output, null, 2))
+})
+
+test('文字の多いページで文字選択のフレーム時間を計測する', async ({ browser }) => {
+  await fs.access(textHeavy)
+  const run = await isolatedPage(browser)
+  try {
+    const pageIndex = 10
+    const { page } = run
+    await page.goto('/karu-pdf/?test=1&workers=3')
+    await page.getByTestId('file-input').setInputFiles(textHeavy)
+    await expect(page.locator('.page-view[data-page-index="0"]')).toBeVisible({ timeout: 180_000 })
+    await page.evaluate((index) => window.__karu!.scrollToPage(index), pageIndex)
+    const layer = page.getByTestId(`annotation-layer-${pageIndex}`)
+    await expect(layer).toBeVisible({ timeout: 180_000 })
+    const box = await layer.boundingBox()
+    const viewer = await page.getByTestId('viewer').boundingBox()
+    if (!box || !viewer) throw new Error('文字選択の計測ページが表示されていません。')
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await page.keyboard.press('m')
+
+    const startX = Math.max(box.x + 80, viewer.x + 60)
+    const startY = Math.max(box.y + 100, viewer.y + 80)
+    const endX = Math.min(box.x + box.width - 80, viewer.x + viewer.width - 100)
+    const endY = Math.min(box.y + box.height - 100, viewer.y + viewer.height - 80)
+    await page.mouse.move(startX, startY)
+    await page.mouse.down()
+    for (let step = 1; step <= 120; step += 1) {
+      const ratio = step / 120
+      await page.mouse.move(startX + (endX - startX) * ratio, startY + (endY - startY) * ratio)
+      await page.waitForTimeout(1000 / 60)
+    }
+    await page.mouse.up()
+    const stats = await page.evaluate(() => window.__karu!.getFrameStats().drag)
+    console.log(`[perf-text-selection] ${JSON.stringify({ source: path.basename(textHeavy), page: pageIndex + 1, ...stats })}`)
+    expect(stats.samples).toBeGreaterThan(60)
+    expect(stats.p95).toBeLessThanOrEqual(20)
+  } finally {
+    await run.close()
+  }
 })

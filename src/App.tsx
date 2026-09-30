@@ -982,6 +982,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
       const target = event.target as HTMLElement | null
       const isInput = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false
       const key = event.key.toLowerCase()
@@ -1090,6 +1091,7 @@ export default function App() {
       else if (key === 'p') void changeTool('ink')
       else if (key === 's') void changeTool('symbol')
       else if (key === 'c') void changeTool('callout')
+      else if (key === 'm') void changeTool('textSelect')
       else if (event.key === 'Escape') { setTool('select'); viewerRef.current?.clearSelection() }
     }
     window.addEventListener('keydown', onKey)
@@ -1310,6 +1312,7 @@ export default function App() {
           onZoomChange={(next) => { setZoom(next); scheduleViewPersistence() }}
           onFirstBitmap={() => { openEndRef.current?.(); openEndRef.current = null }}
           onFirstSharp={() => { openSharpEndRef.current?.(); openSharpEndRef.current = null }}
+          onStatus={showStatus}
           organize={workspaceOrganize}
           />
           </WorkspaceFailureProbe>

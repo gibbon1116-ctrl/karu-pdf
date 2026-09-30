@@ -61,7 +61,7 @@ interface Props {
 }
 
 function formatTool(kind: Kind | EditorTool): FormatTool | null {
-  if (kind === 'select') return null
+  if (kind === 'select' || kind === 'textSelect') return null
   return kind === 'freetext' ? 'text' : kind
 }
 
@@ -76,7 +76,8 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
   const values: EditableAnnotation | ToolFormat | null = activeSelection ?? (target ? defaults[target] : null)
   const textTarget = target === 'text' || target === 'callout'
   const shapeTarget = target === 'square' || target === 'circle'
-  const simpleColorTarget = target === 'line' || target === 'arrow' || target === 'highlight' || target === 'ink' || target === 'symbol'
+  const simpleColorTarget = target === 'line' || target === 'arrow' || target === 'highlight' || target === 'ink' || target === 'textHighlight' || target === 'underline' || target === 'strikeout' || target === 'symbol'
+  const opacityTarget = simpleColorTarget && target !== 'underline' && target !== 'strikeout'
 
   const changeDefault = (changes: Partial<ToolFormat>) => {
     if (target) onDefaultsChange(updateToolFormat(defaults, target, changes))
@@ -147,7 +148,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
   return <aside className="format-panel" aria-label="書式" data-testid="format-panel">
     <h2>書式</h2>
     {!target && <p>道具または書き込みを選んでください。</p>}
-    {simpleColorTarget && values && <ColorField label="色" value={values.color} choices={target === 'highlight' ? HIGHLIGHT_COLORS : COLORS} onChange={(next) => next && changeColor(next)} />}
+    {simpleColorTarget && values && <ColorField label="色" value={values.color} choices={target === 'highlight' || target === 'textHighlight' ? HIGHLIGHT_COLORS : COLORS} onChange={(next) => next && changeColor(next)} />}
     {target === 'symbol' && values && <fieldset>
       <legend>記号の種類</legend>
       <div className="symbol-grid">
@@ -171,7 +172,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     {textTarget && values && <ColorField label="文字の色" value={values.color} onChange={(next) => next && changeColor(next)} />}
     {(shapeTarget || textTarget) && <ColorField label={textTarget ? '背景色' : '塗り'} value={fillColor} allowNone onChange={changeFill} />}
     {(shapeTarget || textTarget) && <ColorField label="枠線の色" value={borderColor} allowNone onChange={changeBorder} />}
-    {target && values && ((simpleColorTarget && target !== 'symbol') || shapeTarget || textTarget) && <label>
+    {target && values && ((simpleColorTarget && target !== 'symbol' && target !== 'textHighlight' && target !== 'underline' && target !== 'strikeout') || shapeTarget || textTarget) && <label>
       {textTarget ? '枠線の太さ' : '線の太さ'}
       <select aria-label={textTarget ? '枠線の太さ' : '線の太さ'} value={values.borderWidth} onChange={(event) => changeBorderWidth(Number(event.currentTarget.value))}>
         {(target === 'highlight' ? HIGHLIGHT_WIDTHS : textTarget ? TEXT_BORDER_WIDTHS : WIDTHS).map((value) => <option key={value} value={value}>{value} pt</option>)}
@@ -183,10 +184,10 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
         <option value="1">100%</option><option value="0.5">50%</option><option value="0.25">25%</option>
       </select>
     </label>}
-    {simpleColorTarget && values && <label>
+    {opacityTarget && values && <label>
       透明度
       <select aria-label="透明度" value={values.opacity} onChange={(event) => changeOpacity(Number(event.currentTarget.value))}>
-        <option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option>{target === 'highlight' && <option value="0.35">35%（既定）</option>}<option value="0.25">25%</option>
+        <option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option>{target === 'highlight' && <option value="0.35">35%（既定）</option>}{target === 'textHighlight' && <option value="0.4">40%（既定）</option>}<option value="0.25">25%</option>
       </select>
     </label>}
     {target === 'square' && <button type="button" className="whiteout-button" title="上に白い四角を重ねて見えなくします。下の文字やデータはファイルに残ります" onClick={makeWhiteout}>白塗りにする</button>}

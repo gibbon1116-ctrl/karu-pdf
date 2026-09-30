@@ -48,6 +48,7 @@ interface Props {
   onZoomChange(zoom: number): void
   onFirstBitmap(): void
   onFirstSharp(): void
+  onStatus(message: string): void
   organize: OrganizeWorkspaceState | null
 }
 
@@ -121,7 +122,6 @@ export function DocumentWorkspace(props: Props) {
         focusSearchVersion={props.focusSearchVersion}
         onTabChange={props.onSideTabChange}
         onPageClick={(index) => props.viewerRef.current?.scrollToPage(index)}
-        onNavigate={(pageIndex, x, y) => props.viewerRef.current?.scrollToPosition(pageIndex, x, y)}
         onSearchNavigate={(match) => {
           const quad = match.quads[0]
           props.viewerRef.current?.scrollToPosition(match.pageIndex, quad ? Math.min(quad[0], quad[4]) : null, quad ? Math.min(quad[1], quad[3]) : null)
@@ -165,6 +165,7 @@ export function DocumentWorkspace(props: Props) {
         }}
         onFirstBitmap={props.onFirstBitmap}
         onFirstSharp={props.onFirstSharp}
+        onStatus={props.onStatus}
       />
       {props.showFormat && <FormatPanel
         selected={selected}
