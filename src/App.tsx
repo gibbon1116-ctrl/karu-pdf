@@ -6,7 +6,9 @@ import { HelpDialog } from './app/HelpDialog'
 import { MenuBar } from './app/MenuBar'
 import { RasterizeDialog } from './app/RasterizeDialog'
 import { ToolRow } from './app/ToolRow'
-import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS } from './app/documentModel'
+import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS, type SidePanelTab } from './app/documentModel'
+import { allSessionAnnotations } from './app/AnnotationListPanel'
+import { createAnnotationCsv } from './app/annotationCsv'
 import { StartScreen } from './app/StartScreen'
 import { ErrorBoundary } from './app/ErrorBoundary'
 import { PdfWorkerPool, type ApplyAndSaveResult, type PageLayoutTimings, type PreparedOutputResult, type RasterizeMetrics } from './client/PdfWorkerPool'
@@ -68,6 +70,7 @@ declare global {
       rasterizeToStream(options: RasterizeOptions, target: PdfWriteTarget): Promise<RasterizeMetrics | null>
       getLastRasterizeMetrics(): RasterizeMetrics | null
       getMenuActions(): string[]
+      exportAnnotationCsv(): string
     }
     launchQueue?: {
       setConsumer(consumer: (params: { files: PdfFileHandle[] }) => void): void
@@ -205,6 +208,7 @@ export default function App() {
   const [updateReady, setUpdateReady] = useState(false)
   const [debug, setDebug] = useState(() => new URLSearchParams(location.search).get('debug') === '1')
   const [workspaceFailure, setWorkspaceFailure] = useState(false)
+  const [focusSearchVersion, setFocusSearchVersion] = useState(0)
   const testMode = new URLSearchParams(location.search).get('test') === '1'
   const active = tabs.active
   activeRef.current = active
@@ -674,6 +678,15 @@ export default function App() {
     try { localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify(next)) } catch { /* 表示は続ける。 */ }
   }, [])
 
+  const openSidePanel = useCallback((tab: SidePanelTab, focusSearch = true) => {
+    const session = activeRef.current
+    if (!session) return
+    session.sidePanelTab = tab
+    if (!panels.thumbnails) updatePanels({ ...panels, thumbnails: true })
+    if (tab === 'search' && focusSearch) setFocusSearchVersion((value) => value + 1)
+    refreshTabs()
+  }, [panels, refreshTabs, updatePanels])
+
   const updateFormatDefaults = useCallback((next: FormatDefaults) => {
     setFormatDefaults(next)
     saveFormatDefaults(next)
@@ -991,6 +1004,11 @@ export default function App() {
         setDebug((value) => !value)
         return
       }
+      if ((event.ctrlKey || event.metaKey) && key === 'f') {
+        event.preventDefault()
+        if (!organizing) openSidePanel('search')
+        return
+      }
       if (!organizing && !isInput && (event.ctrlKey || event.metaKey) && key === 'c') {
         event.preventDefault()
         copyAnnotations()
@@ -1076,7 +1094,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, tabs])
+  }, [activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, openSidePanel, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, tabs])
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -1124,6 +1142,10 @@ export default function App() {
       rasterizeToStream: async (options, target) => (await rasterizeToTarget(options, target))?.metrics ?? null,
       getLastRasterizeMetrics: () => lastRasterizeMetricsRef.current,
       getMenuActions: () => [...menuActionsRef.current],
+      exportAnnotationCsv: () => {
+        const session = activeRef.current
+        return session ? createAnnotationCsv(allSessionAnnotations(session)) : ''
+      },
     }
     return () => { delete window.__karu }
   }, [activateDocument, applyOrganize, closeDocument, extractToBytes, openBuffer, openOrganize, pool, prepareOutput, rasterizeToBytes, rasterizeToTarget, saveToBytes, splitToBytes, tabs, undoLastOrganize])
@@ -1199,6 +1221,7 @@ export default function App() {
           canUndo={active?.annotationStore.canUndo() ?? false}
           canRedo={active?.annotationStore.canRedo() ?? false}
           showThumbnails={panels.thumbnails}
+          sidePanelTab={active?.sidePanelTab ?? 'pages'}
           showFormat={panels.format}
           canUndoOrganize={active?.canUndoOrganize ?? false}
           onOpen={() => void pickFile()}
@@ -1217,6 +1240,7 @@ export default function App() {
           onClearSelection={() => viewerRef.current?.clearSelection()}
           onDeleteSelection={() => { active?.annotationStore.removeMany(active.annotationStore.selectedIds()); refreshTabs() }}
           onToggleThumbnails={() => updatePanels({ ...panels, thumbnails: !panels.thumbnails })}
+          onOpenSidePanel={(tab) => openSidePanel(tab)}
           onToggleFormat={() => updatePanels({ ...panels, format: !panels.format })}
           onZoomIn={() => viewerRef.current?.zoomIn()}
           onZoomOut={() => viewerRef.current?.zoomOut()}
@@ -1276,9 +1300,12 @@ export default function App() {
           formatDefaults={formatDefaults}
           showThumbnails={panels.thumbnails}
           showFormat={panels.format}
+          activeSideTab={active.sidePanelTab}
+          focusSearchVersion={focusSearchVersion}
           debug={debug}
           onToolChange={setTool}
           onFormatDefaultsChange={updateFormatDefaults}
+          onSideTabChange={(tab) => openSidePanel(tab, tab === 'search')}
           onPageChange={(next) => { setPage(next); scheduleViewPersistence() }}
           onZoomChange={(next) => { setZoom(next); scheduleViewPersistence() }}
           onFirstBitmap={() => { openEndRef.current?.(); openEndRef.current = null }}

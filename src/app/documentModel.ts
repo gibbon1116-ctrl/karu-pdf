@@ -15,6 +15,8 @@ export interface DocumentViewState {
   scrollTop: number
 }
 
+export type SidePanelTab = 'pages' | 'outline' | 'search' | 'annotations'
+
 export interface DocumentSessionInit {
   docId: string
   name: string
@@ -33,6 +35,7 @@ export class DocumentSession {
   readonly annotationStore = new AnnotationStore()
   view: DocumentViewState
   fileOutdated = false
+  sidePanelTab: SidePanelTab = 'pages'
   canUndoOrganize = false
   pageRevision = 0
   fitOnFirstView: boolean

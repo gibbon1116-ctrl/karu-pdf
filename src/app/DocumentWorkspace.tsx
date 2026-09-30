@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type RefObject } from 'react'
+import { useEffect, useMemo, useState, type RefObject } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { RenderScheduler } from '../client/RenderScheduler'
 import type { EditorTool } from '../editor/AnnotationLayer'
@@ -6,9 +6,10 @@ import type { FormatDefaults } from '../editor/formatDefaults'
 import { DebugPanel } from '../perf/DebugPanel'
 import { BitmapCache } from '../viewer/BitmapCache'
 import { Viewer, type ViewerHandle } from '../viewer/Viewer'
-import type { DocumentSession } from './documentModel'
+import type { DocumentSession, SidePanelTab } from './documentModel'
 import { FormatPanel } from './FormatPanel'
-import { ThumbnailPanel } from './ThumbnailPanel'
+import { SidePanel } from './SidePanel'
+import type { SearchHighlightState } from './SearchPanel'
 import { OrganizeView, type ExtractOptions, type OrganizeSourceInfo } from '../organize/OrganizeView'
 import type { OrganizeDraft } from '../organize/OrganizeDraft'
 import type { PageCard } from '../organize/OrganizeDraft'
@@ -37,9 +38,12 @@ interface Props {
   formatDefaults: FormatDefaults
   showThumbnails: boolean
   showFormat: boolean
+  activeSideTab: SidePanelTab
+  focusSearchVersion: number
   debug: boolean
   onToolChange(tool: EditorTool): void
   onFormatDefaultsChange(value: FormatDefaults): void
+  onSideTabChange(tab: SidePanelTab): void
   onPageChange(page: number): void
   onZoomChange(zoom: number): void
   onFirstBitmap(): void
@@ -48,6 +52,7 @@ interface Props {
 }
 
 export function DocumentWorkspace(props: Props) {
+  const [searchHighlights, setSearchHighlights] = useState<SearchHighlightState>({ matches: [], activeIndex: -1 })
   const scheduler = useMemo(() => new RenderScheduler(
     props.pool,
     new BitmapCache(),
@@ -75,6 +80,14 @@ export function DocumentWorkspace(props: Props) {
     scheduler.warmCache.clear()
   }, [scheduler])
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSearchHighlights({ matches: [], activeIndex: -1 })
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   if (props.organize) return (
     <div className="document-workspace organize-mode">
       <OrganizeView
@@ -100,13 +113,25 @@ export function DocumentWorkspace(props: Props) {
 
   return (
     <div className={`document-workspace${props.showThumbnails ? '' : ' thumbnails-hidden'}${props.showFormat ? '' : ' format-hidden'}`}>
-      {props.showThumbnails && <ThumbnailPanel
-        docId={props.session.docId}
-        pageSizes={props.session.pageSizes}
-        currentPage={props.session.view.page}
+      {props.showThumbnails && <SidePanel
+        session={props.session}
+        pool={props.pool}
         scheduler={scheduler}
-        annotationStore={props.session.annotationStore}
+        activeTab={props.activeSideTab}
+        focusSearchVersion={props.focusSearchVersion}
+        onTabChange={props.onSideTabChange}
         onPageClick={(index) => props.viewerRef.current?.scrollToPage(index)}
+        onNavigate={(pageIndex, x, y) => props.viewerRef.current?.scrollToPosition(pageIndex, x, y)}
+        onSearchNavigate={(match) => {
+          const quad = match.quads[0]
+          props.viewerRef.current?.scrollToPosition(match.pageIndex, quad ? Math.min(quad[0], quad[4]) : null, quad ? Math.min(quad[1], quad[3]) : null)
+        }}
+        onSearchHighlights={setSearchHighlights}
+        onSelectAnnotation={(annotation) => {
+          props.session.annotationStore.selectOnly(annotation.id)
+          props.onToolChange('select')
+          props.viewerRef.current?.scrollToPosition(annotation.pageIndex, annotation.rect[0], annotation.rect[1])
+        }}
       />}
       <Viewer
         ref={props.viewerRef}
@@ -117,6 +142,8 @@ export function DocumentWorkspace(props: Props) {
         formatDefaults={props.formatDefaults}
         tool={props.tool}
         selectedAnnotationId={selectedId}
+        searchMatches={searchHighlights.matches}
+        activeSearchIndex={searchHighlights.activeIndex}
         onSelectAnnotation={(id) => {
           if (id === null) props.session.annotationStore.clearSelection()
           else if (!props.session.annotationStore.isSelected(id)) props.session.annotationStore.selectOnly(id)

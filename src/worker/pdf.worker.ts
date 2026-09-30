@@ -16,6 +16,8 @@ import { layoutText } from '../core/textLayout'
 import { saveDocument } from '../core/save'
 import { prepareDocumentOutput } from '../core/output'
 import { planRasterPages, renderRasterBand } from '../core/rasterize'
+import { searchPage } from '../core/search'
+import { loadOutline } from '../core/outline'
 import {
   applyPageLayout,
   extractPages,
@@ -32,11 +34,14 @@ import type {
   ExportBytesRequest,
   GetPageInfoRequest,
   LayoutTextRequest,
+  ListAllAnnotationsRequest,
   ListAnnotationsRequest,
+  LoadOutlineRequest,
   OpenRequest,
   PrepareOutputRequest,
   RenderRequest,
   RenderRasterBandRequest,
+  SearchDocumentRequest,
   SplitPagesRequest,
   UndoPageLayoutRequest,
   WorkerRequest,
@@ -53,12 +58,19 @@ interface WorkerDocument {
 const documents = new Map<string, WorkerDocument>()
 const pageLayoutBackups = new Map<string, Uint8Array>()
 const fontResources: FontResources = {}
+const cancelledSearches = new Set<number>()
+const cancelledAnnotationLists = new Set<number>()
+const activeSearches = new Map<string, number>()
+const activeAnnotationLists = new Map<string, number>()
 let sequence = 0
 let running = false
 let processedCount = 0
 type CoreRequest =
   | OpenRequest
   | ListAnnotationsRequest
+  | ListAllAnnotationsRequest
+  | SearchDocumentRequest
+  | LoadOutlineRequest
   | LayoutTextRequest
   | ApplyAndSaveRequest
   | ApplyEditsRequest
@@ -82,6 +94,10 @@ function post(message: WorkerResponse, transfer: Transferable[] = []): void {
 }
 
 function disposeDocument(docId: string): void {
+  const searchRequest = activeSearches.get(docId)
+  if (searchRequest !== undefined) cancelledSearches.add(searchRequest)
+  const annotationRequest = activeAnnotationLists.get(docId)
+  if (annotationRequest !== undefined) cancelledAnnotationLists.add(annotationRequest)
   const entry = documents.get(docId)
   if (!entry) return
   entry.displayLists.destroy()
@@ -244,6 +260,74 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         requestId: request.requestId,
         annotations: listAnnotations(document, request.pageIndex),
       })
+      return
+    }
+
+    if (request.type === 'loadOutline') {
+      post({ type: 'outlineLoaded', requestId: request.requestId, outline: loadOutline(document) })
+      return
+    }
+
+    if (request.type === 'searchDocument') {
+      const totalPages = document.countPages()
+      let totalMatches = 0
+      let textPages = 0
+      let processedPages = 0
+      let truncated = false
+      for (let pageIndex = 0; pageIndex < totalPages; pageIndex += 1) {
+        if (cancelledSearches.has(request.requestId)) break
+        const page = document.loadPage(pageIndex) as import('mupdf').PDFPage
+        let result
+        try {
+          result = searchPage(page, pageIndex, request.needle, request.options, 1_001 - totalMatches)
+        } finally {
+          page.destroy()
+        }
+        if (result.hasText) textPages += 1
+        let matches = result.matches
+        if (totalMatches + matches.length > 1_000) {
+          matches = matches.slice(0, Math.max(0, 1_000 - totalMatches))
+          truncated = true
+        }
+        totalMatches += matches.length
+        processedPages = pageIndex + 1
+        post({
+          type: 'searchProgress', requestId: request.requestId, pageIndex, matches,
+          processedPages, totalPages, totalMatches, textPages, truncated,
+          done: truncated, cancelled: false,
+        })
+        if (truncated) break
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+      const cancelled = cancelledSearches.delete(request.requestId)
+      if (!truncated) post({
+        type: 'searchProgress', requestId: request.requestId, pageIndex: -1, matches: [],
+        processedPages, totalPages, totalMatches, textPages, truncated: false,
+        done: true, cancelled,
+      })
+      if (activeSearches.get(request.docId) === request.requestId) activeSearches.delete(request.docId)
+      return
+    }
+
+    if (request.type === 'listAllAnnotations') {
+      const totalPages = document.countPages()
+      let processedPages = 0
+      for (let pageIndex = 0; pageIndex < totalPages; pageIndex += 1) {
+        if (cancelledAnnotationLists.has(request.requestId)) break
+        const annotations = listAnnotations(document, pageIndex)
+        processedPages = pageIndex + 1
+        post({
+          type: 'allAnnotationsProgress', requestId: request.requestId, pageIndex, annotations,
+          processedPages, totalPages, done: false, cancelled: false,
+        })
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+      const cancelled = cancelledAnnotationLists.delete(request.requestId)
+      post({
+        type: 'allAnnotationsProgress', requestId: request.requestId, pageIndex: -1, annotations: [],
+        processedPages, totalPages, done: true, cancelled,
+      })
+      if (activeAnnotationLists.get(request.docId) === request.requestId) activeAnnotationLists.delete(request.docId)
       return
     }
 
@@ -477,8 +561,29 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     disposeDocument(message.docId)
     return
   }
+  if (message.type === 'cancelSearch') {
+    cancelledSearches.add(message.requestId)
+    return
+  }
+  if (message.type === 'cancelListAllAnnotations') {
+    cancelledAnnotationLists.add(message.requestId)
+    return
+  }
+  if (message.type === 'searchDocument') {
+    const previous = activeSearches.get(message.docId)
+    if (previous !== undefined) cancelledSearches.add(previous)
+    activeSearches.set(message.docId, message.requestId)
+  }
+  if (message.type === 'listAllAnnotations') {
+    const previous = activeAnnotationLists.get(message.docId)
+    if (previous !== undefined) cancelledAnnotationLists.add(previous)
+    activeAnnotationLists.set(message.docId, message.requestId)
+  }
   if (
     message.type === 'listAnnotations'
+    || message.type === 'listAllAnnotations'
+    || message.type === 'searchDocument'
+    || message.type === 'loadOutline'
     || message.type === 'layoutText'
     || message.type === 'applyAndSave'
     || message.type === 'applyEdits'

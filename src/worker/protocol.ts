@@ -5,6 +5,8 @@ import type { LayoutResult } from '../core/textLayout'
 import type { SaveMode } from '../core/save'
 import type { PageInfo, PageLayoutCard } from '../core/pageOps'
 import type { RasterPagePlan, RasterizeOptions } from '../core/rasterize'
+import type { SearchMatch, SearchOptions } from '../core/search'
+import type { OutlineEntry } from '../core/outline'
 
 export type DeviceRect = [number, number, number, number]
 export type Priority = 0 | 1 | 2 | 3
@@ -63,6 +65,38 @@ export interface ListAnnotationsRequest {
   requestId: number
   docId: string
   pageIndex: number
+}
+
+export interface ListAllAnnotationsRequest {
+  type: 'listAllAnnotations'
+  requestId: number
+  docId: string
+}
+
+export interface CancelListAllAnnotationsRequest {
+  type: 'cancelListAllAnnotations'
+  requestId: number
+  docId: string
+}
+
+export interface SearchDocumentRequest {
+  type: 'searchDocument'
+  requestId: number
+  docId: string
+  needle: string
+  options: SearchOptions
+}
+
+export interface CancelSearchRequest {
+  type: 'cancelSearch'
+  requestId: number
+  docId: string
+}
+
+export interface LoadOutlineRequest {
+  type: 'loadOutline'
+  requestId: number
+  docId: string
 }
 
 export interface LayoutTextRequest {
@@ -171,6 +205,11 @@ export type WorkerRequest =
   | StatsRequest
   | DisposeRequest
   | ListAnnotationsRequest
+  | ListAllAnnotationsRequest
+  | CancelListAllAnnotationsRequest
+  | SearchDocumentRequest
+  | CancelSearchRequest
+  | LoadOutlineRequest
   | LayoutTextRequest
   | ApplyAndSaveRequest
   | ApplyEditsRequest
@@ -224,6 +263,37 @@ export interface ListAnnotationsResponse {
   type: 'annotationsListed'
   requestId: number
   annotations: AnnotationInfo[]
+}
+
+export interface AllAnnotationsProgressResponse {
+  type: 'allAnnotationsProgress'
+  requestId: number
+  pageIndex: number
+  annotations: AnnotationInfo[]
+  processedPages: number
+  totalPages: number
+  done: boolean
+  cancelled: boolean
+}
+
+export interface SearchProgressResponse {
+  type: 'searchProgress'
+  requestId: number
+  pageIndex: number
+  matches: SearchMatch[]
+  processedPages: number
+  totalPages: number
+  totalMatches: number
+  textPages: number
+  truncated: boolean
+  done: boolean
+  cancelled: boolean
+}
+
+export interface OutlineLoadedResponse {
+  type: 'outlineLoaded'
+  requestId: number
+  outline: OutlineEntry[]
 }
 
 export interface LayoutTextResponse {
@@ -332,6 +402,9 @@ export type WorkerResponse =
   | RenderResponse
   | StatsResponse
   | ListAnnotationsResponse
+  | AllAnnotationsProgressResponse
+  | SearchProgressResponse
+  | OutlineLoadedResponse
   | LayoutTextResponse
   | ApplyAndSaveResponse
   | AppliedEditsResponse

@@ -5,14 +5,18 @@ import type { LayoutResult } from '../core/textLayout'
 import type { SaveMode } from '../core/save'
 import type { PageInfo, PageLayoutCard } from '../core/pageOps'
 import type { RasterizeOptions } from '../core/rasterize'
+import type { SearchOptions } from '../core/search'
+import type { OutlineEntry } from '../core/outline'
 import { MemoryPdfWriteTarget, PdfStreamWriter, type PdfImageBand, type PdfWriteTarget } from '../core/pdfStreamWriter'
 import type {
   AppliedEditsResponse,
+  AllAnnotationsProgressResponse,
   ApplyAndSaveResponse,
   DeviceRect,
   ExportBytesResponse,
   LayoutTextResponse,
   ListAnnotationsResponse,
+  OutlineLoadedResponse,
   OpenResponse,
   PageInfoResponse,
   PageLayoutResponse,
@@ -26,6 +30,7 @@ import type {
   OutputPreparedResponse,
   RasterBandRenderedResponse,
   RasterizeBegunResponse,
+  SearchProgressResponse,
 } from '../worker/protocol'
 
 export interface OpenResult {
@@ -132,6 +137,27 @@ export interface RenderTask {
   isStarted(): boolean
 }
 
+export interface SearchSummary {
+  processedPages: number
+  totalPages: number
+  totalMatches: number
+  textPages: number
+  truncated: boolean
+  cancelled: boolean
+}
+
+export interface AnnotationListSummary {
+  processedPages: number
+  totalPages: number
+  cancelled: boolean
+}
+
+export interface StreamingTask<T> {
+  requestId: number
+  promise: Promise<T>
+  cancel(): void
+}
+
 export interface RenderBackend {
   render(options: {
     docId: string
@@ -176,6 +202,18 @@ export class PdfWorkerPool {
   private readonly slots: WorkerSlot[]
   private readonly pendingRenders = new Map<number, Pending>()
   private readonly pendingRequests = new Map<number, { resolve(value: WorkerResponse): void; reject(error: Error): void }>()
+  private readonly pendingSearches = new Map<number, {
+    docId: string
+    onProgress(response: SearchProgressResponse): void
+    resolve(value: SearchSummary): void
+    reject(error: Error): void
+  }>()
+  private readonly pendingAnnotationLists = new Map<number, {
+    docId: string
+    onProgress(response: AllAnnotationsProgressResponse): void
+    resolve(value: AnnotationListSummary): void
+    reject(error: Error): void
+  }>()
   private displayLru: string[] = []
   private readonly pageAssignments = new Map<string, number>()
   private readonly renderLogEntries: WorkerRenderLogEntry[] = []
@@ -356,6 +394,42 @@ export class PdfWorkerPool {
       type: 'listAnnotations', requestId, docId, pageIndex,
     }))
     return response.annotations
+  }
+
+  loadOutline(docId: string): Promise<OutlineEntry[]> {
+    return this.request<OutlineLoadedResponse>(this.slots[0], (requestId) => ({
+      type: 'loadOutline', requestId, docId,
+    })).then((response) => response.outline)
+  }
+
+  searchDocument(
+    docId: string,
+    needle: string,
+    options: SearchOptions,
+    onProgress: (response: SearchProgressResponse) => void,
+  ): StreamingTask<SearchSummary> {
+    const requestId = this.nextId++
+    let cancel: () => void = () => {}
+    const promise = new Promise<SearchSummary>((resolve, reject) => {
+      this.pendingSearches.set(requestId, { docId, onProgress, resolve, reject })
+      this.slots[0].worker.postMessage({ type: 'searchDocument', requestId, docId, needle, options })
+      cancel = () => this.slots[0].worker.postMessage({ type: 'cancelSearch', requestId, docId })
+    })
+    return { requestId, promise, cancel: () => cancel() }
+  }
+
+  listAllAnnotations(
+    docId: string,
+    onProgress: (response: AllAnnotationsProgressResponse) => void,
+  ): StreamingTask<AnnotationListSummary> {
+    const requestId = this.nextId++
+    let cancel: () => void = () => {}
+    const promise = new Promise<AnnotationListSummary>((resolve, reject) => {
+      this.pendingAnnotationLists.set(requestId, { docId, onProgress, resolve, reject })
+      this.slots[0].worker.postMessage({ type: 'listAllAnnotations', requestId, docId })
+      cancel = () => this.slots[0].worker.postMessage({ type: 'cancelListAllAnnotations', requestId, docId })
+    })
+    return { requestId, promise, cancel: () => cancel() }
   }
 
   async layoutText(text: string, fontSize: number, boxWidth: number, font: FontName = 'BIZUDGothic'): Promise<LayoutResult> {
@@ -594,8 +668,12 @@ export class PdfWorkerPool {
     const error = new Error('Worker pool は破棄されました。')
     for (const pending of this.pendingRenders.values()) pending.reject(error)
     for (const pending of this.pendingRequests.values()) pending.reject(error)
+    for (const pending of this.pendingSearches.values()) pending.reject(error)
+    for (const pending of this.pendingAnnotationLists.values()) pending.reject(error)
     this.pendingRenders.clear()
     this.pendingRequests.clear()
+    this.pendingSearches.clear()
+    this.pendingAnnotationLists.clear()
   }
 
   private request<T extends WorkerResponse>(
@@ -696,6 +774,37 @@ export class PdfWorkerPool {
       })
       return
     }
+    if (message.type === 'searchProgress') {
+      const pending = this.pendingSearches.get(message.requestId)
+      if (!pending) return
+      pending.onProgress(message)
+      if (message.done) {
+        this.pendingSearches.delete(message.requestId)
+        pending.resolve({
+          processedPages: message.processedPages,
+          totalPages: message.totalPages,
+          totalMatches: message.totalMatches,
+          textPages: message.textPages,
+          truncated: message.truncated,
+          cancelled: message.cancelled,
+        })
+      }
+      return
+    }
+    if (message.type === 'allAnnotationsProgress') {
+      const pending = this.pendingAnnotationLists.get(message.requestId)
+      if (!pending) return
+      pending.onProgress(message)
+      if (message.done) {
+        this.pendingAnnotationLists.delete(message.requestId)
+        pending.resolve({
+          processedPages: message.processedPages,
+          totalPages: message.totalPages,
+          cancelled: message.cancelled,
+        })
+      }
+      return
+    }
     if (message.type === 'error') {
       const error = new Error(message.message)
       if (message.jobId !== undefined) {
@@ -708,7 +817,11 @@ export class PdfWorkerPool {
         }
       } else if (message.requestId !== undefined) {
         this.pendingRequests.get(message.requestId)?.reject(error)
+        this.pendingSearches.get(message.requestId)?.reject(error)
+        this.pendingAnnotationLists.get(message.requestId)?.reject(error)
         this.pendingRequests.delete(message.requestId)
+        this.pendingSearches.delete(message.requestId)
+        this.pendingAnnotationLists.delete(message.requestId)
       }
       return
     }
@@ -730,6 +843,14 @@ export class PdfWorkerPool {
     for (const [requestId, pending] of this.pendingRequests) {
       pending.reject(error)
       this.pendingRequests.delete(requestId)
+    }
+    for (const [requestId, pending] of this.pendingSearches) {
+      pending.reject(error)
+      this.pendingSearches.delete(requestId)
+    }
+    for (const [requestId, pending] of this.pendingAnnotationLists) {
+      pending.reject(error)
+      this.pendingAnnotationLists.delete(requestId)
     }
     slot.queueLength = 0
   }

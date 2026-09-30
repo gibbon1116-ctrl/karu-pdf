@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import type { RenderScheduler } from '../client/RenderScheduler'
 import type { PageSize } from '../core/mupdfDoc'
+import type { SearchMatch } from '../core/search'
 import { AnnotationLayer, type EditorTool } from '../editor/AnnotationLayer'
 import type { AnnotationStore } from '../editor/AnnotationStore'
 import type { FormatDefaults } from '../editor/formatDefaults'
@@ -26,6 +27,7 @@ interface Props {
   formatDefaults: FormatDefaults
   tool: EditorTool
   selectedAnnotationId: string | null
+  searchMatches: Array<{ match: SearchMatch; active: boolean }>
   editingAnnotationId: string | null
   onSelectAnnotation(id: string | null): void
   onEditAnnotation(id: string | null): void
@@ -455,6 +457,20 @@ export function PageView(props: Props) {
           height: (detail.region[3] - detail.region[1]) / dpr,
         }}
       />}
+      {props.searchMatches.length > 0 && <svg
+        className="search-highlight-layer"
+        viewBox={`0 0 ${props.pageSize.width} ${props.pageSize.height}`}
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        {props.searchMatches.flatMap(({ match, active }, matchIndex) => match.quads.map((quad, quadIndex) => (
+          <polygon
+            key={`${matchIndex}-${quadIndex}`}
+            className={active ? 'active' : ''}
+            points={`${quad[0]},${quad[1]} ${quad[2]},${quad[3]} ${quad[6]},${quad[7]} ${quad[4]},${quad[5]}`}
+          />
+        )))}
+      </svg>}
       <AnnotationLayer
         pageIndex={props.layout.index}
         pageSize={props.pageSize}

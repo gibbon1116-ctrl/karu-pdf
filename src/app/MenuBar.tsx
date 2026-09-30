@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Dropdown, type DropdownItem } from '../ui/Dropdown'
+import type { SidePanelTab } from './documentModel'
 
 interface Props {
   fileName: string | null
@@ -10,6 +11,7 @@ interface Props {
   canUndo: boolean
   canRedo: boolean
   showThumbnails: boolean
+  sidePanelTab: SidePanelTab
   showFormat: boolean
   canUndoOrganize: boolean
   onOpen(): void
@@ -28,6 +30,7 @@ interface Props {
   onClearSelection(): void
   onDeleteSelection(): void
   onToggleThumbnails(): void
+  onOpenSidePanel(tab: SidePanelTab): void
   onToggleFormat(): void
   onZoomIn(): void
   onZoomOut(): void
@@ -76,7 +79,13 @@ export function MenuBar(props: Props) {
       { label: '選んだ書き込みを削除', shortcut: 'Delete', disabled: !props.hasDocument, onSelect: props.onDeleteSelection },
     ] },
     { label: '表示', items: [
-      { label: 'ページ一覧', checked: props.showThumbnails, onSelect: props.onToggleThumbnails },
+      { label: 'ページ一覧', checked: props.showThumbnails && props.sidePanelTab === 'pages', onSelect: () => {
+        if (props.showThumbnails && props.sidePanelTab === 'pages') props.onToggleThumbnails()
+        else props.onOpenSidePanel('pages')
+      } },
+      { label: 'しおり', checked: props.showThumbnails && props.sidePanelTab === 'outline', onSelect: () => props.onOpenSidePanel('outline') },
+      { label: '検索', shortcut: 'Ctrl+F', checked: props.showThumbnails && props.sidePanelTab === 'search', onSelect: () => props.onOpenSidePanel('search') },
+      { label: '書き込みの一覧', checked: props.showThumbnails && props.sidePanelTab === 'annotations', onSelect: () => props.onOpenSidePanel('annotations') },
       { label: '書式パネル', checked: props.showFormat, onSelect: props.onToggleFormat },
       separator(),
       { label: '拡大', disabled: !props.hasDocument, onSelect: props.onZoomIn },

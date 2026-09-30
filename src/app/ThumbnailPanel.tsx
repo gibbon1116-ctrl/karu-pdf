@@ -115,7 +115,7 @@ export function ThumbnailPanel({ docId, pageSizes, currentPage, scheduler, annot
   useEffect(() => () => window.clearTimeout(scrollTimerRef.current), [])
 
   return (
-    <aside
+    <div
       ref={scrollerRef}
       className="thumbnail-panel"
       aria-label="ページ一覧"
@@ -144,6 +144,6 @@ export function ThumbnailPanel({ docId, pageSizes, currentPage, scheduler, annot
           </button>
         ))}
       </div>
-    </aside>
+    </div>
   )
 }

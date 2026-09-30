@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { PdfWorkerPool, WorkerRenderLogEntry } from '../client/PdfWorkerPool'
 import type { RenderScheduler } from '../client/RenderScheduler'
 import type { PageSize } from '../core/mupdfDoc'
+import type { SearchMatch } from '../core/search'
 import { EditorToolChangeContext, type EditorTool } from '../editor/AnnotationLayer'
 import type { AnnotationStore } from '../editor/AnnotationStore'
 import type { FormatDefaults } from '../editor/formatDefaults'
@@ -11,7 +12,7 @@ import type { Priority } from '../worker/protocol'
 import { BitmapCache } from './BitmapCache'
 import { type Box } from './detailRegion'
 import { getDetailRecoveryCount, subscribeDetailRecovery } from './detailRequestSync'
-import { computePageLayout, pagesInRange, type PageLayout } from './pageLayout'
+import { computePageLayout, CSS_PX_PER_PT, pagesInRange, type PageLayout } from './pageLayout'
 import { PageView } from './PageView'
 
 export const ZOOM_STEPS = [0.25, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8]
@@ -22,6 +23,7 @@ export interface ViewerHandle {
   zoomOut(): void
   fitWidth(): void
   scrollToPage(index: number): void
+  scrollToPosition(index: number, x: number | null, y: number | null): void
   isIdle(): boolean
   isSharp(): boolean
   getZoom(): number
@@ -40,6 +42,8 @@ interface Props {
   initialView: { page: number; zoom: number; scrollLeft?: number; scrollTop?: number } | null
   pageSizes: PageSize[]
   selectedAnnotationId: string | null
+  searchMatches: SearchMatch[]
+  activeSearchIndex: number
   onSelectAnnotation(id: string | null): void
   onToolChange(tool: EditorTool): void
   onZoomChange(zoom: number): void
@@ -477,6 +481,23 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
         ignoreScrollForPrefetchRef.current = false
       })
     },
+    scrollToPosition: (index, x, y) => {
+      const currentLayout = layoutRef.current
+      const page = currentLayout.pages[Math.max(0, Math.min(currentLayout.pages.length - 1, index))]
+      const scroller = scrollerRef.current
+      if (!page || !scroller) return
+      const content = Math.max(currentLayout.maxWidth, scroller.clientWidth)
+      const pageLeft = (content - page.width) / 2
+      ignoreScrollForPrefetchRef.current = true
+      scroller.scrollTo({
+        top: Math.max(0, page.top + (y ?? 0) * CSS_PX_PER_PT * zoomRef.current - scroller.clientHeight / 3),
+        left: Math.max(0, pageLeft + (x ?? 0) * CSS_PX_PER_PT * zoomRef.current - scroller.clientWidth / 2),
+      })
+      requestAnimationFrame(() => {
+        updateViewport()
+        ignoreScrollForPrefetchRef.current = false
+      })
+    },
     isIdle: () => scheduler.pendingCount() === 0,
     isSharp: isSharpNow,
     getZoom: () => zoomRef.current,
@@ -537,6 +558,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
             formatDefaults={props.formatDefaults}
             tool={props.tool}
             selectedAnnotationId={props.selectedAnnotationId}
+            searchMatches={props.searchMatches.flatMap((match, index) => match.pageIndex === page.index ? [{ match, active: index === props.activeSearchIndex }] : [])}
             editingAnnotationId={editingAnnotationId}
             onSelectAnnotation={props.onSelectAnnotation}
             onEditAnnotation={setEditingAnnotationId}
