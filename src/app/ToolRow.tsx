@@ -84,12 +84,15 @@ export function ToolRow(props: Props) {
       label: item.label, shortcut: item.shortcut, checked: item.tool === lastTools[group], onSelect: () => choose(item.tool),
     }))
     return <div key={group} className={`split-button${active ? ' active' : ''}`}>
-      <button type="button" className="split-main" aria-pressed={active} disabled={!props.hasDocument} onClick={() => props.onToolChange(lastTools[group])}>
+      <button type="button" className="split-main" title={`${labelFor(lastTools[group])}（${label}: ${groups[group].map((item) => item.label).join('・')}）`}
+        aria-pressed={active} disabled={!props.hasDocument} onClick={() => props.onToolChange(lastTools[group])}>
         {labelFor(lastTools[group])}
       </button>
-      <Dropdown label={`${label}▼`} items={items} disabled={!props.hasDocument} buttonClassName="split-arrow">
-        <span aria-hidden="true">▼</span><span className="visually-hidden">{label}▼</span>
-      </Dropdown>
+      <span className="split-arrow-wrap" title={`${label}の道具を選ぶ`}>
+        <Dropdown label={`${label}▼`} items={items} disabled={!props.hasDocument} buttonClassName="split-arrow">
+          <span aria-hidden="true">▼</span><span className="visually-hidden">{label}▼</span>
+        </Dropdown>
+      </span>
     </div>
   }
 
@@ -105,8 +108,8 @@ export function ToolRow(props: Props) {
     {splitButton('pen', 'ペン')}
     <button type="button" className={props.tool === 'symbol' ? 'active' : ''} aria-pressed={props.tool === 'symbol'} disabled={!props.hasDocument} onClick={() => props.onToolChange('symbol')}>記号</button>
     <span className="tool-row-separator" />
-    <button type="button" className="icon-button" title="元に戻す" aria-label="元に戻す" disabled={!props.canUndo} onClick={props.onUndo}>↶</button>
-    <button type="button" className="icon-button" title="やり直し" aria-label="やり直し" disabled={!props.canRedo} onClick={props.onRedo}>↷</button>
+    <button type="button" className="icon-button" title="元に戻す" aria-label="元に戻す" disabled={!props.canUndo} onClick={props.onUndo}>↶ 戻す</button>
+    <button type="button" className="icon-button" title="やり直し" aria-label="やり直し" disabled={!props.canRedo} onClick={props.onRedo}>↷ やり直し</button>
     <span className="tool-row-separator" />
     <div className="zoom-controls">
       <button type="button" title="縮小" aria-label="縮小" disabled={!props.hasDocument} onClick={props.onZoomOut}>−</button>

@@ -32,6 +32,59 @@ async function pageInfo(page: Page) {
   return page.evaluate(() => window.__karu!.getPageInfo())
 }
 
+test('ページ整理のプレビュー、方向キー、拡大プレビューを操作する', async ({ page }) => {
+  test.setTimeout(120_000)
+  await openSample(page)
+  await page.evaluate(() => window.__karu!.openOrganize())
+  const scroller = page.locator('.organize-grid-scroller')
+  await page.getByTestId('organize-card-2').click()
+  await expect(page.getByTestId('organize-preview-position')).toHaveText('3 / 5')
+  const preview = page.getByTestId('organize-preview-canvas')
+  await expect(preview).toHaveAttribute('data-rendered', 'true')
+  await expect.poll(() => preview.evaluate((element) => {
+    const canvas = element as HTMLCanvasElement
+    const context = canvas.getContext('2d')
+    if (!context || canvas.width === 0 || canvas.height === 0) return false
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
+    const first = [pixels[0], pixels[1], pixels[2]]
+    for (let index = 4; index < pixels.length; index += 4) {
+      if (pixels[index] !== first[0] || pixels[index + 1] !== first[1] || pixels[index + 2] !== first[2]) return true
+    }
+    return false
+  })).toBe(true)
+  await page.screenshot({ path: 'test-results/organize-preview.png', fullPage: true })
+
+  await scroller.press('ArrowRight')
+  await scroller.press('ArrowRight')
+  await expect(page.getByTestId('organize-card-4')).toHaveClass(/focused/)
+  await expect(page.getByTestId('organize-preview-position')).toHaveText('5 / 5')
+
+  await scroller.press('Shift+ArrowLeft')
+  await scroller.press('Shift+ArrowLeft')
+  await expect(page.locator('.organize-card.selected')).toHaveCount(3)
+  await expect(page.getByText('選択: 3ページ ／ 全5ページ（下書き）')).toBeVisible()
+
+  await scroller.press('Space')
+  const lightbox = page.getByRole('dialog', { name: '拡大プレビュー' })
+  await expect(lightbox).toBeVisible()
+  await expect(lightbox.locator('header strong')).toHaveText('3 / 5')
+  await lightbox.press('ArrowRight')
+  await expect(lightbox.locator('header strong')).toHaveText('4 / 5')
+  await lightbox.press('Escape')
+  await expect(lightbox).toBeHidden()
+
+  await page.getByTestId('organize-card-0').click()
+  await page.waitForTimeout(250)
+  await page.evaluate(() => { (window as Window & { __karuOrganizePreviewRequests?: number[] }).__karuOrganizePreviewRequests = [] })
+  for (let index = 0; index < 20; index += 1) {
+    await scroller.press('ArrowRight')
+    await page.waitForTimeout(20)
+  }
+  await expect(page.getByTestId('organize-card-4')).toHaveClass(/focused/)
+  await expect.poll(() => page.evaluate(() => (window as Window & { __karuOrganizePreviewRequests?: number[] }).__karuOrganizePreviewRequests ?? []))
+    .toEqual([4])
+})
+
 test('ページ整理をドラッグ・回転・削除・白紙挿入し、保存と復元ができる', async ({ page }) => {
   await openSample(page)
   const original = await pageInfo(page)

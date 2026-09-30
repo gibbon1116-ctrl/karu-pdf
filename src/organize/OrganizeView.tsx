@@ -6,15 +6,24 @@ import { Dropdown, type DropdownItem } from '../ui/Dropdown'
 import { PDF_PICKER_TYPES } from '../editor/fileAccess'
 import type { PageCard } from './OrganizeDraft'
 import { OrganizeDraft } from './OrganizeDraft'
+import { OrganizePagePreview } from './OrganizePreview'
 import {
+  describePaperSize,
   insertionIndex,
+  keyboardSelection,
+  moveFocusIndex,
   parsePageRange,
   selectionForMode,
+  type OrganizeMoveKey,
   type InsertPosition,
   type OrganizeSplitMode,
 } from './organizeUtils'
 
 const CARD_GAP = 16
+const PREVIEW_WIDTH_KEY = 'karu-pdf:organize-preview-width'
+const PREVIEW_VISIBLE_KEY = 'karu-pdf:organize-preview-visible'
+const MIN_PREVIEW_WIDTH = 240
+const MAX_PREVIEW_WIDTH = 640
 const DISPLAY_SIZES = {
   small: { cardWidth: 120, rowHeight: 184, stageWidth: 100, stageHeight: 140 },
   medium: { cardWidth: 160, rowHeight: 230, stageWidth: 140, stageHeight: 180 },
@@ -81,6 +90,29 @@ function cardLabel(card: PageCard, index: number, targetDocId: string, sources: 
   if (card.source.docId === targetDocId) return String(index + 1)
   const name = sources.get(card.source.docId)?.name.replace(/\.pdf$/i, '') ?? '追加'
   return `${name.slice(0, 8)}-${card.source.pageIndex + 1}`
+}
+
+function cardOrigin(card: PageCard, targetDocId: string, sources: ReadonlyMap<string, OrganizeSourceInfo>): string {
+  if (card.source.kind === 'blank') return '白紙'
+  if (card.source.docId === targetDocId) return `元の文書 ${card.source.pageIndex + 1}ページ`
+  return `${sources.get(card.source.docId)?.name ?? '追加したPDF'} ${card.source.pageIndex + 1}ページ`
+}
+
+function storedPreviewWidth(): number {
+  try {
+    const stored = localStorage.getItem(PREVIEW_WIDTH_KEY)
+    if (stored === null) return 360
+    const value = Number(stored)
+    return Number.isFinite(value) ? Math.max(MIN_PREVIEW_WIDTH, Math.min(MAX_PREVIEW_WIDTH, value)) : 360
+  } catch { return 360 }
+}
+
+function storedPreviewVisible(): boolean {
+  try { return localStorage.getItem(PREVIEW_VISIBLE_KEY) !== 'false' } catch { return true }
+}
+
+function storePreviewSetting(key: string, value: string): void {
+  try { localStorage.setItem(key, value) } catch { /* 表示の操作は続ける。 */ }
 }
 
 function Dialog({ title, children, onCancel, testId }: {
@@ -169,16 +201,20 @@ function OrganizeThumbnail({ card, targetDocId, targetSizes, sources, scheduler,
 }
 
 export function OrganizeView(props: Props) {
-  useSyncExternalStore(props.draft.subscribe, props.draft.getSnapshot)
+  const draftVersion = useSyncExternalStore(props.draft.subscribe, props.draft.getSnapshot)
   const cards = props.draft.getCards()
   const scrollerRef = useRef<HTMLDivElement>(null)
+  const lightboxRef = useRef<HTMLDivElement>(null)
   const anchorRef = useRef<string | null>(null)
+  const focusIndexRef = useRef(0)
+  const panRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
   const dragIdsRef = useRef<string[]>([])
   const fileModeRef = useRef<'insert' | 'replace'>('insert')
   const fixedDropIndexRef = useRef<number | null>(null)
   const nextSourceKeyRef = useRef(1)
   const dismissedSourceKeysRef = useRef(new Set<string>())
   const [selection, setSelection] = useState<Set<string>>(new Set())
+  const [focusedId, setFocusedId] = useState<string | null>(null)
   const [viewport, setViewport] = useState({ top: 0, height: 700, width: 900 })
   const [dropIndex, setDropIndex] = useState<number | null>(null)
   const [displaySize, setDisplaySize] = useState<DisplaySize>('medium')
@@ -198,6 +234,10 @@ export function OrganizeView(props: Props) {
   const [splitOpen, setSplitOpen] = useState(false)
   const [splitKind, setSplitKind] = useState<'before' | 'every' | 'single' | 'equal'>('before')
   const [splitNumber, setSplitNumber] = useState(2)
+  const [previewVisible, setPreviewVisible] = useState(storedPreviewVisible)
+  const [previewWidth, setPreviewWidth] = useState(storedPreviewWidth)
+  const [expandedOpen, setExpandedOpen] = useState(false)
+  const [expandedZoom, setExpandedZoom] = useState(1)
   const metrics = DISPLAY_SIZES[displaySize]
   const columns = Math.max(1, Math.floor((viewport.width - CARD_GAP) / (metrics.cardWidth + CARD_GAP)))
   const rowCount = Math.ceil(cards.length / columns)
@@ -209,6 +249,9 @@ export function OrganizeView(props: Props) {
     const wanted = new Set(selectedIds)
     return cards.filter((card) => wanted.has(card.id))
   }, [cards, selectedIds])
+  const focusedIndex = focusedId ? cards.findIndex((card) => card.id === focusedId) : -1
+  const focusedCard = focusedIndex >= 0 ? cards[focusedIndex] : null
+  const focusedPageSize = focusedCard ? cardPageSize(focusedCard, props.docId, props.pageSizes, props.sources) : null
 
   useEffect(() => {
     const scroller = scrollerRef.current
@@ -222,10 +265,59 @@ export function OrganizeView(props: Props) {
 
   useEffect(() => {
     setSelection((current) => new Set([...current].filter((id) => cards.some((card) => card.id === id))))
-  }, [props.draft.getSnapshot()])
+    setFocusedId((current) => {
+      if (current && cards.some((card) => card.id === current)) return current
+      if (cards.length === 0) { setExpandedOpen(false); return null }
+      const next = cards[Math.min(focusIndexRef.current, cards.length - 1)]
+      focusIndexRef.current = cards.indexOf(next)
+      return next.id
+    })
+  }, [draftVersion])
+
+  useEffect(() => {
+    if (focusedIndex < 0) return
+    focusIndexRef.current = focusedIndex
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    const row = Math.floor(focusedIndex / columns)
+    const top = CARD_GAP + row * metrics.rowHeight
+    const bottom = top + metrics.rowHeight
+    if (top < scroller.scrollTop) scroller.scrollTop = Math.max(0, top - CARD_GAP)
+    else if (bottom > scroller.scrollTop + scroller.clientHeight) scroller.scrollTop = bottom - scroller.clientHeight
+  }, [columns, focusedIndex, metrics.rowHeight])
+
+  useEffect(() => {
+    if (!expandedOpen) return
+    setExpandedZoom(1)
+    requestAnimationFrame(() => lightboxRef.current?.focus())
+  }, [expandedOpen])
+
+  useEffect(() => {
+    if (!expandedOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (!['Escape', ' ', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      if (event.key === 'Escape' || event.key === ' ') setExpandedOpen(false)
+      else {
+        const current = focusedId ? cards.findIndex((card) => card.id === focusedId) : -1
+        if (current < 0) return
+        const next = Math.max(0, Math.min(cards.length - 1, current + (event.key === 'ArrowLeft' ? -1 : 1)))
+        const card = cards[next]
+        focusIndexRef.current = next
+        setFocusedId(card.id)
+        anchorRef.current = card.id
+        setSelection(new Set([card.id]))
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [cards, expandedOpen, focusedId])
 
   const choose = (card: PageCard, event: React.MouseEvent) => {
     const index = cards.findIndex((item) => item.id === card.id)
+    setFocusedId(card.id)
+    focusIndexRef.current = index
     if (event.shiftKey && anchorRef.current) {
       const anchor = cards.findIndex((item) => item.id === anchorRef.current)
       if (anchor >= 0) {
@@ -241,6 +333,22 @@ export function OrganizeView(props: Props) {
       if (next.has(card.id)) next.delete(card.id); else next.add(card.id)
       setSelection(next)
     } else setSelection(new Set([card.id]))
+  }
+
+  const startPreviewResize = (event: React.PointerEvent) => {
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = previewWidth
+    const move = (pointerEvent: PointerEvent) => setPreviewWidth(Math.max(MIN_PREVIEW_WIDTH, Math.min(MAX_PREVIEW_WIDTH, startWidth + startX - pointerEvent.clientX)))
+    const stop = (pointerEvent: PointerEvent) => {
+      move(pointerEvent)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', stop)
+      const width = Math.max(MIN_PREVIEW_WIDTH, Math.min(MAX_PREVIEW_WIDTH, startWidth + startX - pointerEvent.clientX))
+      storePreviewSetting(PREVIEW_WIDTH_KEY, String(width))
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', stop)
   }
 
   const currentInsertionIndex = () => insertionIndex(position, cards, selectedIds, afterPage)
@@ -336,10 +444,12 @@ export function OrganizeView(props: Props) {
       if (selectedIds.length !== pageCards.length && !window.confirm(`選んだ ${selectedIds.length} ページを、${pageCards.length} ページで置き換えます。`)) return
       const inserted = props.draft.replace(selectedIds, pageCards)
       setSelection(new Set(inserted.map((card) => card.id)))
+      if (inserted[0]) { setFocusedId(inserted[0].id); anchorRef.current = inserted[0].id }
     } else {
       const at = sourceDialog.fixedIndex ?? currentInsertionIndex()
       const inserted = props.draft.paste(at, pageCards)
       setSelection(new Set(inserted.map((card) => card.id)))
+      if (inserted[0]) { setFocusedId(inserted[0].id); anchorRef.current = inserted[0].id }
     }
     props.onPrepareSources(sourceIds)
     setSourceDialog(null)
@@ -362,6 +472,7 @@ export function OrganizeView(props: Props) {
     const size = blankOrientation === 'portrait' ? { width: short, height: long } : { width: long, height: short }
     const inserted = props.draft.insertBlanks(at, blankCount, size.width, size.height)
     setSelection(new Set(inserted.map((card) => card.id)))
+    if (inserted[0]) { setFocusedId(inserted[0].id); anchorRef.current = inserted[0].id }
     setBlankOpen(false)
     setDialogError('')
   }
@@ -370,6 +481,7 @@ export function OrganizeView(props: Props) {
     try {
       const inserted = props.onPaste(insertionIndex('after', cards, selectedIds, cards.length))
       setSelection(new Set(inserted.map((card) => card.id)))
+      if (inserted[0]) { setFocusedId(inserted[0].id); anchorRef.current = inserted[0].id }
       setDialogError('')
     } catch (reason) { setDialogError(reason instanceof Error ? reason.message : String(reason)) }
   }
@@ -379,6 +491,10 @@ export function OrganizeView(props: Props) {
     const parsed = parsePageRange(pageSelectionValue, cards.length)
     if (parsed.error) { setDialogError(parsed.error); return }
     setSelection(new Set(parsed.pages.map((index) => cards[index].id)))
+    if (parsed.pages[0] !== undefined) {
+      setFocusedId(cards[parsed.pages[0]].id)
+      anchorRef.current = cards[parsed.pages[0]].id
+    }
     setPageSelectionOpen(false)
     setDialogError('')
   }
@@ -411,6 +527,7 @@ export function OrganizeView(props: Props) {
       <button type="button" disabled={props.busy || selectedIds.length === 0 || selectedIds.length === cards.length} onClick={() => props.draft.delete(selectedIds)}>削除</button>
       <button type="button" disabled={props.busy || selectedIds.length === 0} onClick={() => {
         const created = props.draft.duplicate(selectedIds); setSelection(new Set(created.map((card) => card.id)))
+        if (created[0]) { setFocusedId(created[0].id); anchorRef.current = created[0].id }
       }}>複製</button>
       <button type="button" disabled={props.busy || selectedIds.length === 0} onClick={() => void pickFiles('replace')}>置換</button>
       <button type="button" disabled={props.busy || selectedIds.length === 0} onClick={() => { setExtractOpen(true); setDialogError('') }}>抽出</button>
@@ -425,14 +542,20 @@ export function OrganizeView(props: Props) {
         { label: '偶数ページ', onSelect: () => setSelection(new Set(selectionForMode(cards, selectedIds, 'even'))) },
         { label: 'ページ番号で選ぶ', onSelect: openPageSelection },
       ]} />
+      <label className="organize-preview-toggle">
+        <input type="checkbox" checked={previewVisible} onChange={(event) => {
+          setPreviewVisible(event.target.checked)
+          storePreviewSetting(PREVIEW_VISIBLE_KEY, String(event.target.checked))
+        }} />プレビュー
+      </label>
       <label className="organize-display-size">表示の大きさ
         <select value={displaySize} onChange={(event) => setDisplaySize(event.target.value as DisplaySize)}>
           <option value="small">小</option><option value="medium">中</option><option value="large">大</option>
         </select>
       </label>
       <span className="organize-toolbar-spacer" />
-      <button type="button" disabled={props.busy || !props.draft.canUndo()} onClick={() => props.draft.undo()}>元に戻す</button>
-      <button type="button" disabled={props.busy || !props.draft.canRedo()} onClick={() => props.draft.redo()}>やり直す</button>
+      <button type="button" disabled={props.busy || !props.draft.canUndo()} onClick={() => props.draft.undo()}>↶ 戻す</button>
+      <button type="button" disabled={props.busy || !props.draft.canRedo()} onClick={() => props.draft.redo()}>↷ やり直し</button>
       <button type="button" disabled={props.busy || !props.draft.isChanged()} onClick={props.onApply}>適用</button>
       <button type="button" disabled={props.busy} onClick={props.onCancel}>やめる</button>
       {props.busy && <span role="status">ページを組み立てています…</span>}
@@ -443,6 +566,7 @@ export function OrganizeView(props: Props) {
       event.currentTarget.value = ''
     }} />
     {dialogError && !sourceDialog && !blankOpen && !pageSelectionOpen && <p className="organize-inline-error" role="alert">{dialogError}</p>}
+    <div className="organize-content">
     <div ref={scrollerRef} className="organize-grid-scroller" tabIndex={0}
       onScroll={(event) => {
         const { scrollTop, clientHeight } = event.currentTarget
@@ -460,6 +584,31 @@ export function OrganizeView(props: Props) {
           event.preventDefault(); if (key === 'y' || event.shiftKey) props.draft.redo(); else props.draft.undo(); return
         }
         if (event.key === 'Delete' && selectedIds.length > 0 && selectedIds.length < cards.length) { event.preventDefault(); props.draft.delete(selectedIds); return }
+        if (event.key === ' ' || event.code === 'Space') {
+          event.preventDefault()
+          if (event.ctrlKey || event.metaKey) {
+            if (!focusedCard) return
+            const next = new Set(selection)
+            if (next.has(focusedCard.id)) next.delete(focusedCard.id); else next.add(focusedCard.id)
+            setSelection(next)
+          } else if (focusedCard) setExpandedOpen(true)
+          return
+        }
+        if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) {
+          event.preventDefault()
+          const current = focusedIndex >= 0 ? focusedIndex : Math.max(0, cards.findIndex((card) => selection.has(card.id)))
+          const pageRows = Math.max(1, Math.floor(viewport.height / metrics.rowHeight))
+          const next = moveFocusIndex(current, event.key as OrganizeMoveKey, cards.length, columns, pageRows)
+          if (next < 0) return
+          const anchor = anchorRef.current ? cards.findIndex((card) => card.id === anchorRef.current) : current
+          const selectedIndexes = cards.map((card, index) => selection.has(card.id) ? index : -1).filter((index) => index >= 0)
+          const result = keyboardSelection(selectedIndexes, anchor, next, event.shiftKey, event.ctrlKey || event.metaKey)
+          setFocusedId(cards[next].id)
+          focusIndexRef.current = next
+          setSelection(new Set(result.selection.map((index) => cards[index].id)))
+          anchorRef.current = cards[result.anchor]?.id ?? cards[next].id
+          return
+        }
         if (event.key === 'Escape') { event.preventDefault(); props.onCancel() }
       }}
       onDragOver={(event) => { event.preventDefault(); if (dropIndex === null) setDropIndex(cards.length) }}
@@ -479,16 +628,18 @@ export function OrganizeView(props: Props) {
           const row = Math.floor(index / columns)
           const column = index % columns
           return <button type="button" key={card.id} draggable={!props.busy} data-testid={`organize-card-${index}`}
-            className={`organize-card${selection.has(card.id) ? ' selected' : ''}`}
+            className={`organize-card${selection.has(card.id) ? ' selected' : ''}${focusedId === card.id ? ' focused' : ''}`}
             style={{
               left: CARD_GAP + column * (metrics.cardWidth + CARD_GAP), top: CARD_GAP + row * metrics.rowHeight,
               width: metrics.cardWidth, height: metrics.rowHeight - CARD_GAP,
               gridTemplateRows: `${metrics.stageHeight}px 24px`,
             }}
             onClick={(event) => choose(card, event)}
+            onDoubleClick={() => { setFocusedId(card.id); setExpandedOpen(true) }}
             onDragStart={(event) => {
               const ids = selection.has(card.id) ? selectedIds : [card.id]
               if (!selection.has(card.id)) setSelection(new Set(ids))
+              setFocusedId(card.id)
               dragIdsRef.current = ids
               event.dataTransfer.effectAllowed = 'move'
               event.dataTransfer.setData('application/x-karu-pages', ids.join(','))
@@ -512,7 +663,69 @@ export function OrganizeView(props: Props) {
         }} />}
       </div>
     </div>
+    {previewVisible && <>
+      <div className="organize-preview-resizer" role="separator" aria-label="プレビューの幅を変更" aria-orientation="vertical" onPointerDown={startPreviewResize} />
+      <aside className="organize-preview-pane" style={{ width: previewWidth }} aria-label="プレビュー" data-testid="organize-preview-pane">
+        <h2>プレビュー</h2>
+        {focusedCard && focusedPageSize ? <>
+          <OrganizePagePreview card={focusedCard} pageSize={focusedPageSize} targetDocId={props.docId} scheduler={props.scheduler}
+            annotationStore={props.annotationStore} fit="width" debounceMs={100} testId="organize-preview-canvas" />
+          <div className="organize-preview-info">
+            <strong data-testid="organize-preview-position">{focusedIndex + 1} / {cards.length}</strong>
+            <span>{cardOrigin(focusedCard, props.docId, props.sources)}</span>
+            <span>{describePaperSize(focusedPageSize.width, focusedPageSize.height, focusedCard.rotation)}</span>
+          </div>
+        </> : <p className="organize-preview-empty">ページを選ぶと、ここに大きく表示します。</p>}
+      </aside>
+    </>}
+    </div>
     <footer className="organize-footer">選択: {selectedIds.length}ページ ／ 全{cards.length}ページ（下書き）</footer>
+
+    {expandedOpen && focusedCard && focusedPageSize && <div ref={lightboxRef} className="organize-lightbox" role="dialog" aria-modal="true" aria-label="拡大プレビュー" tabIndex={-1}
+      onPointerDown={(event) => { if (event.target === event.currentTarget) setExpandedOpen(false) }}
+    >
+      <header>
+        <strong>{focusedIndex + 1} / {cards.length}</strong>
+        <span>{cardOrigin(focusedCard, props.docId, props.sources)}</span>
+        <div className="organize-lightbox-zoom">
+          <button type="button" aria-label="縮小" disabled={expandedZoom <= 1} onClick={() => setExpandedZoom((value) => Math.max(1, value - 0.25))}>−</button>
+          <span>{Math.round(expandedZoom * 100)}%</span>
+          <button type="button" aria-label="拡大" disabled={expandedZoom >= 4} onClick={() => setExpandedZoom((value) => Math.min(4, value + 0.25))}>＋</button>
+        </div>
+        <button type="button" aria-label="拡大プレビューを閉じる" onClick={() => setExpandedOpen(false)}>×</button>
+      </header>
+      <div className={`organize-lightbox-stage${expandedZoom > 1 ? ' zoomed' : ''}`}
+        onWheel={(event) => {
+          if (!event.ctrlKey) return
+          event.preventDefault()
+          setExpandedZoom((value) => Math.max(1, Math.min(4, value + (event.deltaY < 0 ? 0.25 : -0.25))))
+        }}
+        onPointerDown={(event) => {
+          const target = event.target as HTMLElement
+          if (!target.closest('.organize-preview-canvas, .organize-preview-blank')) {
+            setExpandedOpen(false)
+            return
+          }
+          if (expandedZoom <= 1 || event.button !== 0) return
+          event.currentTarget.setPointerCapture(event.pointerId)
+          panRef.current = { x: event.clientX, y: event.clientY, left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop }
+        }}
+        onPointerMove={(event) => {
+          const start = panRef.current
+          if (!start) return
+          event.currentTarget.scrollLeft = start.left - (event.clientX - start.x)
+          event.currentTarget.scrollTop = start.top - (event.clientY - start.y)
+        }}
+        onPointerUp={(event) => {
+          const wasPanning = panRef.current !== null
+          panRef.current = null
+          if (wasPanning && event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+        }}>
+        <OrganizePagePreview card={focusedCard} pageSize={focusedPageSize} targetDocId={props.docId} scheduler={props.scheduler}
+          annotationStore={props.annotationStore} fit="contain" zoom={expandedZoom} className={expandedZoom > 1 ? 'zoomed' : ''} testId="organize-lightbox-canvas" />
+      </div>
+      <footer>{describePaperSize(focusedPageSize.width, focusedPageSize.height, focusedCard.rotation)}　　Ctrl＋ホイールまたは［＋］［−］で拡大</footer>
+    </div>}
 
     {sourceDialog && <Dialog title={sourceDialog.mode === 'replace' ? 'ページを置換' : '他のPDFから挿入'} onCancel={cancelSourceDialog} testId="organize-source-dialog">
       <div className="organize-dialog-body">

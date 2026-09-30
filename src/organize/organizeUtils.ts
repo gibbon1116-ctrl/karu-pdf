@@ -8,8 +8,74 @@ export type OrganizeSplitMode =
   | { kind: 'single' }
   | { kind: 'equal'; files: number }
 
+export type OrganizeMoveKey = 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown' | 'Home' | 'End' | 'PageUp' | 'PageDown'
+
+export interface KeyboardSelectionResult {
+  selection: number[]
+  anchor: number
+}
+
+const MM_PER_POINT = 25.4 / 72
+const PAPER_SIZES = [
+  ['A0', 841, 1189], ['A1', 594, 841], ['A2', 420, 594], ['A3', 297, 420], ['A4', 210, 297], ['A5', 148, 210],
+  ['B0', 1030, 1456], ['B1', 728, 1030], ['B2', 515, 728], ['B3', 364, 515], ['B4', 257, 364], ['B5', 182, 257],
+] as const
+
 const FULL_WIDTH_FROM = '０１２３４５６７８９－ー―，、　'
 const FULL_WIDTH_TO = '0123456789---,, '
+
+export function moveFocusIndex(
+  current: number,
+  key: OrganizeMoveKey,
+  cardCount: number,
+  columns: number,
+  pageRows = 1,
+): number {
+  if (cardCount <= 0) return -1
+  const last = cardCount - 1
+  const at = Math.max(0, Math.min(last, Math.trunc(current)))
+  const columnCount = Math.max(1, Math.trunc(columns))
+  const screenRows = Math.max(1, Math.trunc(pageRows))
+  if (key === 'Home') return 0
+  if (key === 'End') return last
+  if (key === 'ArrowLeft') return Math.max(0, at - 1)
+  if (key === 'ArrowRight') return Math.min(last, at + 1)
+  if (key === 'ArrowUp') return Math.max(0, at - columnCount)
+  if (key === 'ArrowDown') return Math.min(last, at + columnCount)
+  if (key === 'PageUp') return Math.max(0, at - columnCount * screenRows)
+  return Math.min(last, at + columnCount * screenRows)
+}
+
+export function keyboardSelection(
+  currentSelection: readonly number[],
+  anchor: number,
+  next: number,
+  shiftKey: boolean,
+  ctrlKey: boolean,
+): KeyboardSelectionResult {
+  if (next < 0) return { selection: [...currentSelection], anchor }
+  if (shiftKey) {
+    const origin = anchor >= 0 ? anchor : next
+    const [start, end] = [origin, next].sort((left, right) => left - right)
+    return { selection: Array.from({ length: end - start + 1 }, (_, offset) => start + offset), anchor: origin }
+  }
+  if (ctrlKey) return { selection: [...currentSelection], anchor: anchor >= 0 ? anchor : next }
+  return { selection: [next], anchor: next }
+}
+
+export function describePaperSize(widthPoints: number, heightPoints: number, rotation: 0 | 90 | 180 | 270 = 0): string {
+  const turned = rotation === 90 || rotation === 270
+  const widthMm = (turned ? heightPoints : widthPoints) * MM_PER_POINT
+  const heightMm = (turned ? widthPoints : heightPoints) * MM_PER_POINT
+  const standard = PAPER_SIZES.find(([, short, long]) => {
+    const expectedWidth = widthMm <= heightMm ? short : long
+    const expectedHeight = widthMm <= heightMm ? long : short
+    return Math.abs(widthMm - expectedWidth) <= 1 && Math.abs(heightMm - expectedHeight) <= 1
+  })
+  const orientation = widthMm > heightMm ? '横' : '縦'
+  const dimensions = `${Math.round(widthMm)}×${Math.round(heightMm)} mm`
+  return standard ? `${standard[0]} ${orientation}、${dimensions}` : dimensions
+}
 
 export function normalizePageRange(value: string): string {
   return [...value].map((character) => {
