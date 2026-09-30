@@ -16,6 +16,7 @@ interface Props {
   onSave(): void
   onSaveAs(): void
   onSaveFinalized(): void
+  onSaveRasterized(): void
   onPrint(): void
   onCloseTab(): void
   onUndo(): void
@@ -56,6 +57,7 @@ export function MenuBar(props: Props) {
       { label: '上書き保存', shortcut: 'Ctrl+S', disabled: unavailable, onSelect: props.onSave },
       { label: '別名で保存', shortcut: 'Ctrl+Shift+S', disabled: unavailable, onSelect: props.onSaveAs },
       { label: '確定して別名で保存', disabled: unavailable, onSelect: props.onSaveFinalized },
+      { label: '画像として保存…', disabled: unavailable, onSelect: props.onSaveRasterized },
       separator(),
       { label: '印刷', shortcut: 'Ctrl+P', disabled: unavailable, onSelect: props.onPrint },
       separator(),

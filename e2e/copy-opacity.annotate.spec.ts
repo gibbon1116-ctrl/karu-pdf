@@ -100,6 +100,7 @@ test('3件を別ページへ貼り付け、1回の元に戻すでまとめて消
   await expect(layer.locator('.annotation-selection')).toHaveCount(3)
   await page.keyboard.press('Control+c')
   await page.evaluate(() => window.__karu!.scrollToPage(1))
+  await expect(page.getByText('2 / 5')).toBeVisible()
   await expect(page.getByTestId('annotation-layer-1')).toBeVisible()
   const before = await page.evaluate(() => window.__karu!.getEditableAnnotations(1).length)
   await page.keyboard.press('Control+v')

@@ -4,6 +4,8 @@ import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
 import type { SaveMode } from '../core/save'
 import type { PageInfo, PageLayoutCard } from '../core/pageOps'
+import type { RasterizeOptions } from '../core/rasterize'
+import { MemoryPdfWriteTarget, PdfStreamWriter, type PdfImageBand, type PdfWriteTarget } from '../core/pdfStreamWriter'
 import type {
   AppliedEditsResponse,
   ApplyAndSaveResponse,
@@ -22,6 +24,8 @@ import type {
   WorkerResponse,
   PageLayoutWorkerTimings,
   OutputPreparedResponse,
+  RasterBandRenderedResponse,
+  RasterizeBegunResponse,
 } from '../worker/protocol'
 
 export interface OpenResult {
@@ -60,6 +64,31 @@ export interface PreparedOutputResult {
   replacedCharacters: number
   unsupportedCharacters: string[]
   errors: ApplyError[]
+}
+
+export interface RasterizeMetrics {
+  totalMs: number
+  saveMs: number
+  pageCount: number
+  bandCount: number
+  maxEncodedBandBytes: number
+  maxWorkerPixelBytes: number
+  concurrentWorkerPixelBytes: number
+}
+
+export interface RasterizeResult {
+  bytes: Uint8Array | null
+  outputBytes: number
+  metrics: RasterizeMetrics
+  replacedCharacters: number
+  unsupportedCharacters: string[]
+  errors: ApplyError[]
+}
+
+export interface RasterizeCallbacks {
+  signal?: AbortSignal
+  onProgress?(completedPages: number, totalPages: number): void
+  target?: PdfWriteTarget
 }
 
 export interface PageLayoutResult {
@@ -376,6 +405,112 @@ export class PdfWorkerPool {
     }
   }
 
+  async rasterize(
+    docId: string,
+    edits: AnnotationEdit[],
+    options: RasterizeOptions,
+    callbacks: RasterizeCallbacks = {},
+  ): Promise<RasterizeResult> {
+    const started = performance.now()
+    const rasterId = `raster-${docId}-${this.nextId++}`
+    const renderDocId = `${rasterId}-source`
+    const primary = this.slots[this.primaryWorkerIndex]
+    const renderSlots = this.slots.length > 1 ? this.slots.slice(1) : this.slots
+    const memoryTarget = callbacks.target ? null : new MemoryPdfWriteTarget()
+    const writer = new PdfStreamWriter(callbacks.target ?? memoryTarget!)
+    let begin: RasterizeBegunResponse | undefined
+    let temporaryOpened = false
+    let writeMs = 0
+    try {
+      if (callbacks.signal?.aborted) throw new DOMException('画像として保存を中止しました。', 'AbortError')
+      begin = await this.request<RasterizeBegunResponse>(primary, (requestId) => ({
+        type: 'beginRasterize', requestId, docId, renderDocId, edits, options,
+      }))
+      const begun = begin
+      if (begun.errors.length > 0) throw new Error(begun.errors.map((item) => item.message).join(' / '))
+      if (callbacks.signal?.aborted) throw new DOMException('画像として保存を中止しました。', 'AbortError')
+      if (begun.preparedBytes) {
+        const copies = renderSlots.map((_, index) => (
+          index === renderSlots.length - 1 ? begun.preparedBytes! : begun.preparedBytes!.slice(0)
+        ))
+        await Promise.all(renderSlots.map((slot, index) => this.openOnSlot(slot, begun.renderDocId, copies[index])))
+        temporaryOpened = true
+      }
+
+      const workerPixelPeaks = new Map<number, number>()
+      let completedPages = 0
+      let maxEncodedBandBytes = 0
+      const bandCount = begun.plans.reduce((sum, plan) => sum + plan.bands.length, 0)
+      callbacks.onProgress?.(0, begun.plans.length)
+      let writeStarted = performance.now()
+      await writer.start()
+      writeMs += performance.now() - writeStarted
+
+      const renderPage = async (slot: WorkerSlot, pagePlan: RasterizeBegunResponse['plans'][number]): Promise<PdfImageBand[]> => {
+        const bands: PdfImageBand[] = []
+        for (const band of pagePlan.bands) {
+          if (callbacks.signal?.aborted) throw new DOMException('画像として保存を中止しました。', 'AbortError')
+          const rendered = await this.request<RasterBandRenderedResponse>(slot, (requestId) => ({
+            type: 'renderRasterBand', requestId, docId: begun.renderDocId,
+            pagePlan, bandIndex: band.index, color: options.color, format: options.format,
+          }))
+          if (callbacks.signal?.aborted) throw new DOMException('画像として保存を中止しました。', 'AbortError')
+          maxEncodedBandBytes = Math.max(maxEncodedBandBytes, rendered.bytes.byteLength)
+          workerPixelPeaks.set(slot.index, Math.max(workerPixelPeaks.get(slot.index) ?? 0, rendered.pixelBytes))
+          bands.push({
+            bytes: new Uint8Array(rendered.bytes), width: rendered.width, height: rendered.height,
+            components: rendered.components, format: options.format,
+          })
+        }
+        return bands
+      }
+
+      for (let start = 0; start < begun.plans.length; start += renderSlots.length) {
+        const batch = begun.plans.slice(start, start + renderSlots.length)
+        const renderedPages = await Promise.all(batch.map((plan, index) => renderPage(renderSlots[index], plan)))
+        if (callbacks.signal?.aborted) throw new DOMException('画像として保存を中止しました。', 'AbortError')
+        for (let index = 0; index < batch.length; index += 1) {
+          writeStarted = performance.now()
+          await writer.writePage(batch[index], renderedPages[index])
+          writeMs += performance.now() - writeStarted
+          completedPages += 1
+          callbacks.onProgress?.(completedPages, begun.plans.length)
+        }
+      }
+      writeStarted = performance.now()
+      await writer.close()
+      writeMs += performance.now() - writeStarted
+      const bytes = memoryTarget?.toBytes() ?? null
+      return {
+        bytes,
+        outputBytes: writer.bytesWritten,
+        replacedCharacters: begun.replacedCharacters,
+        unsupportedCharacters: begun.unsupportedCharacters,
+        errors: begun.errors,
+        metrics: {
+          totalMs: performance.now() - started,
+          saveMs: writeMs,
+          pageCount: begun.plans.length,
+          bandCount,
+          maxEncodedBandBytes,
+          maxWorkerPixelBytes: Math.max(0, ...workerPixelPeaks.values()),
+          concurrentWorkerPixelBytes: [...workerPixelPeaks.values()].reduce((sum, value) => sum + value, 0),
+        },
+      }
+    } catch (error) {
+      try { await writer.abort(error) } catch { /* 元の失敗を隠さない。 */ }
+      throw error
+    } finally {
+      if (temporaryOpened && begin) {
+        for (const slot of renderSlots) {
+          if (!slot.documents.has(begin.renderDocId)) continue
+          slot.worker.postMessage({ type: 'close', docId: begin.renderDocId })
+          slot.documents.delete(begin.renderDocId)
+        }
+      }
+    }
+  }
+
   async applyPageLayout(docId: string, cards: readonly PageLayoutCard[], sources: readonly string[]): Promise<PageLayoutResult> {
     const poolStarted = performance.now()
     const workerStarted = performance.now()
@@ -463,11 +598,15 @@ export class PdfWorkerPool {
     this.pendingRequests.clear()
   }
 
-  private request<T extends WorkerResponse>(slot: WorkerSlot, message: (requestId: number) => object): Promise<T> {
+  private request<T extends WorkerResponse>(
+    slot: WorkerSlot,
+    message: (requestId: number) => object,
+    transfer: Transferable[] = [],
+  ): Promise<T> {
     const requestId = this.nextId++
     return new Promise<T>((resolve, reject) => {
       this.pendingRequests.set(requestId, { resolve: (value) => resolve(value as T), reject })
-      slot.worker.postMessage(message(requestId))
+      slot.worker.postMessage(message(requestId), transfer)
     })
   }
 

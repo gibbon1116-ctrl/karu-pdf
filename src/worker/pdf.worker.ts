@@ -15,6 +15,7 @@ import {
 import { layoutText } from '../core/textLayout'
 import { saveDocument } from '../core/save'
 import { prepareDocumentOutput } from '../core/output'
+import { planRasterPages, renderRasterBand } from '../core/rasterize'
 import {
   applyPageLayout,
   extractPages,
@@ -26,6 +27,7 @@ import type {
   ApplyEditsRequest,
   ApplyAndSaveRequest,
   ApplyPageLayoutRequest,
+  BeginRasterizeRequest,
   ExtractPagesRequest,
   ExportBytesRequest,
   GetPageInfoRequest,
@@ -34,6 +36,7 @@ import type {
   OpenRequest,
   PrepareOutputRequest,
   RenderRequest,
+  RenderRasterBandRequest,
   SplitPagesRequest,
   UndoPageLayoutRequest,
   WorkerRequest,
@@ -66,6 +69,8 @@ type CoreRequest =
   | SplitPagesRequest
   | GetPageInfoRequest
   | ExportBytesRequest
+  | BeginRasterizeRequest
+  | RenderRasterBandRequest
 type QueuedRequest =
   | (RenderRequest & { sequence: number })
   | (CoreRequest & { sequence: number; priority: -1 })
@@ -135,6 +140,16 @@ async function getFontResource(name: FontName): Promise<FontResource> {
   const fontResource = createFontResource(new Uint8Array(await response.arrayBuffer()), name)
   fontResources[name] = fontResource
   return fontResource
+}
+
+async function loadFontsForEdits(edits: readonly import('../core/annotations').AnnotationEdit[]): Promise<void> {
+  const requiredFonts = new Set<FontName>()
+  for (const edit of edits) {
+    if (edit.kind === 'createFreeText' || edit.kind === 'updateFreeText'
+      || edit.kind === 'createCallout' || edit.kind === 'updateCallout') requiredFonts.add(edit.font)
+  }
+  await Promise.all([...requiredFonts].map((fontName) => getFontResource(fontName)))
+  if (requiredFonts.size > 0) getDingbatsResource()
 }
 
 function schedule(): void {
@@ -244,14 +259,61 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       return
     }
 
-    if (request.type === 'prepareOutput') {
-      const requiredFonts = new Set<FontName>()
-      for (const edit of request.edits) {
-        if (edit.kind === 'createFreeText' || edit.kind === 'updateFreeText'
-          || edit.kind === 'createCallout' || edit.kind === 'updateCallout') requiredFonts.add(edit.font)
+    if (request.type === 'renderRasterBand') {
+      const bandPlan = request.pagePlan.bands[request.bandIndex]
+      if (!bandPlan) throw new Error('画像の帯の番号が範囲外です。')
+      const rendered = renderRasterBand(document, request.pagePlan, bandPlan, request)
+      const bytes = rendered.bytes.buffer as ArrayBuffer
+      post({
+        type: 'rasterBandRendered', requestId: request.requestId, bytes,
+        width: rendered.width, height: rendered.height,
+        components: rendered.components, pixelBytes: rendered.pixelBytes,
+      }, [bytes])
+      return
+    }
+
+    if (request.type === 'beginRasterize') {
+      await loadFontsForEdits(request.edits)
+      let preparedBytes: Uint8Array | undefined
+      let plans
+      let replacedCharacters = 0
+      let unsupportedCharacters: string[] = []
+      let errors: import('../core/annotations').ApplyError[] = []
+      if (request.edits.length > 0) {
+        const source = saveDocument(document, 'incremental').bytes
+        const prepared = prepareDocumentOutput(source, request.edits, fontResources, false)
+        preparedBytes = prepared.bytes
+        replacedCharacters = prepared.applied.replacedCharacters
+        unsupportedCharacters = prepared.applied.unsupportedCharacters
+        errors = prepared.applied.errors
+        const opened = openDocument(preparedBytes)
+        try {
+          const preparedDocument = opened.document.asPDF()
+          if (!preparedDocument) throw new Error('PDF 文書ではありません。')
+          plans = planRasterPages(preparedDocument, request.options)
+        } finally {
+          opened.document.destroy()
+        }
+      } else {
+        plans = planRasterPages(document, request.options)
       }
-      await Promise.all([...requiredFonts].map((fontName) => getFontResource(fontName)))
-      if (requiredFonts.size > 0) getDingbatsResource()
+      const transfer: Transferable[] = []
+      const responseBytes = preparedBytes?.buffer as ArrayBuffer | undefined
+      if (responseBytes) transfer.push(responseBytes)
+      post({
+        type: 'rasterizeBegun', requestId: request.requestId,
+        renderDocId: preparedBytes ? request.renderDocId : request.docId,
+        preparedBytes: responseBytes,
+        plans,
+        replacedCharacters,
+        unsupportedCharacters,
+        errors,
+      }, transfer)
+      return
+    }
+
+    if (request.type === 'prepareOutput') {
+      await loadFontsForEdits(request.edits)
       const source = saveDocument(document, 'incremental').bytes
       const output = prepareDocumentOutput(source, request.edits, fontResources, request.bake)
       const bytes = output.bytes.buffer as ArrayBuffer
@@ -355,13 +417,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       return
     }
 
-    const requiredFonts = new Set<FontName>()
-    for (const edit of request.edits) {
-      if (edit.kind === 'createFreeText' || edit.kind === 'updateFreeText'
-        || edit.kind === 'createCallout' || edit.kind === 'updateCallout') requiredFonts.add(edit.font)
-    }
-    await Promise.all([...requiredFonts].map((fontName) => getFontResource(fontName)))
-    if (requiredFonts.size > 0) getDingbatsResource()
+    await loadFontsForEdits(request.edits)
     const applied = applyEdits(document, request.edits, fontResources)
     entry.displayLists.clear()
     if (request.type === 'applyEdits') {
@@ -433,6 +489,8 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     || message.type === 'splitPages'
     || message.type === 'getPageInfo'
     || message.type === 'exportBytes'
+    || message.type === 'beginRasterize'
+    || message.type === 'renderRasterBand'
   ) {
     queue.push({ ...message, priority: -1, sequence: sequence++ })
     queue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence)

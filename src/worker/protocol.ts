@@ -4,6 +4,7 @@ import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
 import type { SaveMode } from '../core/save'
 import type { PageInfo, PageLayoutCard } from '../core/pageOps'
+import type { RasterPagePlan, RasterizeOptions } from '../core/rasterize'
 
 export type DeviceRect = [number, number, number, number]
 export type Priority = 0 | 1 | 2 | 3
@@ -143,6 +144,25 @@ export interface ExportBytesRequest {
   docId: string
 }
 
+export interface BeginRasterizeRequest {
+  type: 'beginRasterize'
+  requestId: number
+  docId: string
+  renderDocId: string
+  edits: AnnotationEdit[]
+  options: RasterizeOptions
+}
+
+export interface RenderRasterBandRequest {
+  type: 'renderRasterBand'
+  requestId: number
+  docId: string
+  pagePlan: RasterPagePlan
+  bandIndex: number
+  color: RasterizeOptions['color']
+  format: RasterizeOptions['format']
+}
+
 export type WorkerRequest =
   | OpenRequest
   | RenderRequest
@@ -162,6 +182,8 @@ export type WorkerRequest =
   | GetPageInfoRequest
   | CloseRequest
   | ExportBytesRequest
+  | BeginRasterizeRequest
+  | RenderRasterBandRequest
 
 export interface ReadyResponse {
   type: 'ready'
@@ -275,6 +297,27 @@ export interface ExportBytesResponse {
   bytes: ArrayBuffer
 }
 
+export interface RasterizeBegunResponse {
+  type: 'rasterizeBegun'
+  requestId: number
+  renderDocId: string
+  preparedBytes?: ArrayBuffer
+  plans: RasterPagePlan[]
+  replacedCharacters: number
+  unsupportedCharacters: string[]
+  errors: ApplyError[]
+}
+
+export interface RasterBandRenderedResponse {
+  type: 'rasterBandRendered'
+  requestId: number
+  bytes: ArrayBuffer
+  width: number
+  height: number
+  components: number
+  pixelBytes: number
+}
+
 export interface ErrorResponse {
   type: 'error'
   requestId?: number
@@ -298,4 +341,6 @@ export type WorkerResponse =
   | PagesSplitResponse
   | PageInfoResponse
   | ExportBytesResponse
+  | RasterizeBegunResponse
+  | RasterBandRenderedResponse
   | ErrorResponse

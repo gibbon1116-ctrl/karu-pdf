@@ -4,11 +4,14 @@ import { DocumentWorkspace } from './app/DocumentWorkspace'
 import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
 import { HelpDialog } from './app/HelpDialog'
 import { MenuBar } from './app/MenuBar'
+import { RasterizeDialog } from './app/RasterizeDialog'
 import { ToolRow } from './app/ToolRow'
 import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS } from './app/documentModel'
 import { StartScreen } from './app/StartScreen'
 import { ErrorBoundary } from './app/ErrorBoundary'
-import { PdfWorkerPool, type ApplyAndSaveResult, type PageLayoutTimings, type PreparedOutputResult } from './client/PdfWorkerPool'
+import { PdfWorkerPool, type ApplyAndSaveResult, type PageLayoutTimings, type PreparedOutputResult, type RasterizeMetrics } from './client/PdfWorkerPool'
+import type { RasterizeOptions } from './core/rasterize'
+import { BlobPdfWriteTarget, type PdfWriteTarget } from './core/pdfStreamWriter'
 import type { EditorTool } from './editor/AnnotationLayer'
 import type { EditableAnnotation } from './editor/AnnotationStore'
 import { downloadPdf, pickOpenHandles, pickSaveHandle, requestWritePermission, writePdf, writePdfWithoutOverwrite, type PdfFileHandle } from './editor/fileAccess'
@@ -61,6 +64,9 @@ declare global {
       splitToBytes(mode: OrganizeSplitMode): Promise<Uint8Array[]>
       finalizeToBytes(): Promise<Uint8Array | null>
       printToBytes(): Promise<Uint8Array | null>
+      rasterizeToBytes(options: RasterizeOptions): Promise<Uint8Array | null>
+      rasterizeToStream(options: RasterizeOptions, target: PdfWriteTarget): Promise<RasterizeMetrics | null>
+      getLastRasterizeMetrics(): RasterizeMetrics | null
       getMenuActions(): string[]
     }
     launchQueue?: {
@@ -134,6 +140,19 @@ function finalizedName(fileName: string): string {
   return `${fileName.replace(/\.pdf$/i, '')}_確定.pdf`
 }
 
+function rasterizedName(fileName: string): string {
+  return `${fileName.replace(/\.pdf$/i, '')}_画像.pdf`
+}
+
+function downloadPdfBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  anchor.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
 function sourceIdsForCards(targetDocId: string, cards: readonly PageLayoutCard[]): string[] {
   return [...new Set(cards.flatMap((card) => card.source.kind === 'page' && card.source.docId !== targetDocId ? [card.source.docId] : []))]
 }
@@ -168,6 +187,7 @@ export default function App() {
   } | null>(null)
   const menuActionsRef = useRef<string[]>([])
   const updateServiceWorkerRef = useRef<((reloadPage?: boolean) => Promise<void>) | null>(null)
+  const lastRasterizeMetricsRef = useRef<RasterizeMetrics | null>(null)
   const [, setTabsVersion] = useState(0)
   const [page, setPage] = useState(() => tabs.active?.view.page ?? 0)
   const [zoom, setZoom] = useState(() => tabs.active?.view.zoom ?? 1)
@@ -181,6 +201,7 @@ export default function App() {
   const [saving, setSaving] = useState(false)
   const [organize, setOrganize] = useState<ActiveOrganize | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [rasterizeOpen, setRasterizeOpen] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
   const [debug, setDebug] = useState(() => new URLSearchParams(location.search).get('debug') === '1')
   const [workspaceFailure, setWorkspaceFailure] = useState(false)
@@ -514,6 +535,67 @@ export default function App() {
     if (result.errors.length > 0) throw new Error(result.errors.map((item) => item.message).join(' / '))
     return result
   }, [pool])
+
+  const rasterizeToTarget = useCallback(async (
+    options: RasterizeOptions,
+    target?: PdfWriteTarget,
+    signal?: AbortSignal,
+    onProgress?: (completed: number, total: number) => void,
+  ) => {
+    const session = activeRef.current
+    if (!session) return null
+    await viewerRef.current?.commitEditor()
+    const result = await pool.rasterize(session.docId, session.annotationStore.toEdits(), options, { signal, onProgress, target })
+    lastRasterizeMetricsRef.current = result.metrics
+    return result
+  }, [pool])
+
+  const rasterizeToBytes = useCallback(async (
+    options: RasterizeOptions,
+    signal?: AbortSignal,
+    onProgress?: (completed: number, total: number) => void,
+  ): Promise<Uint8Array | null> => (await rasterizeToTarget(options, undefined, signal, onProgress))?.bytes ?? null,
+  [rasterizeToTarget])
+
+  const saveRasterized = useCallback(async (
+    options: RasterizeOptions,
+    signal: AbortSignal,
+    onProgress: (completed: number, total: number) => void,
+  ): Promise<void> => {
+    const session = activeRef.current
+    if (!session || !beginSave()) throw new Error('保存中です。')
+    try {
+      const name = rasterizedName(session.name)
+      const handle = window.showSaveFilePicker ? await pickSaveHandle(name, session.handle ?? undefined) : null
+      if (signal.aborted) throw new DOMException('画像として保存を中止しました。', 'AbortError')
+      if (handle) {
+        const writable = await handle.createWritable()
+        const abortable = writable as typeof writable & { abort?(reason?: unknown): Promise<void> }
+        const target: PdfWriteTarget = {
+          write: (data) => writable.write(new Uint8Array(data).buffer),
+          close: () => writable.close(),
+          abort: async (reason) => {
+            if (!abortable.abort) throw new Error('書きかけのファイルを破棄できません。')
+            await abortable.abort(reason)
+          },
+        }
+        if (!await rasterizeToTarget(options, target, signal, onProgress)) throw new Error('PDF が開かれていません。')
+      } else {
+        const target = new BlobPdfWriteTarget()
+        if (!await rasterizeToTarget(options, target, signal, onProgress)) throw new Error('PDF が開かれていません。')
+        downloadPdfBlob(target.toBlob(), name)
+      }
+      showStatus('画像PDFを保存しました。今開いているファイルは変わりません。')
+    } finally {
+      endSave()
+    }
+  }, [beginSave, endSave, rasterizeToTarget, showStatus])
+
+  const estimateRasterized = useCallback(async (options: RasterizeOptions, signal: AbortSignal): Promise<number> => {
+    const bytes = await rasterizeToBytes(options, signal)
+    if (!bytes) throw new Error('PDF が開かれていません。')
+    return bytes.byteLength
+  }, [rasterizeToBytes])
 
   const saveFinalized = useCallback(async () => {
     const session = activeRef.current
@@ -1038,10 +1120,13 @@ export default function App() {
       splitToBytes,
       finalizeToBytes: async () => (await prepareOutput(true))?.bytes ?? null,
       printToBytes: async () => (await prepareOutput(false))?.bytes ?? null,
+      rasterizeToBytes: (options) => rasterizeToBytes(options),
+      rasterizeToStream: async (options, target) => (await rasterizeToTarget(options, target))?.metrics ?? null,
+      getLastRasterizeMetrics: () => lastRasterizeMetricsRef.current,
       getMenuActions: () => [...menuActionsRef.current],
     }
     return () => { delete window.__karu }
-  }, [activateDocument, applyOrganize, closeDocument, extractToBytes, openBuffer, openOrganize, pool, prepareOutput, saveToBytes, splitToBytes, tabs, undoLastOrganize])
+  }, [activateDocument, applyOrganize, closeDocument, extractToBytes, openBuffer, openOrganize, pool, prepareOutput, rasterizeToBytes, rasterizeToTarget, saveToBytes, splitToBytes, tabs, undoLastOrganize])
 
   const openRecent = async (item: RecentFile) => {
     try {
@@ -1120,6 +1205,7 @@ export default function App() {
           onSave={() => { menuActionsRef.current.push('save'); void saveDocument(false) }}
           onSaveAs={() => { menuActionsRef.current.push('save-as'); void saveDocument(true) }}
           onSaveFinalized={() => void saveFinalized()}
+          onSaveRasterized={() => setRasterizeOpen(true)}
           onPrint={() => void printDocument()}
           onCloseTab={() => { if (active) void closeDocument(active.docId) }}
           onUndo={() => { active?.annotationStore.undo(); viewerRef.current?.clearSelection(); refreshTabs() }}
@@ -1215,6 +1301,13 @@ export default function App() {
         <span role="status">{runtimeError || status}</span>
       </footer>
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <RasterizeDialog
+        open={rasterizeOpen && Boolean(active)}
+        pageCount={active?.pageSizes.length ?? 0}
+        onClose={() => setRasterizeOpen(false)}
+        onEstimate={estimateRasterized}
+        onSave={saveRasterized}
+      />
     </main>
   )
 }

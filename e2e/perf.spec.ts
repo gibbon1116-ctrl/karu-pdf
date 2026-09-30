@@ -440,3 +440,55 @@ test('Worker 4本（文書1＋描画3）・warmなしの表示性能を計測す
   expect(rows).toHaveLength(1)
   expect(rows[0].detailRecoveryCount).toBe(0)
 })
+
+test('画像として保存の性能を1回計測する', async ({ page }) => {
+  await fs.access(pdf)
+  await page.goto('/karu-pdf/?test=1&workers=4')
+  await page.getByTestId('file-input').setInputFiles(pdf)
+  await expect(page.getByText('1 / 300')).toBeVisible({ timeout: 180_000 })
+  const result = await page.evaluate(async () => {
+    const memory = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory
+    let peakMainHeapBytes = memory?.usedJSHeapSize ?? null
+    const timer = window.setInterval(() => {
+      if (memory && peakMainHeapBytes !== null) peakMainHeapBytes = Math.max(peakMainHeapBytes, memory.usedJSHeapSize)
+    }, 100)
+    const started = performance.now()
+    const storage = navigator.storage as StorageManager & {
+      getDirectory(): Promise<{
+        getFileHandle(name: string, options: { create: boolean }): Promise<{
+          createWritable(): Promise<{ write(data: Uint8Array): Promise<void>; close(): Promise<void>; abort(reason?: unknown): Promise<void> }>
+          getFile(): Promise<File>
+        }>
+        removeEntry(name: string): Promise<void>
+      }>
+    }
+    const root = await storage.getDirectory()
+    const temporaryName = 'rasterize-benchmark.pdf'
+    try {
+      const handle = await root.getFileHandle(temporaryName, { create: true })
+      const writable = await handle.createWritable()
+      const metrics = await window.__karu!.rasterizeToStream({
+        dpi: 150,
+        color: 'color',
+        format: 'jpeg',
+        pageIndexes: Array.from({ length: 300 }, (_, index) => index),
+      }, {
+        write: (data) => writable.write(new Uint8Array(data).buffer),
+        close: () => writable.close(),
+        abort: (reason) => writable.abort(reason),
+      })
+      return {
+        elapsedMs: performance.now() - started,
+        outputBytes: (await handle.getFile()).size,
+        peakMainHeapBytes,
+        metrics,
+      }
+    } finally {
+      window.clearInterval(timer)
+      await root.removeEntry(temporaryName).catch(() => undefined)
+    }
+  })
+  console.log('[画像として保存 性能計測]', JSON.stringify(result))
+  expect(result.outputBytes).toBeGreaterThan(0)
+  expect(result.metrics?.pageCount).toBe(300)
+})
