@@ -8,7 +8,7 @@ test('前回のページと倍率を文書ごとに復元する', async ({ page 
   await page.goto('/karu-pdf/?test=1')
   await page.getByTestId('file-input').setInputFiles(sample)
   await expect(page.getByText('1 / 5')).toBeVisible()
-  await expect(page.locator('.zoom-output')).toContainText('%')
+  await expect(page.locator('.zoom-value')).toContainText('%')
   await page.evaluate(() => window.__karu!.scrollToPage(2))
   await expect(page.getByText('3 / 5')).toBeVisible()
   await page.evaluate(() => window.__karu!.setZoom(1.5))
@@ -50,9 +50,9 @@ test('ファイル選択にidと前回のハンドルを渡す', async ({ page }
     })
   }, { pdfBytes: bytes })
   await page.goto('/karu-pdf/?test=1')
-  await page.getByRole('button', { name: '開く', exact: true }).click()
+  await page.getByRole('button', { name: 'PDFを開く', exact: true }).click()
   await expect(page.getByText('1 / 5')).toBeVisible()
-  await page.getByRole('button', { name: '開く', exact: true }).click()
+  await page.getByRole('button', { name: 'PDFを開く', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (window as Window & { __pickerCalls?: unknown[] }).__pickerCalls?.length ?? 0)).toBe(2)
   const options = await page.evaluate(() => {
     const target = window as unknown as Window & { __pickerCalls: Array<{ id?: string; startIn?: unknown }>; __pickerHandle: unknown }
@@ -64,18 +64,18 @@ test('ファイル選択にidと前回のハンドルを渡す', async ({ page }
   ])
 })
 
-test('800px幅ではツールバーだけが折り返し、ボタン内は折り返さない', async ({ page }) => {
+test('800px幅でも上部メニューは32pxと40pxの2段に収まる', async ({ page }) => {
   await page.setViewportSize({ width: 800, height: 700 })
   await page.goto('/karu-pdf/?test=1')
-  const result = await page.locator('.toolbar').evaluate((toolbar) => ({
-    flexWrap: getComputedStyle(toolbar).flexWrap,
-    height: toolbar.getBoundingClientRect().height,
-    buttons: [...toolbar.querySelectorAll('button')].map((button) => ({
-      whiteSpace: getComputedStyle(button).whiteSpace,
-      lineFits: button.scrollHeight <= button.clientHeight,
-    })),
+  await expect(page.locator('.menu-bar')).toHaveCSS('height', '32px')
+  await expect(page.locator('.tool-row')).toHaveCSS('height', '40px')
+  const fits = await page.locator('.top-controls').evaluate((controls) => ({
+    height: controls.getBoundingClientRect().height,
+    width: controls.scrollWidth,
+    clientWidth: controls.clientWidth,
+    buttonsFit: [...controls.querySelectorAll('button')].every((button) => button.scrollHeight <= button.clientHeight),
   }))
-  expect(result.flexWrap).toBe('wrap')
-  expect(result.height).toBeGreaterThan(48)
-  expect(result.buttons.every((button) => button.whiteSpace === 'nowrap' && button.lineFits)).toBe(true)
+  expect(fits.height).toBe(72)
+  expect(fits.width).toBeLessThanOrEqual(fits.clientWidth)
+  expect(fits.buttonsFit).toBe(true)
 })

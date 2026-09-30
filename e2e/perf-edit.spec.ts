@@ -83,7 +83,8 @@ async function measureEditing(page: Page, pdf: string, pageIndex: number, source
   const startX = Math.max(viewerBox.x + 80, Math.min(viewerBox.x + viewerBox.width - 260, box.x + 180))
   const startY = Math.max(viewerBox.y + 90, Math.min(viewerBox.y + viewerBox.height - 220, box.y + 160))
 
-  await page.getByRole('button', { name: '四角', exact: true }).click()
+  await page.getByRole('button', { name: '図形▼' }).click()
+  await page.getByRole('menuitemcheckbox', { name: '四角' }).click()
   await page.mouse.move(startX, startY)
   await page.mouse.down()
   for (let step = 1; step <= 120; step += 1) {
@@ -92,7 +93,8 @@ async function measureEditing(page: Page, pdf: string, pageIndex: number, source
   }
   await page.mouse.up()
 
-  await page.getByRole('button', { name: '手書き', exact: true }).click()
+  await page.getByRole('button', { name: 'ペン▼' }).click()
+  await page.getByRole('menuitemcheckbox', { name: '手書き' }).click()
   const inkY = Math.min(viewerBox.y + viewerBox.height - 150, startY + 95)
   await page.mouse.move(startX, inkY)
   await page.mouse.down()

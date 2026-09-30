@@ -57,7 +57,8 @@ test('確定保存ボタンとCtrl+Pが別出力を作り、開いている文�
   await expect(page.getByText('1 / 5')).toBeVisible()
   const before = await page.evaluate(() => window.__karu!.getEditableAnnotations(0).map((item) => item.id))
 
-  await page.getByRole('button', { name: '確定して別名で保存' }).click()
+  await page.getByRole('button', { name: 'ファイル▼' }).click()
+  await page.getByRole('menuitem', { name: '確定して別名で保存' }).click()
   const status = page.locator('.status-bar [role="status"]')
   await expect(status).toContainText('確定版を保存しました。確定版の書き込みは編集できません。')
   const saved = await page.evaluate(() => {
@@ -89,7 +90,8 @@ test('使い方を開始画面とツールバーから開き、Escで閉じら�
 
   await page.getByTestId('file-input').setInputFiles(sample)
   await expect(page.getByText('1 / 5')).toBeVisible()
-  await page.locator('header.toolbar').getByRole('button', { name: '使い方' }).click()
+  await page.getByRole('button', { name: 'ヘルプ▼' }).click()
+  await page.getByRole('menuitem', { name: '使い方' }).click()
   await expect(dialog).toBeVisible()
 })
 
@@ -111,7 +113,7 @@ test('File Handling APIから渡されたPDFをタブで開く', async ({ page }
   }, { pdfBytes: bytes })
   await page.goto('/karu-pdf/?test=1')
   await expect(page.getByText('1 / 5')).toBeVisible()
-  await expect(page.getByText('プログラムから開いた.pdf')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'プログラムから開いた.pdf', exact: true })).toBeVisible()
 })
 
 test('一度開いた後はオフラインで再読み込みして開始画面を表示できる', async ({ page, context }) => {

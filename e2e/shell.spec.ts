@@ -85,7 +85,8 @@ test('書式パネルの青・3ptと文字14ptを作成と保存へ反映する'
   const box = await layer.boundingBox()
   if (!box) throw new Error('注釈レイヤーがありません。')
 
-  await page.getByRole('button', { name: '四角', exact: true }).click()
+  await page.getByRole('button', { name: '図形▼' }).click()
+  await page.getByRole('menuitemcheckbox', { name: '四角' }).click()
   await page.getByLabel('枠線の色 青').click()
   await page.getByLabel('線の太さ').selectOption('3')
   await page.mouse.move(box.x + 250, box.y + 220)

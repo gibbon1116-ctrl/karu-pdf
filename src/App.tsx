@@ -3,6 +3,8 @@ import { DocumentTabs } from './app/DocumentTabs'
 import { DocumentWorkspace } from './app/DocumentWorkspace'
 import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
 import { HelpDialog } from './app/HelpDialog'
+import { MenuBar } from './app/MenuBar'
+import { ToolRow } from './app/ToolRow'
 import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS } from './app/documentModel'
 import { StartScreen } from './app/StartScreen'
 import { ErrorBoundary } from './app/ErrorBoundary'
@@ -59,6 +61,7 @@ declare global {
       splitToBytes(mode: OrganizeSplitMode): Promise<Uint8Array[]>
       finalizeToBytes(): Promise<Uint8Array | null>
       printToBytes(): Promise<Uint8Array | null>
+      getMenuActions(): string[]
     }
     launchQueue?: {
       setConsumer(consumer: (params: { files: PdfFileHandle[] }) => void): void
@@ -157,6 +160,7 @@ export default function App() {
   const openQueueRef = useRef<Promise<void>>(Promise.resolve())
   const organizeRef = useRef<ActiveOrganize | null>(null)
   const organizeClipboardRef = useRef<{ cards: PageCard[]; sources: OrganizeSourceInfo[] } | null>(null)
+  const menuActionsRef = useRef<string[]>([])
   const updateServiceWorkerRef = useRef<((reloadPage?: boolean) => Promise<void>) | null>(null)
   const [, setTabsVersion] = useState(0)
   const [page, setPage] = useState(() => tabs.active?.view.page ?? 0)
@@ -934,6 +938,7 @@ export default function App() {
       splitToBytes,
       finalizeToBytes: async () => (await prepareOutput(true))?.bytes ?? null,
       printToBytes: async () => (await prepareOutput(false))?.bytes ?? null,
+      getMenuActions: () => [...menuActionsRef.current],
     }
     return () => { delete window.__karu }
   }, [activateDocument, applyOrganize, closeDocument, extractToBytes, openBuffer, openOrganize, pool, prepareOutput, saveToBytes, splitToBytes, tabs, undoLastOrganize])
@@ -999,39 +1004,53 @@ export default function App() {
         onClose={(docId) => void closeDocument(docId)}
         onOpen={() => void pickFile()}
       />
-      <header className="toolbar">
-        <button type="button" onClick={() => void pickFile()}>開く</button>
-        <button type="button" onClick={() => void saveDocument(false)} disabled={!active || saving || !!organize}>上書き保存</button>
-        <button type="button" onClick={() => void saveDocument(true)} disabled={!active || saving || !!organize}>別名で保存</button>
-        <button type="button" onClick={() => void saveFinalized()} disabled={!active || saving || !!organize}>確定して別名で保存</button>
-        <button type="button" onClick={() => void printDocument()} disabled={!active || saving || !!organize}>印刷</button>
-        <span className="toolbar-separator" />
-        <button type="button" className={tool === 'select' ? 'active' : ''} aria-pressed={tool === 'select'} disabled={!active} onClick={() => void changeTool('select')}>選択</button>
-        <button type="button" className={tool === 'text' ? 'active' : ''} aria-pressed={tool === 'text'} disabled={!active} onClick={() => void changeTool('text')}>文字</button>
-        <button type="button" className={tool === 'callout' ? 'active' : ''} aria-pressed={tool === 'callout'} disabled={!active} onClick={() => void changeTool('callout')}>吹き出し</button>
-        <button type="button" className={tool === 'line' ? 'active' : ''} aria-pressed={tool === 'line'} disabled={!active} onClick={() => void changeTool('line')}>線</button>
-        <button type="button" className={tool === 'arrow' ? 'active' : ''} aria-pressed={tool === 'arrow'} disabled={!active} onClick={() => void changeTool('arrow')}>矢印</button>
-        <button type="button" className={tool === 'square' ? 'active' : ''} aria-pressed={tool === 'square'} disabled={!active} onClick={() => void changeTool('square')}>四角</button>
-        <button type="button" className={tool === 'circle' ? 'active' : ''} aria-pressed={tool === 'circle'} disabled={!active} onClick={() => void changeTool('circle')}>丸</button>
-        <button type="button" className={tool === 'symbol' ? 'active' : ''} aria-pressed={tool === 'symbol'} disabled={!active} onClick={() => void changeTool('symbol')}>記号</button>
-        <button type="button" className={tool === 'highlight' ? 'active' : ''} aria-pressed={tool === 'highlight'} disabled={!active} onClick={() => void changeTool('highlight')}>蛍光ペン</button>
-        <button type="button" className={tool === 'ink' ? 'active' : ''} aria-pressed={tool === 'ink'} disabled={!active} onClick={() => void changeTool('ink')}>手書き</button>
-        <span className="toolbar-separator" />
-        <button type="button" disabled={!active?.annotationStore.canUndo()} onClick={() => { active?.annotationStore.undo(); viewerRef.current?.clearSelection(); refreshTabs() }}>元に戻す</button>
-        <button type="button" disabled={!active?.annotationStore.canRedo()} onClick={() => { active?.annotationStore.redo(); viewerRef.current?.clearSelection(); refreshTabs() }}>やり直し</button>
-        <span className="toolbar-separator" />
-        <button type="button" aria-pressed={panels.thumbnails} onClick={() => updatePanels({ ...panels, thumbnails: !panels.thumbnails })}>ページ一覧</button>
-        <button type="button" aria-pressed={panels.format} onClick={() => updatePanels({ ...panels, format: !panels.format })}>書式</button>
-        <button type="button" disabled={!active || !!organize} onClick={() => void openOrganize()}>ページ整理</button>
-        <button type="button" disabled={!active?.canUndoOrganize || !!organize || saving} onClick={() => void undoLastOrganize()}>ページ整理を元に戻す</button>
-        <span className="toolbar-separator" />
-        <button type="button" onClick={() => viewerRef.current?.zoomOut()} disabled={!active}>縮小</button>
-        <button type="button" onClick={() => viewerRef.current?.zoomIn()} disabled={!active}>拡大</button>
-        <button type="button" onClick={() => viewerRef.current?.fitWidth()} disabled={!active}>幅に合わせる</button>
-        <output className="zoom-output">{Math.round(zoom * 100)}%</output>
-        <button type="button" onClick={() => setHelpOpen(true)}>使い方</button>
-        {testMode && <button type="button" data-testid="throw-workspace-error" onClick={() => setWorkspaceFailure(true)}>作業領域エラー</button>}
-      </header>
+      <div className="top-controls">
+        <MenuBar
+          fileName={active?.name ?? null}
+          dirty={active?.dirty ?? false}
+          hasDocument={!!active}
+          saving={saving}
+          organizing={!!organize}
+          canUndo={active?.annotationStore.canUndo() ?? false}
+          canRedo={active?.annotationStore.canRedo() ?? false}
+          showThumbnails={panels.thumbnails}
+          showFormat={panels.format}
+          canUndoOrganize={active?.canUndoOrganize ?? false}
+          onOpen={() => void pickFile()}
+          onSave={() => { menuActionsRef.current.push('save'); void saveDocument(false) }}
+          onSaveAs={() => { menuActionsRef.current.push('save-as'); void saveDocument(true) }}
+          onSaveFinalized={() => void saveFinalized()}
+          onPrint={() => void printDocument()}
+          onCloseTab={() => { if (active) void closeDocument(active.docId) }}
+          onUndo={() => { active?.annotationStore.undo(); viewerRef.current?.clearSelection(); refreshTabs() }}
+          onRedo={() => { active?.annotationStore.redo(); viewerRef.current?.clearSelection(); refreshTabs() }}
+          onClearSelection={() => viewerRef.current?.clearSelection()}
+          onDeleteSelection={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete' }))}
+          onToggleThumbnails={() => updatePanels({ ...panels, thumbnails: !panels.thumbnails })}
+          onToggleFormat={() => updatePanels({ ...panels, format: !panels.format })}
+          onZoomIn={() => viewerRef.current?.zoomIn()}
+          onZoomOut={() => viewerRef.current?.zoomOut()}
+          onFitWidth={() => viewerRef.current?.fitWidth()}
+          onOrganize={() => void openOrganize()}
+          onUndoOrganize={() => void undoLastOrganize()}
+          onHelp={() => setHelpOpen(true)}
+        />
+        <ToolRow
+          tool={tool}
+          hasDocument={!!active}
+          zoom={zoom}
+          canUndo={active?.annotationStore.canUndo() ?? false}
+          canRedo={active?.annotationStore.canRedo() ?? false}
+          onToolChange={(next) => void changeTool(next)}
+          onUndo={() => { active?.annotationStore.undo(); viewerRef.current?.clearSelection(); refreshTabs() }}
+          onRedo={() => { active?.annotationStore.redo(); viewerRef.current?.clearSelection(); refreshTabs() }}
+          onZoomIn={() => viewerRef.current?.zoomIn()}
+          onZoomOut={() => viewerRef.current?.zoomOut()}
+          onSetZoom={(next) => viewerRef.current?.setZoom(next)}
+          onFitWidth={() => viewerRef.current?.fitWidth()}
+        />
+        {testMode && <button type="button" className="test-error-button" data-testid="throw-workspace-error" onClick={() => setWorkspaceFailure(true)}>作業領域エラー</button>}
+      </div>
       <input
         hidden
         multiple

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import type { RenderScheduler } from '../client/RenderScheduler'
 import type { PageSize } from '../core/mupdfDoc'
 import type { AnnotationStore } from '../editor/AnnotationStore'
+import { Dropdown, type DropdownItem } from '../ui/Dropdown'
 import { PDF_PICKER_TYPES } from '../editor/fileAccess'
 import type { PageCard } from './OrganizeDraft'
 import { OrganizeDraft } from './OrganizeDraft'
@@ -80,13 +81,6 @@ function cardLabel(card: PageCard, index: number, targetDocId: string, sources: 
   if (card.source.docId === targetDocId) return String(index + 1)
   const name = sources.get(card.source.docId)?.name.replace(/\.pdf$/i, '') ?? '追加'
   return `${name.slice(0, 8)}-${card.source.pageIndex + 1}`
-}
-
-function Menu({ label, children }: { label: string; children: React.ReactNode }) {
-  return <details className="organize-menu">
-    <summary role="button">{label}▼</summary>
-    <div className="organize-menu-items" onClick={(event) => event.currentTarget.closest('details')?.removeAttribute('open')}>{children}</div>
-  </details>
 }
 
 function Dialog({ title, children, onCancel, testId }: {
@@ -404,16 +398,16 @@ export function OrganizeView(props: Props) {
   return <section className="organize-view" data-testid="organize-view">
     <header className="organize-toolbar">
       <strong>ページ整理</strong>
-      <Menu label="挿入">
-        <button type="button" title="複数のPDFをまとめて選べます" disabled={props.busy} onClick={() => void pickFiles('insert')}>他のPDFから（複数選択可）</button>
-        <button type="button" disabled={props.busy} onClick={() => { setPosition('after'); setBlankOpen(true); setDialogError('') }}>白紙のページ</button>
-        <button type="button" disabled={props.busy} onClick={paste}>クリップボードのページを貼り付け</button>
-      </Menu>
-      <Menu label="回転">
-        <button type="button" disabled={props.busy || selectedIds.length === 0} onClick={() => props.draft.rotate(selectedIds, -90)}>左に90°</button>
-        <button type="button" disabled={props.busy || selectedIds.length === 0} onClick={() => props.draft.rotate(selectedIds, 90)}>右に90°</button>
-        <button type="button" disabled={props.busy || selectedIds.length === 0} onClick={() => props.draft.rotate(selectedIds, 180)}>180°</button>
-      </Menu>
+      <Dropdown label="挿入▼" items={[
+        { label: '他のPDFから（複数選択可）', disabled: props.busy, onSelect: () => void pickFiles('insert') },
+        { label: '白紙のページ', disabled: props.busy, onSelect: () => { setPosition('after'); setBlankOpen(true); setDialogError('') } },
+        { label: 'クリップボードのページを貼り付け', disabled: props.busy, onSelect: paste },
+      ] satisfies DropdownItem[]} />
+      <Dropdown label="回転▼" items={[
+        { label: '左に90°', disabled: props.busy || selectedIds.length === 0, onSelect: () => props.draft.rotate(selectedIds, -90) },
+        { label: '右に90°', disabled: props.busy || selectedIds.length === 0, onSelect: () => props.draft.rotate(selectedIds, 90) },
+        { label: '180°', disabled: props.busy || selectedIds.length === 0, onSelect: () => props.draft.rotate(selectedIds, 180) },
+      ] satisfies DropdownItem[]} />
       <button type="button" disabled={props.busy || selectedIds.length === 0 || selectedIds.length === cards.length} onClick={() => props.draft.delete(selectedIds)}>削除</button>
       <button type="button" disabled={props.busy || selectedIds.length === 0} onClick={() => {
         const created = props.draft.duplicate(selectedIds); setSelection(new Set(created.map((card) => card.id)))
@@ -421,16 +415,16 @@ export function OrganizeView(props: Props) {
       <button type="button" disabled={props.busy || selectedIds.length === 0} onClick={() => void pickFiles('replace')}>置換</button>
       <button type="button" disabled={props.busy || selectedIds.length === 0} onClick={() => { setExtractOpen(true); setDialogError('') }}>抽出</button>
       <button type="button" disabled={props.busy || cards.length < 2} onClick={() => { setSplitOpen(true); setDialogError('') }}>分割</button>
-      <Menu label="並び">
-        <button type="button" disabled={props.busy || cards.length < 2} onClick={() => props.draft.reverse(selectedIds)}>逆順にする</button>
-      </Menu>
-      <Menu label="選択">
-        <button type="button" onClick={() => setSelection(new Set(selectionForMode(cards, selectedIds, 'all')))}>すべて選ぶ</button>
-        <button type="button" onClick={() => setSelection(new Set(selectionForMode(cards, selectedIds, 'invert')))}>選択を反転</button>
-        <button type="button" onClick={() => setSelection(new Set(selectionForMode(cards, selectedIds, 'odd')))}>奇数ページ</button>
-        <button type="button" onClick={() => setSelection(new Set(selectionForMode(cards, selectedIds, 'even')))}>偶数ページ</button>
-        <button type="button" onClick={openPageSelection}>ページ番号で選ぶ</button>
-      </Menu>
+      <Dropdown label="並び▼" items={[
+        { label: '逆順にする', disabled: props.busy || cards.length < 2, onSelect: () => props.draft.reverse(selectedIds) },
+      ]} />
+      <Dropdown label="選択▼" items={[
+        { label: 'すべて選ぶ', onSelect: () => setSelection(new Set(selectionForMode(cards, selectedIds, 'all'))) },
+        { label: '選択を反転', onSelect: () => setSelection(new Set(selectionForMode(cards, selectedIds, 'invert'))) },
+        { label: '奇数ページ', onSelect: () => setSelection(new Set(selectionForMode(cards, selectedIds, 'odd'))) },
+        { label: '偶数ページ', onSelect: () => setSelection(new Set(selectionForMode(cards, selectedIds, 'even'))) },
+        { label: 'ページ番号で選ぶ', onSelect: openPageSelection },
+      ]} />
       <label className="organize-display-size">表示の大きさ
         <select value={displaySize} onChange={(event) => setDisplaySize(event.target.value as DisplaySize)}>
           <option value="small">小</option><option value="medium">中</option><option value="large">大</option>

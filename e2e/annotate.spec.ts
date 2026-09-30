@@ -88,7 +88,8 @@ test('文字と四角を保存し、開き直して再編集できる', async ({
   expect(resizedText.rect[3] - resizedText.rect[1]).toBeGreaterThan(textHeightBefore)
   expect(resizedText.layout?.lines.length ?? 0).toBeGreaterThan(textLinesBefore)
 
-  await page.getByRole('button', { name: '四角', exact: true }).click()
+  await page.getByRole('button', { name: '図形▼' }).click()
+  await page.getByRole('menuitemcheckbox', { name: '四角' }).click()
   await page.mouse.move(box.x + 350, box.y + 300)
   await page.mouse.down()
   await page.mouse.move(box.x + 460, box.y + 380, { steps: 8 })
@@ -153,7 +154,14 @@ async function dragOnLayer(
   const layer = page.getByTestId('annotation-layer-0')
   const box = await layer.boundingBox()
   if (!box) throw new Error('1ページ目の注釈レイヤーがありません。')
-  await page.getByRole('button', { name: tool, exact: true }).click()
+  const main = page.getByRole('button', { name: tool, exact: true })
+  if (await main.count()) {
+    await main.click()
+  } else {
+    const group = ['線', '矢印', '四角', '丸'].includes(tool) ? '図形' : 'ペン'
+    await page.getByRole('button', { name: `${group}▼` }).click()
+    await page.getByRole('menuitemcheckbox', { name: tool }).click()
+  }
   await page.mouse.move(box.x + start.x, box.y + start.y)
   await page.mouse.down()
   await page.mouse.move(box.x + end.x, box.y + end.y, { steps })
@@ -242,7 +250,8 @@ test('塗り・白塗り・文字枠・吹き出し・Ctrl直線を保存して�
   await page.getByTestId('text-editor').fill('背景と枠')
   await page.keyboard.press('Control+Enter')
 
-  await page.getByRole('button', { name: '吹き出し', exact: true }).click()
+  await page.getByRole('button', { name: '文字▼' }).click()
+  await page.getByRole('menuitemcheckbox', { name: '吹き出し' }).click()
   await page.mouse.move(box.x + 260, box.y + 280)
   await page.mouse.down()
   await page.mouse.move(box.x + 350, box.y + 350, { steps: 8 })

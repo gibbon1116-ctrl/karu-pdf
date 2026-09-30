@@ -35,7 +35,8 @@ async function pageInfo(page: Page) {
 test('ページ整理をドラッグ・回転・削除・白紙挿入し、保存と復元ができる', async ({ page }) => {
   await openSample(page)
   const original = await pageInfo(page)
-  await page.getByRole('button', { name: 'ページ整理', exact: true }).click()
+  await page.getByRole('button', { name: 'ページ▼' }).click()
+  await page.getByRole('menuitem', { name: 'ページ整理', exact: true }).click()
   await expect(page.getByTestId('organize-view')).toBeVisible()
 
   const source = page.getByTestId('organize-card-2')
@@ -50,12 +51,12 @@ test('ページ整理をドラッグ・回転・削除・白紙挿入し、保�
 
   await page.getByTestId('organize-card-2').click()
   await page.getByRole('button', { name: '回転▼' }).click()
-  await page.getByRole('button', { name: '右に90°' }).click()
+  await page.getByRole('menuitem', { name: '右に90°' }).click()
   await page.getByTestId('organize-card-3').click()
   await page.getByRole('button', { name: '削除', exact: true }).click()
   await page.getByTestId('organize-card-3').click()
   await page.getByRole('button', { name: '挿入▼' }).click()
-  await page.getByRole('button', { name: '白紙のページ' }).click()
+  await page.getByRole('menuitem', { name: '白紙のページ' }).click()
   await page.getByTestId('organize-blank-dialog').getByRole('button', { name: '挿入' }).click()
   await page.getByRole('button', { name: '適用', exact: true }).click()
   await expect(page.getByTestId('organize-view')).toBeHidden()
@@ -77,7 +78,8 @@ test('ページ整理をドラッグ・回転・削除・白紙挿入し、保�
 
   await page.evaluate(() => window.__karu!.closeTab(window.__karu!.listTabs()[0].docId))
   await page.getByTestId('file-input').setInputFiles(sample)
-  await page.getByRole('button', { name: 'ページ整理', exact: true }).click()
+  await page.getByRole('button', { name: 'ページ▼' }).click()
+  await page.getByRole('menuitem', { name: 'ページ整理', exact: true }).click()
   await page.evaluate(() => {
     const draft = window.__karu!.organizeDraft()!
     draft.move([draft.getCards()[2].id], 0)
@@ -154,7 +156,7 @@ test('A3横の白紙を2枚末尾へ挿入する', async ({ page }) => {
   await openSample(page)
   await page.evaluate(() => window.__karu!.openOrganize())
   await page.getByRole('button', { name: '挿入▼' }).click()
-  await page.getByRole('button', { name: '白紙のページ' }).click()
+  await page.getByRole('menuitem', { name: '白紙のページ' }).click()
   const dialog = page.getByTestId('organize-blank-dialog')
   await dialog.getByLabel('白紙の枚数').fill('2')
   await dialog.getByLabel('白紙の大きさ').selectOption('a3')
@@ -195,7 +197,7 @@ test('ページ番号で選んで抽出し、下書きから削除して適用�
   await openSample(page)
   await page.evaluate(() => window.__karu!.openOrganize())
   await page.getByRole('button', { name: '選択▼' }).click()
-  await page.getByRole('button', { name: 'ページ番号で選ぶ' }).click()
+  await page.getByRole('menuitem', { name: 'ページ番号で選ぶ' }).click()
   const selectionDialog = page.getByTestId('organize-page-selection-dialog')
   await selectionDialog.getByLabel('選ぶページ番号').fill('1-3,5')
   await selectionDialog.getByRole('button', { name: '選択', exact: true }).click()
