@@ -21,6 +21,7 @@ const minchoFontPath = path.resolve('public/fonts/BIZUDMincho-Regular.ttf')
 const resultPath = path.resolve('test-results/annot-roundtrip.pdf')
 const calloutResultPath = path.resolve('test-results/callout-check.pdf')
 const symbolResultPath = path.resolve('test-results/symbol-check.pdf')
+const opacityResultPath = path.resolve('test-results/opacity-check.pdf')
 const firstText = '日本語の書き込みテスト①（半角ABC 123）'
 const firstRect: Rect = [72, 320, 272, 362]
 const rotatedRect: Rect = [100, 100, 300, 145]
@@ -91,6 +92,32 @@ function arrayValue(object: PDFObject, ...keys: string[]): number[] {
 function numberValue(object: PDFObject, ...keys: string[]): number {
   const value = object.get(...keys)
   try { return value.asNumber() } finally { value.destroy() }
+}
+
+function appearanceAlphas(object: PDFObject): number[] {
+  const states = object.get('AP', 'N', 'Resources', 'ExtGState')
+  const result: number[] = []
+  try {
+    if (states.isNull()) return result
+    states.forEach((reference) => {
+      const resolved = reference.isIndirect() ? reference.resolve() : null
+      const state = resolved ?? reference
+      const fill = state.get('ca')
+      const stroke = state.get('CA')
+      try {
+        if (fill.isNumber()) result.push(fill.asNumber())
+        if (stroke.isNumber()) result.push(stroke.asNumber())
+      } finally {
+        stroke.destroy()
+        fill.destroy()
+        resolved?.destroy()
+        reference.destroy()
+      }
+    })
+    return result
+  } finally {
+    states.destroy()
+  }
 }
 
 function inspectFreeText(document: PDFDocument, pageIndex: number, objNum: number) {
@@ -669,6 +696,68 @@ describe('annotation integration', () => {
       document.destroy()
     }
     await fs.writeFile(calloutResultPath, saved.bytes)
+  })
+
+  it('文字と背景の別透明度、記号の大きさと透明度、線の透明度を往復保存する', async () => {
+    const textRect: Rect = [72, 120, 272, 170]
+    const symbolRect: Rect = [90, 220, 122, 252]
+    const line: [Point, Point] = [[150, 235], [310, 280]]
+    const saved = applyAndSave(sampleBytes, [
+      {
+        kind: 'createFreeText', pageIndex: 0, rect: textRect,
+        text: '文字50%・背景25%', fontSize: 16, color: [0, 0, 0], font: 'BIZUDGothic',
+        backgroundColor: [1, 0.9, 0], borderColor: [1, 0, 0], borderWidth: 2,
+        textOpacity: 0.5, boxOpacity: 0.25,
+      },
+      {
+        kind: 'createSymbol', pageIndex: 0, rect: symbolRect,
+        color: [1, 0, 0], symbol: 'check', opacity: 0.5,
+      },
+      {
+        kind: 'createLine', pageIndex: 0, line, color: [0, 0.25, 1], borderWidth: 5,
+        lineEnding: { start: 'None', end: 'None' }, opacity: 0.75,
+      },
+      {
+        kind: 'createInk', pageIndex: 0, inkList: [[[100, 320], [180, 335], [260, 320]]],
+        color: [0, 0, 0], borderWidth: 2, opacity: 0.5, inkKind: 'ink',
+      },
+    ])
+    expect(saved.created).toHaveLength(4)
+    await fs.writeFile(opacityResultPath, saved.bytes)
+
+    const document = openPdf(saved.bytes)
+    try {
+      const listed = listAnnotations(document, 0)
+      const text = listed.find((item) => item.objNum === saved.created[0])!
+      const symbol = listed.find((item) => item.objNum === saved.created[1])!
+      const savedLine = listed.find((item) => item.objNum === saved.created[2])!
+      const ink = listed.find((item) => item.objNum === saved.created[3])!
+      expect(text).toMatchObject({ textOpacity: 0.5, boxOpacity: 0.25 })
+      expectRect(symbol.rect, symbolRect)
+      expect(symbol.opacity).toBeCloseTo(0.5, 2)
+      expect(savedLine.opacity).toBeCloseTo(0.75, 2)
+      expect(ink).toMatchObject({ kind: 'ink', opacity: 0.5 })
+
+      const page = document.loadPage(0)
+      const annotation = findAnnotation(page, saved.created[0])
+      const object = annotation.getObject()
+      const resolved = object.resolve()
+      try {
+        expect(numberValue(resolved, 'CA')).toBe(1)
+        expect(numberValue(resolved, 'KaruStyle', 'TextOpacity')).toBeCloseTo(0.5, 3)
+        expect(numberValue(resolved, 'KaruStyle', 'BoxOpacity')).toBeCloseTo(0.25, 3)
+        const alphas = appearanceAlphas(resolved)
+        expect(alphas.some((value) => Math.abs(value - 0.5) < 0.001)).toBe(true)
+        expect(alphas.some((value) => Math.abs(value - 0.25) < 0.001)).toBe(true)
+      } finally {
+        resolved.destroy()
+        object.destroy()
+        annotation.destroy()
+        page.destroy()
+      }
+    } finally {
+      document.destroy()
+    }
   })
 
   it('他ソフト由来相当の Line・Circle・Ink を editable として更新できる', () => {

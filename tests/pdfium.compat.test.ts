@@ -113,6 +113,16 @@ beforeAll(async () => {
         text: '確認✔済み✗', fontSize: 14,
         color: [1, 0, 0], font: 'BIZUDGothic',
       },
+      {
+        kind: 'createSquare', pageIndex: 3, rect: [60, 80, 390, 200],
+        color: [], borderWidth: 0, interiorColor: [1, 1, 1], opacity: 1,
+      },
+      {
+        kind: 'createFreeText', pageIndex: 3, rect: [72, 100, 372, 180],
+        text: '透明度', fontSize: 30, color: [0, 0, 0], font: 'BIZUDGothic',
+        backgroundColor: [1, 1, 0], borderColor: null, borderWidth: 1,
+        textOpacity: 0.5, boxOpacity: 0.25,
+      },
     ], fontResources)
     expect(applied.errors).toEqual([])
     annotatedBytes = saveDocument(document, 'full').bytes
@@ -326,5 +336,19 @@ describe('PDFium compatibility', () => {
     expect(symbols).toBeGreaterThan(300)
     expect(fallbackText).toBeGreaterThan(50)
     console.info(`PDFIUM_METRIC symbols=${symbols} fallback_text=${fallbackText}`)
+  })
+
+  it('文字50%と背景25%を別々の濃さでPDFium描画する', () => {
+    const paleYellow = countPdfiumPixels(
+      annotatedBytes, 3, [220, 110, 360, 170],
+      (r, g, b) => r > 245 && g > 245 && b >= 165 && b <= 225,
+    )
+    const halfBlack = countPdfiumPixels(
+      annotatedBytes, 3, [70, 95, 220, 180],
+      (r, g, b) => r >= 70 && r <= 190 && g >= 70 && g <= 190 && b >= 45 && b <= 165,
+    )
+    expect(paleYellow).toBeGreaterThan(5_000)
+    expect(halfBlack).toBeGreaterThan(100)
+    console.info(`PDFIUM_METRIC opacity pale_yellow=${paleYellow} half_black=${halfBlack}`)
   })
 })

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type RefObject } from 'react'
+import { useEffect, useMemo, type RefObject } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { RenderScheduler } from '../client/RenderScheduler'
 import type { EditorTool } from '../editor/AnnotationLayer'
@@ -63,8 +63,11 @@ export function DocumentWorkspace(props: Props) {
     props.session.restorePageOnFirstView = false
     return value
   }, [props.session])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const selected = selectedId ? props.session.annotationStore.get(selectedId) ?? null : null
+  const selectedIds = props.session.annotationStore.selectedIds()
+  const selectedId = props.session.annotationStore.primarySelection()
+  const selected = selectedIds.length === 1 && selectedId
+    ? props.session.annotationStore.get(selectedId) ?? null
+    : null
 
   useEffect(() => () => {
     scheduler.destroy()
@@ -114,7 +117,10 @@ export function DocumentWorkspace(props: Props) {
         formatDefaults={props.formatDefaults}
         tool={props.tool}
         selectedAnnotationId={selectedId}
-        onSelectAnnotation={setSelectedId}
+        onSelectAnnotation={(id) => {
+          if (id === null) props.session.annotationStore.clearSelection()
+          else if (!props.session.annotationStore.isSelected(id)) props.session.annotationStore.selectOnly(id)
+        }}
         initialView={initialView}
         onToolChange={props.onToolChange}
         pageSizes={props.session.pageSizes}

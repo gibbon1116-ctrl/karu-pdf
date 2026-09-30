@@ -27,6 +27,7 @@ const WIDTHS = [0.5, 1, 1.5, 2, 3, 5]
 const TEXT_BORDER_WIDTHS = [0.5, 1, 1.5, 2]
 const HIGHLIGHT_WIDTHS = [6, 9, 12, 18]
 const FONT_SIZES = [8, 9, 10.5, 12, 14, 18, 24, 36]
+const SYMBOL_SIZES = [8, 12, 16, 24, 32, 48, 72]
 const TEXT_INSERT_SYMBOLS = [...'✓✔○◎×△□☆★※→←↑↓⇒①②③〒℃±']
 
 function sameColor(left: readonly number[] | null, right: readonly number[] | null): boolean {
@@ -103,6 +104,21 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     if (activeSelection) store.update(activeSelection.id, { opacity: next })
     else changeDefault({ opacity: next })
   }
+  const changeTextOpacity = (next: number) => {
+    if (activeSelection) store.update(activeSelection.id, { textOpacity: next })
+    else changeDefault({ textOpacity: next })
+  }
+  const changeBoxOpacity = (next: number) => {
+    if (activeSelection) store.update(activeSelection.id, { boxOpacity: next })
+    else changeDefault({ boxOpacity: next })
+  }
+  const changeSymbolSize = (next: number) => {
+    if (activeSelection?.kind === 'symbol') {
+      const centerX = (activeSelection.rect[0] + activeSelection.rect[2]) / 2
+      const centerY = (activeSelection.rect[1] + activeSelection.rect[3]) / 2
+      store.resize(activeSelection.id, [centerX - next / 2, centerY - next / 2, centerX + next / 2, centerY + next / 2])
+    } else changeDefault({ symbolSize: next })
+  }
   const changeSymbol = (next: SymbolName) => {
     if (activeSelection?.kind === 'symbol') store.update(activeSelection.id, { symbol: next })
     else changeDefault({ symbol: next })
@@ -146,10 +162,16 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
         >{item.glyph}</button>)}
       </div>
     </fieldset>}
+    {target === 'symbol' && values && <label>
+      大きさ
+      <select aria-label="記号の大きさ" value={activeSelection?.kind === 'symbol' ? Math.round(activeSelection.rect[2] - activeSelection.rect[0]) : (values as ToolFormat).symbolSize} onChange={(event) => changeSymbolSize(Number(event.currentTarget.value))}>
+        {SYMBOL_SIZES.map((value) => <option key={value} value={value}>{value} pt</option>)}
+      </select>
+    </label>}
     {textTarget && values && <ColorField label="文字の色" value={values.color} onChange={(next) => next && changeColor(next)} />}
     {(shapeTarget || textTarget) && <ColorField label={textTarget ? '背景色' : '塗り'} value={fillColor} allowNone onChange={changeFill} />}
     {(shapeTarget || textTarget) && <ColorField label="枠線の色" value={borderColor} allowNone onChange={changeBorder} />}
-    {target && values && (simpleColorTarget || shapeTarget || textTarget) && <label>
+    {target && values && ((simpleColorTarget && target !== 'symbol') || shapeTarget || textTarget) && <label>
       {textTarget ? '枠線の太さ' : '線の太さ'}
       <select aria-label={textTarget ? '枠線の太さ' : '線の太さ'} value={values.borderWidth} onChange={(event) => changeBorderWidth(Number(event.currentTarget.value))}>
         {(target === 'highlight' ? HIGHLIGHT_WIDTHS : textTarget ? TEXT_BORDER_WIDTHS : WIDTHS).map((value) => <option key={value} value={value}>{value} pt</option>)}
@@ -161,8 +183,26 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
         <option value="1">100%</option><option value="0.5">50%</option><option value="0.25">25%</option>
       </select>
     </label>}
+    {simpleColorTarget && values && <label>
+      透明度
+      <select aria-label="透明度" value={values.opacity} onChange={(event) => changeOpacity(Number(event.currentTarget.value))}>
+        <option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option>{target === 'highlight' && <option value="0.35">35%（既定）</option>}<option value="0.25">25%</option>
+      </select>
+    </label>}
     {target === 'square' && <button type="button" className="whiteout-button" title="上に白い四角を重ねて見えなくします。下の文字やデータはファイルに残ります" onClick={makeWhiteout}>白塗りにする</button>}
     {textTarget && values && <>
+      <label>
+        文字の透明度
+        <select aria-label="文字の透明度" value={values.textOpacity} onChange={(event) => changeTextOpacity(Number(event.currentTarget.value))}>
+          <option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option><option value="0.25">25%</option>
+        </select>
+      </label>
+      <label>
+        背景と枠の透明度
+        <select aria-label="背景と枠の透明度" value={values.boxOpacity} onChange={(event) => changeBoxOpacity(Number(event.currentTarget.value))}>
+          <option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option><option value="0.25">25%</option>
+        </select>
+      </label>
       <label>
         文字の大きさ
         <select aria-label="文字の大きさ" value={values.fontSize} onChange={(event) => void changeText({ fontSize: Number(event.currentTarget.value) })}>

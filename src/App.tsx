@@ -160,6 +160,12 @@ export default function App() {
   const openQueueRef = useRef<Promise<void>>(Promise.resolve())
   const organizeRef = useRef<ActiveOrganize | null>(null)
   const organizeClipboardRef = useRef<{ cards: PageCard[]; sources: OrganizeSourceInfo[] } | null>(null)
+  const annotationClipboardRef = useRef<{
+    sourceDocId: string
+    annotations: EditableAnnotation[]
+    lastPasteTarget: string | null
+    samePagePasteCount: number
+  } | null>(null)
   const menuActionsRef = useRef<string[]>([])
   const updateServiceWorkerRef = useRef<((reloadPage?: boolean) => Promise<void>) | null>(null)
   const [, setTabsVersion] = useState(0)
@@ -186,6 +192,77 @@ export default function App() {
 
   const refreshTabs = useCallback(() => setTabsVersion((value) => value + 1), [])
   const refreshRecent = useCallback(() => void loadRecentFiles().then(setRecent), [])
+  const showStatus = useCallback((message: string) => {
+    setStatus(message)
+    window.clearTimeout(statusTimerRef.current)
+    statusTimerRef.current = window.setTimeout(() => setStatus(''), 5000)
+  }, [])
+
+  const copyAnnotations = useCallback((): boolean => {
+    const session = activeRef.current
+    if (!session) return false
+    const annotations = session.annotationStore.copySelected()
+    if (annotations.length === 0) return false
+    annotationClipboardRef.current = {
+      sourceDocId: session.docId,
+      annotations,
+      lastPasteTarget: null,
+      samePagePasteCount: 0,
+    }
+    showStatus(`${annotations.length}件の書き込みをコピーしました`)
+    return true
+  }, [showStatus])
+
+  const cutAnnotations = useCallback(() => {
+    const session = activeRef.current
+    if (!session || !copyAnnotations()) return
+    session.annotationStore.removeMany(session.annotationStore.selectedIds())
+    refreshTabs()
+  }, [copyAnnotations, refreshTabs])
+
+  const pasteAnnotations = useCallback(() => {
+    const session = activeRef.current
+    const clipboard = annotationClipboardRef.current
+    if (!session || !clipboard || clipboard.annotations.length === 0) return
+    const pageIndex = Math.max(0, Math.min(session.pageSizes.length - 1, session.view.page - 1))
+    const samePage = clipboard.sourceDocId === session.docId
+      && clipboard.annotations.every((annotation) => annotation.pageIndex === pageIndex)
+    const targetKey = `${session.docId}:${pageIndex}`
+    if (samePage) {
+      clipboard.samePagePasteCount = clipboard.lastPasteTarget === targetKey
+        ? clipboard.samePagePasteCount + 1
+        : 1
+      clipboard.lastPasteTarget = targetKey
+    } else {
+      clipboard.samePagePasteCount = 0
+      clipboard.lastPasteTarget = null
+    }
+    const ids = session.annotationStore.pasteAnnotations(
+      clipboard.annotations,
+      pageIndex,
+      session.pageSizes[pageIndex],
+      samePage ? clipboard.samePagePasteCount * 10 : 0,
+    )
+    if (ids.length > 0) {
+      setTool('select')
+      showStatus(`${ids.length}件の書き込みを貼り付けました`)
+      refreshTabs()
+    }
+  }, [refreshTabs, showStatus])
+
+  const duplicateAnnotations = useCallback(() => {
+    const session = activeRef.current
+    if (!session) return
+    const annotations = session.annotationStore.copySelected()
+    if (annotations.length === 0) return
+    const pageIndex = Math.max(0, Math.min(session.pageSizes.length - 1, session.view.page - 1))
+    const ids = session.annotationStore.pasteAnnotations(annotations, pageIndex, session.pageSizes[pageIndex], 10)
+    if (ids.length > 0) {
+      setTool('select')
+      showStatus(`${ids.length}件の書き込みを複製しました`)
+      refreshTabs()
+    }
+  }, [refreshTabs, showStatus])
 
   useEffect(() => {
     refreshRecent()
@@ -210,12 +287,6 @@ export default function App() {
       window.removeEventListener('error', onError)
       window.removeEventListener('unhandledrejection', onUnhandledRejection)
     }
-  }, [])
-
-  const showStatus = useCallback((message: string) => {
-    setStatus(message)
-    window.clearTimeout(statusTimerRef.current)
-    statusTimerRef.current = window.setTimeout(() => setStatus(''), 5000)
   }, [])
 
   useEffect(() => {
@@ -838,6 +909,26 @@ export default function App() {
         setDebug((value) => !value)
         return
       }
+      if (!organizing && !isInput && (event.ctrlKey || event.metaKey) && key === 'c') {
+        event.preventDefault()
+        copyAnnotations()
+        return
+      }
+      if (!organizing && !isInput && (event.ctrlKey || event.metaKey) && key === 'x') {
+        event.preventDefault()
+        cutAnnotations()
+        return
+      }
+      if (!organizing && !isInput && (event.ctrlKey || event.metaKey) && key === 'v') {
+        event.preventDefault()
+        pasteAnnotations()
+        return
+      }
+      if (!organizing && !isInput && (event.ctrlKey || event.metaKey) && key === 'd') {
+        event.preventDefault()
+        duplicateAnnotations()
+        return
+      }
       if (event.ctrlKey && key === 'o') {
         event.preventDefault()
         void pickFile()
@@ -879,6 +970,15 @@ export default function App() {
         refreshTabs()
         return
       }
+      if (!isInput && (event.key === 'Delete' || event.key === 'Backspace')) {
+        const session = activeRef.current
+        if (session && session.annotationStore.selectedIds().length > 0) {
+          event.preventDefault()
+          session.annotationStore.removeMany(session.annotationStore.selectedIds())
+          refreshTabs()
+        }
+        return
+      }
       if (isInput || event.ctrlKey || event.metaKey || event.altKey) return
       if (key === 'v') void changeTool('select')
       else if (key === 't') void changeTool('text')
@@ -894,7 +994,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [activateDocument, changeTool, closeDocument, discardOrganize, pickFile, printDocument, refreshTabs, saveDocument, tabs])
+  }, [activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, tabs])
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -1024,8 +1124,12 @@ export default function App() {
           onCloseTab={() => { if (active) void closeDocument(active.docId) }}
           onUndo={() => { active?.annotationStore.undo(); viewerRef.current?.clearSelection(); refreshTabs() }}
           onRedo={() => { active?.annotationStore.redo(); viewerRef.current?.clearSelection(); refreshTabs() }}
+          onCut={cutAnnotations}
+          onCopy={() => { copyAnnotations() }}
+          onPaste={pasteAnnotations}
+          onDuplicate={duplicateAnnotations}
           onClearSelection={() => viewerRef.current?.clearSelection()}
-          onDeleteSelection={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete' }))}
+          onDeleteSelection={() => { active?.annotationStore.removeMany(active.annotationStore.selectedIds()); refreshTabs() }}
           onToggleThumbnails={() => updatePanels({ ...panels, thumbnails: !panels.thumbnails })}
           onToggleFormat={() => updatePanels({ ...panels, format: !panels.format })}
           onZoomIn={() => viewerRef.current?.zoomIn()}

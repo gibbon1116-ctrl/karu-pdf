@@ -197,12 +197,12 @@ export function TextEditor({ annotation, zoom, pool, store, onClose, registerCom
         padding: `${2 * scale}px`,
         fontSize: annotation.fontSize * scale,
         fontFamily: annotation.font === 'BIZUDMincho' ? 'KaruBIZUDMincho' : 'KaruBIZUDGothic',
-        color: `rgb(${annotation.color.map((component) => Math.round(component * 255)).join(' ')})`,
+        color: `rgb(${annotation.color.map((component) => Math.round(component * 255)).join(' ')} / ${annotation.textOpacity})`,
         background: annotation.interiorColor
-          ? `rgb(${annotation.interiorColor.map((component) => Math.round(component * 255)).join(' ')})`
+          ? `rgb(${annotation.interiorColor.map((component) => Math.round(component * 255)).join(' ')} / ${annotation.boxOpacity})`
           : 'transparent',
         border: annotation.borderColor
-          ? `${annotation.borderWidth * scale}px solid rgb(${annotation.borderColor.map((component) => Math.round(component * 255)).join(' ')})`
+          ? `${annotation.borderWidth * scale}px solid rgb(${annotation.borderColor.map((component) => Math.round(component * 255)).join(' ')} / ${annotation.boxOpacity})`
           : '0',
       }}
       onChange={(event) => {

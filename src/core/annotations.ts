@@ -69,6 +69,8 @@ export interface AnnotationInfo {
   interiorColor: RGB | null
   borderWidth: number | null
   opacity: number | null
+  textOpacity?: number | null
+  boxOpacity?: number | null
   line: [Point, Point] | null
   lineEnding: LineEnding | null
   inkList: Point[][] | null
@@ -79,20 +81,20 @@ export interface AnnotationInfo {
 }
 
 export type AnnotationEdit =
-  | { kind: 'createFreeText'; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number }
-  | { kind: 'updateFreeText'; objNum: number; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number }
-  | { kind: 'createCallout'; pageIndex: number; rect: Rect; point: Point; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number }
-  | { kind: 'updateCallout'; objNum: number; pageIndex: number; rect: Rect; point: Point; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number }
+  | { kind: 'createFreeText'; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number; textOpacity?: number; boxOpacity?: number }
+  | { kind: 'updateFreeText'; objNum: number; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number; textOpacity?: number; boxOpacity?: number }
+  | { kind: 'createCallout'; pageIndex: number; rect: Rect; point: Point; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number; textOpacity?: number; boxOpacity?: number }
+  | { kind: 'updateCallout'; objNum: number; pageIndex: number; rect: Rect; point: Point; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number; textOpacity?: number; boxOpacity?: number }
   | { kind: 'createSquare'; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null; opacity?: number }
   | { kind: 'updateSquare'; objNum: number; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null; opacity?: number }
-  | { kind: 'createLine'; pageIndex: number; line: [Point, Point]; color: RGB; borderWidth: number; lineEnding: LineEnding }
-  | { kind: 'updateLine'; objNum: number; pageIndex: number; line: [Point, Point]; color: RGB; borderWidth: number; lineEnding: LineEnding }
+  | { kind: 'createLine'; pageIndex: number; line: [Point, Point]; color: RGB; borderWidth: number; lineEnding: LineEnding; opacity?: number }
+  | { kind: 'updateLine'; objNum: number; pageIndex: number; line: [Point, Point]; color: RGB; borderWidth: number; lineEnding: LineEnding; opacity?: number }
   | { kind: 'createCircle'; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null; opacity?: number }
   | { kind: 'updateCircle'; objNum: number; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null; opacity?: number }
-  | { kind: 'createInk'; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number }
-  | { kind: 'updateInk'; objNum: number; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number }
-  | { kind: 'createSymbol'; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName }
-  | { kind: 'updateSymbol'; objNum: number; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName }
+  | { kind: 'createInk'; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number; inkKind?: 'highlight' | 'ink' }
+  | { kind: 'updateInk'; objNum: number; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number; inkKind?: 'highlight' | 'ink' }
+  | { kind: 'createSymbol'; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName; opacity?: number }
+  | { kind: 'updateSymbol'; objNum: number; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName; opacity?: number }
   | { kind: 'delete'; objNum: number; pageIndex: number }
 
 export interface ApplyError {
@@ -124,6 +126,8 @@ interface AppearanceTask {
   backgroundColor: RGB | null
   borderColor: RGB | null
   borderWidth: number
+  textOpacity: number
+  boxOpacity: number
   calloutLine: [Point, Point] | null
   temporaryPageIndex?: number
 }
@@ -198,21 +202,25 @@ interface KaruStyle {
   fill: RGB | null
   border: RGB | null
   borderWidth: number | null
+  textOpacity: number | null
+  boxOpacity: number | null
 }
 
 function readKaruStyle(object: PDFObject): KaruStyle {
   const raw = object.get('KaruStyle')
   let style: PDFObject | undefined
   try {
-    if (raw.isNull()) return { present: false, fill: null, border: null, borderWidth: null }
+    if (raw.isNull()) return { present: false, fill: null, border: null, borderWidth: null, textOpacity: null, boxOpacity: null }
     style = raw.isIndirect() ? raw.resolve() : undefined
     const dictionary = style ?? raw
-    if (!dictionary.isDictionary()) return { present: false, fill: null, border: null, borderWidth: null }
+    if (!dictionary.isDictionary()) return { present: false, fill: null, border: null, borderWidth: null, textOpacity: null, boxOpacity: null }
     return {
       present: true,
       fill: asRGB(readNumberArray(dictionary, 'Fill') ?? []),
       border: asRGB(readNumberArray(dictionary, 'Border') ?? []),
       borderWidth: readNumber(dictionary, 'BorderWidth'),
+      textOpacity: readNumber(dictionary, 'TextOpacity'),
+      boxOpacity: readNumber(dictionary, 'BoxOpacity'),
     }
   } finally {
     style?.destroy()
@@ -243,12 +251,17 @@ function annotationKind(
   opacity: number | null,
   intent: string | null,
   symbol: SymbolName | null,
+  inkKind: string | null,
 ): AnnotationKind {
   if (type === 'FreeText') return intent === 'FreeTextCallout' ? 'callout' : 'freetext'
   if (type === 'Line') return lineEnding?.end === 'OpenArrow' ? 'arrow' : 'line'
   if (type === 'Square') return 'square'
   if (type === 'Circle') return 'circle'
-  if (type === 'Ink') return opacity !== null && opacity < 1 ? 'highlight' : 'ink'
+  if (type === 'Ink') {
+    if (inkKind === 'Highlight') return 'highlight'
+    if (inkKind === 'Ink') return 'ink'
+    return opacity !== null && opacity < 1 ? 'highlight' : 'ink'
+  }
   if (type === 'Stamp' && symbol) return 'symbol'
   return 'other'
 }
@@ -284,18 +297,21 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
           const strokeColor = style?.present ? style.border : standardStroke
           const interiorColor = style?.present ? style.fill : standardInterior
           const borderWidth = hasStroke ? annotation.getBorderWidth() : null
-          const opacity = type === 'Ink' || type === 'Square' || type === 'Circle' ? annotation.getOpacity() : null
+          const opacity = type === 'Ink' || type === 'Square' || type === 'Circle' || type === 'Line' || type === 'Stamp'
+            ? annotation.getOpacity()
+            : null
           const lineEnding = type === 'Line' ? annotation.getLineEndingStyles() : null
           const intent = type === 'FreeText' ? annotation.getIntent() : null
           const calloutLine = type === 'FreeText' && intent === 'FreeTextCallout'
             ? readCalloutLine(page, object)
             : null
           const symbol = type === 'Stamp' ? asSymbolName(readName(object, 'KaruSymbol')) : null
+          const inkKind = type === 'Ink' ? readName(object, 'KaruInkKind') : null
           return {
             objNum: object.asIndirect(),
             pageIndex,
             type,
-            kind: annotationKind(type, lineEnding, opacity, intent, symbol),
+            kind: annotationKind(type, lineEnding, opacity, intent, symbol, inkKind),
             editable,
             // 型定義上は全注釈に getRect() があるが、MuPDF 1.28.1 は
             // Highlight など /Rect を直接扱わない種類では例外にする。
@@ -308,6 +324,8 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             interiorColor,
             borderWidth: style?.present ? style.borderWidth ?? borderWidth : borderWidth,
             opacity,
+            textOpacity: type === 'FreeText' ? style?.textOpacity ?? 1 : null,
+            boxOpacity: type === 'FreeText' ? style?.boxOpacity ?? 1 : null,
             line: type === 'Line' ? annotation.getLine() as [Point, Point] : null,
             lineEnding,
             inkList: type === 'Ink' ? annotation.getInkList() : null,
@@ -408,6 +426,8 @@ function writeFreeTextStyle(
   backgroundColor: RGB | null,
   borderColor: RGB | null,
   borderWidth: number,
+  textOpacity: number,
+  boxOpacity: number,
 ): void {
   if (backgroundColor) setPdfNumberArray(doc, object, 'IC', backgroundColor)
   else object.delete('IC')
@@ -426,6 +446,8 @@ function writeFreeTextStyle(
     if (backgroundColor) setPdfNumberArray(doc, karuStyle, 'Fill', backgroundColor)
     if (borderColor) setPdfNumberArray(doc, karuStyle, 'Border', borderColor)
     setPdfNumber(doc, karuStyle, 'BorderWidth', borderWidth)
+    setPdfNumber(doc, karuStyle, 'TextOpacity', textOpacity)
+    setPdfNumber(doc, karuStyle, 'BoxOpacity', boxOpacity)
     object.put('KaruStyle', karuStyle)
   } finally {
     karuStyle.destroy()
@@ -480,6 +502,8 @@ function configureFreeText(
   backgroundColor: RGB | null,
   borderColor: RGB | null,
   borderWidth: number,
+  textOpacity: number,
+  boxOpacity: number,
   isNew: boolean,
 ): void {
   annotation.setRect(rect)
@@ -487,7 +511,7 @@ function configureFreeText(
   const object = annotation.getObject()
   try {
     setPdfString(doc, object, 'DA', createDefaultAppearance(fontName, fontSize, color))
-    writeFreeTextStyle(doc, object, backgroundColor, borderColor, borderWidth)
+    writeFreeTextStyle(doc, object, backgroundColor, borderColor, borderWidth, textOpacity, boxOpacity)
     setPdfNumber(doc, object, 'F', 4)
     if (isNew) setPdfString(doc, object, 'NM', newAnnotationName())
     object.delete('T')
@@ -496,11 +520,13 @@ function configureFreeText(
     object.destroy()
   }
   annotation.setModificationDate(new Date())
+  annotation.setOpacity(1)
   annotation.update()
   // update() の後に触ると外観の再生成対象になる属性は変更しない。
   // /T と /RC は MuPDF が補う場合にも残さない。
   const updatedObject = annotation.getObject()
   try {
+    setPdfNumber(doc, updatedObject, 'CA', 1)
     updatedObject.delete('T')
     updatedObject.delete('RC')
   } finally {
@@ -531,12 +557,14 @@ function configureLine(
   color: RGB,
   borderWidth: number,
   lineEnding: LineEnding,
+  opacity = 1,
 ): void {
   annotation.setFlags(annotation.getFlags() | 4)
   annotation.setLine(line[0], line[1])
   annotation.setColor(color)
   annotation.setBorderWidth(borderWidth)
   annotation.setLineEndingStyles(lineEnding.start, lineEnding.end)
+  annotation.setOpacity(opacity)
   annotation.update()
 }
 
@@ -558,17 +586,25 @@ function configureCircle(
 }
 
 function configureInk(
+  doc: PDFDocument,
   annotation: PDFAnnotation,
   inkList: Point[][],
   color: RGB,
   borderWidth: number,
   opacity: number,
+  inkKind: 'highlight' | 'ink',
 ): void {
   annotation.setFlags(annotation.getFlags() | 4)
   annotation.setInkList(inkList)
   annotation.setColor(color)
   annotation.setBorderWidth(borderWidth)
   annotation.setOpacity(opacity)
+  const object = annotation.getObject()
+  try {
+    setPdfName(doc, object, 'KaruInkKind', inkKind === 'highlight' ? 'Highlight' : 'Ink')
+  } finally {
+    object.destroy()
+  }
   annotation.update()
 }
 
@@ -710,6 +746,7 @@ function configureSymbol(
   rect: Rect,
   color: RGB,
   symbol: SymbolName,
+  opacity: number,
   isNew: boolean,
 ): void {
   const width = rect[2] - rect[0]
@@ -718,6 +755,7 @@ function configureSymbol(
   annotation.setFlags(annotation.getFlags() | 4)
   annotation.setRect(rect)
   annotation.setColor(color)
+  annotation.setOpacity(opacity)
   const object = annotation.getObject()
   try {
     setPdfName(doc, object, 'KaruSymbol', symbol)
@@ -800,6 +838,8 @@ function makeTemporaryAppearance(
       task.backgroundColor,
       task.borderColor,
       task.borderWidth,
+      task.textOpacity,
+      task.boxOpacity,
       true,
     )
     const layout = layoutText({
@@ -814,7 +854,7 @@ function makeTemporaryAppearance(
       const background = new mupdf.Path()
       try {
         background.rect(task.textRect[0], task.textRect[1], task.textRect[2], task.textRect[3])
-        device.fillPath(background, false, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, task.backgroundColor, 1)
+        device.fillPath(background, false, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, task.backgroundColor, task.boxOpacity)
       } finally {
         background.destroy()
       }
@@ -833,7 +873,7 @@ function makeTemporaryAppearance(
           task.textRect[2] - inset,
           task.textRect[3] - inset,
         )
-        device.strokePath(border, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, task.borderColor, 1)
+        device.strokePath(border, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, task.borderColor, task.boxOpacity)
       } finally {
         stroke.destroy()
         border.destroy()
@@ -855,7 +895,7 @@ function makeTemporaryAppearance(
         x += encoded.advance * task.fontSize
       }
     }
-    device.fillText(text, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, task.color, 1)
+    device.fillText(text, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, task.color, task.textOpacity)
 
     if (task.calloutLine) {
       const [tip, end] = task.calloutLine
@@ -880,7 +920,7 @@ function makeTemporaryAppearance(
           tip[0] + Math.cos(angle + Math.PI / 6) * arrowSize,
           tip[1] + Math.sin(angle + Math.PI / 6) * arrowSize,
         )
-        device.strokePath(linePath, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, lineColor, 1)
+        device.strokePath(linePath, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, lineColor, task.boxOpacity)
       } finally {
         stroke.destroy()
         linePath.destroy()
@@ -1037,7 +1077,7 @@ export function applyEdits(
           : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
         if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
         if (!isNew && annotation.getType() !== 'Line') throw new Error('更新対象は Line ではありません。')
-        configureLine(annotation, edit.line, edit.color, edit.borderWidth, edit.lineEnding)
+        configureLine(annotation, edit.line, edit.color, edit.borderWidth, edit.lineEnding, edit.opacity ?? 1)
         if (isNew) result.created.push(objectNumber(annotation))
         continue
       }
@@ -1061,7 +1101,7 @@ export function applyEdits(
           : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
         if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
         if (!isNew && annotation.getType() !== 'Ink') throw new Error('更新対象は Ink ではありません。')
-        configureInk(annotation, edit.inkList, edit.color, edit.borderWidth, edit.opacity)
+        configureInk(doc, annotation, edit.inkList, edit.color, edit.borderWidth, edit.opacity, edit.inkKind ?? (edit.opacity < 1 ? 'highlight' : 'ink'))
         if (isNew) result.created.push(objectNumber(annotation))
         continue
       }
@@ -1081,7 +1121,7 @@ export function applyEdits(
         } finally {
           object.destroy()
         }
-        configureSymbol(doc, annotation, edit.rect, edit.color, edit.symbol, isNew)
+        configureSymbol(doc, annotation, edit.rect, edit.color, edit.symbol, edit.opacity ?? 1, isNew)
         if (isNew) result.created.push(objectNumber(annotation))
         continue
       }
@@ -1118,6 +1158,8 @@ export function applyEdits(
         edit.backgroundColor ?? null,
         edit.borderColor ?? null,
         borderWidth,
+        edit.textOpacity ?? 1,
+        edit.boxOpacity ?? 1,
         isNew,
       )
       let calloutLine: [Point, Point] | null = null
@@ -1143,6 +1185,8 @@ export function applyEdits(
         backgroundColor: edit.backgroundColor ?? null,
         borderColor: edit.borderColor ?? null,
         borderWidth,
+        textOpacity: edit.textOpacity ?? 1,
+        boxOpacity: edit.boxOpacity ?? 1,
         calloutLine: calloutLine ? [
           [calloutLine[0][0] - outerRect[0], calloutLine[0][1] - outerRect[1]],
           [calloutLine[1][0] - outerRect[0], calloutLine[1][1] - outerRect[1]],

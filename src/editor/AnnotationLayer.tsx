@@ -30,12 +30,14 @@ interface Props {
 
 interface DragOperation {
   pointerId: number
-  mode: 'move' | 'text' | 'callout' | 'shape' | 'symbol' | 'line' | 'ink' | 'resize' | 'line-end' | 'callout-point'
+  mode: 'move' | 'marquee' | 'text' | 'callout' | 'shape' | 'symbol' | 'line' | 'ink' | 'resize' | 'line-end' | 'callout-point'
   creationKind?: Kind
   start: Point
   latest: Point
   id: string | null
   element: SVGGElement | null
+  ids?: string[]
+  elements?: SVGGElement[]
   frame: number
   moved: boolean
   shift: boolean
@@ -141,6 +143,8 @@ export function AnnotationLayer(props: Props) {
   const previousInkRef = useRef<PreviousInkStroke | null>(null)
   const loadingLayoutsRef = useRef(new Set<string>())
   const annotations = props.store.getPageAnnotations(props.pageIndex)
+  const selectedIds = new Set(props.store.selectedIds())
+  const singleSelection = selectedIds.size === 1
   const touched = useMemo(() => new Set(props.store.touchedObjNums(props.pageIndex)), [version, props.pageIndex, props.store])
   const editing = props.editingId ? annotations.find((annotation) => annotation.id === props.editingId) : undefined
 
@@ -160,7 +164,9 @@ export function AnnotationLayer(props: Props) {
     const dx = operation.latest[0] - operation.start[0]
     const dy = operation.latest[1] - operation.start[1]
     if (operation.mode === 'move') {
-      operation.element?.setAttribute('transform', `translate(${dx} ${dy})`)
+      for (const element of operation.elements ?? (operation.element ? [operation.element] : [])) {
+        element.setAttribute('transform', `translate(${dx} ${dy})`)
+      }
       return
     }
     if (operation.mode === 'resize' && operation.originalRect && operation.resizeHandle && operation.annotationKind) {
@@ -209,10 +215,10 @@ export function AnnotationLayer(props: Props) {
     }
     const draft = draftRectRef.current
     if (!draft) return
-    const rect = operation.mode === 'shape'
+    const rect = operation.mode === 'shape' || operation.mode === 'marquee'
       ? shapeRect(operation.start, operation.latest, operation.creationKind === 'circle' && operation.shift)
       : operation.mode === 'symbol'
-        ? symbolRectFromDrag(operation.start, operation.latest, operation.moved)
+        ? symbolRectFromDrag(operation.start, operation.latest, operation.moved, props.formatDefaults.symbol.symbolSize)
       : operation.mode === 'callout'
         ? [
             operation.moved ? operation.latest[0] : operation.start[0] + 40,
@@ -255,14 +261,19 @@ export function AnnotationLayer(props: Props) {
     if (operation.frame) cancelAnimationFrame(operation.frame)
     updateDraft(operation)
     operation.stopMeasurement(operation.moved)
-    operation.element?.removeAttribute('transform')
+    for (const element of operation.elements ?? (operation.element ? [operation.element] : [])) element.removeAttribute('transform')
     hideDrafts()
     if (!commit) return
 
     const dx = operation.latest[0] - operation.start[0]
     const dy = operation.latest[1] - operation.start[1]
     if (operation.mode === 'move' && operation.id) {
-      props.store.move(operation.id, dx, dy)
+      props.store.moveMany(operation.ids ?? [operation.id], dx, dy)
+      return
+    }
+    if (operation.mode === 'marquee') {
+      props.store.selectInRect(props.pageIndex, shapeRect(operation.start, operation.latest, false))
+      props.onSelect(props.store.primarySelection())
       return
     }
     if (operation.mode === 'line-end' && operation.id && operation.originalLine && operation.lineHandle) {
@@ -292,7 +303,7 @@ export function AnnotationLayer(props: Props) {
       const modePoints = inkStrokePoints(operation.points, operation.ctrl, operation.shift)
       const points = operation.ctrl ? modePoints : simplifyPoints(modePoints, 0.5)
       if (points.length < 2) return
-      let id = operation.mergeId
+      let id = operation.creationKind === 'ink' ? operation.mergeId : null
       if (id && props.store.get(id)) props.store.appendInkStroke(id, points)
       else {
         const format = props.formatDefaults[operation.creationKind as 'highlight' | 'ink']
@@ -305,12 +316,19 @@ export function AnnotationLayer(props: Props) {
           rect,
           color: format.color,
           borderWidth: format.borderWidth,
-          opacity: operation.creationKind === 'highlight' ? 0.35 : 1,
+          opacity: format.opacity,
           inkList: [points],
         })
         id = annotation.id
       }
-      previousInkRef.current = { id: id!, pageIndex: props.pageIndex, kind: operation.creationKind as 'highlight' | 'ink', endedAt: performance.now() }
+      if (operation.creationKind === 'highlight') {
+        previousInkRef.current = null
+        props.store.selectOnly(id!)
+        props.onSelect(id!)
+        changeTool('select')
+      } else {
+        previousInkRef.current = { id: id!, pageIndex: props.pageIndex, kind: 'ink', endedAt: performance.now() }
+      }
       return
     }
     if (operation.mode === 'line' && operation.creationKind) {
@@ -324,6 +342,7 @@ export function AnnotationLayer(props: Props) {
         line: [[...operation.start], end],
         color: format.color,
         borderWidth: format.borderWidth,
+        opacity: format.opacity,
       })
       props.onSelect(annotation.id)
       changeTool('select')
@@ -348,15 +367,16 @@ export function AnnotationLayer(props: Props) {
       return
     }
     if (operation.mode === 'symbol') {
-      const rect = symbolRectFromDrag(operation.start, operation.latest, operation.moved)
-      if (rect[2] - rect[0] < 4) return
       const format = props.formatDefaults.symbol
+      const rect = symbolRectFromDrag(operation.start, operation.latest, operation.moved, format.symbolSize)
+      if (rect[2] - rect[0] < 4) return
       props.store.create({
         pageIndex: props.pageIndex,
         kind: 'symbol',
         rect,
         color: format.color,
         symbol: format.symbol,
+        opacity: format.opacity,
       })
       return
     }
@@ -378,6 +398,8 @@ export function AnnotationLayer(props: Props) {
         interiorColor: format.fillColor,
         borderColor: format.borderColor,
         borderWidth: format.borderWidth,
+        textOpacity: format.textOpacity,
+        boxOpacity: format.boxOpacity,
         calloutPoint: callout ? operation.start : null,
         deferHistory: true,
       })
@@ -420,8 +442,8 @@ export function AnnotationLayer(props: Props) {
         {visible && annotation.kind === 'square' && <rect className="annotation-square" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && annotation.kind === 'circle' && <ellipse className="annotation-shape" cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} rx={(x1 - x0) / 2} ry={(y1 - y0) / 2} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && line && <>
-          <line className="annotation-line" x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]} stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} />
-          {annotation.kind === 'arrow' && <polyline className="annotation-line" points={arrowHead(line, Math.max(8, annotation.borderWidth * 5))} fill="none" stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} />}
+          <line className="annotation-line" x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]} stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} opacity={annotation.opacity} />
+          {annotation.kind === 'arrow' && <polyline className="annotation-line" points={arrowHead(line, Math.max(8, annotation.borderWidth * 5))} fill="none" stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} opacity={annotation.opacity} />}
         </>}
         {visible && (annotation.kind === 'highlight' || annotation.kind === 'ink') && annotation.inkList?.map((stroke, index) => (
           <polyline key={`${annotation.id}-stroke-${index}`} className="annotation-ink" points={stroke.map((point) => `${point[0]},${point[1]}`).join(' ')} fill="none" stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} opacity={annotation.opacity} />
@@ -431,27 +453,28 @@ export function AnnotationLayer(props: Props) {
           x={(x0 + x1) / 2}
           y={(y0 + y1) / 2}
           fill={color(annotation.color)}
+          opacity={annotation.opacity}
           fontSize={Math.min(x1 - x0, y1 - y0) * 0.92}
           textAnchor="middle"
           dominantBaseline="central"
         >{symbolGlyph}</text>}
         {visible && calloutLine && <>
-          <line className="annotation-callout-line" x1={calloutLine[0][0]} y1={calloutLine[0][1]} x2={calloutLine[1][0]} y2={calloutLine[1][1]} stroke={color(calloutColor)} strokeWidth={Math.max(0.5, annotation.borderWidth)} />
-          <polyline className="annotation-callout-line" points={calloutArrowHead(calloutLine, Math.max(8, annotation.borderWidth * 5))} fill="none" stroke={color(calloutColor)} strokeWidth={Math.max(0.5, annotation.borderWidth)} />
+          <line className="annotation-callout-line" x1={calloutLine[0][0]} y1={calloutLine[0][1]} x2={calloutLine[1][0]} y2={calloutLine[1][1]} stroke={color(calloutColor)} strokeWidth={Math.max(0.5, annotation.borderWidth)} opacity={annotation.boxOpacity} />
+          <polyline className="annotation-callout-line" points={calloutArrowHead(calloutLine, Math.max(8, annotation.borderWidth * 5))} fill="none" stroke={color(calloutColor)} strokeWidth={Math.max(0.5, annotation.borderWidth)} opacity={annotation.boxOpacity} />
         </>}
         {visible && (annotation.kind === 'freetext' || annotation.kind === 'callout') && <g className="annotation-text-frame">
-          <rect className="annotation-text-box" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} />
+          <rect className="annotation-text-box" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.boxOpacity} />
           {annotation.layout?.lines.map((lineLayout, index) => (
-            <text key={`${annotation.id}-line-${index}`} className="annotation-text" x={x0 + lineLayout.x} y={y0 + lineLayout.baseline} fill={color(annotation.color)} fontFamily={annotation.font === 'BIZUDMincho' ? 'KaruBIZUDMincho' : 'KaruBIZUDGothic'} fontSize={annotation.fontSize} style={{ fontKerning: 'none' }} xmlSpace="preserve">{lineLayout.text}</text>
+            <text key={`${annotation.id}-line-${index}`} className="annotation-text" x={x0 + lineLayout.x} y={y0 + lineLayout.baseline} fill={color(annotation.color)} opacity={annotation.textOpacity} fontFamily={annotation.font === 'BIZUDMincho' ? 'KaruBIZUDMincho' : 'KaruBIZUDGothic'} fontSize={annotation.fontSize} style={{ fontKerning: 'none' }} xmlSpace="preserve">{lineLayout.text}</text>
           ))}
         </g>}
         {line ? <line className="annotation-hit annotation-line-hit" data-annotation-id={annotation.id} x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]} /> : <rect className="annotation-hit" data-annotation-id={annotation.id} x={x0} y={y0} width={Math.max(1, x1 - x0)} height={Math.max(1, y1 - y0)} />}
         {calloutLine && <line className="annotation-hit annotation-line-hit" data-annotation-id={annotation.id} x1={calloutLine[0][0]} y1={calloutLine[0][1]} x2={calloutLine[1][0]} y2={calloutLine[1][1]} />}
-        {props.selectedId === annotation.id && <>
+        {selectedIds.has(annotation.id) && <>
           <rect className="annotation-selection" x={selectionRect[0] - 1} y={selectionRect[1] - 1} width={Math.max(2, selectionRect[2] - selectionRect[0] + 2)} height={Math.max(2, selectionRect[3] - selectionRect[1] + 2)} />
-          {props.tool === 'select' && positions.map(({ handle, x, y }) => <rect key={`${annotation.id}-${handle}`} className="annotation-resize-handle" data-testid={`resize-handle-${handle}`} data-annotation-id={annotation.id} data-resize-handle={handle} x={x - handleSize / 2} y={y - handleSize / 2} width={handleSize} height={handleSize} />)}
-          {props.tool === 'select' && line && line.map((point, index) => <rect key={`${annotation.id}-line-${index}`} className="annotation-resize-handle" data-testid={`line-handle-${index === 0 ? 'start' : 'end'}`} data-annotation-id={annotation.id} data-line-handle={index === 0 ? 'start' : 'end'} x={point[0] - handleSize / 2} y={point[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
-          {props.tool === 'select' && calloutLine && <rect className="annotation-resize-handle annotation-callout-handle" data-testid="callout-point-handle" data-annotation-id={annotation.id} data-callout-point="true" x={calloutLine[0][0] - handleSize / 2} y={calloutLine[0][1] - handleSize / 2} width={handleSize} height={handleSize} />}
+          {props.tool === 'select' && singleSelection && positions.map(({ handle, x, y }) => <rect key={`${annotation.id}-${handle}`} className="annotation-resize-handle" data-testid={`resize-handle-${handle}`} data-annotation-id={annotation.id} data-resize-handle={handle} x={x - handleSize / 2} y={y - handleSize / 2} width={handleSize} height={handleSize} />)}
+          {props.tool === 'select' && singleSelection && line && line.map((point, index) => <rect key={`${annotation.id}-line-${index}`} className="annotation-resize-handle" data-testid={`line-handle-${index === 0 ? 'start' : 'end'}`} data-annotation-id={annotation.id} data-line-handle={index === 0 ? 'start' : 'end'} x={point[0] - handleSize / 2} y={point[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
+          {props.tool === 'select' && singleSelection && calloutLine && <rect className="annotation-resize-handle annotation-callout-handle" data-testid="callout-point-handle" data-annotation-id={annotation.id} data-callout-point="true" x={calloutLine[0][0] - handleSize / 2} y={calloutLine[0][1] - handleSize / 2} width={handleSize} height={handleSize} />}
         </>}
       </g>
     )
@@ -474,6 +497,11 @@ export function AnnotationLayer(props: Props) {
           const lineHandle = targetValue<LineHandle>(event.target, 'line-handle')
           const resizeHandle = targetValue<ResizeHandle>(event.target, 'resize-handle')
           const calloutPoint = targetValue<string>(event.target, 'callout-point')
+          if (id && event.shiftKey && !lineHandle && !resizeHandle && !calloutPoint) {
+            props.store.toggleSelection(id)
+            props.onSelect(props.store.primarySelection())
+            return
+          }
           if (calloutPoint && annotation?.kind === 'callout') {
             props.store.touch(id!)
             props.onSelect(id)
@@ -490,12 +518,19 @@ export function AnnotationLayer(props: Props) {
             if (resizePreviewRef.current) resizePreviewRef.current.style.display = 'block'
             dragRef.current = { pointerId: event.pointerId, mode: 'resize', start, latest: start, id, element: null, frame: 0, moved: false, shift: false, ctrl: false, resizeHandle, originalRect: annotation.rect, annotationKind: annotation.kind, stopMeasurement: beginDragFrameMeasurement() }
           } else if (id) {
-            props.store.touch(id)
+            if (!props.store.isSelected(id)) props.store.selectOnly(id)
+            const ids = props.store.selectedIds()
+            for (const selectedId of ids) props.store.touch(selectedId)
             props.onSelect(id)
-            dragRef.current = { pointerId: event.pointerId, mode: 'move', start, latest: start, id, element: svg.querySelector(annotation?.kind === 'callout' ? `g[data-annotation-id="${id}"] .annotation-text-frame` : `g[data-annotation-id="${id}"]`), frame: 0, moved: false, shift: false, ctrl: false, stopMeasurement: beginDragFrameMeasurement() }
+            const pageIds = new Set(annotations.map((item) => item.id))
+            const elements = ids.filter((selectedId) => pageIds.has(selectedId)).flatMap((selectedId) => {
+              const element = svg.querySelector<SVGGElement>(`g[data-annotation-id="${selectedId}"]`)
+              return element ? [element] : []
+            })
+            dragRef.current = { pointerId: event.pointerId, mode: 'move', start, latest: start, id, ids, elements, element: null, frame: 0, moved: false, shift: false, ctrl: false, stopMeasurement: beginDragFrameMeasurement() }
           } else {
-            props.onSelect(null)
-            return
+            if (draftRectRef.current) draftRectRef.current.style.display = 'block'
+            dragRef.current = { pointerId: event.pointerId, mode: 'marquee', start, latest: start, id: null, element: null, frame: 0, moved: false, shift: false, ctrl: false, stopMeasurement: beginDragFrameMeasurement() }
           }
         } else {
           props.onSelect(null)
@@ -518,7 +553,7 @@ export function AnnotationLayer(props: Props) {
             shift: event.shiftKey,
             ctrl: event.ctrlKey,
             points: mode === 'ink' ? [start] : undefined,
-            mergeId: mode === 'ink' ? mergeInkAnnotationId(previousInkRef.current, props.pageIndex, kind as 'highlight' | 'ink', startedAt) : null,
+            mergeId: mode === 'ink' && kind === 'ink' ? mergeInkAnnotationId(previousInkRef.current, props.pageIndex, 'ink', startedAt) : null,
             stopMeasurement: beginDragFrameMeasurement(mode === 'ink' ? 'ink' : 'drag'),
           }
         }

@@ -17,6 +17,8 @@ export interface EditableAnnotation {
   color: RGB
   borderWidth: number
   opacity: number
+  textOpacity: number
+  boxOpacity: number
   interiorColor: RGB | null
   borderColor: RGB | null
   line: [Point, Point] | null
@@ -96,6 +98,8 @@ function persistedState(state: AnnotationState): unknown {
     color: state.color,
     borderWidth: state.borderWidth,
     opacity: state.opacity,
+    textOpacity: state.textOpacity,
+    boxOpacity: state.boxOpacity,
     interiorColor: state.interiorColor,
     borderColor: state.borderColor,
     line: state.line,
@@ -116,6 +120,37 @@ function bounds(points: readonly Point[]): Rect {
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
 }
 
+function annotationBounds(annotation: Pick<AnnotationState, 'rect' | 'line' | 'inkList' | 'calloutPoint'>): Rect {
+  const points: Point[] = [
+    [annotation.rect[0], annotation.rect[1]],
+    [annotation.rect[2], annotation.rect[3]],
+    ...(annotation.line?.flatMap((point) => [[point[0], point[1]] as Point]) ?? []),
+    ...(annotation.inkList?.flatMap((stroke) => stroke.map((point) => [point[0], point[1]] as Point)) ?? []),
+    ...(annotation.calloutPoint ? [[annotation.calloutPoint[0], annotation.calloutPoint[1]] as Point] : []),
+  ]
+  return bounds(points)
+}
+
+export function annotationInsideSelection(annotation: EditableAnnotation, selection: Rect): boolean {
+  const area = annotationBounds(annotation)
+  return area[0] >= selection[0] && area[1] >= selection[1]
+    && area[2] <= selection[2] && area[3] <= selection[3]
+}
+
+export function translationToFit(rect: Rect, pageSize: { width: number; height: number }, offset: number): Point {
+  let dx = offset
+  let dy = offset
+  const width = rect[2] - rect[0]
+  const height = rect[3] - rect[1]
+  if (width >= pageSize.width) dx = -rect[0]
+  else if (rect[0] + dx < 0) dx = -rect[0]
+  else if (rect[2] + dx > pageSize.width) dx = pageSize.width - rect[2]
+  if (height >= pageSize.height) dy = -rect[1]
+  else if (rect[1] + dy < 0) dy = -rect[1]
+  else if (rect[3] + dy > pageSize.height) dy = pageSize.height - rect[3]
+  return [dx, dy]
+}
+
 function mapPoint(point: Point, from: Rect, to: Rect): Point {
   const width = from[2] - from[0]
   const height = from[3] - from[1]
@@ -132,8 +167,9 @@ export class AnnotationStore {
   private readonly loadedPages = new Set<number>()
   private readonly loadingPages = new Map<number, Promise<void>>()
   private readonly listeners = new Set<() => void>()
-  private readonly history = new History<AnnotationState | null>(100)
+  private readonly history = new History<AnnotationState[]>(100)
   private readonly pendingCreations = new Set<string>()
+  private readonly selection = new Set<string>()
   private pendingEdits: PendingEdit[] = []
   private nextNewId = 1
   private version = 0
@@ -155,6 +191,7 @@ export class AnnotationStore {
     this.loadedPages.clear()
     this.loadingPages.clear()
     this.pendingCreations.clear()
+    this.selection.clear()
     this.pendingEdits = []
     this.history.clear()
     this.nextNewId = 1
@@ -186,6 +223,8 @@ export class AnnotationStore {
           color: [...((kind === 'freetext' || kind === 'callout' ? info.textColor : info.strokeColor) ?? DEFAULT_COLOR)],
           borderWidth: info.borderWidth ?? DEFAULT_BORDER_WIDTH,
           opacity: info.opacity ?? 1,
+          textOpacity: info.textOpacity ?? 1,
+          boxOpacity: info.boxOpacity ?? 1,
           interiorColor: info.interiorColor ? [...info.interiorColor] : null,
           borderColor: info.strokeColor ? [...info.strokeColor] : null,
           line: info.line ? [[...info.line[0]], [...info.line[1]]] : null,
@@ -223,6 +262,59 @@ export class AnnotationStore {
       : undefined
   }
 
+  selectedIds(): string[] {
+    return [...this.selection].filter((id) => this.annotations.get(id)?.deleted === false)
+  }
+
+  primarySelection(): string | null {
+    return this.selectedIds().at(-1) ?? null
+  }
+
+  isSelected(id: string): boolean {
+    return this.selection.has(id) && this.annotations.get(id)?.deleted === false
+  }
+
+  selectOnly(id: string | null): void {
+    const next = id && this.annotations.get(id)?.deleted === false ? [id] : []
+    if (this.selectedIds().length === next.length && next.every((value) => this.selection.has(value))) return
+    this.selection.clear()
+    for (const value of next) this.selection.add(value)
+    this.notify()
+  }
+
+  toggleSelection(id: string): void {
+    if (this.annotations.get(id)?.deleted !== false) return
+    if (this.selection.has(id)) this.selection.delete(id)
+    else this.selection.add(id)
+    this.notify()
+  }
+
+  clearSelection(): void {
+    if (this.selection.size === 0) return
+    this.selection.clear()
+    this.notify()
+  }
+
+  selectInRect(pageIndex: number, rect: Rect): string[] {
+    const normalized: Rect = [
+      Math.min(rect[0], rect[2]), Math.min(rect[1], rect[3]),
+      Math.max(rect[0], rect[2]), Math.max(rect[1], rect[3]),
+    ]
+    this.selection.clear()
+    for (const annotation of this.getPageAnnotations(pageIndex)) {
+      if (annotationInsideSelection(annotation, normalized)) this.selection.add(annotation.id)
+    }
+    this.notify()
+    return this.selectedIds()
+  }
+
+  copySelected(): EditableAnnotation[] {
+    return this.selectedIds().flatMap((id) => {
+      const annotation = this.annotations.get(id)
+      return annotation && !annotation.deleted ? [publicAnnotation(annotation, this.isAnnotationDirty(annotation))] : []
+    })
+  }
+
   create(input: {
     pageIndex: number
     kind: Kind
@@ -233,6 +325,8 @@ export class AnnotationStore {
     color?: RGB
     borderWidth?: number
     opacity?: number
+    textOpacity?: number
+    boxOpacity?: number
     interiorColor?: RGB | null
     borderColor?: RGB | null
     line?: [Point, Point] | null
@@ -255,6 +349,8 @@ export class AnnotationStore {
       color: [...(input.color ?? DEFAULT_COLOR)],
       borderWidth: input.borderWidth ?? DEFAULT_BORDER_WIDTH,
       opacity: input.opacity ?? 1,
+      textOpacity: input.textOpacity ?? 1,
+      boxOpacity: input.boxOpacity ?? 1,
       interiorColor: input.interiorColor ? [...input.interiorColor] : null,
       borderColor: input.borderColor === undefined
         ? (input.kind === 'square' || input.kind === 'circle' ? [...(input.color ?? DEFAULT_COLOR)] : null)
@@ -271,7 +367,7 @@ export class AnnotationStore {
     }
     this.annotations.set(id, annotation)
     if (input.deferHistory) this.pendingCreations.add(id)
-    else this.history.push({ before: null, after: cloneState(annotation) })
+    else this.history.push({ before: [], after: [cloneState(annotation)] })
     this.notify()
     return this.get(id)!
   }
@@ -297,6 +393,20 @@ export class AnnotationStore {
       if (annotation.line) annotation.line = annotation.line.map((point) => [point[0] + dx, point[1] + dy]) as [Point, Point]
       if (annotation.inkList) annotation.inkList = annotation.inkList.map((stroke) => stroke.map((point) => [point[0] + dx, point[1] + dy]))
       if (annotation.kind === 'callout' && annotation.calloutPoint) {
+        annotation.calloutPoint = [annotation.calloutPoint[0] + dx, annotation.calloutPoint[1] + dy]
+        annotation.calloutLine = [[...annotation.calloutPoint], nearestCalloutEdgePoint(annotation.rect, annotation.calloutPoint)]
+      }
+    })
+  }
+
+  moveMany(ids: readonly string[], dx: number, dy: number): void {
+    if (dx === 0 && dy === 0) return
+    this.mutateMany(ids, (annotation) => {
+      annotation.rect = [annotation.rect[0] + dx, annotation.rect[1] + dy, annotation.rect[2] + dx, annotation.rect[3] + dy]
+      if (annotation.line) annotation.line = annotation.line.map((point) => [point[0] + dx, point[1] + dy]) as [Point, Point]
+      if (annotation.inkList) annotation.inkList = annotation.inkList.map((stroke) => stroke.map((point) => [point[0] + dx, point[1] + dy]))
+      if (annotation.kind === 'callout' && annotation.calloutPoint) {
+        annotation.calloutPoint = [annotation.calloutPoint[0] + dx, annotation.calloutPoint[1] + dy]
         annotation.calloutLine = [[...annotation.calloutPoint], nearestCalloutEdgePoint(annotation.rect, annotation.calloutPoint)]
       }
     })
@@ -340,14 +450,14 @@ export class AnnotationStore {
     const annotation = this.annotations.get(id)
     if (!annotation || annotation.deleted || (annotation.kind !== 'freetext' && annotation.kind !== 'callout')) return
     const pendingCreation = this.pendingCreations.delete(id)
-    const before = pendingCreation ? null : cloneState(annotation)
+    const before = pendingCreation ? [] : [cloneState(annotation)]
     this.markTouched(annotation)
     annotation.text = text
     annotation.layout = layout
     annotation.rect = rect ? [...rect] : [annotation.rect[0], annotation.rect[1], annotation.rect[2], annotation.rect[1] + layout.height]
     annotation.madeByKaru = true
     annotation.revision += 1
-    this.history.push({ before, after: cloneState(annotation) })
+    this.history.push({ before, after: [cloneState(annotation)] })
     this.notify()
   }
 
@@ -368,6 +478,8 @@ export class AnnotationStore {
     interiorColor?: RGB | null
     borderColor?: RGB | null
     opacity?: number
+    textOpacity?: number
+    boxOpacity?: number
     symbol?: SymbolName
   }): void {
     this.mutate(id, (annotation) => {
@@ -376,6 +488,8 @@ export class AnnotationStore {
       if (values.interiorColor !== undefined) annotation.interiorColor = values.interiorColor ? [...values.interiorColor] : null
       if (values.borderColor !== undefined) annotation.borderColor = values.borderColor ? [...values.borderColor] : null
       if (values.opacity !== undefined) annotation.opacity = values.opacity
+      if (values.textOpacity !== undefined) annotation.textOpacity = values.textOpacity
+      if (values.boxOpacity !== undefined) annotation.boxOpacity = values.boxOpacity
       if (values.symbol !== undefined && annotation.kind === 'symbol') annotation.symbol = values.symbol
       if (values.fontSize !== undefined && (annotation.kind === 'freetext' || annotation.kind === 'callout')) annotation.fontSize = values.fontSize
       if (values.font !== undefined && (annotation.kind === 'freetext' || annotation.kind === 'callout')) annotation.font = values.font
@@ -388,10 +502,16 @@ export class AnnotationStore {
   }
 
   remove(id: string): void {
+    const selected = this.selectedIds()
+    if (selected.length > 1 && this.selection.has(id)) {
+      this.removeMany(selected)
+      return
+    }
     const annotation = this.annotations.get(id)
     if (!annotation || annotation.deleted) return
     if (this.pendingCreations.delete(id)) {
       this.annotations.delete(id)
+      this.selection.delete(id)
       this.notify()
       return
     }
@@ -399,21 +519,89 @@ export class AnnotationStore {
     this.markTouched(annotation)
     annotation.deleted = true
     annotation.revision += 1
-    this.history.push({ before, after: null })
+    this.selection.delete(id)
+    this.history.push({ before: [before], after: [] })
     this.notify()
+  }
+
+  removeMany(ids: readonly string[]): void {
+    const before: AnnotationState[] = []
+    for (const id of [...new Set(ids)]) {
+      const annotation = this.annotations.get(id)
+      if (!annotation || annotation.deleted) continue
+      before.push(cloneState(annotation))
+      this.pendingCreations.delete(id)
+      this.markTouched(annotation)
+      annotation.deleted = true
+      annotation.revision += 1
+      this.selection.delete(id)
+    }
+    if (before.length === 0) return
+    this.history.push({ before, after: [] })
+    this.notify()
+  }
+
+  pasteAnnotations(
+    source: readonly EditableAnnotation[],
+    pageIndex: number,
+    pageSize: { width: number; height: number },
+    offset: number,
+  ): string[] {
+    if (source.length === 0) return []
+    const sourceBounds = source.map(annotationBounds)
+    const groupBounds: Rect = [
+      Math.min(...sourceBounds.map((rect) => rect[0])),
+      Math.min(...sourceBounds.map((rect) => rect[1])),
+      Math.max(...sourceBounds.map((rect) => rect[2])),
+      Math.max(...sourceBounds.map((rect) => rect[3])),
+    ]
+    const [dx, dy] = translationToFit(groupBounds, pageSize, offset)
+    const created: AnnotationState[] = []
+    for (const item of source) {
+      const annotation = this.create({
+        pageIndex,
+        kind: item.kind,
+        rect: [item.rect[0] + dx, item.rect[1] + dy, item.rect[2] + dx, item.rect[3] + dy],
+        text: item.text,
+        fontSize: item.fontSize,
+        font: item.font,
+        color: item.color,
+        borderWidth: item.borderWidth,
+        opacity: item.opacity,
+        textOpacity: item.textOpacity,
+        boxOpacity: item.boxOpacity,
+        interiorColor: item.interiorColor,
+        borderColor: item.borderColor,
+        line: item.line ? item.line.map((point) => [point[0] + dx, point[1] + dy]) as [Point, Point] : null,
+        inkList: item.inkList?.map((stroke) => stroke.map((point) => [point[0] + dx, point[1] + dy])) ?? null,
+        calloutPoint: item.calloutPoint ? [item.calloutPoint[0] + dx, item.calloutPoint[1] + dy] : null,
+        symbol: item.symbol,
+        layout: item.layout,
+        deferHistory: true,
+      })
+      this.pendingCreations.delete(annotation.id)
+      const stored = this.annotations.get(annotation.id)
+      if (stored) created.push(cloneState(stored))
+    }
+    if (created.length === 0) return []
+    this.history.push({ before: [], after: created })
+    this.selection.clear()
+    for (const annotation of created) this.selection.add(annotation.id)
+    this.notify()
+    return created.map((annotation) => annotation.id)
   }
 
   undo(): void {
     const step = this.history.undo()
     if (!step) return
-    this.restore(step.before, step.after)
+    this.restoreMany(step.before, step.after)
     this.notify()
   }
 
   redo(): void {
     const step = this.history.redo()
     if (!step) return
-    this.restore(step.after, step.before)
+    this.restoreMany(step.after, step.before)
     this.notify()
   }
 
@@ -475,28 +663,52 @@ export class AnnotationStore {
     if (samePersisted(before, after)) return
     this.markTouched(annotation)
     annotation.revision += 1
+    this.history.push({ before: [before], after: [after] })
+    this.notify()
+  }
+
+  private mutateMany(ids: readonly string[], change: (annotation: StoredAnnotation) => void): void {
+    const before: AnnotationState[] = []
+    const after: AnnotationState[] = []
+    for (const id of [...new Set(ids)]) {
+      const annotation = this.annotations.get(id)
+      if (!annotation || annotation.deleted) continue
+      const previous = cloneState(annotation)
+      change(annotation)
+      const next = cloneState(annotation)
+      if (samePersisted(previous, next)) continue
+      this.markTouched(annotation)
+      annotation.revision += 1
+      before.push(previous)
+      after.push(next)
+    }
+    if (before.length === 0) return
     this.history.push({ before, after })
     this.notify()
   }
 
-  private restore(target: AnnotationState | null, counterpart: AnnotationState | null): void {
-    const id = target?.id ?? counterpart?.id
-    if (!id) return
-    const existing = this.annotations.get(id)
-    if (target === null) {
-      if (!existing) return
-      this.markTouched(existing)
-      existing.deleted = true
-      existing.revision += 1
-      return
+  private restoreMany(target: AnnotationState[], counterpart: AnnotationState[]): void {
+    const targetById = new Map(target.map((state) => [state.id, state]))
+    const ids = new Set([...target.map((state) => state.id), ...counterpart.map((state) => state.id)])
+    for (const id of ids) {
+      const state = targetById.get(id)
+      const existing = this.annotations.get(id)
+      if (!state) {
+        if (!existing) continue
+        this.markTouched(existing)
+        existing.deleted = true
+        existing.revision += 1
+        this.selection.delete(id)
+        continue
+      }
+      const restored: StoredAnnotation = {
+        ...cloneState(state),
+        deleted: false,
+        revision: (existing?.revision ?? 0) + 1,
+      }
+      this.annotations.set(id, restored)
+      this.markTouched(restored)
     }
-    const restored: StoredAnnotation = {
-      ...cloneState(target),
-      deleted: false,
-      revision: (existing?.revision ?? 0) + 1,
-    }
-    this.annotations.set(id, restored)
-    this.markTouched(restored)
   }
 
   private isAnnotationDirty(annotation: StoredAnnotation): boolean {
@@ -534,6 +746,8 @@ export class AnnotationStore {
         backgroundColor: annotation.interiorColor,
         borderColor: annotation.borderColor,
         borderWidth: annotation.borderWidth,
+        textOpacity: annotation.textOpacity,
+        boxOpacity: annotation.boxOpacity,
       }
       if (annotation.kind === 'callout') {
         const callout = { ...common, point: annotation.calloutPoint ?? [annotation.rect[0] - 40, annotation.rect[1] + 40] as Point }
@@ -547,6 +761,7 @@ export class AnnotationStore {
         line: annotation.line!,
         color: annotation.color,
         borderWidth: annotation.borderWidth,
+        opacity: annotation.opacity,
         lineEnding: { start: 'None' as const, end: annotation.kind === 'arrow' ? 'OpenArrow' as const : 'None' as const },
       }
       return create ? { kind: 'createLine', ...common } : { kind: 'updateLine', objNum: savedObjNum, ...common }
@@ -557,7 +772,7 @@ export class AnnotationStore {
       return create ? { kind: 'createCircle', ...common } : { kind: 'updateCircle', objNum: savedObjNum, ...common }
     }
     if (annotation.kind === 'highlight' || annotation.kind === 'ink') {
-      const common = { pageIndex: annotation.pageIndex, inkList: annotation.inkList!, color: annotation.color, borderWidth: annotation.borderWidth, opacity: annotation.opacity }
+      const common = { pageIndex: annotation.pageIndex, inkList: annotation.inkList!, color: annotation.color, borderWidth: annotation.borderWidth, opacity: annotation.opacity, inkKind: annotation.kind }
       return create ? { kind: 'createInk', ...common } : { kind: 'updateInk', objNum: savedObjNum, ...common }
     }
     if (annotation.kind === 'symbol') {
@@ -566,6 +781,7 @@ export class AnnotationStore {
         rect: annotation.rect,
         color: annotation.color,
         symbol: annotation.symbol ?? 'check' as const,
+        opacity: annotation.opacity,
       }
       return create ? { kind: 'createSymbol', ...common } : { kind: 'updateSymbol', objNum: savedObjNum, ...common }
     }
@@ -581,20 +797,21 @@ export class AnnotationStore {
     annotation.id = newId
     annotation.objNum = objNum
     this.annotations.set(newId, annotation)
+    if (this.selection.delete(oldId)) this.selection.add(newId)
     this.pendingCreations.delete(oldId)
-    this.history.map((step) => this.mapHistoryStep(step, (state) => state?.id === oldId ? { ...state, id: newId, objNum } : state))
+    this.history.map((step) => this.mapHistoryStep(step, (state) => state.id === oldId ? { ...state, id: newId, objNum } : state))
     this.markTouched(annotation)
   }
 
   private clearSavedObjectFromHistory(id: string, objNum: number): void {
-    this.history.map((step) => this.mapHistoryStep(step, (state) => state?.id === id && state.objNum === objNum ? { ...state, objNum: null } : state))
+    this.history.map((step) => this.mapHistoryStep(step, (state) => state.id === id && state.objNum === objNum ? { ...state, objNum: null } : state))
   }
 
   private mapHistoryStep(
-    step: HistoryStep<AnnotationState | null>,
-    mapper: (state: AnnotationState | null) => AnnotationState | null,
-  ): HistoryStep<AnnotationState | null> {
-    return { before: mapper(step.before), after: mapper(step.after) }
+    step: HistoryStep<AnnotationState[]>,
+    mapper: (state: AnnotationState) => AnnotationState,
+  ): HistoryStep<AnnotationState[]> {
+    return { before: step.before.map(mapper), after: step.after.map(mapper) }
   }
 
   private markTouched(annotation: AnnotationState): void {

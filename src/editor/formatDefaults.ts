@@ -13,6 +13,9 @@ export interface ToolFormat {
   fillColor: RGB | null
   borderColor: RGB | null
   opacity: number
+  textOpacity: number
+  boxOpacity: number
+  symbolSize: number
   symbol: SymbolName
 }
 
@@ -30,12 +33,18 @@ function format(
   borderColor: RGB | null = null,
   opacity = 1,
   symbol: SymbolName = 'check',
+  textOpacity = 1,
+  boxOpacity = 1,
+  symbolSize = 16,
 ): ToolFormat {
   return {
     color: [...color], borderWidth, fontSize, font,
     fillColor: fillColor ? [...fillColor] : null,
     borderColor: borderColor ? [...borderColor] : null,
     opacity,
+    textOpacity,
+    boxOpacity,
+    symbolSize,
     symbol,
   }
 }
@@ -47,7 +56,7 @@ export const DEFAULT_FORMAT: FormatDefaults = {
   arrow: format(red),
   square: format(red, 1, 10.5, 'BIZUDGothic', null, red),
   circle: format(red, 1, 10.5, 'BIZUDGothic', null, red),
-  highlight: format(yellow, 12),
+  highlight: format(yellow, 12, 10.5, 'BIZUDGothic', null, null, 0.35),
   ink: format(red, 1.5),
   symbol: format(red),
 }
@@ -68,7 +77,10 @@ function readTool(value: unknown, fallback: ToolFormat): ToolFormat {
     font: item.font === 'BIZUDMincho' || item.font === 'BIZUDGothic' ? item.font : fallback.font,
     fillColor: item.fillColor === null ? null : validColor(item.fillColor) ? [...item.fillColor] : fallback.fillColor ? [...fallback.fillColor] : null,
     borderColor: item.borderColor === null ? null : validColor(item.borderColor) ? [...item.borderColor] : legacyBorder ? [...legacyBorder] : null,
-    opacity: typeof item.opacity === 'number' && [0.25, 0.5, 1].includes(item.opacity) ? item.opacity : fallback.opacity,
+    opacity: typeof item.opacity === 'number' && [0.25, 0.35, 0.5, 0.75, 1].includes(item.opacity) ? item.opacity : fallback.opacity,
+    textOpacity: typeof item.textOpacity === 'number' && [0.25, 0.5, 0.75, 1].includes(item.textOpacity) ? item.textOpacity : fallback.textOpacity,
+    boxOpacity: typeof item.boxOpacity === 'number' && [0.25, 0.5, 0.75, 1].includes(item.boxOpacity) ? item.boxOpacity : fallback.boxOpacity,
+    symbolSize: typeof item.symbolSize === 'number' && [8, 12, 16, 24, 32, 48, 72].includes(item.symbolSize) ? item.symbolSize : fallback.symbolSize,
     symbol: SYMBOL_OPTIONS.some((option) => option.name === item.symbol) ? item.symbol as SymbolName : fallback.symbol,
   }
 }

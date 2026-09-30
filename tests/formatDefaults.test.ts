@@ -18,7 +18,22 @@ describe('formatDefaults', () => {
     saveFormatDefaults(value, storage)
     expect(loadFormatDefaults(storage)).toEqual(value)
     expect(value.highlight.borderWidth).toBe(12)
-    expect(value.callout).toMatchObject({ fillColor: [1, 1, 1], borderColor: [1, 0, 0], opacity: 1 })
+    expect(value.highlight.opacity).toBe(0.35)
+    expect(value.callout).toMatchObject({ fillColor: [1, 1, 1], borderColor: [1, 0, 0], opacity: 1, textOpacity: 1, boxOpacity: 1 })
+    expect(value.symbol.symbolSize).toBe(16)
+  })
+
+  it('透明度と記号の大きさをツールごとに保存する', () => {
+    const storage = new MemoryStorage()
+    const value = updateToolFormat(
+      updateToolFormat(DEFAULT_FORMAT, 'text', { textOpacity: 0.5, boxOpacity: 0.25 }),
+      'symbol',
+      { opacity: 0.75, symbolSize: 32 },
+    )
+    saveFormatDefaults(value, storage)
+    const loaded = loadFormatDefaults(storage)
+    expect(loaded.text).toMatchObject({ textOpacity: 0.5, boxOpacity: 0.25 })
+    expect(loaded.symbol).toMatchObject({ opacity: 0.75, symbolSize: 32 })
   })
 
   it('旧版の値を全ツールへ引き継ぐ', () => {

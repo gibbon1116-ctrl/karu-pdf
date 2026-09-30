@@ -204,8 +204,67 @@ describe('AnnotationStore', () => {
     ])
 
     store.move(callout.id, 20, 10)
-    expect(store.get(callout.id)).toMatchObject({ rect: [220, 110, 380, 155], calloutPoint: [150, 70] })
+    expect(store.get(callout.id)).toMatchObject({ rect: [220, 110, 380, 155], calloutPoint: [170, 80] })
     store.updateCalloutPoint(callout.id, [175, 90])
     expect(store.get(callout.id)?.calloutLine?.[0]).toEqual([175, 90])
+  })
+
+  it('Shift相当の追加・解除と囲み選択を管理する', () => {
+    const store = new AnnotationStore()
+    const first = store.create({ pageIndex: 0, kind: 'square', rect: [10, 10, 30, 30] })
+    const second = store.create({ pageIndex: 0, kind: 'symbol', rect: [40, 40, 56, 56] })
+    store.selectOnly(first.id)
+    store.toggleSelection(second.id)
+    expect(store.selectedIds()).toEqual([first.id, second.id])
+    store.toggleSelection(first.id)
+    expect(store.selectedIds()).toEqual([second.id])
+
+    expect(store.selectInRect(0, [5, 5, 60, 60])).toEqual([first.id, second.id])
+    expect(store.selectInRect(0, [35, 35, 58, 58])).toEqual([second.id])
+  })
+
+  it('複数の貼り付けを1手で戻し、同じページのずらしとページ内への収めを行う', () => {
+    const source = new AnnotationStore()
+    const square = source.create({ pageIndex: 0, kind: 'square', rect: [70, 70, 95, 95] })
+    const symbol = source.create({ pageIndex: 0, kind: 'symbol', rect: [50, 50, 66, 66], opacity: 0.5 })
+    source.selectOnly(square.id)
+    source.toggleSelection(symbol.id)
+
+    const target = new AnnotationStore()
+    const ids = target.pasteAnnotations(source.copySelected(), 0, { width: 100, height: 100 }, 10)
+    expect(ids).toHaveLength(2)
+    expect(target.get(ids[0])?.rect).toEqual([75, 75, 100, 100])
+    expect(target.get(ids[1])?.rect).toEqual([55, 55, 71, 71])
+    expect(target.get(ids[1])?.opacity).toBe(0.5)
+    target.undo()
+    expect(target.getPageAnnotations(0)).toHaveLength(0)
+    target.redo()
+    expect(target.getPageAnnotations(0)).toHaveLength(2)
+  })
+
+  it('複数選択をまとめて移動・削除する', () => {
+    const store = new AnnotationStore()
+    const first = store.create({ pageIndex: 0, kind: 'square', rect: [10, 10, 20, 20] })
+    const callout = store.create({ pageIndex: 0, kind: 'callout', rect: [40, 40, 80, 60], calloutPoint: [30, 30] })
+    store.moveMany([first.id, callout.id], 5, 7)
+    expect(store.get(first.id)?.rect).toEqual([15, 17, 25, 27])
+    expect(store.get(callout.id)).toMatchObject({ rect: [45, 47, 85, 67], calloutPoint: [35, 37] })
+    store.undo()
+    expect(store.get(first.id)?.rect).toEqual([10, 10, 20, 20])
+
+    store.removeMany([first.id, callout.id])
+    expect(store.getPageAnnotations(0)).toHaveLength(0)
+    store.undo()
+    expect(store.getPageAnnotations(0)).toHaveLength(2)
+  })
+
+  it('文字と背景の透明度を別々の編集属性にする', () => {
+    const store = new AnnotationStore()
+    const text = store.create({
+      pageIndex: 0, kind: 'freetext', rect: [10, 10, 100, 40], text: '透明',
+      textOpacity: 0.5, boxOpacity: 0.25, interiorColor: [1, 1, 0],
+    })
+    expect(store.toEdits()[0]).toMatchObject({ kind: 'createFreeText', textOpacity: 0.5, boxOpacity: 0.25 })
+    expect(store.get(text.id)).toMatchObject({ textOpacity: 0.5, boxOpacity: 0.25 })
   })
 })

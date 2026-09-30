@@ -20,6 +20,10 @@ interface Props {
   onCloseTab(): void
   onUndo(): void
   onRedo(): void
+  onCut(): void
+  onCopy(): void
+  onPaste(): void
+  onDuplicate(): void
   onClearSelection(): void
   onDeleteSelection(): void
   onToggleThumbnails(): void
@@ -60,6 +64,11 @@ export function MenuBar(props: Props) {
     { label: '編集', items: [
       { label: '元に戻す', shortcut: 'Ctrl+Z', disabled: !props.canUndo, onSelect: props.onUndo },
       { label: 'やり直し', shortcut: 'Ctrl+Y', disabled: !props.canRedo, onSelect: props.onRedo },
+      separator(),
+      { label: '切り取り', shortcut: 'Ctrl+X', disabled: !props.hasDocument, onSelect: props.onCut },
+      { label: 'コピー', shortcut: 'Ctrl+C', disabled: !props.hasDocument, onSelect: props.onCopy },
+      { label: '貼り付け', shortcut: 'Ctrl+V', disabled: !props.hasDocument, onSelect: props.onPaste },
+      { label: '複製', shortcut: 'Ctrl+D', disabled: !props.hasDocument, onSelect: props.onDuplicate },
       separator(),
       { label: '選択を外す', shortcut: 'Esc', disabled: !props.hasDocument, onSelect: props.onClearSelection },
       { label: '選んだ書き込みを削除', shortcut: 'Delete', disabled: !props.hasDocument, onSelect: props.onDeleteSelection },
