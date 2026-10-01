@@ -16,7 +16,7 @@ describe('ToolRowの最後に使った道具', () => {
     const storage = new MemoryStorage()
     saveLastTool('shape', 'circle', storage)
     saveLastTool('text', 'callout', storage)
-    expect(loadLastTools(storage)).toEqual({ text: 'callout', shape: 'circle', pen: 'highlight', mark: 'textSelect' })
+    expect(loadLastTools(storage)).toEqual({ text: 'callout', shape: 'circle', pen: 'highlight', mark: 'textSelect', measure: 'distance' })
   })
 
   it('壊れた値と別グループの道具は既定値へ戻す', () => {

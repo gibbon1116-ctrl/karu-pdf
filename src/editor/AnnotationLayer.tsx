@@ -11,6 +11,7 @@ import { inkStrokePoints, mergeInkAnnotationId, simplifyPoints, type PreviousInk
 import { TextSelectionQueue } from './textSelectionQueue'
 import type { TextSelectionMode, TextSelectionResult } from '../core/textSelection'
 import { hitTextLine } from './textHitTest'
+import { MeasurementShape, useMeasurementInteraction } from './MeasurementOverlay'
 import { ToolIcon } from '../ui/ToolIcon'
 
 export type EditorTool = 'select' | 'textSelect' | FormatTool
@@ -164,6 +165,7 @@ export function AnnotationLayer(props: Props) {
   const changeTool = useContext(EditorToolChangeContext)
   const version = useSyncExternalStore(props.store.subscribe, props.store.getSnapshot)
   const svgRef = useRef<SVGSVGElement>(null)
+  const measurement = useMeasurementInteraction({ svg: svgRef, store: props.store, pageIndex: props.pageIndex, tool: props.tool, defaults: props.formatDefaults, select: props.onSelect })
   const draftRectRef = useRef<SVGRectElement>(null)
   const draftLineRef = useRef<SVGLineElement>(null)
   const draftInkRef = useRef<SVGPolylineElement>(null)
@@ -680,6 +682,7 @@ export function AnnotationLayer(props: Props) {
       : annotation.rect
     return (
       <g key={annotation.id} data-annotation-id={annotation.id} data-symbol={annotation.symbol ?? undefined} className="annotation-item">
+        {visible && annotation.measure && annotation.vertices && <MeasurementShape points={annotation.vertices} kind={annotation.measure.kind} text={annotation.text} fontSize={annotation.fontSize} color={color(annotation.color)} width={annotation.borderWidth} opacity={annotation.opacity} />}
         {visible && annotation.kind === 'square' && <rect className="annotation-square" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && annotation.kind === 'circle' && <ellipse className="annotation-shape" cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} rx={(x1 - x0) / 2} ry={(y1 - y0) / 2} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && line && <>
@@ -716,10 +719,11 @@ export function AnnotationLayer(props: Props) {
             <text key={`${annotation.id}-line-${index}`} className="annotation-text" x={x0 + lineLayout.x} y={y0 + lineLayout.baseline} fill={color(annotation.color)} opacity={annotation.textOpacity} fontFamily={annotation.font === 'BIZUDMincho' ? 'KaruBIZUDMincho' : 'KaruBIZUDGothic'} fontSize={annotation.fontSize} style={{ fontKerning: 'none' }} xmlSpace="preserve">{lineLayout.text}</text>
           ))}
         </g>}
-        {line ? <line className="annotation-hit annotation-line-hit" data-annotation-id={annotation.id} x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]} /> : <rect className="annotation-hit" data-annotation-id={annotation.id} x={x0} y={y0} width={Math.max(1, x1 - x0)} height={Math.max(1, y1 - y0)} />}
+        {annotation.measure && annotation.vertices ? <polyline className="annotation-hit annotation-line-hit" points={[...annotation.vertices, ...(annotation.kind === 'area' ? [annotation.vertices[0]] : [])].map(p => p.join(',')).join(' ')} fill="none" /> : line ? <line className="annotation-hit annotation-line-hit" data-annotation-id={annotation.id} x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]} /> : <rect className="annotation-hit" data-annotation-id={annotation.id} x={x0} y={y0} width={Math.max(1, x1 - x0)} height={Math.max(1, y1 - y0)} />}
         {calloutLine && <line className="annotation-hit annotation-line-hit" data-annotation-id={annotation.id} x1={calloutLine[0][0]} y1={calloutLine[0][1]} x2={calloutLine[1][0]} y2={calloutLine[1][1]} />}
         {selectedIds.has(annotation.id) && <>
           <rect className="annotation-selection" x={selectionRect[0] - 1} y={selectionRect[1] - 1} width={Math.max(2, selectionRect[2] - selectionRect[0] + 2)} height={Math.max(2, selectionRect[3] - selectionRect[1] + 2)} />
+          {singleSelection && annotation.vertices?.map((p, i) => <rect key={i} className="annotation-resize-handle" data-testid={`measure-handle-${i}`} data-measure-vertex={i} data-annotation-id={annotation.id} x={p[0] - handleSize / 2} y={p[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
           {props.tool === 'select' && singleSelection && positions.map(({ handle, x, y }) => <rect key={`${annotation.id}-${handle}`} className="annotation-resize-handle" data-testid={`resize-handle-${handle}`} data-annotation-id={annotation.id} data-resize-handle={handle} x={x - handleSize / 2} y={y - handleSize / 2} width={handleSize} height={handleSize} />)}
           {props.tool === 'select' && singleSelection && line && line.map((point, index) => <rect key={`${annotation.id}-line-${index}`} className="annotation-resize-handle" data-testid={`line-handle-${index === 0 ? 'start' : 'end'}`} data-annotation-id={annotation.id} data-line-handle={index === 0 ? 'start' : 'end'} x={point[0] - handleSize / 2} y={point[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
           {props.tool === 'select' && singleSelection && calloutLine && <rect className="annotation-resize-handle annotation-callout-handle" data-testid="callout-point-handle" data-annotation-id={annotation.id} data-callout-point="true" x={calloutLine[0][0] - handleSize / 2} y={calloutLine[0][1] - handleSize / 2} width={handleSize} height={handleSize} />}
@@ -747,6 +751,7 @@ export function AnnotationLayer(props: Props) {
         const svg = event.currentTarget
         const start = pointInPage(svg, event)
         const id = annotationIdFromTarget(event.target)
+        if (measurement.pointerDown(event, start)) return
         if (props.tool === 'select') {
           const annotation = id ? props.store.get(id) : undefined
           const lineHandle = targetValue<LineHandle>(event.target, 'line-handle')
@@ -838,6 +843,7 @@ export function AnnotationLayer(props: Props) {
         svg.setPointerCapture(event.pointerId)
       }}
       onPointerMove={(event) => {
+        if (measurement.pointerMove(event, pointInPage(event.currentTarget, event))) return
         if (TEXT_MARK_TOOLS.has(props.tool)) {
           const point = pointInPage(event.currentTarget, event)
           pointerPointRef.current = point
@@ -854,6 +860,7 @@ export function AnnotationLayer(props: Props) {
         scheduleDraft(operation)
       }}
       onPointerUp={(event) => {
+        if (measurement.pointerUp(event, pointInPage(event.currentTarget, event))) return
         const operation = dragRef.current
         if (!operation || operation.pointerId !== event.pointerId) return
         operation.latest = pointInPage(event.currentTarget, event)
@@ -863,8 +870,9 @@ export function AnnotationLayer(props: Props) {
         if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
         finishDrag(true)
       }}
-      onPointerCancel={() => finishDrag(false)}
+      onPointerCancel={() => { if (!measurement.cancel()) finishDrag(false) }}
       onDoubleClick={(event) => {
+        if (measurement.doubleClick()) return
         if (props.tool !== 'select') return
         const id = annotationIdFromTarget(event.target) ?? props.selectedId
         const annotation = id ? props.store.touch(id) : undefined
@@ -873,6 +881,7 @@ export function AnnotationLayer(props: Props) {
     >
       <rect className="annotation-surface" x="0" y="0" width={props.pageSize.width} height={props.pageSize.height} />
       {annotations.map(renderAnnotation)}
+      {measurement.draft}
       <g ref={textSelectionRef} className="text-selection-quads" aria-hidden="true" />
       <rect ref={draftRectRef} className="annotation-draft" x="0" y="0" width="0" height="0" />
       <line ref={draftLineRef} className="annotation-line-draft" x1="0" y1="0" x2="0" y2="0" />

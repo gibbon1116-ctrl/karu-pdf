@@ -2,6 +2,7 @@
 import { DisplayListCache } from '../core/displayListCache'
 import { openDocument, type OpenedDocument } from '../core/mupdfDoc'
 import { renderRegion } from '../core/render'
+import { readDocumentScales } from '../core/measure'
 import { applyEdits, listAnnotations } from '../core/annotations'
 import {
   createFontResource,
@@ -181,6 +182,7 @@ async function loadFontsForEdits(edits: readonly import('../core/annotations').A
   for (const edit of edits) {
     if (edit.kind === 'createFreeText' || edit.kind === 'updateFreeText'
       || edit.kind === 'createCallout' || edit.kind === 'updateCallout') requiredFonts.add(edit.font)
+    if (edit.kind === 'createMeasure' || edit.kind === 'updateMeasure') requiredFonts.add('BIZUDGothic')
   }
   await Promise.all([...requiredFonts].map((fontName) => getFontResource(fontName)))
   if (requiredFonts.size > 0) getDingbatsResource()
@@ -266,6 +268,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         requestId: request.requestId,
         pageCount: opened.pageCount,
         pageSizes: opened.pageSizes,
+        pageScales: readDocumentScales(pdf),
         openMs: opened.openMs,
         sizesMs: opened.sizesMs,
       })
@@ -499,7 +502,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         post({
           type: 'pageLayoutApplied', requestId: request.requestId, bytes,
           pageCount: pageSizes.length,
-          pageSizes,
+          pageSizes, pageScales: readDocumentScales(reopenedDocument),
           hasBackup: true,
           timings: {
             backupMs,
@@ -547,7 +550,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         const bytes = saved.buffer as ArrayBuffer
         post({
           type: request.type === 'applyHeaderFooter' ? 'headerFooterApplied' : 'headerFooterRemoved', requestId: request.requestId, bytes,
-          pageCount: pageSizes.length, pageSizes, hasBackup: true,
+          pageCount: pageSizes.length, pageSizes, pageScales: readDocumentScales(reopenedDocument), hasBackup: true,
           timings: { backupMs, assembleMs, exportMs, primaryReloadMs, pageMetadataMs, workerTotalMs: performance.now() - workerStarted },
         }, [bytes])
       } catch (error) {
@@ -573,7 +576,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       post({
         type: 'pageLayoutUndone', requestId: request.requestId, bytes,
         pageCount: pageSizes.length,
-        pageSizes,
+        pageSizes, pageScales: readDocumentScales(restoredDocument),
         hasBackup: false,
         timings: {
           backupMs: 0,

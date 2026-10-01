@@ -3,11 +3,11 @@ import type { EditorTool } from '../editor/AnnotationLayer'
 import { Dropdown, type DropdownItem } from '../ui/Dropdown'
 import { ToolIcon } from '../ui/ToolIcon'
 
-export type SplitToolGroup = 'text' | 'shape' | 'pen' | 'mark'
+export type SplitToolGroup = 'text' | 'shape' | 'pen' | 'mark' | 'measure'
 export type LastSplitTools = Record<SplitToolGroup, EditorTool>
 
 export const LAST_TOOLS_STORAGE_KEY = 'karu-pdf:last-tools'
-export const DEFAULT_LAST_TOOLS: LastSplitTools = { text: 'text', shape: 'line', pen: 'highlight', mark: 'textSelect' }
+export const DEFAULT_LAST_TOOLS: LastSplitTools = { text: 'text', shape: 'line', pen: 'highlight', mark: 'textSelect', measure: 'distance' }
 
 const groups: Record<SplitToolGroup, Array<{ tool: EditorTool; label: string; description: string; shortcut: string }>> = {
   text: [
@@ -23,6 +23,11 @@ const groups: Record<SplitToolGroup, Array<{ tool: EditorTool; label: string; de
   pen: [
     { tool: 'highlight', label: '蛍光ペン', description: 'なぞった所に半透明の太い線を引く（Ctrl で直線）', shortcut: 'H' },
     { tool: 'ink', label: '手書き', description: '細い線で自由に書く', shortcut: 'P' },
+  ],
+  measure: [
+    { tool: 'distance', label: '距離', description: '2点の間の長さを測る', shortcut: 'K' },
+    { tool: 'perimeter', label: '連続した長さ', description: '折れ線の長さの合計を測る', shortcut: '' },
+    { tool: 'area', label: '面積', description: '囲んだ範囲の面積を測る', shortcut: '' },
   ],
   mark: [
     { tool: 'textSelect', label: '文字を選択', description: 'PDF の文字を選んでコピーする', shortcut: 'M' },
@@ -78,6 +83,7 @@ interface Props {
   zoom: number
   canUndo: boolean
   canRedo: boolean
+  onScale(): void
   onToolChange(tool: EditorTool): void
   onUndo(): void
   onRedo(): void
@@ -105,10 +111,11 @@ export function ToolRow(props: Props) {
       label: item.label, icon: <ToolIcon tool={item.tool} />, description: item.description,
       shortcut: item.shortcut, checked: item.tool === lastTools[group], onSelect: () => choose(item.tool),
     }))
+    if (group === 'measure') items.push({ type: 'separator' }, { label: '縮尺の設定…', description: 'このページの縮尺を決める', onSelect: props.onScale })
     return <div key={group} className={`split-button${active ? ' active' : ''}`}>
       <button type="button" className="split-main" title={`${labelFor(lastTools[group])}: ${descriptionFor(lastTools[group])}（${label}: ${groups[group].map((item) => item.label).join('・')}）`}
         aria-pressed={active} disabled={!props.hasDocument} onClick={() => props.onToolChange(lastTools[group])}>
-        <ToolIcon tool={lastTools[group]} />{labelFor(lastTools[group])}
+        <ToolIcon tool={lastTools[group]} /><span className="split-label">{labelFor(lastTools[group])}</span>
       </button>
       <span className="split-arrow-wrap" title={`${label}の道具を選ぶ`}>
         <Dropdown label={`${label}▼`} items={items} disabled={!props.hasDocument} buttonClassName="split-arrow">
@@ -129,6 +136,7 @@ export function ToolRow(props: Props) {
     {splitButton('shape', '図形')}
     {splitButton('pen', 'ペン')}
     {splitButton('mark', '文字に印')}
+    {splitButton('measure', '計測')}
     <button type="button" className={props.tool === 'symbol' ? 'active' : ''} title="記号: 記号を置く" aria-pressed={props.tool === 'symbol'} disabled={!props.hasDocument} onClick={() => props.onToolChange('symbol')}><ToolIcon tool="symbol" />記号</button>
     <span className="tool-row-separator" />
     <button type="button" className="icon-button" title="元に戻す" aria-label="元に戻す" disabled={!props.canUndo} onClick={props.onUndo}>↶ 戻す</button>

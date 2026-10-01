@@ -4,7 +4,7 @@ import type { EditableAnnotation } from '../editor/AnnotationStore'
 import type { DocumentSession } from './documentModel'
 import { annotationBody, annotationColorHex, annotationCsvFileName, annotationKindLabel, createAnnotationCsv } from './annotationCsv'
 
-type Filter = 'all' | 'text' | 'callout' | 'shape' | 'symbol' | 'pen' | 'markup'
+type Filter = 'measure' | 'all' | 'text' | 'callout' | 'shape' | 'symbol' | 'pen' | 'markup'
 
 interface Props {
   session: DocumentSession
@@ -13,6 +13,7 @@ interface Props {
 }
 
 function matchesFilter(annotation: EditableAnnotation, filter: Filter): boolean {
+  if (filter === 'measure') return !!annotation.measure
   if (filter === 'all') return true
   if (filter === 'text') return annotation.kind === 'freetext'
   if (filter === 'callout') return annotation.kind === 'callout'
@@ -84,7 +85,7 @@ export function AnnotationListPanel({ session, pool, onSelect }: Props) {
     <div className="annotation-filters">
       <label>種類<select aria-label="書き込みの種類" value={filter} onChange={(event) => setFilter(event.currentTarget.value as Filter)}>
         <option value="all">すべて</option><option value="text">文字</option><option value="callout">吹き出し</option>
-        <option value="shape">図形</option><option value="symbol">記号</option><option value="pen">ペン</option><option value="markup">文字への印</option>
+        <option value="measure">計測</option><option value="shape">図形</option><option value="symbol">記号</option><option value="pen">ペン</option><option value="markup">文字への印</option>
       </select></label>
       <div><label>ページ<input aria-label="開始ページ" type="number" min="1" max={session.pageSizes.length} value={firstPage} onChange={(event) => setFirstPage(Number(event.currentTarget.value))} /></label><span>〜</span><label><span className="visually-hidden">終了ページ</span><input aria-label="終了ページ" type="number" min="1" max={session.pageSizes.length} value={lastPage} onChange={(event) => setLastPage(Number(event.currentTarget.value))} /></label></div>
     </div>

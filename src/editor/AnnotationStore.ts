@@ -2,11 +2,14 @@ import { nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, typ
 import type { Quad } from 'mupdf'
 import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
+import { measureBounds, measureText, type MeasureKind, type MeasureSettings, type PageScale } from '../core/measure'
 import { History, type HistoryStep } from './history'
 
-export type Kind = 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
+export type Kind = MeasureKind | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
 export interface EditableAnnotation {
+  measure?: MeasureSettings | null
+  vertices?: Point[] | null
   id: string
   objNum: number | null
   pageIndex: number
@@ -33,6 +36,8 @@ export interface EditableAnnotation {
   madeByKaru: boolean
 }
 
+type ScaleChange = { pageIndex: number; scale: PageScale | null }
+type HistoryState = AnnotationState[] & { scales?: ScaleChange[] }
 interface AnnotationState extends Omit<EditableAnnotation, 'dirty'> {}
 interface StoredAnnotation extends AnnotationState {
   deleted: boolean
@@ -63,6 +68,8 @@ function clonePoints(points: readonly Point[]): Point[] {
 function cloneState(annotation: AnnotationState): AnnotationState {
   return {
     ...annotation,
+    measure: annotation.measure ? { ...annotation.measure } : null,
+    vertices: annotation.vertices?.map(p => [...p] as Point) ?? null,
     rect: [...annotation.rect],
     color: [...annotation.color],
     interiorColor: annotation.interiorColor ? [...annotation.interiorColor] : null,
@@ -92,6 +99,7 @@ function publicAnnotation(annotation: StoredAnnotation, dirty: boolean): Editabl
 
 function persistedState(state: AnnotationState): unknown {
   return {
+    measure: state.measure, vertices: state.vertices,
     pageIndex: state.pageIndex,
     kind: state.kind,
     rect: state.rect,
@@ -175,14 +183,17 @@ export class AnnotationStore {
   private readonly loadedPages = new Set<number>()
   private readonly loadingPages = new Map<number, Promise<void>>()
   private readonly listeners = new Set<() => void>()
-  private readonly history = new History<AnnotationState[]>(100)
+  private readonly history = new History<HistoryState>(100)
   private readonly pendingCreations = new Set<string>()
   private readonly selection = new Set<string>()
   private pendingEdits: PendingEdit[] = []
+  private readonly scales = new Map<number, PageScale | null>()
+  private readonly scaleBaselines = new Map<number, PageScale | null>()
+  private pendingScales: Array<ScaleChange & { editIndex: number }> = []
   private nextNewId = 1
   private version = 0
   private generation = 0
-  private lastNudge: { key: string; step: HistoryStep<AnnotationState[]>; at: number } | null = null
+  private lastNudge: { key: string; step: HistoryStep<HistoryState>; at: number } | null = null
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
@@ -194,6 +205,7 @@ export class AnnotationStore {
   canRedo = (): boolean => this.history.canRedo
 
   reset(): void {
+    this.scales.clear(); this.scaleBaselines.clear(); this.pendingScales = []
     this.annotations.clear()
     this.baselines.clear()
     this.touchedByPage.clear()
@@ -225,6 +237,8 @@ export class AnnotationStore {
           objNum: info.objNum,
           pageIndex,
           kind,
+          measure: info.measure ? { ...info.measure } : null,
+          vertices: info.vertices?.map(p => [...p] as Point) ?? null,
           rect: [...info.rect],
           text: isTextMarkup(kind) ? info.markedText ?? '' : info.contents,
           fontSize: info.fontSize ?? DEFAULT_FONT_SIZE,
@@ -257,6 +271,38 @@ export class AnnotationStore {
     })
     this.loadingPages.set(pageIndex, request)
     return request
+  }
+
+  loadScales(scales: readonly (PageScale | null)[]): void {
+    scales.forEach((scale, pageIndex) => { this.scales.set(pageIndex, scale); this.scaleBaselines.set(pageIndex, scale) })
+    this.notify()
+  }
+
+  getScale(pageIndex: number): PageScale | null { const s = this.scales.get(pageIndex); return s ? { ...s } : null }
+
+  setScale(pageIndices: readonly number[], scale: PageScale, recalculate: boolean): void {
+    const before: HistoryState = [], after: HistoryState = []
+    before.scales = pageIndices.map(pageIndex => ({ pageIndex, scale: this.getScale(pageIndex) }))
+    after.scales = pageIndices.map(pageIndex => ({ pageIndex, scale: { ...scale } }))
+    for (const pageIndex of pageIndices) {
+      this.scales.set(pageIndex, { ...scale })
+      if (!recalculate) continue
+      for (const a of this.annotations.values()) {
+        if (a.deleted || a.pageIndex !== pageIndex || !a.measure || !a.vertices) continue
+        before.push(cloneState(a)); a.measure = { ...a.measure, mmPerPoint: scale.mmPerPoint, unit: scale.unit, decimals: scale.decimals }
+        a.text = measureText(a.vertices, a.measure); a.rect = measureBounds(a.vertices, a.measure.kind, a.text, a.fontSize)
+        this.markTouched(a); a.revision++; after.push(cloneState(a))
+      }
+    }
+    this.history.push({ before, after }); this.notify()
+  }
+
+  updateMeasureVertices(id: string, points: Point[]): void {
+    this.mutate(id, a => {
+      if (!a.measure) return
+      a.vertices = points.map(p => [...p] as Point); a.text = measureText(points, a.measure)
+      a.rect = measureBounds(points, a.measure.kind, a.text, a.fontSize)
+    })
   }
 
   getPageAnnotations(pageIndex: number): EditableAnnotation[] {
@@ -326,6 +372,8 @@ export class AnnotationStore {
   }
 
   create(input: {
+    measure?: MeasureSettings | null
+    vertices?: Point[] | null
     pageIndex: number
     kind: Kind
     rect: Rect
@@ -353,6 +401,8 @@ export class AnnotationStore {
       objNum: null,
       pageIndex: input.pageIndex,
       kind: input.kind,
+      measure: input.measure ? { ...input.measure } : null,
+      vertices: input.vertices?.map(p => [...p] as Point) ?? null,
       rect: [...input.rect],
       text: input.text ?? '',
       fontSize: input.fontSize ?? DEFAULT_FONT_SIZE,
@@ -402,6 +452,7 @@ export class AnnotationStore {
     this.mutate(id, (annotation) => {
       if (dx === 0 && dy === 0) return
       annotation.rect = [annotation.rect[0] + dx, annotation.rect[1] + dy, annotation.rect[2] + dx, annotation.rect[3] + dy]
+      if (annotation.vertices) annotation.vertices = annotation.vertices.map(p => [p[0] + dx, p[1] + dy])
       if (annotation.line) annotation.line = annotation.line.map((point) => [point[0] + dx, point[1] + dy]) as [Point, Point]
       if (annotation.inkList) annotation.inkList = annotation.inkList.map((stroke) => stroke.map((point) => [point[0] + dx, point[1] + dy]))
       if (annotation.kind === 'callout' && annotation.calloutPoint) {
@@ -415,6 +466,7 @@ export class AnnotationStore {
     if (dx === 0 && dy === 0) return
     this.mutateMany(ids, (annotation) => {
       annotation.rect = [annotation.rect[0] + dx, annotation.rect[1] + dy, annotation.rect[2] + dx, annotation.rect[3] + dy]
+      if (annotation.vertices) annotation.vertices = annotation.vertices.map(p => [p[0] + dx, p[1] + dy])
       if (annotation.line) annotation.line = annotation.line.map((point) => [point[0] + dx, point[1] + dy]) as [Point, Point]
       if (annotation.inkList) annotation.inkList = annotation.inkList.map((stroke) => stroke.map((point) => [point[0] + dx, point[1] + dy]))
       if (annotation.kind === 'callout' && annotation.calloutPoint) {
@@ -438,6 +490,7 @@ export class AnnotationStore {
     for (const id of movableIds) {
       const annotation = this.annotations.get(id)!
       annotation.rect = [annotation.rect[0] + dx, annotation.rect[1] + dy, annotation.rect[2] + dx, annotation.rect[3] + dy]
+      if (annotation.vertices) annotation.vertices = annotation.vertices.map(p => [p[0] + dx, p[1] + dy])
       if (annotation.line) annotation.line = annotation.line.map((point) => [point[0] + dx, point[1] + dy]) as [Point, Point]
       if (annotation.inkList) annotation.inkList = annotation.inkList.map((stroke) => stroke.map((point) => [point[0] + dx, point[1] + dy]))
       if (annotation.kind === 'callout' && annotation.calloutPoint) {
@@ -469,6 +522,10 @@ export class AnnotationStore {
   resize(id: string, rect: Rect): void {
     this.mutate(id, (annotation) => {
       const previous = annotation.rect
+      if (annotation.vertices && annotation.measure) {
+        annotation.vertices = annotation.vertices.map(p => mapPoint(p, previous, rect))
+        annotation.text = measureText(annotation.vertices, annotation.measure)
+      }
       if (annotation.line) annotation.line = annotation.line.map((point) => mapPoint(point, previous, rect)) as [Point, Point]
       if (annotation.inkList) annotation.inkList = annotation.inkList.map((stroke) => stroke.map((point) => mapPoint(point, previous, rect)))
       annotation.rect = [...rect]
@@ -545,10 +602,11 @@ export class AnnotationStore {
       if (values.textOpacity !== undefined) annotation.textOpacity = values.textOpacity
       if (values.boxOpacity !== undefined) annotation.boxOpacity = values.boxOpacity
       if (values.symbol !== undefined && annotation.kind === 'symbol') annotation.symbol = values.symbol
-      if (values.fontSize !== undefined && (annotation.kind === 'freetext' || annotation.kind === 'callout')) annotation.fontSize = values.fontSize
+      if (values.fontSize !== undefined && (annotation.measure || annotation.kind === 'freetext' || annotation.kind === 'callout')) annotation.fontSize = values.fontSize
       if (values.font !== undefined && (annotation.kind === 'freetext' || annotation.kind === 'callout')) annotation.font = values.font
       if (values.layout && (annotation.kind === 'freetext' || annotation.kind === 'callout')) annotation.layout = values.layout
       if (values.rect) annotation.rect = [...values.rect]
+      if (annotation.measure && annotation.vertices && values.fontSize !== undefined) annotation.rect = measureBounds(annotation.vertices, annotation.measure.kind, annotation.text, annotation.fontSize)
       if (annotation.kind === 'callout' && annotation.calloutPoint) {
         annotation.calloutLine = [[...annotation.calloutPoint], nearestCalloutEdgePoint(annotation.rect, annotation.calloutPoint)]
       }
@@ -616,6 +674,8 @@ export class AnnotationStore {
         pageIndex,
         kind: item.kind,
         rect: [item.rect[0] + dx, item.rect[1] + dy, item.rect[2] + dx, item.rect[3] + dy],
+        measure: item.measure,
+        vertices: item.vertices?.map(p => [p[0] + dx, p[1] + dy]) ?? null,
         text: item.text,
         fontSize: item.fontSize,
         font: item.font,
@@ -673,13 +733,17 @@ export class AnnotationStore {
       state: annotation.deleted ? null : cloneState(annotation),
       edit,
     }))
-    return entries.map(({ edit }) => edit)
+    const edits = entries.map(({ edit }) => edit)
+    this.pendingScales = [...this.scales].filter(([i, scale]) => JSON.stringify(scale) !== JSON.stringify(this.scaleBaselines.get(i) ?? null)).map(([pageIndex, scale], i) => ({ pageIndex, scale: scale ? { ...scale } : null, editIndex: edits.length + i }))
+    return [...edits, ...this.pendingScales.map(({ pageIndex, scale }) => ({ kind: 'setPageScale' as const, pageIndex, scale }))]
   }
 
   markApplied(result: SaveResult): void {
     const pending = this.pendingEdits
     this.pendingEdits = []
     const failed = new Set(result.errors?.map((error) => error.editIndex) ?? [])
+    for (const item of this.pendingScales) if (!failed.has(item.editIndex)) this.scaleBaselines.set(item.pageIndex, item.scale)
+    this.pendingScales = []
     let createdIndex = 0
     pending.forEach((item, editIndex) => {
       if (failed.has(editIndex)) return
@@ -706,7 +770,7 @@ export class AnnotationStore {
   }
 
   isDirty(): boolean {
-    return this.editEntries().length > 0
+    return this.editEntries().length > 0 || [...this.scales].some(([i, scale]) => JSON.stringify(scale) !== JSON.stringify(this.scaleBaselines.get(i) ?? null))
   }
 
   private mutate(id: string, change: (annotation: StoredAnnotation) => void): void {
@@ -742,7 +806,8 @@ export class AnnotationStore {
     this.notify()
   }
 
-  private restoreMany(target: AnnotationState[], counterpart: AnnotationState[]): void {
+  private restoreMany(target: HistoryState, counterpart: HistoryState): void {
+    for (const item of target.scales ?? []) this.scales.set(item.pageIndex, item.scale ? { ...item.scale } : null)
     const targetById = new Map(target.map((state) => [state.id, state]))
     const ids = new Set([...target.map((state) => state.id), ...counterpart.map((state) => state.id)])
     for (const id of ids) {
@@ -790,6 +855,10 @@ export class AnnotationStore {
 
   private toEdit(annotation: StoredAnnotation, savedObjNum: number | null): AnnotationEdit {
     const create = savedObjNum === null
+    if (annotation.measure && annotation.vertices) {
+      const common = { pageIndex: annotation.pageIndex, vertices: annotation.vertices, measure: annotation.measure, text: annotation.text, color: annotation.color, borderWidth: annotation.borderWidth, fontSize: annotation.fontSize, opacity: annotation.opacity }
+      return create ? { kind: 'createMeasure', ...common } : { kind: 'updateMeasure', objNum: savedObjNum, ...common }
+    }
     if (annotation.kind === 'freetext' || annotation.kind === 'callout') {
       const common = {
         pageIndex: annotation.pageIndex,
@@ -876,10 +945,10 @@ export class AnnotationStore {
   }
 
   private mapHistoryStep(
-    step: HistoryStep<AnnotationState[]>,
+    step: HistoryStep<HistoryState>,
     mapper: (state: AnnotationState) => AnnotationState,
-  ): HistoryStep<AnnotationState[]> {
-    return { before: step.before.map(mapper), after: step.after.map(mapper) }
+  ): HistoryStep<HistoryState> {
+    return { before: Object.assign(step.before.map(mapper), { scales: step.before.scales }), after: Object.assign(step.after.map(mapper), { scales: step.after.scales }) }
   }
 
   private markTouched(annotation: AnnotationState): void {

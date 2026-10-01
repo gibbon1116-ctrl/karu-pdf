@@ -3,7 +3,7 @@ import type { FontName } from '../core/fontMetrics'
 
 export const FORMAT_STORAGE_KEY = 'karu-pdf:format'
 
-export type FormatTool = 'text' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
+export type FormatTool = 'distance' | 'perimeter' | 'area' | 'text' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
 export interface ToolFormat {
   color: RGB
@@ -50,6 +50,7 @@ function format(
 }
 
 export const DEFAULT_FORMAT: FormatDefaults = {
+  distance: format(red), perimeter: format(red), area: format(red),
   text: format(red),
   callout: format(red, 1, 10.5, 'BIZUDGothic', [1, 1, 1], red),
   line: format(red),

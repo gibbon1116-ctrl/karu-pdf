@@ -98,11 +98,12 @@ export class DocumentSession {
     this.lastSavedByteLength = byteLength
   }
 
-  updateAfterPageLayout(pageSizes: PageSize[], canUndoOrganize: boolean): void {
+  updateAfterPageLayout(pageSizes: PageSize[], canUndoOrganize: boolean, scales?: import('../core/measure').PageScale[] | (import('../core/measure').PageScale | null)[]): void {
     this.pageSizes = pageSizes
     this.canUndoOrganize = canUndoOrganize
     this.pageRevision += 1
     this.annotationStore.reset()
+    if (scales) this.annotationStore.loadScales(scales)
     this.view.page = Math.min(Math.max(1, this.view.page), pageSizes.length)
     this.view.scrollLeft = 0
     this.view.scrollTop = 0

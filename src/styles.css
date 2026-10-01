@@ -357,3 +357,27 @@ button, input { font: inherit; }
   .header-footer-body { grid-template-columns: minmax(0, 1fr); }
   .header-footer-preview { grid-column: 1 !important; grid-row: auto; position: static; }
 }
+
+/* Measurement input keeps pointer updates in the SVG draft. */
+.annotation-layer.tool-distance, .annotation-layer.tool-perimeter, .annotation-layer.tool-area { cursor: crosshair; }
+.measurement-shape, .measurement-draft { pointer-events: none; }
+.measurement-label, .measurement-draft text { font-family: KaruBIZUDGothic; font-kerning: none; }
+.scale-dialog { width: min(540px, 90vw); border: 1px solid #aeb9c7; border-radius: 8px; padding: 22px; }
+.scale-dialog::backdrop { background: #0005; }
+.scale-dialog h2 { margin-top: 0; font-size: 18px; }
+.scale-dialog fieldset { border: 0; padding: 0; display: grid; gap: 12px; }
+.scale-dialog label { display: flex; align-items: center; gap: 8px; }
+.scale-dialog input:not([type=radio]) { width: 110px; }
+.scale-dialog .scale-options { display: flex; gap: 24px; }
+.scale-dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; }
+.scale-trace-banner { position: fixed; left: 50%; top: 100px; transform: translateX(-50%); z-index: 100; background: #fff5c6; padding: 10px 18px; border: 1px solid #ad962c; pointer-events: none; }
+.status-scale { border: 0; background: none; color: inherit; padding: 0 8px; text-decoration: underline; }
+
+@media (max-width: 850px) {
+  .tool-row .icon-button { min-width: 50px; padding-inline: 4px !important; }
+  .tool-row > button, .split-main { font-size: 13px; }
+  .tool-row .icon-button, .zoom-controls { flex: none; }
+  .split-main { min-width: 0; }
+  .split-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .split-arrow-wrap { flex: none; }
+}

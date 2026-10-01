@@ -7,6 +7,10 @@ import { MenuBar } from './app/MenuBar'
 import { RasterizeDialog } from './app/RasterizeDialog'
 import { HeaderFooterDialog } from './app/HeaderFooterDialog'
 import type { HeaderFooterSettings } from './app/headerFooterText'
+import { ScaleDialog } from './app/ScaleDialog'
+import { ScaleInteractionContext } from './editor/MeasurementOverlay'
+import { scaleLabel } from './core/measure'
+import type { Point } from './core/annotations'
 import { ToolRow } from './app/ToolRow'
 import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS, type SidePanelTab } from './app/documentModel'
 import { allSessionAnnotations } from './app/AnnotationListPanel'
@@ -201,6 +205,9 @@ export default function App() {
   const [, setTabsVersion] = useState(0)
   const [page, setPage] = useState(() => tabs.active?.view.page ?? 0)
   const [zoom, setZoom] = useState(() => tabs.active?.view.zoom ?? 1)
+  const [scaleDialog, setScaleDialog] = useState<{ session: DocumentSession; pageIndex: number; required: boolean } | null>(null)
+  const [scaleTracing, setScaleTracing] = useState(false)
+  const [scalePoints, setScalePoints] = useState<Point[] | null>(null)
   const [tool, setTool] = useState<EditorTool>('select')
   const [formatDefaults, setFormatDefaults] = useState<FormatDefaults>(() => loadFormatDefaults())
   const [panels, setPanels] = useState(loadPanels)
@@ -223,6 +230,16 @@ export default function App() {
   organizeRef.current = organize
   useSyncExternalStore(active?.annotationStore.subscribe ?? noopSubscribe, active?.annotationStore.getSnapshot ?? zeroSnapshot)
 
+  const openScale = (pageIndex: number, required = false) => {
+    const session = activeRef.current
+    if (!session) return
+    setScaleTracing(false); setScalePoints(null); setScaleDialog({ session, pageIndex, required })
+  }
+  const scaleTargets = (all: boolean) => {
+    if (!scaleDialog) return []
+    const size = scaleDialog.session.pageSizes[scaleDialog.pageIndex]
+    return all ? scaleDialog.session.pageSizes.flatMap((p, i) => Math.abs(p.width - size.width) < .01 && Math.abs(p.height - size.height) < .01 ? [i] : []) : [scaleDialog.pageIndex]
+  }
   const refreshTabs = useCallback(() => setTabsVersion((value) => value + 1), [])
   const refreshRecent = useCallback(() => void loadRecentFiles().then(setRecent), [])
   const showStatus = useCallback((message: string) => {
@@ -399,6 +416,7 @@ export default function App() {
         zoom: remembered.zoom,
       } : undefined
       const session = new DocumentSession({ docId, name, byteLength, handle, pageSizes: result.pageSizes, view })
+      session.annotationStore.loadScales(result.pageScales ?? [])
       tabs.add(session)
       activeRef.current = session
       setPage(session.view.page)
@@ -820,8 +838,8 @@ export default function App() {
     return inserted
   }, [pool])
 
-  const finishPageLayout = useCallback((session: DocumentSession, result: { pageSizes: typeof session.pageSizes; hasBackup: boolean }) => {
-    session.updateAfterPageLayout(result.pageSizes, result.hasBackup)
+  const finishPageLayout = useCallback((session: DocumentSession, result: { pageSizes: typeof session.pageSizes; hasBackup: boolean; pageScales?: (import('./core/measure').PageScale | null)[] }) => {
+    session.updateAfterPageLayout(result.pageSizes, result.hasBackup, result.pageScales)
     activeRef.current = session
     setPage(session.view.page)
     setZoom(session.view.zoom)
@@ -1134,6 +1152,7 @@ export default function App() {
       else if (key === 'p') void changeTool('ink')
       else if (key === 's') void changeTool('symbol')
       else if (key === 'c') void changeTool('callout')
+      else if (key === 'k') void changeTool('distance')
       else if (key === 'm') void changeTool('textSelect')
       else if (event.key === 'Escape') { setTool('select'); viewerRef.current?.clearSelection() }
     }
@@ -1313,6 +1332,7 @@ export default function App() {
           canUndo={active?.annotationStore.canUndo() ?? false}
           canRedo={active?.annotationStore.canRedo() ?? false}
           onToolChange={(next) => void changeTool(next)}
+          onScale={() => openScale(page - 1)}
           onUndo={() => { active?.annotationStore.undo(); viewerRef.current?.clearSelection(); refreshTabs() }}
           onRedo={() => { active?.annotationStore.redo(); viewerRef.current?.clearSelection(); refreshTabs() }}
           onZoomIn={() => viewerRef.current?.zoomIn()}
@@ -1348,6 +1368,7 @@ export default function App() {
           </section>}
         >
           <WorkspaceFailureProbe fail={workspaceFailure}>
+          <ScaleInteractionContext.Provider value={{ request: i => openScale(i, true), tracePage: scaleTracing ? scaleDialog?.pageIndex ?? null : null, complete: p => { setScalePoints(p); setScaleTracing(false) } }}>
           <DocumentWorkspace
           key={`${active.docId}:${active.pageRevision}`}
           session={active}
@@ -1370,6 +1391,7 @@ export default function App() {
           onStatus={showStatus}
           organize={workspaceOrganize}
           />
+          </ScaleInteractionContext.Provider>
           </WorkspaceFailureProbe>
         </ErrorBoundary>
       ) : (
@@ -1383,8 +1405,18 @@ export default function App() {
       )}
       <footer className="status-bar">
         <span>{active ? `${page} / ${active.pageSizes.length} ページ` : 'PDFを開いてください'}</span>
+        {active?.annotationStore.getScale(page - 1) && <button type="button" className="status-scale" onClick={() => openScale(page - 1)}>{scaleLabel(active.annotationStore.getScale(page - 1)!)}</button>}
         <span role="status">{runtimeError || status}</span>
       </footer>
+      {scaleDialog && <ScaleDialog key={`${scaleDialog.session.docId}:${scaleDialog.pageIndex}`} pageIndex={scaleDialog.pageIndex} size={scaleDialog.session.pageSizes[scaleDialog.pageIndex]} initial={scaleDialog.session.annotationStore.getScale(scaleDialog.pageIndex)} required={scaleDialog.required} tracing={scaleTracing} points={scalePoints}
+        onTrace={() => { viewerRef.current?.scrollToPage(scaleDialog.pageIndex); setScaleTracing(true) }}
+        onClose={() => { setScaleDialog(null); setScaleTracing(false) }}
+        countMeasurements={async all => {
+          const session = scaleDialog.session, indices = scaleTargets(all)
+          for (const i of indices) await session.annotationStore.ensurePageLoaded(i, () => pool.listAnnotations(session.docId, i))
+          return indices.reduce((n, i) => n + session.annotationStore.getPageAnnotations(i).filter(a => a.measure).length, 0)
+        }}
+        onSave={(scale, all, recalculate) => { scaleDialog.session.annotationStore.setScale(scaleTargets(all), scale, recalculate); setScaleDialog(null); setScaleTracing(false); refreshTabs() }} />}
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
       <RasterizeDialog
         open={rasterizeOpen && Boolean(active)}

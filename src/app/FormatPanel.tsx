@@ -67,7 +67,7 @@ function formatTool(kind: Kind | EditorTool): FormatTool | null {
 
 function formatToolLabel(tool: FormatTool): string {
   const labels: Record<FormatTool, string> = {
-    text: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角', circle: '丸',
+    distance: '距離', perimeter: '連続した長さ', area: '面積', text: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角', circle: '丸',
     highlight: '蛍光ペン', ink: '手書き', symbol: '記号', textHighlight: '文字ハイライト',
     underline: '文字に下線', strikeout: '文字に取り消し線',
   }
@@ -85,7 +85,8 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
   const values: EditableAnnotation | ToolFormat | null = activeSelection ?? (target ? defaults[target] : null)
   const textTarget = target === 'text' || target === 'callout'
   const shapeTarget = target === 'square' || target === 'circle'
-  const simpleColorTarget = target === 'line' || target === 'arrow' || target === 'highlight' || target === 'ink' || target === 'textHighlight' || target === 'underline' || target === 'strikeout' || target === 'symbol'
+  const measureTarget = target === 'distance' || target === 'perimeter' || target === 'area'
+  const simpleColorTarget = measureTarget || target === 'line' || target === 'arrow' || target === 'highlight' || target === 'ink' || target === 'textHighlight' || target === 'underline' || target === 'strikeout' || target === 'symbol'
   const opacityTarget = simpleColorTarget && target !== 'underline' && target !== 'strikeout'
 
   const changeDefault = (changes: Partial<ToolFormat>) => {
@@ -139,6 +140,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
   }
 
   const changeText = async (changes: { fontSize?: number; font?: FontName }) => {
+    if (activeSelection?.measure) { store.update(activeSelection.id, changes); return }
     if (!activeSelection || (activeSelection.kind !== 'freetext' && activeSelection.kind !== 'callout')) {
       changeDefault(changes)
       return
@@ -200,6 +202,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
       </select>
     </label>}
     {target === 'square' && <button type="button" className="whiteout-button" title="上に白い四角を重ねて見えなくします。下の文字やデータはファイルに残ります" onClick={makeWhiteout}>白塗りにする</button>}
+    {measureTarget && values && <label>文字の大きさ<select aria-label="文字の大きさ" value={values.fontSize} onChange={event => void changeText({ fontSize: Number(event.currentTarget.value) })}>{FONT_SIZES.map(v => <option key={v} value={v}>{v} pt</option>)}</select></label>}
     {textTarget && values && <>
       <label>
         文字の透明度

@@ -1,13 +1,14 @@
+import { scaleLabel, PT_MM } from '../core/measure'
 import { SYMBOL_OPTIONS } from '../core/annotations'
 import type { EditableAnnotation } from '../editor/AnnotationStore'
 
 const PT_TO_MM = 25.4 / 72
 
-export const ANNOTATION_CSV_HEADER = ['番号', 'ページ', '種類', '本文', '色', '位置（x, y mm）', '大きさ（幅, 高さ mm）']
+export const ANNOTATION_CSV_HEADER = ['番号', 'ページ', '種類', '本文', '色', '位置（x, y mm）', '大きさ（幅, 高さ mm）', '縮尺']
 
 export function annotationKindLabel(kind: EditableAnnotation['kind']): string {
   const labels: Record<EditableAnnotation['kind'], string> = {
-    freetext: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角',
+    distance: '距離', perimeter: '連続した長さ', area: '面積', freetext: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角',
     circle: '丸', highlight: '蛍光ペン', ink: '手書き', textHighlight: '文字ハイライト',
     underline: '文字に下線', strikeout: '文字に取り消し線', symbol: '記号',
   }
@@ -15,6 +16,7 @@ export function annotationKindLabel(kind: EditableAnnotation['kind']): string {
 }
 
 export function annotationBody(annotation: EditableAnnotation): string {
+  if (annotation.measure) return annotation.text
   if (annotation.kind === 'freetext' || annotation.kind === 'callout') return annotation.text
   if (annotation.kind === 'textHighlight' || annotation.kind === 'underline' || annotation.kind === 'strikeout') return annotation.text
   if (annotation.kind === 'symbol') return SYMBOL_OPTIONS.find((option) => option.name === annotation.symbol)?.label ?? '記号'
@@ -51,6 +53,7 @@ export function createAnnotationCsv(annotations: readonly EditableAnnotation[]):
       annotationColorHex(annotation),
       `${decimal(left)}, ${decimal(top)}`,
       `${decimal(right - left)}, ${decimal(bottom - top)}`,
+      annotation.measure ? scaleLabel({ ...annotation.measure, denominator: annotation.measure.mmPerPoint / PT_MM, paper: 'PDF', source: 'standard' }) : '',
     ].map(quote).join(',')
   })
   return `\uFEFF${[ANNOTATION_CSV_HEADER.map(quote).join(','), ...rows].join('\r\n')}\r\n`

@@ -8,6 +8,7 @@ import { createDingbatsFontResource, createFontResource, type FontResource, type
 import { saveDocument } from '../src/core/save'
 import { searchPage } from '../src/core/search'
 import { ensureSamplePdf } from './fixtures'
+import { measureText, ratioScale } from '../src/core/measure'
 
 const fontPath = path.resolve('public/fonts/BIZUDGothic-Regular.ttf')
 const minchoFontPath = path.resolve('public/fonts/BIZUDMincho-Regular.ttf')
@@ -261,6 +262,32 @@ function verifyPage(pageIndex: number, rect: Rect, label: string): void {
 }
 
 describe('PDFium compatibility', () => {
+  it.each([0, 90, 180, 270])('計測の線・値・面積をPDFiumで回転%s°でも正しい位置に描く', rotation => {
+    const doc = new mupdf.PDFDocument(sourceBytes)
+    try {
+      const p = doc.findPage(0); try { p.put('Rotate', rotation) } finally { p.destroy() }
+      const s = ratioScale(100, 'PDF', { width: 595, height: 842 })
+      const measures = ([
+        { kind: 'distance', points: [[100, 220], [172, 220]] },
+        { kind: 'perimeter', points: [[280, 300], [352, 300], [352, 372]] },
+        { kind: 'area', points: [[100, 400], [172, 400], [172, 472], [100, 472]] },
+      ] as const).map(item => {
+        const measure = { ...s, kind: item.kind }, vertices = item.points.map(p => [...p] as [number, number])
+        return { kind: 'createMeasure' as const, pageIndex: 0, measure, vertices, text: measureText(vertices, measure), color: [1, 0, 0] as [number, number, number], borderWidth: 1, fontSize: 10.5, opacity: 1 }
+      })
+      expect(applyEdits(doc, measures, fontResources).errors).toEqual([])
+      const bytes = saveDocument(doc, 'full').bytes
+      const isRed = (r: number, g: number, b: number) => r > 150 && g < 120 && b < 120
+      const distanceLabel = countPdfiumPixels(bytes, 0, [110, 195, 165, 216], isRed)
+      const distanceLine = countPdfiumPixels(bytes, 0, [110, 218, 120, 223], isRed)
+      const perimeterLabel = countPdfiumPixels(bytes, 0, [305, 346, 405, 370], isRed)
+      const areaLabel = countPdfiumPixels(bytes, 0, [110, 425, 165, 447], isRed)
+      const paleFill = countPdfiumPixels(bytes, 0, [110, 450, 160, 465], (r, g, b) => r > 240 && g >= 200 && g < 235 && b >= 200 && b < 235)
+      expect(distanceLabel).toBeGreaterThan(40); expect(distanceLine).toBeGreaterThan(15)
+      expect(perimeterLabel).toBeGreaterThan(40); expect(areaLabel).toBeGreaterThan(40); expect(paleFill).toBeGreaterThan(600)
+      console.info(`PDFIUM_MEASURE rotation=${rotation} distance_label=${distanceLabel} distance_line=${distanceLine} perimeter_label=${perimeterLabel} area_label=${areaLabel} fill=${paleFill}`)
+    } finally { doc.destroy() }
+  })
   it('1ページ目の日本語 FreeText を MuPDF の±30%の赤画素数で描く', () => {
     verifyPage(0, pageRect, 'normal')
   })

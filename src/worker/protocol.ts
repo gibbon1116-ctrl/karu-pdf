@@ -1,3 +1,4 @@
+import type { PageScale } from '../core/measure'
 import type { PageSize } from '../core/mupdfDoc'
 import type { AnnotationEdit, AnnotationInfo, ApplyError } from '../core/annotations'
 import type { FontName } from '../core/fontMetrics'
@@ -275,6 +276,7 @@ export interface ReadyResponse {
 }
 
 export interface OpenResponse {
+  pageScales?: (PageScale | null)[]
   type: 'opened'
   requestId: number
   pageCount: number
@@ -392,6 +394,7 @@ export interface OutputPreparedResponse {
 }
 
 export interface PageLayoutResponse {
+  pageScales?: (PageScale | null)[]
   type: 'pageLayoutApplied' | 'pageLayoutUndone' | 'headerFooterApplied' | 'headerFooterRemoved'
   requestId: number
   bytes: ArrayBuffer

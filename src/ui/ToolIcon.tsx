@@ -15,6 +15,9 @@ const common = {
 export function ToolIcon({ tool, className = '' }: Props) {
   const content = (() => {
     switch (tool) {
+      case 'distance': return <><path {...common} d="M2 11h12M4 9l-2 2 2 2M12 9l2 2-2 2" /><text x="4" y="7" fontSize="6" fill="currentColor">100</text></>
+      case 'perimeter': return <path {...common} d="M2 13l4-8 5 5 3-7" />
+      case 'area': return <><path {...common} d="M2 12 4 3l9 2 1 8zM3 9l5-5M5 12l7-7M9 13l4-4" /></>
       case 'select':
         return <><path {...common} d="M3 2.2v10.4l2.5-2.3 1.8 3.5 1.7-.9-1.8-3.4 3.4-.4z" /></>
       case 'text':
