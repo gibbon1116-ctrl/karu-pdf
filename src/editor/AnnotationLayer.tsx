@@ -12,6 +12,9 @@ import { TextSelectionQueue } from './textSelectionQueue'
 import type { TextSelectionMode, TextSelectionResult } from '../core/textSelection'
 import { hitTextLine } from './textHitTest'
 import { MeasurementShape, useMeasurementInteraction } from './MeasurementOverlay'
+import { cloudPath, rectVertices } from '../core/cloud'
+import { issueColor, issueFontSize } from '../core/issues'
+import { IssueEditor } from './IssueEditor'
 import { ToolIcon } from '../ui/ToolIcon'
 
 export type EditorTool = 'select' | 'textSelect' | FormatTool
@@ -147,7 +150,7 @@ function calloutArrowHead(line: [Point, Point], size: number): string {
 }
 
 function allResizeHandles(kind: Kind): boolean {
-  return kind === 'square' || kind === 'circle' || kind === 'highlight' || kind === 'ink'
+  return kind === 'cloudSquare' || kind === 'square' || kind === 'circle' || kind === 'highlight' || kind === 'ink'
 }
 
 function quadPoints(quad: Quad): string {
@@ -166,6 +169,7 @@ export function AnnotationLayer(props: Props) {
   const version = useSyncExternalStore(props.store.subscribe, props.store.getSnapshot)
   const svgRef = useRef<SVGSVGElement>(null)
   const measurement = useMeasurementInteraction({ svg: svgRef, store: props.store, pageIndex: props.pageIndex, tool: props.tool, defaults: props.formatDefaults, select: props.onSelect })
+  const draftCloudRef = useRef<SVGPathElement>(null)
   const draftRectRef = useRef<SVGRectElement>(null)
   const draftLineRef = useRef<SVGLineElement>(null)
   const draftInkRef = useRef<SVGPolylineElement>(null)
@@ -456,6 +460,15 @@ export function AnnotationLayer(props: Props) {
             (operation.moved ? operation.latest[1] : operation.start[1] - 40) + 16.6,
           ] as Rect
       : [dx < 0 ? operation.latest[0] : operation.start[0], operation.start[1], dx < 0 ? operation.start[0] : operation.latest[0], operation.start[1] + 16.6] as Rect
+    if (operation.creationKind === 'cloudSquare') {
+      const f = props.formatDefaults.cloudSquare
+      draftCloudRef.current?.setAttribute('d', cloudPath(rectVertices(rect), f.cloudIntensity, f.borderWidth))
+      draftCloudRef.current?.setAttribute('stroke', color(f.color))
+      draftCloudRef.current?.setAttribute('stroke-width', String(f.borderWidth))
+      draftCloudRef.current?.setAttribute('fill', f.fillColor ? color(f.fillColor) : 'none')
+      draftCloudRef.current?.setAttribute('opacity', String(f.opacity))
+      return
+    }
     draft.setAttribute('x', String(rect[0]))
     draft.setAttribute('y', String(rect[1]))
     draft.setAttribute('width', String(rect[2] - rect[0]))
@@ -478,7 +491,7 @@ export function AnnotationLayer(props: Props) {
   }
 
   const hideDrafts = () => {
-    for (const element of [draftRectRef.current, draftLineRef.current, draftInkRef.current, resizePreviewRef.current, linePreviewRef.current, calloutPreviewRef.current]) {
+    for (const element of [draftCloudRef.current, draftRectRef.current, draftLineRef.current, draftInkRef.current, resizePreviewRef.current, linePreviewRef.current, calloutPreviewRef.current]) {
       if (element) element.style.display = 'none'
     }
   }
@@ -594,7 +607,7 @@ export function AnnotationLayer(props: Props) {
     if (operation.mode === 'shape' && operation.creationKind) {
       const rect = shapeRect(operation.start, operation.latest, operation.creationKind === 'circle' && operation.shift)
       if (rect[2] - rect[0] < 4 || rect[3] - rect[1] < 4) return
-      const format = props.formatDefaults[operation.creationKind as 'square' | 'circle']
+      const format = props.formatDefaults[operation.creationKind as 'cloudSquare' | 'square' | 'circle']
       const annotation = props.store.create({
         pageIndex: props.pageIndex,
         kind: operation.creationKind,
@@ -603,6 +616,7 @@ export function AnnotationLayer(props: Props) {
         borderColor: format.borderColor,
         borderWidth: format.borderColor ? format.borderWidth : 0,
         interiorColor: format.fillColor,
+        cloudIntensity: format.cloudIntensity,
         opacity: format.opacity,
       })
       props.onSelect(annotation.id)
@@ -681,7 +695,14 @@ export function AnnotationLayer(props: Props) {
       ? [Math.min(x0, calloutLine[0][0]), Math.min(y0, calloutLine[0][1]), Math.max(x1, calloutLine[0][0]), Math.max(y1, calloutLine[0][1])]
       : annotation.rect
     return (
-      <g key={annotation.id} data-annotation-id={annotation.id} data-symbol={annotation.symbol ?? undefined} className="annotation-item">
+      <g key={annotation.id} data-annotation-id={annotation.id} data-symbol={annotation.symbol ?? undefined} className="annotation-item" data-issue-number={annotation.issue?.number}>
+        {annotation.issue && <title>{annotation.text}</title>}
+        {visible && (annotation.kind === 'cloudSquare' || annotation.kind === 'cloudPolygon') && <path className="annotation-cloud" d={cloudPath(annotation.vertices ?? rectVertices(annotation.rect), annotation.cloudIntensity ?? 1, annotation.borderWidth)} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} opacity={annotation.opacity} />}
+        {visible && annotation.issue && <g className="annotation-issue" fill={color(issueColor(annotation.issue, annotation.color))}>
+          <circle cx={(x0+x1)/2} cy={(y0+y1)/2} r={(x1-x0)*.45} fill="white" stroke={color(issueColor(annotation.issue, annotation.color))} strokeWidth={(x1-x0)*.06} />
+          <text x={(x0+x1)/2} y={(y0+y1)/2 + issueFontSize(annotation.issue.number, x1-x0)*.3} textAnchor="middle" fontFamily="KaruBIZUDGothic" fontSize={issueFontSize(annotation.issue.number, x1-x0)}>{annotation.issue.number}</text>
+          {annotation.issue.status === 'done' && <path d={`M${x0+(x1-x0)*.7} ${y0+(y1-y0)*.2} L${x0+(x1-x0)*.8} ${y0+(y1-y0)*.3} L${x0+(x1-x0)*.98} ${y0+(y1-y0)*.08}`} fill="none" stroke={color(issueColor(annotation.issue, annotation.color))} strokeWidth={(x1-x0)*.06} strokeLinecap="round" strokeLinejoin="round" />}
+        </g>}
         {visible && annotation.measure && annotation.vertices && <MeasurementShape points={annotation.vertices} kind={annotation.measure.kind} text={annotation.text} fontSize={annotation.fontSize} color={color(annotation.color)} width={annotation.borderWidth} opacity={annotation.opacity} />}
         {visible && annotation.kind === 'square' && <rect className="annotation-square" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && annotation.kind === 'circle' && <ellipse className="annotation-shape" cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} rx={(x1 - x0) / 2} ry={(y1 - y0) / 2} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
@@ -752,6 +773,15 @@ export function AnnotationLayer(props: Props) {
         const start = pointInPage(svg, event)
         const id = annotationIdFromTarget(event.target)
         if (measurement.pointerDown(event, start)) return
+        if (props.tool === 'issue') {
+          void props.store.issueNumbers.initialize(() => props.pool.maxIssueNumber(props.docId)).then(() => {
+            if (toolRef.current !== 'issue') return
+            const f = props.formatDefaults.issue
+            const annotation = props.store.create({ pageIndex: props.pageIndex, kind: 'issue', rect: symbolRectFromDrag(start, start, false, f.symbolSize), color: f.color })
+            props.store.selectOnly(annotation.id); props.onSelect(annotation.id); props.onEdit(annotation.id)
+          }).catch(reason => props.onStatus(`指摘を作れませんでした: ${String(reason)}`))
+          return
+        }
         if (props.tool === 'select') {
           const annotation = id ? props.store.get(id) : undefined
           const lineHandle = targetValue<LineHandle>(event.target, 'line-handle')
@@ -819,7 +849,7 @@ export function AnnotationLayer(props: Props) {
           }
           const kind = props.tool === 'text' ? 'freetext' : props.tool
           const mode = props.tool === 'text' ? 'text' : props.tool === 'callout' ? 'callout' : props.tool === 'symbol' ? 'symbol' : props.tool === 'line' || props.tool === 'arrow' ? 'line' : props.tool === 'highlight' || props.tool === 'ink' ? 'ink' : 'shape'
-          const shown = mode === 'line' ? draftLineRef.current : mode === 'ink' ? draftInkRef.current : draftRectRef.current
+          const shown = kind === 'cloudSquare' ? draftCloudRef.current : mode === 'line' ? draftLineRef.current : mode === 'ink' ? draftInkRef.current : draftRectRef.current
           if (shown) shown.style.display = 'block'
           if (mode === 'callout' && draftLineRef.current) draftLineRef.current.style.display = 'block'
           const startedAt = performance.now()
@@ -876,12 +906,13 @@ export function AnnotationLayer(props: Props) {
         if (props.tool !== 'select') return
         const id = annotationIdFromTarget(event.target) ?? props.selectedId
         const annotation = id ? props.store.touch(id) : undefined
-        if (annotation?.kind === 'freetext' || annotation?.kind === 'callout') { props.onSelect(annotation.id); props.onEdit(annotation.id) }
+        if (annotation?.kind === 'issue' || annotation?.kind === 'freetext' || annotation?.kind === 'callout') { props.onSelect(annotation.id); props.onEdit(annotation.id) }
       }}
     >
       <rect className="annotation-surface" x="0" y="0" width={props.pageSize.width} height={props.pageSize.height} />
       {annotations.map(renderAnnotation)}
       {measurement.draft}
+      <path ref={draftCloudRef} style={{ display: 'none' }} pointerEvents="none" />
       <g ref={textSelectionRef} className="text-selection-quads" aria-hidden="true" />
       <rect ref={draftRectRef} className="annotation-draft" x="0" y="0" width="0" height="0" />
       <line ref={draftLineRef} className="annotation-line-draft" x1="0" y1="0" x2="0" y2="0" />
@@ -899,7 +930,8 @@ export function AnnotationLayer(props: Props) {
       <button type="button" onClick={() => createMarkup('underline')}><ToolIcon tool="underline" />下線</button>
       <button type="button" onClick={() => createMarkup('strikeout')}><ToolIcon tool="strikeout" />取り消し線</button>
     </div>}
-    {editing && <TextEditor annotation={editing} zoom={props.zoom} pool={props.pool} store={props.store} onClose={(removed) => {
+    {editing?.issue && <IssueEditor key={editing.id} annotation={editing} store={props.store} zoom={props.zoom} registerCommit={props.registerCommit} onClose={() => props.onEdit(null)} />}
+    {editing && !editing.issue && <TextEditor annotation={editing} zoom={props.zoom} pool={props.pool} store={props.store} onClose={(removed) => {
       props.onEdit(null)
       if (props.tool === 'text' || props.tool === 'callout') { props.onSelect(removed ? null : editing.id); changeTool('select') }
     }} registerCommit={props.registerCommit} />}

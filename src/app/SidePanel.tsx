@@ -30,6 +30,7 @@ interface Props {
   onSearchNavigate(match: SearchMatch): void
   onSearchHighlights(value: SearchHighlightState): void
   onSelectAnnotation(annotation: EditableAnnotation): void
+  onEditAnnotation(annotation: EditableAnnotation): void
 }
 
 const tabs: Array<{ id: SidePanelTab; label: string }> = [
@@ -68,7 +69,7 @@ export function SidePanel(props: Props) {
     docId={props.session.docId} pool={props.pool} focusVersion={props.focusSearchVersion}
     onHighlightsChange={props.onSearchHighlights} onNavigate={props.onSearchNavigate}
   />
-  else content = <AnnotationListPanel session={props.session} pool={props.pool} onSelect={props.onSelectAnnotation} />
+  else content = <AnnotationListPanel session={props.session} pool={props.pool} onSelect={props.onSelectAnnotation} onEdit={props.onEditAnnotation} />
 
   return <aside className="side-panel" style={{ width }} aria-label="左の欄" data-testid="side-panel">
     <div className="side-panel-tabs" role="tablist" aria-label="左の欄">

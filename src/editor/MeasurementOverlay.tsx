@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, type RefObject } from 'react'
 import type { Point } from '../core/annotations'
+import { cloudPath, type CloudIntensity } from '../core/cloud'
 import { constrainMeasurePoint, measureBounds, measureLabel, measureText, type MeasureKind } from '../core/measure'
 import type { EditableAnnotation, AnnotationStore } from './AnnotationStore'
 import type { EditorTool } from './AnnotationLayer'
@@ -47,7 +48,8 @@ export function useMeasurementInteraction(props: Props) {
   const vertex = useRef<{ id: string; index: number; original: EditableAnnotation; points: Point[]; element: SVGGElement | null } | null>(null)
   const frame = useRef(0)
   const tracing = scaleInteraction.tracePage === props.pageIndex
-  const enabled = tracing || isMeasureTool(props.tool)
+  const cloud = props.tool === 'cloudPolygon'
+  const enabled = tracing || cloud || isMeasureTool(props.tool)
   const clear = () => {
     if (frame.current) cancelAnimationFrame(frame.current)
     if (vertex.current?.element) vertex.current.element.style.visibility = ''
@@ -55,16 +57,21 @@ export function useMeasurementInteraction(props: Props) {
     frame.current = 0; points.current = []; cursor.current = null; down.current = null
     draftRef.current?.replaceChildren()
   }
-  const draw = (p: Point[], text: string, kind: MeasureKind, color: string, size: number, width: number, floating: boolean) => {
+  const draw = (p: Point[], text: string, kind: MeasureKind, color: string, size: number, width: number, floating: boolean, intensity?: CloudIntensity, fill?: string) => {
     const group = draftRef.current
     if (!group || !p.length) return
     // Fixed, tiny SVG draft. No React state, scene queries or Worker requests.
     const ns = 'http://www.w3.org/2000/svg'
     if (!group.firstChild) {
-      group.appendChild(document.createElementNS(ns, 'polyline'))
+      group.appendChild(document.createElementNS(ns, intensity !== undefined ? 'path' : 'polyline'))
       group.appendChild(document.createElementNS(ns, 'text'))
     }
     const path = group.children[0], label = group.children[1]
+    group.setAttribute('opacity', String(vertex.current?.original.opacity ?? props.defaults.cloudPolygon.opacity))
+    if (intensity !== undefined) {
+      path.setAttribute('d', cloudPath(p, intensity, width)); path.setAttribute('fill', fill ?? 'none'); path.setAttribute('stroke', color); path.setAttribute('stroke-width', String(width)); label.textContent = ''; return
+    }
+    group.removeAttribute('opacity')
     path.setAttribute('points', [...p, ...(kind === 'area' ? [p[0]] : [])].map(p => p.join(',')).join(' '))
     path.setAttribute('fill', kind === 'area' ? color : 'none'); path.setAttribute('fill-opacity', '.15')
     path.setAttribute('stroke', color); path.setAttribute('stroke-width', String(width))
@@ -80,20 +87,29 @@ export function useMeasurementInteraction(props: Props) {
     frame.current = 0
     if (vertex.current) {
       const v = vertex.current, a = v.original
-      draw(v.points, measureText(v.points, a.measure!), a.measure!.kind, cssColor(a.color), a.fontSize, a.borderWidth, false)
+      if (a.kind === 'cloudPolygon') draw(v.points, '', 'area', cssColor(a.color), a.fontSize, a.borderWidth, false, a.cloudIntensity ?? 1, a.interiorColor ? cssColor(a.interiorColor) : undefined)
+      else draw(v.points, measureText(v.points, a.measure!), a.measure!.kind, cssColor(a.color), a.fontSize, a.borderWidth, false)
       return
     }
     if (!points.current.length) { draftRef.current?.replaceChildren(); return }
-    const kind = tracing ? 'distance' : isMeasureTool(props.tool) ? props.tool : 'distance'
+    const kind = tracing ? 'distance' : cloud ? 'area' : isMeasureTool(props.tool) ? props.tool : 'distance'
     const p = cursor.current ? [...points.current, cursor.current] : points.current
     const scale = props.store.getScale(props.pageIndex)
-    const f = props.defaults[kind]
+    const f = props.defaults[cloud ? 'cloudPolygon' : kind]
+    if (cloud) { draw(p, '', 'area', cssColor(f.color), f.fontSize, f.borderWidth, true, f.cloudIntensity, f.fillColor ? cssColor(f.fillColor) : undefined); return }
     draw(p, tracing ? 'なぞって合わせる' : scale ? measureText(p, { ...scale, kind }) : '', kind, cssColor(f.color), f.fontSize, f.borderWidth, true)
   }
   const schedule = () => { if (!frame.current) frame.current = requestAnimationFrame(redraw) }
   const commit = () => {
     const p = points.current
     if (tracing) { if (p.length >= 2) { const copy = p.map(p => [...p] as Point); clear(); scaleInteraction.complete(copy) }; return }
+    if (cloud) {
+      if (p.length < 3) return
+      const f = props.defaults.cloudPolygon
+      const rect: [number, number, number, number] = [Math.min(...p.map(p => p[0])), Math.min(...p.map(p => p[1])), Math.max(...p.map(p => p[0])), Math.max(...p.map(p => p[1]))]
+      const a = props.store.create({ pageIndex: props.pageIndex, kind: 'cloudPolygon', rect, vertices: p, color: f.color, borderWidth: f.borderWidth, opacity: f.opacity, interiorColor: f.fillColor, cloudIntensity: f.cloudIntensity })
+      clear(); props.store.selectOnly(a.id); props.select(a.id); return
+    }
     if (!isMeasureTool(props.tool) || p.length < (props.tool === 'area' ? 3 : 2)) return
     const scale = props.store.getScale(props.pageIndex)
     if (!scale) return
@@ -124,7 +140,7 @@ export function useMeasurementInteraction(props: Props) {
     const target = (event.target as Element).closest('[data-measure-vertex]')
     if (target) {
       const id = target.getAttribute('data-annotation-id')!, a = props.store.get(id)
-      if (a?.vertices && a.measure) {
+      if (a?.vertices && (a.measure || a.kind === 'cloudPolygon')) {
         props.store.touch(id)
         vertex.current = { id, index: Number(target.getAttribute('data-measure-vertex')), original: a, points: a.vertices.map(p => [...p] as Point), element: target.closest<SVGGElement>('g.annotation-item') }
         if (vertex.current.element) vertex.current.element.style.visibility = 'hidden'
@@ -133,7 +149,7 @@ export function useMeasurementInteraction(props: Props) {
       }
     }
     if (!enabled) return false
-    if (!tracing && !props.store.getScale(props.pageIndex)) { scaleInteraction.request(props.pageIndex); return true }
+    if (!tracing && !cloud && !props.store.getScale(props.pageIndex)) { scaleInteraction.request(props.pageIndex); return true }
     window.dispatchEvent(new CustomEvent('karu-pdf:measurement-start', { detail: props.pageIndex }))
     const hadPoints = points.current.length > 0
     const previous = points.current.at(-1)

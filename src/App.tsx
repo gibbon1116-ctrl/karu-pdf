@@ -14,7 +14,7 @@ import type { Point } from './core/annotations'
 import { ToolRow } from './app/ToolRow'
 import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS, type SidePanelTab } from './app/documentModel'
 import { allSessionAnnotations } from './app/AnnotationListPanel'
-import { createAnnotationCsv } from './app/annotationCsv'
+import { createIssueCsv, createAnnotationCsv } from './app/annotationCsv'
 import { StartScreen } from './app/StartScreen'
 import { ErrorBoundary } from './app/ErrorBoundary'
 import { PdfWorkerPool, type ApplyAndSaveResult, type PageLayoutTimings, type PreparedOutputResult, type RasterizeMetrics } from './client/PdfWorkerPool'
@@ -77,6 +77,7 @@ declare global {
       getLastRasterizeMetrics(): RasterizeMetrics | null
       getMenuActions(): string[]
       exportAnnotationCsv(): string
+      exportIssueCsv(): string
       getHeaderFooterSettings(): Promise<HeaderFooterSettings | null>
       applyHeaderFooter(settings: HeaderFooterSettings, dateText?: string): Promise<PageLayoutTimings | null>
       removeHeaderFooter(): Promise<PageLayoutTimings | null>
@@ -270,10 +271,14 @@ export default function App() {
     refreshTabs()
   }, [copyAnnotations, refreshTabs])
 
-  const pasteAnnotations = useCallback(() => {
+  const pasteAnnotations = useCallback(async () => {
     const session = activeRef.current
     const clipboard = annotationClipboardRef.current
     if (!session || !clipboard || clipboard.annotations.length === 0) return
+    if (clipboard.annotations.some(a => a.issue)) {
+      try { await session.annotationStore.issueNumbers.initialize(() => pool.maxIssueNumber(session.docId)) } catch (reason) { showStatus(`番号を取得できませんでした: ${String(reason)}`); return }
+      if (activeRef.current !== session) return
+    }
     const pageIndex = Math.max(0, Math.min(session.pageSizes.length - 1, session.view.page - 1))
     const samePage = clipboard.sourceDocId === session.docId
       && clipboard.annotations.every((annotation) => annotation.pageIndex === pageIndex)
@@ -300,11 +305,15 @@ export default function App() {
     }
   }, [refreshTabs, showStatus])
 
-  const duplicateAnnotations = useCallback(() => {
+  const duplicateAnnotations = useCallback(async () => {
     const session = activeRef.current
     if (!session) return
     const annotations = session.annotationStore.copySelected()
     if (annotations.length === 0) return
+    if (annotations.some(a => a.issue)) {
+      try { await session.annotationStore.issueNumbers.initialize(() => pool.maxIssueNumber(session.docId)) } catch (reason) { showStatus(`番号を取得できませんでした: ${String(reason)}`); return }
+      if (activeRef.current !== session) return
+    }
     const pageIndex = Math.max(0, Math.min(session.pageSizes.length - 1, session.view.page - 1))
     const ids = session.annotationStore.pasteAnnotations(annotations, pageIndex, session.pageSizes[pageIndex], 10)
     if (ids.length > 0) {
@@ -696,8 +705,13 @@ export default function App() {
 
   const changeTool = useCallback(async (next: EditorTool) => {
     await viewerRef.current?.commitEditor()
+    const session = activeRef.current
+    if (next === 'issue' && session) {
+      try { await session.annotationStore.issueNumbers.initialize(() => pool.maxIssueNumber(session.docId)) } catch (reason) { showStatus(`番号を取得できませんでした: ${String(reason)}`); return }
+      if (activeRef.current !== session) return
+    }
     setTool(next)
-  }, [])
+  }, [pool, showStatus])
 
   const updatePanels = useCallback((next: { thumbnails: boolean; format: boolean }) => {
     setPanels(next)
@@ -1152,6 +1166,7 @@ export default function App() {
       else if (key === 'p') void changeTool('ink')
       else if (key === 's') void changeTool('symbol')
       else if (key === 'c') void changeTool('callout')
+      else if (key === 'n') void changeTool('issue')
       else if (key === 'k') void changeTool('distance')
       else if (key === 'm') void changeTool('textSelect')
       else if (event.key === 'Escape') { setTool('select'); viewerRef.current?.clearSelection() }
@@ -1206,6 +1221,7 @@ export default function App() {
       rasterizeToStream: async (options, target) => (await rasterizeToTarget(options, target))?.metrics ?? null,
       getLastRasterizeMetrics: () => lastRasterizeMetricsRef.current,
       getMenuActions: () => [...menuActionsRef.current],
+      exportIssueCsv: () => { const session = activeRef.current; return session ? createIssueCsv(allSessionAnnotations(session)) : '' },
       exportAnnotationCsv: () => {
         const session = activeRef.current
         return session ? createAnnotationCsv(allSessionAnnotations(session)) : ''

@@ -29,6 +29,7 @@ export interface ViewerHandle {
   getZoom(): number
   getCache(): BitmapCache
   commitEditor(): Promise<void>
+  editAnnotation(id: string): void
   clearSelection(): void
 }
 
@@ -503,6 +504,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     isSharp: isSharpNow,
     getZoom: () => zoomRef.current,
     getCache: () => scheduler.cache,
+    editAnnotation: (id) => setEditingAnnotationId(id),
     commitEditor: () => editorCommitRef.current?.() ?? Promise.resolve(),
     clearSelection: () => {
       props.onSelectAnnotation(null)

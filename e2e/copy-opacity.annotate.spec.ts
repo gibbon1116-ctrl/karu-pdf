@@ -23,7 +23,7 @@ async function createSquare(page: Page, x: number, y: number, width = 70, height
   const before = await page.evaluate(() => window.__karu!.getEditableAnnotations(0).map((item) => item.id))
   const { box } = await layerBox(page)
   await page.getByRole('button', { name: '図形▼' }).click()
-  await page.getByRole('menuitemcheckbox', { name: '四角' }).click()
+  await page.getByRole('menuitemcheckbox', { name: /^(?:✓\s*)?四角(?:\s|$)/ }).click()
   await page.mouse.move(box.x + x, box.y + y)
   await page.mouse.down()
   await page.mouse.move(box.x + x + width, box.y + y + height, { steps: 5 })

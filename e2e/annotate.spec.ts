@@ -89,7 +89,7 @@ test('文字と四角を保存し、開き直して再編集できる', async ({
   expect(resizedText.layout?.lines.length ?? 0).toBeGreaterThan(textLinesBefore)
 
   await page.getByRole('button', { name: '図形▼' }).click()
-  await page.getByRole('menuitemcheckbox', { name: '四角' }).click()
+  await page.getByRole('menuitemcheckbox', { name: /^(?:✓\s*)?四角(?:\s|$)/ }).click()
   await page.mouse.move(box.x + 350, box.y + 300)
   await page.mouse.down()
   await page.mouse.move(box.x + 460, box.y + 380, { steps: 8 })
@@ -160,7 +160,7 @@ async function dragOnLayer(
   } else {
     const group = ['線', '矢印', '四角', '丸'].includes(tool) ? '図形' : 'ペン'
     await page.getByRole('button', { name: `${group}▼` }).click()
-    await page.getByRole('menuitemcheckbox', { name: tool }).click()
+    await page.getByRole('menuitemcheckbox', { name: new RegExp(`^(?:✓\\s*)?${tool}(?:\\s|$)`) }).click()
   }
   await page.mouse.move(box.x + start.x, box.y + start.y)
   await page.mouse.down()

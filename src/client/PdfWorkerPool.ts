@@ -1,4 +1,5 @@
 import type { PageScale } from '../core/measure'
+import type { MaxIssueNumberResponse } from '../worker/protocol'
 import type { PageSize } from '../core/mupdfDoc'
 import type { AnnotationEdit, AnnotationInfo, ApplyError } from '../core/annotations'
 import type { FontName } from '../core/fontMetrics'
@@ -403,6 +404,10 @@ export class PdfWorkerPool {
       type: 'listAnnotations', requestId, docId, pageIndex,
     }))
     return response.annotations
+  }
+  async maxIssueNumber(docId: string): Promise<number> {
+    const response = await this.request<MaxIssueNumberResponse>(this.slots[0], requestId => ({ type: 'maxIssueNumber', requestId, docId }))
+    return response.maximum
   }
 
   async pageHasText(docId: string, pageIndex: number): Promise<boolean> {

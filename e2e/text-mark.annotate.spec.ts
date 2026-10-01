@@ -164,7 +164,7 @@ test('方向キー移動をまとめて戻し、複数選択も一緒に動か�
   const squares: EditableAnnotation[] = []
   for (let index = 0; index < 3; index += 1) {
     await page.getByRole('button', { name: '図形▼' }).click()
-    await page.getByRole('menuitemcheckbox', { name: '四角' }).click()
+    await page.getByRole('menuitemcheckbox', { name: /^(?:✓\s*)?四角(?:\s|$)/ }).click()
     const x = layerBox.x + 230 + index * 90
     await page.mouse.move(x, layerBox.y + 230)
     await page.mouse.down()

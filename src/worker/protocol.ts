@@ -240,6 +240,7 @@ export interface RenderRasterBandRequest {
 }
 
 export type WorkerRequest =
+  | MaxIssueNumberRequest
   | OpenRequest
   | RenderRequest
   | CancelJobsRequest
@@ -312,6 +313,8 @@ export interface ListAnnotationsResponse {
   requestId: number
   annotations: AnnotationInfo[]
 }
+export interface MaxIssueNumberRequest { type: 'maxIssueNumber'; requestId: number; docId: string }
+export interface MaxIssueNumberResponse { type: 'maxIssueNumberResult'; requestId: number; maximum: number }
 
 export interface AllAnnotationsProgressResponse {
   type: 'allAnnotationsProgress'
@@ -463,6 +466,7 @@ export interface ErrorResponse {
 }
 
 export type WorkerResponse =
+  | MaxIssueNumberResponse
   | ReadyResponse
   | OpenResponse
   | StartedResponse

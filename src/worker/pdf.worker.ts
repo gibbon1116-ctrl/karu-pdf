@@ -4,6 +4,8 @@ import { openDocument, type OpenedDocument } from '../core/mupdfDoc'
 import { renderRegion } from '../core/render'
 import { readDocumentScales } from '../core/measure'
 import { applyEdits, listAnnotations } from '../core/annotations'
+import { maxIssueNumber } from '../core/issues'
+import type { MaxIssueNumberRequest } from './protocol'
 import {
   createFontResource,
   createDingbatsFontResource,
@@ -74,6 +76,7 @@ let sequence = 0
 let running = false
 let processedCount = 0
 type CoreRequest =
+  | MaxIssueNumberRequest
   | OpenRequest
   | ListAnnotationsRequest
   | ListAllAnnotationsRequest
@@ -182,7 +185,7 @@ async function loadFontsForEdits(edits: readonly import('../core/annotations').A
   for (const edit of edits) {
     if (edit.kind === 'createFreeText' || edit.kind === 'updateFreeText'
       || edit.kind === 'createCallout' || edit.kind === 'updateCallout') requiredFonts.add(edit.font)
-    if (edit.kind === 'createMeasure' || edit.kind === 'updateMeasure') requiredFonts.add('BIZUDGothic')
+    if (edit.kind === 'createMeasure' || edit.kind === 'updateMeasure' || edit.kind === 'createIssue' || edit.kind === 'updateIssue') requiredFonts.add('BIZUDGothic')
   }
   await Promise.all([...requiredFonts].map((fontName) => getFontResource(fontName)))
   if (requiredFonts.size > 0) getDingbatsResource()
@@ -304,6 +307,10 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         requestId: request.requestId,
         annotations: listAnnotations(document, request.pageIndex),
       })
+      return
+    }
+    if (request.type === 'maxIssueNumber') {
+      post({ type: 'maxIssueNumberResult', requestId: request.requestId, maximum: maxIssueNumber(document) })
       return
     }
 
@@ -684,6 +691,7 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
   }
   if (
     message.type === 'listAnnotations'
+    || message.type === 'maxIssueNumber'
     || message.type === 'listAllAnnotations'
     || message.type === 'searchDocument'
     || message.type === 'selectText'

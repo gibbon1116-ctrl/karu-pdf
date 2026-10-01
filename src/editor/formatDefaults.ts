@@ -3,9 +3,10 @@ import type { FontName } from '../core/fontMetrics'
 
 export const FORMAT_STORAGE_KEY = 'karu-pdf:format'
 
-export type FormatTool = 'distance' | 'perimeter' | 'area' | 'text' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
+export type FormatTool = 'cloudSquare' | 'cloudPolygon' | 'issue' | 'distance' | 'perimeter' | 'area' | 'text' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
 export interface ToolFormat {
+  cloudIntensity: 0 | 1 | 2
   color: RGB
   borderWidth: number
   fontSize: number
@@ -38,6 +39,7 @@ function format(
   symbolSize = 16,
 ): ToolFormat {
   return {
+    cloudIntensity: 1,
     color: [...color], borderWidth, fontSize, font,
     fillColor: fillColor ? [...fillColor] : null,
     borderColor: borderColor ? [...borderColor] : null,
@@ -50,6 +52,9 @@ function format(
 }
 
 export const DEFAULT_FORMAT: FormatDefaults = {
+  cloudSquare: format(red, 1, 10.5, 'BIZUDGothic', null, red),
+  cloudPolygon: format(red, 1, 10.5, 'BIZUDGothic', null, red),
+  issue: format(red),
   distance: format(red), perimeter: format(red), area: format(red),
   text: format(red),
   callout: format(red, 1, 10.5, 'BIZUDGothic', [1, 1, 1], red),
@@ -75,6 +80,7 @@ function readTool(value: unknown, fallback: ToolFormat): ToolFormat {
   const item = value && typeof value === 'object' ? value as Partial<ToolFormat> : {}
   const legacyBorder = fallback.borderColor && validColor(item.color) ? item.color : fallback.borderColor
   return {
+    cloudIntensity: item.cloudIntensity === 0 || item.cloudIntensity === 1 || item.cloudIntensity === 2 ? item.cloudIntensity : fallback.cloudIntensity,
     color: validColor(item.color) ? [...item.color] : [...fallback.color],
     borderWidth: typeof item.borderWidth === 'number' && Number.isFinite(item.borderWidth) ? item.borderWidth : fallback.borderWidth,
     fontSize: typeof item.fontSize === 'number' && Number.isFinite(item.fontSize) ? item.fontSize : fallback.fontSize,

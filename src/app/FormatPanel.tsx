@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { SYMBOL_OPTIONS, type RGB, type SymbolName } from '../core/annotations'
+import { issueStatusLabel } from '../core/issues'
+import type { CloudIntensity } from '../core/cloud'
 import type { FontName } from '../core/fontMetrics'
 import type { EditorTool } from '../editor/AnnotationLayer'
 import type { AnnotationStore, EditableAnnotation, Kind } from '../editor/AnnotationStore'
@@ -67,7 +69,7 @@ function formatTool(kind: Kind | EditorTool): FormatTool | null {
 
 function formatToolLabel(tool: FormatTool): string {
   const labels: Record<FormatTool, string> = {
-    distance: '距離', perimeter: '連続した長さ', area: '面積', text: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角', circle: '丸',
+    cloudSquare: '雲（四角）', cloudPolygon: '雲（多角形）', issue: '指摘', distance: '距離', perimeter: '連続した長さ', area: '面積', text: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角', circle: '丸',
     highlight: '蛍光ペン', ink: '手書き', symbol: '記号', textHighlight: '文字ハイライト',
     underline: '文字に下線', strikeout: '文字に取り消し線',
   }
@@ -84,10 +86,11 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
   const target = formatTool(activeSelection?.kind ?? (tool === 'select' ? 'text' : tool))
   const values: EditableAnnotation | ToolFormat | null = activeSelection ?? (target ? defaults[target] : null)
   const textTarget = target === 'text' || target === 'callout'
-  const shapeTarget = target === 'square' || target === 'circle'
+  const cloudTarget = target === 'cloudSquare' || target === 'cloudPolygon'
+  const shapeTarget = target === 'square' || target === 'circle' || cloudTarget
   const measureTarget = target === 'distance' || target === 'perimeter' || target === 'area'
-  const simpleColorTarget = measureTarget || target === 'line' || target === 'arrow' || target === 'highlight' || target === 'ink' || target === 'textHighlight' || target === 'underline' || target === 'strikeout' || target === 'symbol'
-  const opacityTarget = simpleColorTarget && target !== 'underline' && target !== 'strikeout'
+  const simpleColorTarget = cloudTarget || target === 'issue' || measureTarget || target === 'line' || target === 'arrow' || target === 'highlight' || target === 'ink' || target === 'textHighlight' || target === 'underline' || target === 'strikeout' || target === 'symbol'
+  const opacityTarget = !cloudTarget && target !== 'issue' && simpleColorTarget && target !== 'underline' && target !== 'strikeout'
 
   const changeDefault = (changes: Partial<ToolFormat>) => {
     if (target) onDefaultsChange(updateToolFormat(defaults, target, changes))
@@ -124,7 +127,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     else changeDefault({ boxOpacity: next })
   }
   const changeSymbolSize = (next: number) => {
-    if (activeSelection?.kind === 'symbol') {
+    if (activeSelection?.kind === 'symbol' || activeSelection?.kind === 'issue') {
       const centerX = (activeSelection.rect[0] + activeSelection.rect[2]) / 2
       const centerY = (activeSelection.rect[1] + activeSelection.rect[3]) / 2
       store.resize(activeSelection.id, [centerX - next / 2, centerY - next / 2, centerX + next / 2, centerY + next / 2])
@@ -180,10 +183,22 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
         {SYMBOL_SIZES.map((value) => <option key={value} value={value}>{value} pt</option>)}
       </select>
     </label>}
+    {target === 'issue' && values && <>
+      <label>大きさ<select aria-label="指摘の大きさ" value={activeSelection ? Math.round(activeSelection.rect[2] - activeSelection.rect[0]) : (values as ToolFormat).symbolSize} onChange={event => changeSymbolSize(Number(event.currentTarget.value))}>
+        <option value="12">小（12 pt）</option><option value="16">中（16 pt）</option><option value="24">大（24 pt）</option>
+      </select></label>
+      {activeSelection?.issue && <label>状態<select aria-label="指摘の状態" value={activeSelection.issue.status} onChange={event => store.update(activeSelection.id, { issueStatus: event.currentTarget.value as 'open' | 'done' })}>
+        {(['open', 'done'] as const).map(status => <option key={status} value={status}>{issueStatusLabel(status)}</option>)}
+      </select></label>}
+    </>}
+    {cloudTarget && values && <label>雲の大きさ<select aria-label="雲の大きさ" value={values.cloudIntensity ?? 1} onChange={event => {
+      const cloudIntensity = Number(event.currentTarget.value) as CloudIntensity
+      if (activeSelection) store.update(activeSelection.id, { cloudIntensity }); else changeDefault({ cloudIntensity })
+    }}><option value="0">小</option><option value="1">中</option><option value="2">大</option></select></label>}
     {textTarget && values && <ColorField label="文字の色" value={values.color} onChange={(next) => next && changeColor(next)} />}
     {(shapeTarget || textTarget) && <ColorField label={textTarget ? '背景色' : '塗り'} value={fillColor} allowNone onChange={changeFill} />}
-    {(shapeTarget || textTarget) && <ColorField label="枠線の色" value={borderColor} allowNone onChange={changeBorder} />}
-    {target && values && ((simpleColorTarget && target !== 'symbol' && target !== 'textHighlight' && target !== 'underline' && target !== 'strikeout') || shapeTarget || textTarget) && <label>
+    {((shapeTarget && !cloudTarget) || textTarget) && <ColorField label="枠線の色" value={borderColor} allowNone onChange={changeBorder} />}
+    {target && values && ((simpleColorTarget && target !== 'issue' && target !== 'symbol' && target !== 'textHighlight' && target !== 'underline' && target !== 'strikeout') || shapeTarget || textTarget) && <label>
       {textTarget ? '枠線の太さ' : '線の太さ'}
       <select aria-label={textTarget ? '枠線の太さ' : '線の太さ'} value={values.borderWidth} onChange={(event) => changeBorderWidth(Number(event.currentTarget.value))}>
         {(target === 'highlight' ? HIGHLIGHT_WIDTHS : textTarget ? TEXT_BORDER_WIDTHS : WIDTHS).map((value) => <option key={value} value={value}>{value} pt</option>)}

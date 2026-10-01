@@ -85,7 +85,7 @@ async function measureEditing(page: Page, pdf: string, pageIndex: number, source
   const startY = Math.max(viewerBox.y + 90, Math.min(viewerBox.y + viewerBox.height - 220, box.y + 160))
 
   await page.getByRole('button', { name: '図形▼' }).click()
-  await page.getByRole('menuitemcheckbox', { name: '四角' }).click()
+  await page.getByRole('menuitemcheckbox', { name: /^(?:✓\s*)?四角(?:\s|$)/ }).click()
   await page.mouse.move(startX, startY)
   await page.mouse.down()
   for (let step = 1; step <= 120; step += 1) {

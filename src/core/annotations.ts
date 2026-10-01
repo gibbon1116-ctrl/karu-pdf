@@ -19,6 +19,8 @@ import {
   type FontResources,
 } from './fontMetrics'
 import { layoutText } from './textLayout'
+import { cloudArcs, cloudBounds, rectVertices, type CloudIntensity } from './cloud'
+import { parseIssue, issueColor, issueFontSize, type Issue } from './issues'
 import { createMeasureDictionary, invertMatrix, measureBounds, measureLabel, measureText, pageUnitFactor, readMeasureSettings, transformMeasurePoint, writePageScale, type MeasureKind, type MeasureSettings, type PageScale } from './measure'
 
 export type Rect = [number, number, number, number]
@@ -45,6 +47,7 @@ export type LineEnding = {
   end: PDFAnnotationLineEndingStyle
 }
 export type AnnotationKind =
+  | 'cloudSquare' | 'cloudPolygon' | 'issue'
   | MeasureKind
   | 'freetext'
   | 'callout'
@@ -61,6 +64,8 @@ export type AnnotationKind =
   | 'other'
 
 export interface AnnotationInfo {
+  cloudIntensity?: CloudIntensity | null
+  issue?: Issue | null
   measure?: MeasureSettings | null
   vertices?: Point[] | null
   objNum: number
@@ -91,6 +96,10 @@ export interface AnnotationInfo {
 }
 
 export type AnnotationEdit =
+  | { kind: 'createCloud'; pageIndex: number; shape: 'square' | 'polygon'; rect: Rect; vertices: Point[] | null; color: RGB; borderWidth: number; interiorColor: RGB | null; opacity: number; cloudIntensity: CloudIntensity }
+  | { kind: 'updateCloud'; objNum: number; pageIndex: number; shape: 'square' | 'polygon'; rect: Rect; vertices: Point[] | null; color: RGB; borderWidth: number; interiorColor: RGB | null; opacity: number; cloudIntensity: CloudIntensity }
+  | { kind: 'createIssue'; pageIndex: number; rect: Rect; issue: Issue; text: string; color: RGB }
+  | { kind: 'updateIssue'; objNum: number; pageIndex: number; rect: Rect; issue: Issue; text: string; color: RGB }
   | { kind: 'setPageScale'; pageIndex: number; scale: PageScale | null }
   | { kind: 'createMeasure'; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number }
   | { kind: 'updateMeasure'; objNum: number; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number }
@@ -128,6 +137,8 @@ export interface ApplyResult {
 }
 
 interface AppearanceTask {
+  issue?: Issue
+  visibleRect?: Rect
   measurement?: { points: Point[]; kind: MeasureKind; rect: Rect; opacity: number }
   editIndex: number
   page: PDFPage
@@ -296,18 +307,24 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
           const type = annotation.getType()
         const object = annotation.getObject()
         try {
+          const be = object.get('BE')
+          const cloud = (type === 'Square' || type === 'Polygon') && !be.isNull() && readName(be, 'S') === 'C'
+          const cloudIntensity: CloudIntensity | null = cloud ? Math.max(0, Math.min(2, Math.round(readNumber(be, 'I') ?? 1))) as CloudIntensity : null
+          be.destroy()
+          const issue = type === 'Stamp' ? parseIssue(readString(object, 'KaruIssue')) : null
           const dimensionIntent = readName(object, 'IT')
           const measureKind: MeasureKind | null = type === 'Line' && dimensionIntent === 'LineDimension' ? 'distance'
             : type === 'PolyLine' && dimensionIntent === 'PolyLineDimension' ? 'perimeter'
             : type === 'Polygon' && dimensionIntent === 'PolygonDimension' ? 'area' : null
           const measurement = measureKind ? readMeasureSettings(object, measureKind, pageUnitFactor(page)) : null
-          const measureVertices = measureKind === 'distance' ? annotation.getLine() as Point[] : measureKind ? annotation.getVertices() : null
+          const measureVertices = measureKind === 'distance' ? annotation.getLine() as Point[] : measureKind || (cloud && type === 'Polygon') ? annotation.getVertices() : null
           const da = readString(object, 'DA')
           const parsed = da === null
             ? { fontName: null, fontSize: null, color: null }
             : parseDefaultAppearance(da)
           const isTextMarkup = type === 'Highlight' || type === 'Underline' || type === 'StrikeOut'
           const editable = type === 'FreeText'
+            || cloud || issue !== null
             || (measureKind !== null && measurement !== null)
             || type === 'Square'
             || type === 'Line'
@@ -316,20 +333,21 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             || isTextMarkup
             || (type === 'Stamp' && asSymbolName(readName(object, 'KaruSymbol')) !== null)
           const hasStroke = type === 'FreeText'
+            || cloud
             || measureKind !== null
             || type === 'Square'
             || type === 'Line'
             || type === 'Circle'
             || type === 'Ink'
           const hasColor = hasStroke || type === 'Stamp' || isTextMarkup
-          const hasInterior = type === 'FreeText' || type === 'Square' || type === 'Circle'
+          const hasInterior = type === 'FreeText' || type === 'Square' || type === 'Circle' || cloud
           const standardStroke = hasColor ? asRGB(readNumberArray(object, 'C') ?? []) : null
           const standardInterior = hasInterior ? asRGB(readNumberArray(object, 'IC') ?? []) : null
           const style = type === 'FreeText' ? readKaruStyle(object) : null
           const strokeColor = style?.present ? style.border : standardStroke
           const interiorColor = style?.present ? style.fill : standardInterior
           const borderWidth = hasStroke ? annotation.getBorderWidth() : null
-          const opacity = measureKind !== null || type === 'Ink' || type === 'Square' || type === 'Circle' || type === 'Line' || type === 'Stamp' || isTextMarkup
+          const opacity = cloud || measureKind !== null || type === 'Ink' || type === 'Square' || type === 'Circle' || type === 'Line' || type === 'Stamp' || isTextMarkup
             ? annotation.getOpacity()
             : null
           const lineEnding = type === 'Line' ? annotation.getLineEndingStyles() : null
@@ -340,18 +358,19 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
           const symbol = type === 'Stamp' ? asSymbolName(readName(object, 'KaruSymbol')) : null
           const inkKind = type === 'Ink' ? readName(object, 'KaruInkKind') : null
           return {
+            cloudIntensity, issue,
             measure: measurement,
             vertices: measureVertices,
             objNum: object.asIndirect(),
             pageIndex,
             type,
-            kind: annotationKind(type, lineEnding, opacity, intent, symbol, inkKind),
+            kind: issue ? 'issue' : cloud ? type === 'Square' ? 'cloudSquare' : 'cloudPolygon' : annotationKind(type, lineEnding, opacity, intent, symbol, inkKind),
             editable,
             // 型定義上は全注釈に getRect() があるが、MuPDF 1.28.1 は
             // Highlight など /Rect を直接扱わない種類では例外にする。
-            rect: [...(annotation.hasRect() ? annotation.getRect() : annotation.getBounds())] as Rect,
+            rect: cloud && type === 'Square' ? cloudSquareRect(page, object) : cloud && measureVertices ? vertexBounds(measureVertices) : [...(annotation.hasRect() ? annotation.getRect() : annotation.getBounds())] as Rect,
             contents: measurement && measureVertices && readString(object, 'KaruMeasure')
-              ? measureText(measureVertices, measurement) : type === 'FreeText' || measureKind ? annotation.getContents() : '',
+              ? measureText(measureVertices, measurement) : issue || type === 'FreeText' || measureKind ? annotation.getContents() : '',
             fontName: type === 'FreeText' ? parsed.fontName : null,
             fontSize: type === 'FreeText' ? parsed.fontSize : measureKind ? readNumber(object, 'KaruMeasureFontSize') ?? 10.5 : null,
             textColor: type === 'FreeText' ? parsed.color : null,
@@ -371,7 +390,7 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             symbol,
             madeByKaru: (type === 'FreeText'
               && (parsed.fontName === 'BIZUDGothic' || parsed.fontName === 'BIZUDMincho'))
-              || symbol !== null || readString(object, 'KaruMeasure') !== null,
+              || issue !== null || symbol !== null || readString(object, 'KaruMeasure') !== null,
           }
         } finally {
           object.destroy()
@@ -392,6 +411,61 @@ function findAnnotation(page: PDFPage, wantedObjectNumber: number): PDFAnnotatio
     else annotation.destroy()
   }
   return found
+}
+
+function vertexBounds(points: readonly Point[]): Rect {
+  return [Math.min(...points.map(p => p[0])), Math.min(...points.map(p => p[1])), Math.max(...points.map(p => p[0])), Math.max(...points.map(p => p[1]))]
+}
+function cloudSquareRect(page: PDFPage, object: PDFObject): Rect {
+  const r = readNumberArray(object, 'Rect')!, rd = readNumberArray(object, 'RD') ?? [0, 0, 0, 0]
+  const matrix = page.getTransform()
+  return vertexBounds(rectVertices([r[0] + rd[0], r[1] + rd[1], r[2] - rd[2], r[3] - rd[3]]).map(p => transformPoint(p, matrix)))
+}
+function setVisibleRect(doc: PDFDocument, page: PDFPage, object: PDFObject, rect: Rect): Rect {
+  const inv = invertMatrix(page.getTransform())
+  const raw = vertexBounds(rectVertices(rect).map(p => transformPoint(p, inv)))
+  setPdfNumberArray(doc, object, 'Rect', raw)
+  return raw
+}
+function configureCloud(doc: PDFDocument, page: PDFPage, annotation: PDFAnnotation, edit: Extract<AnnotationEdit, { kind: 'createCloud' | 'updateCloud' }>): void {
+  const points = edit.shape === 'square' ? rectVertices(edit.rect) : edit.vertices
+  if (!points || points.length < 3 || points.some(p => p.some(n => !Number.isFinite(n)))) throw new Error('雲の頂点が不正です。')
+  if (edit.shape === 'square' && (edit.rect[2] <= edit.rect[0] || edit.rect[3] <= edit.rect[1])) throw new Error('雲の大きさが不正です。')
+  annotation.setFlags(annotation.getFlags() | 4)
+  if (edit.shape === 'square') annotation.setRect(edit.rect)
+  else annotation.setVertices(points)
+  annotation.setColor(edit.color); annotation.setBorderWidth(edit.borderWidth)
+  annotation.setInteriorColor(edit.interiorColor ?? []); annotation.setOpacity(edit.opacity)
+  // Clear MuPDF's regeneration flag before installing our common SVG/PDF path.
+  annotation.update()
+  const rect = cloudBounds(points, edit.cloudIntensity, edit.borderWidth)
+  const object = annotation.getObject(), be = doc.newDictionary()
+  try {
+    be.put('S', 'C'); be.put('I', edit.cloudIntensity); object.put('BE', be)
+    const raw = setVisibleRect(doc, page, object, rect)
+    if (edit.shape === 'polygon') setPdfName(doc, object, 'IT', 'PolygonCloud')
+    else {
+      const inner = vertexBounds(points.map(p => transformPoint(p, invertMatrix(page.getTransform()))))
+      setPdfNumberArray(doc, object, 'RD', [inner[0] - raw[0], inner[1] - raw[1], raw[2] - inner[2], raw[3] - inner[3]])
+    }
+    if (edit.kind === 'createCloud') setPdfString(doc, object, 'NM', newAnnotationName())
+    object.delete('T')
+  } finally { be.destroy(); object.destroy() }
+  const display = new mupdf.DisplayList([0, 0, rect[2] - rect[0], rect[3] - rect[1]])
+  const device = new mupdf.DisplayListDevice(display), path = new mupdf.Path()
+  const stroke = new mupdf.StrokeState({ lineWidth: edit.borderWidth, lineJoin: 'Round', lineCap: 'Round', miterLimit: 10 })
+  try {
+    const arcs = cloudArcs(points.map(p => [p[0] - rect[0], p[1] - rect[1]]), edit.cloudIntensity, edit.borderWidth)
+    if (!arcs.length) throw new Error('雲の辺がありません。')
+    path.moveTo(...arcs[0].start)
+    for (const arc of arcs) path.curveTo(...arc.c1, ...arc.c2, ...arc.end)
+    path.closePath()
+    if (edit.interiorColor) device.fillPath(path, false, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, edit.interiorColor, 1)
+    device.strokePath(path, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, edit.color, 1)
+    device.close(); annotation.setAppearanceFromDisplayList(null, null, mupdf.Matrix.identity, display)
+    const target = annotation.getObject(), ap = target.get('AP', 'N')
+    try { orientVisibleAppearance(doc, page, rect, target, ap) } finally { ap.destroy(); target.destroy() }
+  } finally { stroke.destroy(); path.destroy(); device.destroy(); display.destroy() }
 }
 
 function setPdfString(doc: PDFDocument, object: PDFObject, key: string, value: string): void {
@@ -902,16 +976,41 @@ function drawMeasurement(device: DisplayListDevice, text: InstanceType<typeof mu
   device.fillText(text, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, task.color, 1)
 }
 
-function orientMeasureAppearance(doc: PDFDocument, task: AppearanceTask, object: PDFObject, appearance: PDFObject): void {
+function orientVisibleAppearance(doc: PDFDocument, page: PDFPage, rect: Rect, object: PDFObject, appearance: PDFObject): void {
   // AP is authored in visible-page coordinates. Convert its LOCAL PDF (y-up)
   // coordinates into the target page's raw PDF coordinates, including CropBox,
   // UserUnit and rotation. Absolute BBox prevents annotation fitting/rescaling.
-  const inv = invertMatrix(task.page.getTransform()), rect = task.measurement!.rect
+  const inv = invertMatrix(page.getTransform())
   const origin = transformMeasurePoint([rect[0], rect[3]], inv)
   const transform = [inv[0], inv[1], -inv[2], -inv[3], origin[0], origin[1]]
   const stream = appearance.readStream(), bbox = object.get('Rect')
   try { appearance.writeStream(`q\n${transform.join(' ')} cm\n${stream.asString()}\nQ\n`); appearance.put('BBox', bbox); setPdfNumberArray(doc, appearance, 'Matrix', [1, 0, 0, 1, 0, 0]) }
   finally { bbox.destroy(); stream.destroy() }
+}
+
+function drawIssue(device: DisplayListDevice, text: InstanceType<typeof mupdf.Text>, task: AppearanceTask, font: FontResource): void {
+  const size = Math.min(task.width, task.height), issue = task.issue!, color = issueColor(issue, task.color)
+  const path = new mupdf.Path(), stroke = new mupdf.StrokeState({ lineWidth: size * .06, lineCap: 'Round', lineJoin: 'Round', miterLimit: 10 })
+  try {
+    ellipse(path, size * .05, size * .05, size * .95, size * .95)
+    device.fillPath(path, false, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, [1, 1, 1], 1)
+    device.strokePath(path, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, color, 1)
+    if (issue.status === 'done') {
+      const check = new mupdf.Path()
+      try {
+        check.moveTo(size * .7, size * .2); check.lineTo(size * .8, size * .3); check.lineTo(size * .98, size * .08)
+        device.strokePath(check, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, color, 1)
+      } finally { check.destroy() }
+    }
+  } finally { stroke.destroy(); path.destroy() }
+  const encoded = [...String(issue.number)].map(c => encodeCharacter(font.font, c))
+  const fs = issueFontSize(issue.number, size), width = encoded.reduce((sum, c) => sum + c.advance * fs, 0)
+  let x = (size - width) / 2
+  for (const char of encoded) {
+    text.showGlyph(char.font, [fs, 0, 0, -fs, x, size / 2 + fs * .3], char.glyph, char.unicode)
+    x += char.advance * fs
+  }
+  device.fillText(text, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, color, 1)
 }
 
 function makeTemporaryAppearance(
@@ -943,8 +1042,9 @@ function makeTemporaryAppearance(
       task.boxOpacity,
       true,
     )
-    if (task.measurement) {
-      drawMeasurement(device, text, task, fontResource, fallbackResource)
+    if (task.measurement || task.issue) {
+      if (task.issue) drawIssue(device, text, task, fontResource)
+      else drawMeasurement(device, text, task, fontResource, fallbackResource)
       device.close()
       annotation.setAppearanceFromDisplayList(null, null, mupdf.Matrix.identity, displayList)
       referenceAppearanceFromPage(temporaryDocument, page, annotation)
@@ -1119,7 +1219,7 @@ function installTemporaryAppearances(
         try {
           // MuPDF は回転ページの FreeText に /Rotate と、回転前座標の
           // /Rect を設定する。標準 AP と同じ絶対 BBox と行列に直す。
-          if (task.measurement) orientMeasureAppearance(doc, task, targetObject, graftedAppearance)
+          if (task.measurement || task.visibleRect) orientVisibleAppearance(doc, task.page, task.visibleRect ?? task.measurement!.rect, targetObject, graftedAppearance)
           else orientAppearanceForAnnotation(doc, targetObject, graftedAppearance)
           appearanceDictionary.put('N', graftedAppearance)
           targetObject.put('AP', appearanceDictionary)
@@ -1162,6 +1262,37 @@ export function applyEdits(
       page = doc.loadPage(edit.pageIndex)
       if (edit.kind === 'setPageScale') {
         writePageScale(doc, page, edit.scale)
+        continue
+      }
+      if (edit.kind === 'createCloud' || edit.kind === 'updateCloud') {
+        const type = edit.shape === 'square' ? 'Square' : 'Polygon'
+        annotation = edit.kind === 'createCloud' ? page.createAnnotation(type) : findAnnotation(page, edit.objNum)
+        if (!annotation || annotation.getType() !== type) throw new Error('雲の注釈が見つかりません。')
+        configureCloud(doc, page, annotation, edit)
+        if (edit.kind === 'createCloud') result.created.push(objectNumber(annotation))
+        continue
+      }
+      if (edit.kind === 'createIssue' || edit.kind === 'updateIssue') {
+        if (!parseIssue(JSON.stringify(edit.issue))) throw new Error('指摘の番号または状態が不正です。')
+        const width = edit.rect[2] - edit.rect[0], height = edit.rect[3] - edit.rect[1]
+        if (width <= 0 || height <= 0) throw new Error('指摘の大きさが不正です。')
+        annotation = edit.kind === 'createIssue' ? page.createAnnotation('Stamp') : findAnnotation(page, edit.objNum)
+        if (!annotation || annotation.getType() !== 'Stamp') throw new Error('指摘の注釈が見つかりません。')
+        annotation.setFlags(annotation.getFlags() | 4); annotation.setRect(edit.rect)
+        annotation.setColor(edit.color); annotation.setOpacity(1); annotation.setContents(edit.text)
+        annotation.update()
+        const object = annotation.getObject()
+        try {
+          setVisibleRect(doc, page, object, edit.rect)
+          setPdfString(doc, object, 'KaruIssue', JSON.stringify(edit.issue))
+          if (edit.kind === 'createIssue') setPdfString(doc, object, 'NM', newAnnotationName())
+          object.delete('T')
+        } finally { object.destroy() }
+        if (edit.kind === 'createIssue') result.created.push(objectNumber(annotation))
+        appearances.push({ editIndex, page, annotation, width, height, text: String(edit.issue.number), fontSize: issueFontSize(edit.issue.number, width), color: edit.color,
+          fontName: 'BIZUDGothic', textRect: [0, 0, width, height], backgroundColor: null, borderColor: null, borderWidth: 1, textOpacity: 1, boxOpacity: 1, calloutLine: null,
+          issue: edit.issue, visibleRect: edit.rect })
+        keepForAppearance = true
         continue
       }
       if (edit.kind === 'createMeasure' || edit.kind === 'updateMeasure') {

@@ -4,10 +4,14 @@ import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
 import { measureBounds, measureText, type MeasureKind, type MeasureSettings, type PageScale } from '../core/measure'
 import { History, type HistoryStep } from './history'
+import { IssueNumbers, issueOrder, type Issue } from '../core/issues'
+import type { CloudIntensity } from '../core/cloud'
 
-export type Kind = MeasureKind | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
+export type Kind = MeasureKind | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
 export interface EditableAnnotation {
+  cloudIntensity?: CloudIntensity | null
+  issue?: Issue | null
   measure?: MeasureSettings | null
   vertices?: Point[] | null
   id: string
@@ -37,7 +41,7 @@ export interface EditableAnnotation {
 }
 
 type ScaleChange = { pageIndex: number; scale: PageScale | null }
-type HistoryState = AnnotationState[] & { scales?: ScaleChange[] }
+type HistoryState = AnnotationState[] & { scales?: ScaleChange[]; issueMaximum?: number }
 interface AnnotationState extends Omit<EditableAnnotation, 'dirty'> {}
 interface StoredAnnotation extends AnnotationState {
   deleted: boolean
@@ -68,6 +72,7 @@ function clonePoints(points: readonly Point[]): Point[] {
 function cloneState(annotation: AnnotationState): AnnotationState {
   return {
     ...annotation,
+    issue: annotation.issue ? { ...annotation.issue } : null,
     measure: annotation.measure ? { ...annotation.measure } : null,
     vertices: annotation.vertices?.map(p => [...p] as Point) ?? null,
     rect: [...annotation.rect],
@@ -99,6 +104,7 @@ function publicAnnotation(annotation: StoredAnnotation, dirty: boolean): Editabl
 
 function persistedState(state: AnnotationState): unknown {
   return {
+    issue: state.issue, cloudIntensity: state.cloudIntensity,
     measure: state.measure, vertices: state.vertices,
     pageIndex: state.pageIndex,
     kind: state.kind,
@@ -177,6 +183,7 @@ function mapPoint(point: Point, from: Rect, to: Rect): Point {
 }
 
 export class AnnotationStore {
+  readonly issueNumbers = new IssueNumbers()
   private readonly annotations = new Map<string, StoredAnnotation>()
   private readonly baselines = new Map<string, AnnotationState>()
   private readonly touchedByPage = new Map<number, Set<number>>()
@@ -233,6 +240,8 @@ export class AnnotationStore {
         if (this.annotations.has(id)) continue
         const kind = info.kind as Kind
         const annotation: StoredAnnotation = {
+          issue: info.issue ? { ...info.issue } : null,
+          cloudIntensity: info.cloudIntensity ?? null,
           id,
           objNum: info.objNum,
           pageIndex,
@@ -262,6 +271,7 @@ export class AnnotationStore {
           revision: 0,
         }
         this.annotations.set(id, annotation)
+        if (annotation.issue) this.issueNumbers.observe(annotation.issue.number)
         this.baselines.set(id, cloneState(annotation))
       }
       this.loadedPages.add(pageIndex)
@@ -299,6 +309,9 @@ export class AnnotationStore {
 
   updateMeasureVertices(id: string, points: Point[]): void {
     this.mutate(id, a => {
+      if (a.kind === 'cloudPolygon') {
+        a.vertices = clonePoints(points); a.rect = bounds(points); return
+      }
       if (!a.measure) return
       a.vertices = points.map(p => [...p] as Point); a.text = measureText(points, a.measure)
       a.rect = measureBounds(points, a.measure.kind, a.text, a.fontSize)
@@ -372,6 +385,8 @@ export class AnnotationStore {
   }
 
   create(input: {
+    issue?: Issue | null
+    cloudIntensity?: CloudIntensity | null
     measure?: MeasureSettings | null
     vertices?: Point[] | null
     pageIndex: number
@@ -397,6 +412,8 @@ export class AnnotationStore {
   }): EditableAnnotation {
     const id = `new-${this.nextNewId++}`
     const annotation: StoredAnnotation = {
+      issue: input.kind === 'issue' ? input.issue ? { ...input.issue } : { number: this.issueNumbers.next(), status: 'open' } : null,
+      cloudIntensity: input.cloudIntensity ?? (input.kind === 'cloudSquare' || input.kind === 'cloudPolygon' ? 1 : null),
       id,
       objNum: null,
       pageIndex: input.pageIndex,
@@ -414,7 +431,7 @@ export class AnnotationStore {
       boxOpacity: input.boxOpacity ?? 1,
       interiorColor: input.interiorColor ? [...input.interiorColor] : null,
       borderColor: input.borderColor === undefined
-        ? (input.kind === 'square' || input.kind === 'circle' ? [...(input.color ?? DEFAULT_COLOR)] : null)
+        ? (input.kind === 'square' || input.kind === 'circle' || input.kind === 'cloudSquare' || input.kind === 'cloudPolygon' ? [...(input.color ?? DEFAULT_COLOR)] : null)
         : input.borderColor ? [...input.borderColor] : null,
       line: input.line ? [[...input.line[0]], [...input.line[1]]] : null,
       inkList: input.inkList?.map(clonePoints) ?? null,
@@ -428,6 +445,7 @@ export class AnnotationStore {
       revision: 1,
     }
     this.annotations.set(id, annotation)
+    if (annotation.issue) this.issueNumbers.observe(annotation.issue.number)
     if (input.deferHistory) this.pendingCreations.add(id)
     else this.history.push({ before: [], after: [cloneState(annotation)] })
     this.notify()
@@ -580,6 +598,8 @@ export class AnnotationStore {
   }
 
   update(id: string, values: {
+    issueStatus?: Issue['status']
+    cloudIntensity?: CloudIntensity
     color?: RGB
     borderWidth?: number
     fontSize?: number
@@ -594,6 +614,8 @@ export class AnnotationStore {
     symbol?: SymbolName
   }): void {
     this.mutate(id, (annotation) => {
+      if (values.issueStatus && annotation.issue) annotation.issue.status = values.issueStatus
+      if (values.cloudIntensity !== undefined) annotation.cloudIntensity = values.cloudIntensity
       if (values.color) annotation.color = [...values.color]
       if (values.borderWidth !== undefined) annotation.borderWidth = values.borderWidth
       if (values.interiorColor !== undefined) annotation.interiorColor = values.interiorColor ? [...values.interiorColor] : null
@@ -671,6 +693,8 @@ export class AnnotationStore {
     const created: AnnotationState[] = []
     for (const item of source) {
       const annotation = this.create({
+        issue: item.issue ? { ...item.issue, number: this.issueNumbers.next() } : null,
+        cloudIntensity: item.cloudIntensity,
         pageIndex,
         kind: item.kind,
         rect: [item.rect[0] + dx, item.rect[1] + dy, item.rect[2] + dx, item.rect[3] + dy],
@@ -711,6 +735,22 @@ export class AnnotationStore {
     if (!step) return
     this.restoreMany(step.before, step.after)
     this.notify()
+  }
+
+  updateIssueText(id: string, text: string): void {
+    this.mutate(id, a => { if (a.issue) a.text = text })
+  }
+
+  renumberIssues(): void {
+    const sorted = issueOrder([...this.annotations.values()].filter(a => !a.deleted && a.issue))
+    if (!sorted.length) return
+    const before: HistoryState = sorted.map(cloneState)
+    before.issueMaximum = this.issueNumbers.current
+    sorted.forEach((a, i) => { a.issue = { ...a.issue!, number: i + 1 }; this.markTouched(a); a.revision++ })
+    const after: HistoryState = sorted.map(cloneState)
+    after.issueMaximum = sorted.length
+    this.issueNumbers.renumber(sorted.length)
+    this.history.push({ before, after }); this.notify()
   }
 
   redo(): void {
@@ -807,6 +847,7 @@ export class AnnotationStore {
   }
 
   private restoreMany(target: HistoryState, counterpart: HistoryState): void {
+    if (target.issueMaximum !== undefined) this.issueNumbers.renumber(target.issueMaximum)
     for (const item of target.scales ?? []) this.scales.set(item.pageIndex, item.scale ? { ...item.scale } : null)
     const targetById = new Map(target.map((state) => [state.id, state]))
     const ids = new Set([...target.map((state) => state.id), ...counterpart.map((state) => state.id)])
@@ -855,6 +896,15 @@ export class AnnotationStore {
 
   private toEdit(annotation: StoredAnnotation, savedObjNum: number | null): AnnotationEdit {
     const create = savedObjNum === null
+    if (annotation.issue) {
+      const common = { pageIndex: annotation.pageIndex, rect: annotation.rect, issue: annotation.issue, text: annotation.text, color: annotation.color }
+      return create ? { kind: 'createIssue', ...common } : { kind: 'updateIssue', objNum: savedObjNum, ...common }
+    }
+    if (annotation.kind === 'cloudSquare' || annotation.kind === 'cloudPolygon') {
+      const common = { pageIndex: annotation.pageIndex, rect: annotation.rect, vertices: annotation.vertices ?? null, shape: annotation.kind === 'cloudSquare' ? 'square' as const : 'polygon' as const,
+        color: annotation.color, borderWidth: annotation.borderWidth, interiorColor: annotation.interiorColor, opacity: annotation.opacity, cloudIntensity: annotation.cloudIntensity ?? 1 as CloudIntensity }
+      return create ? { kind: 'createCloud', ...common } : { kind: 'updateCloud', objNum: savedObjNum, ...common }
+    }
     if (annotation.measure && annotation.vertices) {
       const common = { pageIndex: annotation.pageIndex, vertices: annotation.vertices, measure: annotation.measure, text: annotation.text, color: annotation.color, borderWidth: annotation.borderWidth, fontSize: annotation.fontSize, opacity: annotation.opacity }
       return create ? { kind: 'createMeasure', ...common } : { kind: 'updateMeasure', objNum: savedObjNum, ...common }
@@ -948,7 +998,7 @@ export class AnnotationStore {
     step: HistoryStep<HistoryState>,
     mapper: (state: AnnotationState) => AnnotationState,
   ): HistoryStep<HistoryState> {
-    return { before: Object.assign(step.before.map(mapper), { scales: step.before.scales }), after: Object.assign(step.after.map(mapper), { scales: step.after.scales }) }
+    return { before: Object.assign(step.before.map(mapper), { scales: step.before.scales, issueMaximum: step.before.issueMaximum }), after: Object.assign(step.after.map(mapper), { scales: step.after.scales, issueMaximum: step.after.issueMaximum }) }
   }
 
   private markTouched(annotation: AnnotationState): void {

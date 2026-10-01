@@ -11,10 +11,13 @@ export const DEFAULT_LAST_TOOLS: LastSplitTools = { text: 'text', shape: 'line',
 
 const groups: Record<SplitToolGroup, Array<{ tool: EditorTool; label: string; description: string; shortcut: string }>> = {
   text: [
+    { tool: 'issue', label: '指摘', description: '番号を付けて、指摘の内容を書く', shortcut: 'N' },
     { tool: 'text', label: '文字', description: '文字を入力する', shortcut: 'T' },
     { tool: 'callout', label: '吹き出し', description: '指す位置から文字枠を引き出す', shortcut: 'C' },
   ],
   shape: [
+    { tool: 'cloudSquare', label: '雲（四角）', description: '修正箇所を四角い雲形で囲む', shortcut: '' },
+    { tool: 'cloudPolygon', label: '雲（多角形）', description: '修正箇所を自由な形の雲形で囲む', shortcut: '' },
     { tool: 'line', label: '線', description: 'まっすぐな線を引く', shortcut: 'L' },
     { tool: 'arrow', label: '矢印', description: '矢印を引く', shortcut: 'A' },
     { tool: 'square', label: '四角', description: '四角形を描く', shortcut: 'R' },

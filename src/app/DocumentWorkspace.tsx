@@ -127,6 +127,13 @@ export function DocumentWorkspace(props: Props) {
           props.viewerRef.current?.scrollToPosition(match.pageIndex, quad ? Math.min(quad[0], quad[4]) : null, quad ? Math.min(quad[1], quad[3]) : null)
         }}
         onSearchHighlights={setSearchHighlights}
+        onEditAnnotation={(annotation) => {
+          props.session.annotationStore.touch(annotation.id)
+          props.session.annotationStore.selectOnly(annotation.id)
+          props.onToolChange('select')
+          props.viewerRef.current?.scrollToPosition(annotation.pageIndex, annotation.rect[0], annotation.rect[1])
+          props.viewerRef.current?.editAnnotation(annotation.id)
+        }}
         onSelectAnnotation={(annotation) => {
           props.session.annotationStore.selectOnly(annotation.id)
           props.onToolChange('select')

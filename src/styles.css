@@ -381,3 +381,9 @@ button, input { font: inherit; }
   .split-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .split-arrow-wrap { flex: none; }
 }
+
+/* SPEC-02j: SVG drafts are changed through refs, without React pointermove state. */
+.annotation-cloud, .annotation-issue { pointer-events: none; }
+.annotation-cloud { stroke-linejoin: round; stroke-linecap: round; }
+.issue-editor { position: absolute; z-index: 8; width: 260px; min-height: 90px; resize: vertical; padding: 8px; border: 1px solid #e00000; border-radius: 4px; background: white; color: #222; font: 14px KaruBIZUDGothic, sans-serif; box-shadow: 0 2px 8px #0003; }
+.annotation-rows .issue-status { margin: 4px 8px; max-width: 110px; }
