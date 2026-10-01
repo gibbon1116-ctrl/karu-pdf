@@ -1,4 +1,5 @@
 import type { PageSize } from '../core/mupdfDoc'
+import type { AnnotationEdit } from '../core/annotations'
 import type { SaveMode } from '../core/save'
 import { AnnotationStore } from '../editor/AnnotationStore'
 import type { PdfFileHandle } from '../editor/fileAccess'
@@ -42,6 +43,10 @@ export class DocumentSession {
   private _sidePanelTab: SidePanelTab = 'pages'
   canUndoOrganize = false
   pageRevision = 0
+  // Rendering-only generation for saved annotations (the editable overlay stays independent).
+  savedRevision = 0
+  splitSnapshotRevision = 0
+  readonly savedPageRevisions = new Map<number, number>()
   fitOnFirstView: boolean
   restorePageOnFirstView: boolean
   incrementalSaveCount = 0
@@ -98,7 +103,17 @@ export class DocumentSession {
     this.lastSavedByteLength = byteLength
   }
 
+  recordSavedRendering(edits: readonly AnnotationEdit[], errors: readonly { editIndex: number }[]): void {
+    const failed = new Set(errors.map(error => error.editIndex))
+    const pages = new Set(edits.flatMap((edit, index) => !failed.has(index) && edit.kind !== 'setPageScale' ? [edit.pageIndex] : []))
+    this.savedRevision += 1
+    for (const page of pages) this.savedPageRevisions.set(page, this.savedRevision)
+  }
+
   updateAfterPageLayout(pageSizes: PageSize[], canUndoOrganize: boolean, scales?: import('../core/measure').PageScale[] | (import('../core/measure').PageScale | null)[]): void {
+    this.savedPageRevisions.clear()
+    this.savedRevision = 0
+    this.splitSnapshotRevision = 0
     this.pageSizes = pageSizes
     this.canUndoOrganize = canUndoOrganize
     this.pageRevision += 1

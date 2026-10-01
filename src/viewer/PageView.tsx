@@ -20,6 +20,9 @@ import {
 import { CSS_PX_PER_PT, type PageLayout } from './pageLayout'
 
 interface Props {
+  readOnly?: boolean
+  deferPreview?: boolean
+  renderRevision?: number
   docId: string
   pool: PdfWorkerPool
   scheduler: RenderScheduler
@@ -111,6 +114,7 @@ export function PageView(props: Props) {
   }
 
   useEffect(() => {
+    if (props.readOnly) return
     void props.annotationStore.ensurePageLoaded(
       props.layout.index,
       () => props.pool.listAnnotations(props.docId, props.layout.index),
@@ -127,8 +131,8 @@ export function PageView(props: Props) {
   const previewScale = usesDetail ? 2048 / Math.max(props.pageSize.width, props.pageSize.height) : renderScale
   const lowScale = 512 / Math.max(props.pageSize.width, props.pageSize.height)
   const warmScale = 256 / Math.max(props.pageSize.width, props.pageSize.height)
-  const excludedObjNums = props.annotationStore.touchedObjNums(props.layout.index)
-  const excludeKey = `:x=${excludedObjNums.join('.')}`
+  const excludedObjNums = props.readOnly ? [] : props.annotationStore.touchedObjNums(props.layout.index)
+  const excludeKey = `:x=${excludedObjNums.join('.')}${props.renderRevision ? `:v=${props.renderRevision}` : ''}`
   const previewKey = `${props.layout.index}:${previewScale.toFixed(6)}:full${excludeKey}`
   const lowKey = `${props.layout.index}:${lowScale.toFixed(6)}:full${excludeKey}`
   const warmKey = `warm:${props.layout.index}:${warmScale.toFixed(6)}:full${excludeKey}`
@@ -266,7 +270,11 @@ export function PageView(props: Props) {
   }, [props.scheduler, lowKey, lowScale, props.layout.index, props.priority, props.onRenderRequest, usesDetail, hasBitmap])
 
   useEffect(() => {
-    if (!props.visible || (usesDetail && !detailFull)) return
+    // With two panes, preserve the low-resolution first paint while scrolling.
+    // New sharp whole-page requests would compete with both panes' first paints
+    // and prefetch. Cached sharp images remain available immediately.
+    if (!props.visible || (usesDetail && !detailFull)
+      || (props.deferPreview && !props.scheduler.has(previewKey))) return
     const priority: Priority = usesDetail ? 2 : 0
     const previewRegion: DeviceRect = [
       0,
@@ -332,7 +340,7 @@ export function PageView(props: Props) {
         item.release()
       }
     }
-  }, [props.scheduler, previewKey, previewScale, props.layout.index, props.pageSize, props.visible, props.onRenderRequest, usesDetail, detailFull])
+  }, [props.scheduler, previewKey, previewScale, props.layout.index, props.pageSize, props.visible, props.onRenderRequest, usesDetail, detailFull, props.deferPreview])
 
   const detailKey = detailRequest?.key ?? ''
 
@@ -472,7 +480,7 @@ export function PageView(props: Props) {
           />
         )))}
       </svg>}
-      <AnnotationLayer
+      {!props.readOnly && <AnnotationLayer
         docId={props.docId}
         pageIndex={props.layout.index}
         pageSize={props.pageSize}
@@ -487,7 +495,7 @@ export function PageView(props: Props) {
         registerCommit={props.registerEditorCommit}
         formatDefaults={props.formatDefaults}
         onStatus={props.onStatus}
-      />
+      />}
     </div>
   )
 }

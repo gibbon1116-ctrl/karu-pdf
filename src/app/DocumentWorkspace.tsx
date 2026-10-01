@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { SplitView, type SplitController, type SplitWorkspaceProps } from './SplitView'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { RenderScheduler } from '../client/RenderScheduler'
 import type { EditorTool } from '../editor/AnnotationLayer'
@@ -32,6 +33,7 @@ export interface OrganizeWorkspaceState {
 }
 
 interface Props {
+  split: SplitWorkspaceProps | null
   session: DocumentSession
   pool: PdfWorkerPool
   viewerRef: RefObject<ViewerHandle | null>
@@ -54,6 +56,8 @@ interface Props {
 }
 
 export function DocumentWorkspace(props: Props) {
+  const viewerSlotRef = useRef<HTMLDivElement>(null)
+  const splitControllerRef = useRef<SplitController>(null)
   const [searchHighlights, setSearchHighlights] = useState<SearchHighlightState>({ matches: [], activeIndex: -1 })
   const scheduler = useMemo(() => new RenderScheduler(
     props.pool,
@@ -142,6 +146,7 @@ export function DocumentWorkspace(props: Props) {
           props.viewerRef.current?.scrollToPosition(annotation.pageIndex, annotation.rect[0], annotation.rect[1])
         }}
       />}
+      <div ref={viewerSlotRef} className={props.split ? 'viewer-slot split-view' : 'viewer-slot'} style={props.split ? { gridTemplateColumns: `minmax(0, ${props.split.settings.ratio}fr) 6px minmax(0, ${1 - props.split.settings.ratio}fr)` } : undefined}>
       <Viewer
         ref={props.viewerRef}
         docId={props.session.docId}
@@ -158,6 +163,8 @@ export function DocumentWorkspace(props: Props) {
           else if (!props.session.annotationStore.isSelected(id)) props.session.annotationStore.selectOnly(id)
         }}
         initialView={initialView}
+        onViewChange={props.split ? () => splitControllerRef.current?.change() : undefined}
+        onViewInteraction={props.split ? () => splitControllerRef.current?.interact() : undefined}
         onToolChange={props.onToolChange}
         pageSizes={props.session.pageSizes}
         onZoomChange={(zoom) => {
@@ -176,6 +183,10 @@ export function DocumentWorkspace(props: Props) {
         onFirstSharp={props.onFirstSharp}
         onStatus={props.onStatus}
       />
+      {props.split && <SplitView {...props.split} left={props.session} pool={props.pool} scheduler={scheduler}
+        leftRef={props.viewerRef} containerRef={viewerSlotRef} controllerRef={splitControllerRef}
+        formatDefaults={props.formatDefaults} onStatus={props.onStatus} />}
+      </div>
       {props.showFormat && <FormatPanel
         selected={selected}
         tool={props.tool}

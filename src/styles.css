@@ -87,6 +87,17 @@ button, input { font: inherit; }
 .document-workspace.format-hidden { grid-template-columns: auto minmax(0, 1fr); }
 .document-workspace.thumbnails-hidden.format-hidden { grid-template-columns: minmax(0, 1fr); }
 .viewer { position: relative; min-width: 0; min-height: 0; overflow: auto; background: #525659; overscroll-behavior: contain; }
+.viewer-slot { display: grid; min-width: 0; min-height: 0; }
+.viewer-slot.split-view { grid-template-rows: minmax(0, 1fr); }
+.split-divider { background: #c0c3c6; cursor: ew-resize; touch-action: none; }
+.split-divider:focus-visible { outline: 2px solid #1769aa; outline-offset: -2px; }
+.split-reference { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; overflow: hidden; background: #ededed; }
+.split-header { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 5px; border-bottom: 1px solid #aaa; font-size: 11px; }
+.split-header select { min-width: 80px; max-width: 100%; flex: 1 1 140px; }
+.split-header input[type="number"] { width: 38px; padding: 2px; }
+.split-header button { min-height: 24px; padding: 2px 5px; }
+.split-sync { display: flex; align-items: center; gap: 3px; }
+.split-header small { flex-basis: 100%; color: #705315; }
 .side-panel { position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 220px; max-width: 480px; min-height: 0; background: #ededed; border-right: 1px solid #aaa; }
 .side-panel-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid #aaa; background: #e4e4e4; }
 .side-panel-tabs button { min-width: 0; height: 34px; padding: 0 2px; border: 0; border-right: 1px solid #c4c4c4; background: transparent; font-size: 11px; white-space: normal; }

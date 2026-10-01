@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { DocumentTabs } from './app/DocumentTabs'
 import { DocumentWorkspace } from './app/DocumentWorkspace'
+import { loadSplitSettings, saveSplitSettings, type SplitSettings } from './app/SplitView'
+import { prepareSplitDisplays } from './app/splitRendering'
+import type { DocumentViewState } from './app/documentModel'
+import type { ViewPosition } from './viewer/viewSync'
 import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
 import { HelpDialog } from './app/HelpDialog'
 import { MenuBar } from './app/MenuBar'
@@ -190,6 +194,10 @@ export default function App() {
   const pool = appRuntime.pool
   const tabs = appRuntime.tabs
   const viewerRef = useRef<ViewerHandle>(null)
+  const rightViewsRef = useRef(new Map<string, DocumentViewState>())
+  const rightPositionsRef = useRef(new Map<string, ViewPosition>())
+  const swapPositionRef = useRef<{ docId: string; position: ViewPosition } | null>(null)
+  const [split, setSplit] = useState(loadSplitSettings)
   const activeRef = useRef<DocumentSession | null>(null)
   const openEndRef = useRef<(() => number) | null>(null)
   const openSharpEndRef = useRef<(() => number) | null>(null)
@@ -248,6 +256,22 @@ export default function App() {
     return all ? scaleDialog.session.pageSizes.flatMap((p, i) => Math.abs(p.width - size.width) < .01 && Math.abs(p.height - size.height) < .01 ? [i] : []) : [scaleDialog.pageIndex]
   }
   const refreshTabs = useCallback(() => setTabsVersion((value) => value + 1), [])
+  const updateSplit = useCallback((next: SplitSettings) => {
+    setSplit(next)
+    saveSplitSettings(next)
+  }, [])
+  const toggleSplit = useCallback(() => {
+    const left = activeRef.current
+    if (!left || organizeRef.current) return
+    if (split.enabled) { updateSplit({ ...split, enabled: false }); return }
+    const documents = tabs.list()
+    const remembered = documents.find(doc => doc.docId === split.rightId)
+      ?? documents.find(doc => doc.name === split.rightName)
+    const index = documents.indexOf(left)
+    const right = remembered ?? documents[(index + 1) % documents.length] ?? left
+    updateSplit({ ...split, enabled: true, rightId: right.docId, rightName: right.name,
+      synced: right === left ? false : remembered ? split.synced : true })
+  }, [split, tabs, updateSplit])
   const refreshRecent = useCallback(() => void loadRecentFiles().then(setRecent), [])
   const showStatus = useCallback((message: string) => {
     setStatus(message)
@@ -405,6 +429,25 @@ export default function App() {
     refreshTabs()
   }, [discardOrganize, persistView, pool, refreshTabs, tabs])
 
+  const swapSplit = useCallback(async (right: DocumentSession, rightPosition: ViewPosition, leftPosition: ViewPosition) => {
+    const left = activeRef.current
+    if (!left) return
+    if (right === left) return
+    rightViewsRef.current.set(left.docId, { ...left.view })
+    rightPositionsRef.current.set(left.docId, leftPosition)
+    swapPositionRef.current = { docId: right.docId, position: rightPosition }
+    await activateDocument(right.docId)
+    if (activeRef.current?.docId !== right.docId) { swapPositionRef.current = null; return }
+    updateSplit({ ...split, rightId: left.docId, rightName: left.name })
+  }, [activateDocument, refreshTabs, split, updateSplit])
+
+  useEffect(() => {
+    const pending = swapPositionRef.current
+    if (!pending || pending.docId !== active?.docId) return
+    swapPositionRef.current = null
+    viewerRef.current?.applyViewPosition(pending.position)
+  }, [active?.docId])
+
   const openBuffer = useCallback(async (buffer: ArrayBuffer, name: string, handle: PdfFileHandle | null, created = false, signal?: AbortSignal) => {
     if (signal?.aborted) return
     const byteLength = buffer.byteLength
@@ -529,9 +572,12 @@ export default function App() {
     if (!session || !beginSave()) return null
     try {
       await viewerRef.current?.commitEditor()
-      const result = await pool.applyAndSave(session.docId, session.annotationStore.toEdits(), session.nextSaveMode())
+      const edits = session.annotationStore.toEdits()
+      const result = await pool.applyAndSave(session.docId, edits, session.nextSaveMode())
       session.annotationStore.markApplied(result)
+      session.recordSavedRendering(edits, result.errors)
       session.recordSave(result.mode, result.bytes.byteLength)
+      if (split.enabled && !organizeRef.current) await prepareSplitDisplays(pool, session, session, () => false)
       session.fileOutdated = true
       viewerRef.current?.clearSelection()
       refreshTabs()
@@ -541,7 +587,7 @@ export default function App() {
     } finally {
       endSave()
     }
-  }, [beginSave, endSave, pool, refreshTabs, showStatus])
+  }, [beginSave, endSave, pool, refreshTabs, showStatus, split.enabled])
 
   const saveDocument = useCallback(async (saveAs: boolean) => {
     const session = activeRef.current
@@ -555,9 +601,12 @@ export default function App() {
         throw new Error('ファイルへの書き込みが許可されませんでした。')
       }
       await viewerRef.current?.commitEditor()
-      const result = await pool.applyAndSave(session.docId, session.annotationStore.toEdits(), session.nextSaveMode())
+      const edits = session.annotationStore.toEdits()
+      const result = await pool.applyAndSave(session.docId, edits, session.nextSaveMode())
       session.annotationStore.markApplied(result)
+      session.recordSavedRendering(edits, result.errors)
       session.recordSave(result.mode, result.bytes.byteLength)
+      if (split.enabled && !organizeRef.current) await prepareSplitDisplays(pool, session, session, () => false)
       session.fileOutdated = true
       if (handle) {
         await writePdf(handle, result.bytes)
@@ -578,7 +627,7 @@ export default function App() {
     } finally {
       endSave()
     }
-  }, [beginSave, endSave, pool, refreshRecent, refreshTabs, showStatus])
+  }, [beginSave, endSave, pool, refreshRecent, refreshTabs, showStatus, split.enabled])
 
   const prepareOutput = useCallback(async (bake: boolean): Promise<PreparedOutputResult | null> => {
     const session = activeRef.current
@@ -759,6 +808,7 @@ export default function App() {
     if (edits.length === 0) return
     const result = await pool.applyEdits(session.docId, edits)
     session.annotationStore.markApplied(result)
+    session.recordSavedRendering(edits, result.errors)
     session.fileOutdated = true
     viewerRef.current?.clearSelection()
     refreshTabs()
@@ -1083,6 +1133,11 @@ export default function App() {
       const isInput = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false
       const key = event.key.toLowerCase()
       const organizing = organizeRef.current
+      if (event.ctrlKey && (event.key === '\\' || event.code === 'Backslash')) {
+        event.preventDefault()
+        toggleSplit()
+        return
+      }
       if (organizing && !isInput) {
         if (event.key === 'Escape') {
           event.preventDefault()
@@ -1194,7 +1249,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, openSidePanel, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, tabs])
+  }, [activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, openSidePanel, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, tabs, toggleSplit])
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -1347,6 +1402,8 @@ export default function App() {
           showThumbnails={panels.thumbnails}
           sidePanelTab={active?.sidePanelTab ?? 'pages'}
           showFormat={panels.format}
+          splitEnabled={split.enabled && !organize}
+          onToggleSplit={toggleSplit}
           canUndoOrganize={active?.canUndoOrganize ?? false}
           onOpen={() => void pickFile()}
           onImagesToPdf={() => void pickImageFiles()}
@@ -1445,6 +1502,9 @@ export default function App() {
           onFirstSharp={() => { openSharpEndRef.current?.(); openSharpEndRef.current = null }}
           onStatus={showStatus}
           organize={workspaceOrganize}
+          split={split.enabled && !workspaceOrganize ? {
+            settings: split, documents, views: rightViewsRef.current, positions: rightPositionsRef.current, onChange: updateSplit, onSwap: swapSplit,
+          } : null}
           />
           </ScaleInteractionContext.Provider>
           </WorkspaceFailureProbe>

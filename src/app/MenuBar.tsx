@@ -13,6 +13,8 @@ interface Props {
   showThumbnails: boolean
   sidePanelTab: SidePanelTab
   showFormat: boolean
+  splitEnabled: boolean
+  onToggleSplit(): void
   canUndoOrganize: boolean
   onOpen(): void
   onImagesToPdf(): void
@@ -89,6 +91,7 @@ export function MenuBar(props: Props) {
       { label: '検索', shortcut: 'Ctrl+F', checked: props.showThumbnails && props.sidePanelTab === 'search', onSelect: () => props.onOpenSidePanel('search') },
       { label: '書き込みの一覧', checked: props.showThumbnails && props.sidePanelTab === 'annotations', onSelect: () => props.onOpenSidePanel('annotations') },
       { label: '書式パネル', checked: props.showFormat, onSelect: props.onToggleFormat },
+      { label: '左右に並べて表示', shortcut: 'Ctrl+\\', checked: props.splitEnabled, disabled: !props.hasDocument || props.organizing, onSelect: props.onToggleSplit },
       separator(),
       { label: '拡大', disabled: !props.hasDocument, onSelect: props.onZoomIn },
       { label: '縮小', disabled: !props.hasDocument, onSelect: props.onZoomOut },
