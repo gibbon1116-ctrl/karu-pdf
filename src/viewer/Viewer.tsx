@@ -25,6 +25,7 @@ export interface ViewerHandle {
   fitWidth(): void
   scrollToPage(index: number): void
   scrollToPosition(index: number, x: number | null, y: number | null): void
+  zoomToRect(index: number, rect: readonly number[]): void
   isIdle(): boolean
   isSharp(): boolean
   getZoom(): number
@@ -37,6 +38,10 @@ export interface ViewerHandle {
 }
 
 interface Props {
+  minZoom?: number
+  renderVariant?: string
+  compareRegions?: readonly import('../core/compare').CompareRect[]
+  activeCompareIndex?: number
   readOnly?: boolean
   renderRevisions?: ReadonlyMap<number, number>
   onViewChange?(): void
@@ -94,7 +99,8 @@ type RenderLogWindow = Window & typeof globalThis & {
 }
 
 export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref) {
-  const initialZoom = Math.max(0.25, Math.min(8, props.initialView?.zoom ?? 1))
+  const minZoom = props.minZoom ?? .25
+  const initialZoom = Math.max(minZoom, Math.min(8, props.initialView?.zoom ?? 1))
   const initialLayout = computePageLayout(props.pageSizes, initialZoom)
   const initialPageIndex = Math.max(0, Math.min(props.pageSizes.length - 1, (props.initialView?.page ?? 1) - 1))
   const initialTop = props.initialView?.scrollTop ?? initialLayout.pages[initialPageIndex]?.top ?? 0
@@ -234,7 +240,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
 
   const setZoom = useCallback((next: number, anchor?: { x: number; y: number }, positionFromSync = false) => {
     const scroller = scrollerRef.current
-    const bounded = Math.max(0.25, Math.min(8, next))
+    const bounded = Math.max(minZoom, Math.min(8, next))
     const previousZoom = zoomRef.current
     zoomRef.current = bounded
     for (const entry of prefetchRef.current.values()) entry.release()
@@ -275,7 +281,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     } else setZoomState(bounded)
     props.onZoomChange(bounded)
     commitZoom(bounded)
-  }, [commitZoom, props.onScrollPositionChange, props.onZoomChange, props.pageSizes, props.onViewChange])
+  }, [commitZoom, props.onScrollPositionChange, props.onZoomChange, props.pageSizes, props.onViewChange, minZoom])
 
   const fitWidth = useCallback(() => {
     beginInteraction()
@@ -291,9 +297,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     const currentZoom = zoomRef.current
     const next = direction > 0
       ? ZOOM_STEPS.find((step) => step > currentZoom + 0.001) ?? 8
-      : [...ZOOM_STEPS].reverse().find((step) => step < currentZoom - 0.001) ?? 0.25
+      : [...ZOOM_STEPS].reverse().find((step) => step < currentZoom - 0.001) ?? minZoom
     setZoom(next)
-  }, [setZoom, beginInteraction])
+  }, [setZoom, beginInteraction, minZoom])
 
   const updateViewport = useCallback(() => {
     const scroller = scrollerRef.current
@@ -443,7 +449,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       const scale = 512 / Math.max(size.width, size.height)
       const excluded = props.readOnly ? [] : props.annotationStore.touchedObjNums(page.index)
       const revision = props.renderRevisions?.get(page.index)
-      const key = `${page.index}:${scale.toFixed(6)}:full:x=${excluded.join('.')}${revision ? `:v=${revision}` : ''}`
+      const key = `${page.index}:${scale.toFixed(6)}:full:x=${excluded.join('.')}${revision ? `:v=${revision}` : ''}${props.renderVariant ? `:variant=${props.renderVariant}` : ''}`
       desired.set(page.index, { priority, key, excluded })
     }
 
@@ -462,7 +468,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       const release = scheduler.want(wanted.key, params, wanted.priority, () => undefined)
       prefetchRef.current.set(pageIndex, { priority: wanted.priority, key: wanted.key, release })
     }
-  }, [scheduler, layout.pages, props.docId, props.pageSizes, props.annotationStore, annotationVersion, viewport.y, viewport.height, scrollDirection, zoom, isScrolling, prefetchDistance])
+  }, [scheduler, layout.pages, props.docId, props.pageSizes, props.annotationStore, annotationVersion, viewport.y, viewport.height, scrollDirection, zoom, isScrolling, prefetchDistance, props.renderVariant])
 
   useEffect(() => {
     if (!warmEnabled || props.pageSizes.length === 0) return
@@ -535,6 +541,22 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
         ignoreScrollForPrefetchRef.current = false
       })
     },
+    zoomToRect: (index, rect) => {
+      beginInteraction()
+      const el = scrollerRef.current
+      if (!el) return
+      const next = Math.max(minZoom, Math.min(8, (el.clientWidth - 64) / (Math.max(1, rect[2] - rect[0]) * CSS_PX_PER_PT), (el.clientHeight - 64) / (Math.max(1, rect[3] - rect[1]) * CSS_PX_PER_PT)))
+      setZoom(next)
+      const layout = computePageLayout(props.pageSizes, next), page = layout.pages[index]
+      if (!page) return
+      cancelAnimationFrame(syncFrameRef.current)
+      syncFrameRef.current = requestAnimationFrame(() => {
+        syncFrameRef.current = 0
+        el.scrollLeft = Math.max(0, (Math.max(layout.maxWidth, el.clientWidth) - page.width) / 2 + (rect[0] + rect[2]) / 2 * CSS_PX_PER_PT * next - el.clientWidth / 2)
+        el.scrollTop = Math.max(0, page.top + (rect[1] + rect[3]) / 2 * CSS_PX_PER_PT * next - el.clientHeight / 2)
+        updateViewport()
+      })
+    },
     isIdle: () => scheduler.pendingCount() === 0,
     isSharp: isSharpNow,
     getZoom: () => zoomRef.current,
@@ -553,7 +575,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       const el = scrollerRef.current
       if (!el) return
       syncMutedRef.current = true
-      const mapped = mapViewPosition(position, props.pageSizes, el.clientWidth, el.clientHeight)
+      const mapped = mapViewPosition(position, props.pageSizes, el.clientWidth, el.clientHeight, minZoom)
       // The target may render its new visible page before its native scroll
       // event arrives. Carry the driver's phase so it cannot enqueue a sharp
       // whole-page render ahead of the two panes' first paints.
@@ -577,7 +599,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
         if (el.scrollLeft === previousLeft && el.scrollTop === previousTop) updateViewport()
       })
     },
-  }), [beginInteraction, fitWidth, isSharpNow, isScrolling, props.onSelectAnnotation, props.pageSizes, scheduler, setZoom, stepZoom, updateViewport])
+  }), [beginInteraction, fitWidth, isSharpNow, isScrolling, props.onSelectAnnotation, props.pageSizes, scheduler, setZoom, stepZoom, updateViewport, minZoom])
 
   const registerEditorCommit = useCallback((commit: (() => Promise<void>) | null) => {
     editorCommitRef.current = commit
@@ -638,6 +660,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
         {virtualPages.map((page) => {
           const visible = visibleIndexes.has(page.index)
           return <PageView
+            renderVariant={props.renderVariant}
+            compareRegions={props.compareRegions}
+            activeCompareIndex={props.activeCompareIndex}
             deferPreview={Boolean(props.onViewChange) && isScrolling}
             readOnly={props.readOnly}
             renderRevision={props.renderRevisions?.get(page.index)}

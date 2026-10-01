@@ -2,6 +2,7 @@
 import { DisplayListCache } from '../core/displayListCache'
 import { openDocument, type OpenedDocument } from '../core/mupdfDoc'
 import { renderRegion } from '../core/render'
+import { ComparePageCache, renderComparePixels } from './compareRender'
 import { readDocumentScales } from '../core/measure'
 import { applyEdits, listAnnotations } from '../core/annotations'
 import { maxIssueNumber } from '../core/issues'
@@ -47,6 +48,7 @@ import type {
   OpenRequest,
   PrepareOutputRequest,
   RenderRequest,
+  RenderCompareRequest,
   RenderRasterBandRequest,
   SearchDocumentRequest,
   SelectTextRequest,
@@ -63,6 +65,7 @@ interface WorkerDocument {
   opened: OpenedDocument
   displayLists: DisplayListCache
   textSelections: StructuredTextCache
+  comparePages?: ComparePageCache
 }
 
 const documents = new Map<string, WorkerDocument>()
@@ -72,6 +75,7 @@ const cancelledSearches = new Set<number>()
 const cancelledAnnotationLists = new Set<number>()
 const activeSearches = new Map<string, number>()
 const activeAnnotationLists = new Map<string, number>()
+const activeComparisons = new Map<number, { docId: string; newDocId: string; cancelled: boolean }>()
 let sequence = 0
 let running = false
 let processedCount = 0
@@ -101,6 +105,7 @@ type CoreRequest =
   | RenderRasterBandRequest
 type QueuedRequest =
   | (RenderRequest & { sequence: number })
+  | (RenderCompareRequest & { sequence: number })
   | (CoreRequest & { sequence: number; priority: -1 })
 const queue: QueuedRequest[] = []
 const scheduler = new MessageChannel()
@@ -110,6 +115,7 @@ function post(message: WorkerResponse, transfer: Transferable[] = []): void {
 }
 
 function disposeDocument(docId: string): void {
+  for (const job of activeComparisons.values()) if (job.docId === docId || job.newDocId === docId) job.cancelled = true
   const searchRequest = activeSearches.get(docId)
   if (searchRequest !== undefined) cancelledSearches.add(searchRequest)
   const annotationRequest = activeAnnotationLists.get(docId)
@@ -117,6 +123,7 @@ function disposeDocument(docId: string): void {
   const entry = documents.get(docId)
   if (!entry) return
   entry.displayLists.destroy()
+  entry.comparePages?.destroy()
   entry.textSelections.destroy()
   entry.opened.document.destroy()
   documents.delete(docId)
@@ -214,7 +221,7 @@ async function yieldToInteractiveRequests(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0))
   for (let index = 0; index < queue.length;) {
     const job = queue[index]
-    if (job.type === 'render' || !INTERACTIVE_REQUESTS.has(job.type)) {
+    if (job.type === 'render' || job.type === 'renderCompare' || !INTERACTIVE_REQUESTS.has(job.type)) {
       index += 1
       continue
     }
@@ -224,6 +231,36 @@ async function yieldToInteractiveRequests(): Promise<void> {
 }
 
 async function execute(job: QueuedRequest): Promise<void> {
+  if (job.type === 'renderCompare') {
+    const state = { docId: job.docId, newDocId: job.newDocId, cancelled: false }
+    activeComparisons.set(job.jobId, state)
+    post({ type: 'started', jobId: job.jobId })
+    const started = performance.now()
+    try {
+      const old = documents.get(job.docId), next = documents.get(job.newDocId)
+      if (!old || !next) throw new Error('比較する PDF が開かれていません。')
+      old.comparePages ??= new ComparePageCache(old.opened.document)
+      next.comparePages ??= new ComparePageCache(next.opened.document)
+      const rendered = await renderComparePixels(old.comparePages, next.comparePages, job, async () => {
+        // Receive cancellation between bands, and give visible rendering priority.
+        await new Promise<void>(resolve => setTimeout(resolve, 0))
+        if (state.cancelled) throw new Error('compare-cancelled')
+        const index = queue.findIndex(q => (q.type === 'render' || (q.type === 'renderCompare' && !q.detect)) && q.priority < job.priority)
+        if (index >= 0) await execute(queue.splice(index, 1)[0])
+        if (state.cancelled) throw new Error('compare-cancelled')
+      })
+      if (state.cancelled) throw new Error('compare-cancelled')
+      const bitmap = await createImageBitmap(new ImageData(rendered.rgba, rendered.width, rendered.height))
+      if (state.cancelled) { bitmap.close(); throw new Error('compare-cancelled') }
+      processedCount++
+      post({ type: 'rendered', jobId: job.jobId, bitmap, renderMs: performance.now() - started,
+        differences: rendered.differences, detectionMs: rendered.detectionMs }, [bitmap])
+    } catch (error) {
+      if (state.cancelled) post({ type: 'rendered', jobId: job.jobId, cancelled: true })
+      else post({ type: 'error', jobId: job.jobId, message: error instanceof Error ? error.message : String(error) })
+    } finally { activeComparisons.delete(job.jobId) }
+    return
+  }
   if (job.type !== 'render') {
     await executeCoreRequest(job)
     return
@@ -650,15 +687,25 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
 function cancelQueuedForDocument(docId: string, message: string): void {
   for (let index = queue.length - 1; index >= 0; index -= 1) {
     const queued = queue[index]
-    if (!('docId' in queued) || queued.docId !== docId) continue
+    if (!('docId' in queued) || (queued.docId !== docId && !(queued.type === 'renderCompare' && queued.newDocId === docId))) continue
     queue.splice(index, 1)
-    if (queued.type === 'render') post({ type: 'rendered', jobId: queued.jobId, cancelled: true })
+    if (queued.type === 'render' || queued.type === 'renderCompare') post({ type: 'rendered', jobId: queued.jobId, cancelled: true })
     else post({ type: 'error', requestId: queued.requestId, message })
   }
 }
 
 scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const message = event.data
+  if (message.type === 'clearCompare') {
+    for (const job of activeComparisons.values()) job.cancelled = true
+    for (let i = queue.length - 1; i >= 0; i--) if (queue[i].type === 'renderCompare') {
+      const job = queue.splice(i, 1)[0] as RenderCompareRequest
+      post({ type: 'rendered', jobId: job.jobId, cancelled: true })
+    }
+    // Active jobs check cancellation before accessing another DisplayList.
+    for (const doc of documents.values()) { doc.comparePages?.destroy(); doc.comparePages = undefined }
+    return
+  }
   if (message.type === 'open') {
     cancelQueuedForDocument(message.docId, 'PDF が開き直されました。')
     queue.push({ ...message, priority: -1, sequence: sequence++ })
@@ -718,7 +765,7 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     schedule()
     return
   }
-  if (message.type === 'render') {
+  if (message.type === 'render' || message.type === 'renderCompare') {
     queue.push({ ...message, sequence: sequence++ })
     queue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence)
     schedule()
@@ -726,9 +773,10 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
   }
   if (message.type === 'cancelJobs') {
     const ids = new Set(message.jobIds)
+    for (const id of ids) { const active = activeComparisons.get(id); if (active?.docId === message.docId) active.cancelled = true }
     for (let index = queue.length - 1; index >= 0; index -= 1) {
       const queued = queue[index]
-      if (queued.type === 'render' && queued.docId === message.docId && ids.has(queued.jobId)) {
+      if ((queued.type === 'render' || queued.type === 'renderCompare') && queued.docId === message.docId && ids.has(queued.jobId)) {
         queue.splice(index, 1)
         post({ type: 'rendered', jobId: queued.jobId, cancelled: true })
       }
@@ -736,8 +784,8 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     return
   }
   if (message.type === 'reprioritize') {
-    const job = queue.find((candidate): candidate is RenderRequest & { sequence: number } => (
-      candidate.type === 'render' && candidate.docId === message.docId && candidate.jobId === message.jobId
+    const job = queue.find((candidate): candidate is (RenderRequest | RenderCompareRequest) & { sequence: number } => (
+      (candidate.type === 'render' || candidate.type === 'renderCompare') && candidate.docId === message.docId && candidate.jobId === message.jobId
     ))
     if (job !== undefined) {
       job.priority = message.priority

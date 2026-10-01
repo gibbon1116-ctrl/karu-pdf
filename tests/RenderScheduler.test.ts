@@ -77,4 +77,27 @@ describe('RenderScheduler', () => {
     scheduler.want('priority', params, 0, () => undefined)
     expect(backend.reprioritize).toHaveBeenCalledWith('doc-a', tasks[0].task.jobId, 0 satisfies Priority)
   })
+
+  it('比較の開始済み要求も、不要になれば取り消す', async () => {
+    const { backend, tasks } = backendHarness()
+    const scheduler = new RenderScheduler(backend, new BitmapCache())
+    const release = scheduler.want('compare', params, 1, () => undefined)
+    tasks[0].task.cancellableWhileStarted = true
+    tasks[0].setStarted()
+    release(); await flush()
+    expect(backend.cancelJobs).toHaveBeenCalledWith('doc-a', [tasks[0].task.jobId])
+  })
+
+  it('画面を閉じた後に届いた画像を解放し、キャッシュへ残さない', async () => {
+    const { backend, tasks } = backendHarness()
+    const cache = new BitmapCache(), scheduler = new RenderScheduler(backend, cache)
+    const ready = vi.fn()
+    scheduler.want('late', params, 0, ready)
+    tasks[0].setStarted(); scheduler.destroy()
+    const resultBitmap = bitmap()
+    tasks[0].resolve({ bitmap: resultBitmap, renderMs: 1, roundTripMs: 2 })
+    await flush()
+    expect(resultBitmap.close).toHaveBeenCalledOnce()
+    expect(cache.size).toBe(0); expect(ready).not.toHaveBeenCalled()
+  })
 })

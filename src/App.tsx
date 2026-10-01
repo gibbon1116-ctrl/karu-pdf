@@ -8,6 +8,8 @@ import type { ViewPosition } from './viewer/viewSync'
 import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
 import { HelpDialog } from './app/HelpDialog'
 import { MenuBar } from './app/MenuBar'
+import { CompareDialog } from './app/CompareDialog'
+import { CompareView } from './app/CompareView'
 import { RasterizeDialog } from './app/RasterizeDialog'
 import { ImagesToPdfDialog } from './app/ImagesToPdfDialog'
 import { IMAGE_ACCEPT, isImageFile, pickImages } from './app/imageFiles'
@@ -232,6 +234,8 @@ export default function App() {
   const [saving, setSaving] = useState(false)
   const [organize, setOrganize] = useState<ActiveOrganize | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [compareDialog, setCompareDialog] = useState(false)
+  const [comparison, setComparison] = useState<{ old: DocumentSession; next: DocumentSession } | null>(null)
   const [rasterizeOpen, setRasterizeOpen] = useState(false)
   const [imageFiles, setImageFiles] = useState<File[] | null>(null)
   const [headerFooterOpen, setHeaderFooterOpen] = useState(false)
@@ -1129,6 +1133,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return
+      if (comparison) return
       const target = event.target as HTMLElement | null
       const isInput = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false
       const key = event.key.toLowerCase()
@@ -1249,7 +1254,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, openSidePanel, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, tabs, toggleSplit])
+  }, [comparison, activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, openSidePanel, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, tabs, toggleSplit])
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -1376,14 +1381,14 @@ export default function App() {
     onSplit: (mode) => void splitAndSave(mode),
   } : null
   return (
-    <main className={`app${updateReady ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => void handleDrop(event)}>
+    <main className={`app${comparison ? ' comparing' : ''}${updateReady ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { if (!comparison) void handleDrop(event) }}>
       {updateReady && (
         <div className="update-banner" role="status">
           <span>新しい版があります。</span>
           <button type="button" onClick={() => void applyUpdate()}>更新する</button>
         </div>
       )}
-      <DocumentTabs
+      {!comparison && <><DocumentTabs
         documents={documents}
         activeDocId={active?.docId ?? null}
         onActivate={(docId) => void activateDocument(docId)}
@@ -1404,6 +1409,7 @@ export default function App() {
           showFormat={panels.format}
           splitEnabled={split.enabled && !organize}
           onToggleSplit={toggleSplit}
+          onCompare={() => setCompareDialog(true)}
           canUndoOrganize={active?.canUndoOrganize ?? false}
           onOpen={() => void pickFile()}
           onImagesToPdf={() => void pickImageFiles()}
@@ -1448,7 +1454,7 @@ export default function App() {
           onFitWidth={() => viewerRef.current?.fitWidth()}
         />
         {testMode && <button type="button" className="test-error-button" data-testid="throw-workspace-error" onClick={() => setWorkspaceFailure(true)}>作業領域エラー</button>}
-      </div>
+      </div></>}
       <input
         hidden
         multiple
@@ -1467,7 +1473,12 @@ export default function App() {
         event.currentTarget.value = ''
       }} />
       {error && <div className="error" role="alert">{error}</div>}
-      {active ? (
+      {comparison ? <CompareView old={comparison.old} next={comparison.next} pool={pool} formatDefaults={formatDefaults} onClose={() => {
+        void (async () => {
+          try { if (activeRef.current) await pool.activate(activeRef.current.docId); setComparison(null) }
+          catch (reason) { setError(String(reason)); setComparison(null) }
+        })()
+      }} /> : active ? (
         <ErrorBoundary
           resetKey={`${active.docId}:${active.pageRevision}`}
           onReset={() => setWorkspaceFailure(false)}
@@ -1520,7 +1531,7 @@ export default function App() {
       )}
       <footer className="status-bar">
         <span>{active ? `${page} / ${active.pageSizes.length} ページ` : 'PDFを開いてください'}</span>
-        {active?.annotationStore.getScale(page - 1) && <button type="button" className="status-scale" onClick={() => openScale(page - 1)}>{scaleLabel(active.annotationStore.getScale(page - 1)!)}</button>}
+        {!comparison && active?.annotationStore.getScale(page - 1) && <button type="button" className="status-scale" onClick={() => openScale(page - 1)}>{scaleLabel(active.annotationStore.getScale(page - 1)!)}</button>}
         <span role="status">{runtimeError || status}</span>
       </footer>
       {scaleDialog && <ScaleDialog key={`${scaleDialog.session.docId}:${scaleDialog.pageIndex}`} pageIndex={scaleDialog.pageIndex} size={scaleDialog.session.pageSizes[scaleDialog.pageIndex]} initial={scaleDialog.session.annotationStore.getScale(scaleDialog.pageIndex)} required={scaleDialog.required} tracing={scaleTracing} points={scalePoints}
@@ -1533,6 +1544,13 @@ export default function App() {
         }}
         onSave={(scale, all, recalculate) => { scaleDialog.session.annotationStore.setScale(scaleTargets(all), scale, recalculate); setScaleDialog(null); setScaleTracing(false); refreshTabs() }} />}
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      {compareDialog && active && <CompareDialog documents={documents} activeId={active.docId} onOpen={() => void pickFile()} onClose={() => setCompareDialog(false)} onCompare={(old, next) => {
+        void (async () => {
+          await viewerRef.current?.commitEditor()
+          persistView()
+          setCompareDialog(false); setComparison({ old, next })
+        })().catch(reason => setError(String(reason)))
+      }} />}
       {imageFiles && <ImagesToPdfDialog files={imageFiles} mode="create" onClose={() => setImageFiles(null)} onComplete={async (bytes, name, signal) => {
         if (tabs.list().length >= MAX_OPEN_DOCUMENTS) throw new Error('同時に開けるのは8ファイルまでです。タブを閉じてから作成してください。')
         if (!discardOrganize()) throw new Error('ページ整理の変更を確認してから作成してください。')

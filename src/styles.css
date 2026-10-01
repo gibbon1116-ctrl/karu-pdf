@@ -21,6 +21,30 @@ button, input { font: inherit; }
 
 .app { position: relative; display: grid; grid-template-rows: 38px auto minmax(0, 1fr) 28px; width: 100%; height: 100%; }
 .app.update-ready { grid-template-rows: auto 38px auto minmax(0, 1fr) 28px; }
+.app.comparing { grid-template-rows: minmax(0, 1fr) 28px; }
+.app.comparing.update-ready { grid-template-rows: auto minmax(0, 1fr) 28px; }
+.compare-dialog { width: min(560px, 95vw); }
+.compare-dialog label { display: flex; align-items: center; gap: 12px; margin: 14px 0; }
+.compare-dialog select { flex: 1; min-width: 0; padding: 6px; }
+.compare-view { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.compare-header { padding: 8px 12px; background: #f7f7f7; border-bottom: 1px solid #bbb; }
+.compare-header > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.compare-header input[type="number"] { width: 60px; margin-left: 4px; }
+.compare-header small { display: block; margin-top: 5px; }
+.compare-header button { padding: 3px 9px; }
+.compare-body { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 190px; min-height: 0; }
+.compare-panes { display: flex; min-width: 0; min-height: 0; }
+.compare-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid #aaa; }
+.compare-pane > .viewer { flex: 1; }
+.compare-pane canvas { transform: translate(var(--compare-shift-x, 0px), var(--compare-shift-y, 0px)); }
+.compare-pane-title { padding: 6px 12px; background: #e7e7e7; }
+.compare-list { overflow: auto; padding: 10px; background: #fff; }
+.compare-list h2 { font-size: 15px; margin: 0 0 12px; }
+.compare-list button { display: block; width: 100%; padding: 8px; margin: 4px 0; text-align: left; }
+.compare-list button[aria-pressed="true"] { background: #fff0d8; border-color: #d56a00; }
+.compare-region-layer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.compare-region-layer rect { fill: transparent; stroke: #ed8800; stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
+.compare-region-layer rect.active { fill: rgb(255 165 0 / 10%); stroke-width: 3; }
 .update-banner { display: flex; z-index: 20; align-items: center; justify-content: center; gap: 12px; padding: 8px 16px; color: #132238; background: #fff2b8; border-bottom: 1px solid #d2b34f; }
 .update-banner button { padding: 4px 14px; font-weight: 700; }
 .document-tabs {

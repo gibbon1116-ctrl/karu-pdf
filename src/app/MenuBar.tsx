@@ -15,6 +15,7 @@ interface Props {
   showFormat: boolean
   splitEnabled: boolean
   onToggleSplit(): void
+  onCompare(): void
   canUndoOrganize: boolean
   onOpen(): void
   onImagesToPdf(): void
@@ -92,6 +93,7 @@ export function MenuBar(props: Props) {
       { label: '書き込みの一覧', checked: props.showThumbnails && props.sidePanelTab === 'annotations', onSelect: () => props.onOpenSidePanel('annotations') },
       { label: '書式パネル', checked: props.showFormat, onSelect: props.onToggleFormat },
       { label: '左右に並べて表示', shortcut: 'Ctrl+\\', checked: props.splitEnabled, disabled: !props.hasDocument || props.organizing, onSelect: props.onToggleSplit },
+      { label: '2つの PDF を比較…', disabled: unavailable, onSelect: props.onCompare },
       separator(),
       { label: '拡大', disabled: !props.hasDocument, onSelect: props.onZoomIn },
       { label: '縮小', disabled: !props.hasDocument, onSelect: props.onZoomOut },

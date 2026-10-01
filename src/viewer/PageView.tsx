@@ -20,6 +20,9 @@ import {
 import { CSS_PX_PER_PT, type PageLayout } from './pageLayout'
 
 interface Props {
+  renderVariant?: string
+  compareRegions?: readonly import('../core/compare').CompareRect[]
+  activeCompareIndex?: number
   readOnly?: boolean
   deferPreview?: boolean
   renderRevision?: number
@@ -132,7 +135,7 @@ export function PageView(props: Props) {
   const lowScale = 512 / Math.max(props.pageSize.width, props.pageSize.height)
   const warmScale = 256 / Math.max(props.pageSize.width, props.pageSize.height)
   const excludedObjNums = props.readOnly ? [] : props.annotationStore.touchedObjNums(props.layout.index)
-  const excludeKey = `:x=${excludedObjNums.join('.')}${props.renderRevision ? `:v=${props.renderRevision}` : ''}`
+  const excludeKey = `:x=${excludedObjNums.join('.')}${props.renderRevision ? `:v=${props.renderRevision}` : ''}${props.renderVariant ? `:variant=${props.renderVariant}` : ''}`
   const previewKey = `${props.layout.index}:${previewScale.toFixed(6)}:full${excludeKey}`
   const lowKey = `${props.layout.index}:${lowScale.toFixed(6)}:full${excludeKey}`
   const warmKey = `warm:${props.layout.index}:${warmScale.toFixed(6)}:full${excludeKey}`
@@ -479,6 +482,9 @@ export function PageView(props: Props) {
             points={`${quad[0]},${quad[1]} ${quad[2]},${quad[3]} ${quad[6]},${quad[7]} ${quad[4]},${quad[5]}`}
           />
         )))}
+      </svg>}
+      {props.compareRegions && <svg className="compare-region-layer" viewBox={`0 0 ${props.pageSize.width} ${props.pageSize.height}`} preserveAspectRatio="none" aria-hidden="true">
+        {props.compareRegions.map((r, i) => <rect key={i} className={i === props.activeCompareIndex ? 'active' : ''} x={r[0]} y={r[1]} width={r[2] - r[0]} height={r[3] - r[1]} />)}
       </svg>}
       {!props.readOnly && <AnnotationLayer
         docId={props.docId}

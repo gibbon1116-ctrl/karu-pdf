@@ -41,6 +41,25 @@ export interface RenderRequest {
   excludeAnnotObjNums?: number[]
 }
 
+export interface CompareOptions {
+  docId: string
+  newDocId: string
+  pageIndex: number
+  newPageIndex: number
+  renderScale: number
+  deviceRect: DeviceRect | null
+  offset: [number, number]
+  includeAnnotations: boolean
+  output?: 'overlay' | 'old' | 'new'
+  detect?: boolean
+}
+export interface RenderCompareRequest extends CompareOptions {
+  type: 'renderCompare'
+  jobId: number
+  priority: Priority
+}
+export interface ClearCompareRequest { type: 'clearCompare' }
+
 export interface CancelJobsRequest {
   type: 'cancelJobs'
   docId: string
@@ -240,6 +259,8 @@ export interface RenderRasterBandRequest {
 }
 
 export type WorkerRequest =
+  | RenderCompareRequest
+  | ClearCompareRequest
   | MaxIssueNumberRequest
   | OpenRequest
   | RenderRequest
@@ -292,6 +313,8 @@ export interface RenderResponse {
   bitmap?: ImageBitmap
   renderMs?: number
   cancelled?: true
+  differences?: import('../core/compare').CompareRect[]
+  detectionMs?: number
 }
 
 export interface StartedResponse {

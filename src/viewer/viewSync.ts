@@ -25,11 +25,11 @@ export function readViewPosition(sizes: readonly PageSize[], zoom: number, left:
   }
 }
 
-export function mapViewPosition(position: ViewPosition, sizes: readonly PageSize[], width: number, height: number) {
+export function mapViewPosition(position: ViewPosition, sizes: readonly PageSize[], width: number, height: number, minZoom = .25) {
   const pageIndex = Math.max(0, Math.min(sizes.length - 1, position.pageIndex))
   const size = sizes[pageIndex]
   if (!size) return { zoom: 1, left: 0, top: 0, pageIndex: 0 }
-  const zoom = Math.max(.25, Math.min(8, position.widthRatio * Math.max(1, width - 32) / (size.width * CSS_PX_PER_PT)))
+  const zoom = Math.max(minZoom, Math.min(8, position.widthRatio * Math.max(1, width - 32) / (size.width * CSS_PX_PER_PT)))
   const layout = computePageLayout(sizes, zoom)
   const page = layout.pages[pageIndex]
   return {

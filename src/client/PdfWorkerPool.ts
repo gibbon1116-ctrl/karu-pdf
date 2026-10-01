@@ -17,6 +17,7 @@ import type {
   AllAnnotationsProgressResponse,
   ApplyAndSaveResponse,
   DeviceRect,
+  CompareOptions,
   ExportBytesResponse,
   LayoutTextResponse,
   ListAnnotationsResponse,
@@ -52,6 +53,8 @@ export interface RenderResult {
   bitmap: ImageBitmap
   renderMs: number
   roundTripMs: number
+  differences?: import('../core/compare').CompareRect[]
+  detectionMs?: number
 }
 
 export interface ApplyAndSaveResult {
@@ -141,6 +144,7 @@ export interface WorkerRenderLogEntry {
 }
 
 export interface RenderTask {
+  cancellableWhileStarted?: boolean
   jobId: number
   promise: Promise<RenderResult>
   isStarted(): boolean
@@ -190,6 +194,7 @@ interface WorkerSlot {
 }
 
 type Pending = {
+  comparison?: boolean
   docId: string
   started: number
   workerStarted: boolean
@@ -225,6 +230,7 @@ export class PdfWorkerPool {
   }>()
   private displayLru: string[] = []
   private readonly pageAssignments = new Map<string, number>()
+  private readonly compareAssignments = new Map<string, number>()
   private readonly renderLogEntries: WorkerRenderLogEntry[] = []
   private readonly assignedCounts: number[] = []
   private readonly documentVersions = new Map<string, number>()
@@ -341,6 +347,30 @@ export class PdfWorkerPool {
     excludeAnnotObjNums?: number[]
   }): RenderTask {
     const slot = this.slotForPage(options.docId, options.pageIndex)
+    return this.startRender(slot, 'render', options)
+  }
+
+  renderCompare(options: CompareOptions & { priority: Priority }): RenderTask {
+    const renderSlots = this.slots.length > 1 ? this.slots.slice(1) : this.slots
+    const available = renderSlots.filter(slot => slot.documents.has(options.docId) && slot.documents.has(options.newDocId))
+    if (!available.length) throw new Error('比較する PDF の表示を準備してください。')
+    // Keep a pair on one rendering Worker, so its expensive DisplayLists are
+    // built once and reused by preview, detail, detection and both panes.
+    const key = JSON.stringify([options.docId, options.pageIndex, options.newDocId, options.newPageIndex])
+    const previous = this.compareAssignments.get(key)
+    const slot = available.find(slot => slot.index === previous) ?? available.reduce((a, b) => a.queueLength <= b.queueLength ? a : b)
+    this.compareAssignments.set(key, slot.index)
+    return this.startRender(slot, 'renderCompare', options)
+  }
+
+  clearCompare(): void {
+    this.compareAssignments.clear()
+    for (const slot of this.slots) slot.worker.postMessage({ type: 'clearCompare' })
+  }
+
+  private startRender(slot: WorkerSlot, type: 'render' | 'renderCompare', options: {
+    docId: string; priority: Priority; pageIndex: number; renderScale: number; deviceRect: DeviceRect | null
+  }): RenderTask {
     const jobId = this.nextId++
     const log: WorkerRenderLogEntry = {
       jobId,
@@ -358,11 +388,12 @@ export class PdfWorkerPool {
     if (this.renderLogEntries.length > 5_000) this.renderLogEntries.splice(0, 1_000)
     slot.queueLength += 1
     const promise = new Promise<RenderResult>((resolve, reject) => {
-      this.pendingRenders.set(jobId, { docId: options.docId, started: performance.now(), workerStarted: false, slot, log, resolve, reject })
-      slot.worker.postMessage({ type: 'render', jobId, ...options })
+      this.pendingRenders.set(jobId, { comparison: type === 'renderCompare', docId: options.docId, started: performance.now(), workerStarted: false, slot, log, resolve, reject })
+      slot.worker.postMessage({ type, jobId, ...options })
     })
     return {
       jobId,
+      cancellableWhileStarted: type === 'renderCompare',
       promise,
       isStarted: () => this.pendingRenders.get(jobId)?.workerStarted ?? true,
     }
@@ -372,7 +403,7 @@ export class PdfWorkerPool {
     const byWorker = new Map<WorkerSlot, number[]>()
     for (const jobId of jobIds) {
       const pending = this.pendingRenders.get(jobId)
-      if (!pending || pending.docId !== docId || pending.workerStarted) continue
+      if (!pending || pending.docId !== docId || (pending.workerStarted && !pending.comparison)) continue
       const ids = byWorker.get(pending.slot) ?? []
       ids.push(jobId)
       byWorker.set(pending.slot, ids)
@@ -840,6 +871,8 @@ export class PdfWorkerPool {
         bitmap: message.bitmap,
         renderMs: message.renderMs ?? 0,
         roundTripMs: performance.now() - pending.started,
+        differences: message.differences,
+        detectionMs: message.detectionMs,
       })
       return
     }

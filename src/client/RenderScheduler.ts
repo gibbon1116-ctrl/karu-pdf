@@ -22,11 +22,13 @@ interface RequestEntry {
 export class RenderScheduler {
   private readonly requests = new Map<string, RequestEntry>()
   private nextWaiterId = 1
+  private destroyed = false
 
   constructor(
     private readonly backend: RenderBackend,
     readonly cache: BitmapCache,
     readonly warmCache = new BitmapCache(64 * 1024 * 1024),
+    private readonly keyPrefix = '',
   ) {}
 
   want(
@@ -35,6 +37,7 @@ export class RenderScheduler {
     priority: Priority,
     onReady: (bitmap: ImageBitmap) => void,
   ): () => void {
+    key = this.keyPrefix + key
     const cache = this.cacheFor(key)
     const cached = cache.get(key)
     if (cached) {
@@ -56,6 +59,7 @@ export class RenderScheduler {
       entry = created
       this.requests.set(key, created)
       void task.promise.then((result) => {
+        if (this.destroyed) { result.bitmap.close(); return }
         recordMetric('render-job-worker', result.renderMs)
         recordMetric('render-job-roundtrip', result.roundTripMs)
         cache.set(key, result.bitmap)
@@ -78,7 +82,7 @@ export class RenderScheduler {
       current.waiters.delete(waiterId)
       if (current.waiters.size > 0) return
       queueMicrotask(() => {
-        if (this.requests.get(key) !== current || current.waiters.size > 0 || current.task.isStarted()) return
+        if (this.requests.get(key) !== current || current.waiters.size > 0 || (current.task.isStarted() && !current.task.cancellableWhileStarted)) return
         this.requests.delete(key)
         this.backend.cancelJobs(current.params.docId, [current.task.jobId])
       })
@@ -86,6 +90,7 @@ export class RenderScheduler {
   }
 
   has(key: string): boolean {
+    key = this.keyPrefix + key
     return this.cacheFor(key).get(key) !== undefined
   }
 
@@ -94,9 +99,10 @@ export class RenderScheduler {
   }
 
   destroy(): void {
+    this.destroyed = true
     for (const entry of this.requests.values()) {
       entry.waiters.clear()
-      if (!entry.task.isStarted()) this.backend.cancelJobs(entry.params.docId, [entry.task.jobId])
+      if (!entry.task.isStarted() || entry.task.cancellableWhileStarted) this.backend.cancelJobs(entry.params.docId, [entry.task.jobId])
     }
     this.requests.clear()
   }
