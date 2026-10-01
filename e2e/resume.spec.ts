@@ -64,18 +64,27 @@ test('ファイル選択にidと前回のハンドルを渡す', async ({ page }
   ])
 })
 
-test('800px幅でも上部メニューは32pxと40pxの2段に収まる', async ({ page }) => {
+test('800px幅では道具の段を折り返し、ボタンの文字を省略せず、横にはみ出さない', async ({ page }) => {
   await page.setViewportSize({ width: 800, height: 700 })
   await page.goto('/karu-pdf/?test=1')
   await expect(page.locator('.menu-bar')).toHaveCSS('height', '32px')
-  await expect(page.locator('.tool-row')).toHaveCSS('height', '40px')
-  const fits = await page.locator('.top-controls').evaluate((controls) => ({
-    height: controls.getBoundingClientRect().height,
-    width: controls.scrollWidth,
-    clientWidth: controls.clientWidth,
-    buttonsFit: [...controls.querySelectorAll('button')].every((button) => button.scrollHeight <= button.clientHeight),
-  }))
-  expect(fits.height).toBe(72)
+  const fits = await page.locator('.top-controls').evaluate((controls) => {
+    const row = controls.querySelector('.tool-row')!
+    return {
+      height: controls.getBoundingClientRect().height,
+      rowHeight: row.getBoundingClientRect().height,
+      width: controls.scrollWidth,
+      clientWidth: controls.clientWidth,
+      buttonsFit: [...controls.querySelectorAll('button')].every((button) => button.scrollHeight <= button.clientHeight),
+      clipped: [...row.querySelectorAll('button, .split-label')]
+        .filter((el) => el.scrollWidth > el.clientWidth + 1 && !el.classList.contains('split-arrow'))
+        .map((el) => el.textContent),
+    }
+  })
+  // 道具の段は1段か2段（40px か、折り返して 80px 以下）。上の帯の高さは、メニューバーと道具の段の合計
+  expect(fits.rowHeight).toBeLessThanOrEqual(80)
+  expect(fits.height).toBeCloseTo(32 + fits.rowHeight, 0)
   expect(fits.width).toBeLessThanOrEqual(fits.clientWidth)
   expect(fits.buttonsFit).toBe(true)
+  expect(fits.clipped).toEqual([])
 })

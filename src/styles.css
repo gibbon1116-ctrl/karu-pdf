@@ -91,7 +91,7 @@ button, input { font: inherit; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .dropdown { position: relative; }
-.dropdown-menu { position: absolute; z-index: 50; top: calc(100% + 2px); left: 0; display: grid; min-width: 210px; max-width: calc(100vw - 16px); max-height: calc(100vh - 24px); padding: 4px; overflow: auto; background: #fff; border: 1px solid #8e8e8e; border-radius: 4px; box-shadow: 0 5px 16px rgb(0 0 0 / 28%); }
+.dropdown-menu { position: absolute; z-index: 50; top: calc(100% + 2px); left: 0; display: grid; width: max-content; min-width: 210px; max-width: calc(100vw - 16px); max-height: calc(100vh - 24px); padding: 4px; overflow: auto; background: #fff; border: 1px solid #8e8e8e; border-radius: 4px; box-shadow: 0 5px 16px rgb(0 0 0 / 28%); }
 .dropdown-menu.align-right { right: 0; left: auto; }
 .dropdown-menu.open-above { top: auto; bottom: calc(100% + 2px); }
 .dropdown-menu button { display: grid; grid-template-columns: 18px 18px minmax(0, 1fr) auto; align-items: center; gap: 6px; min-height: 30px; padding: 4px 8px; border: 0; background: transparent; text-align: left; white-space: nowrap; }
@@ -103,7 +103,7 @@ button, input { font: inherit; }
 .dropdown-item-text { display: grid; min-width: 0; gap: 1px; }
 .dropdown-description { color: #666; font-size: 11px; font-weight: 400; white-space: normal; }
 /* 説明は道具を見分けるためのものなので、省略せずに全文を出す */
-.dropdown-menu:has(.dropdown-description) { min-width: 360px; }
+.dropdown-menu:has(.dropdown-description) { width: 380px; }
 .dropdown-menu button:disabled .dropdown-description { color: #999; }
 .dropdown-separator { height: 1px; margin: 4px 6px; background: #d5d5d5; }
 .document-workspace { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) 210px; min-width: 0; min-height: 0; }
@@ -448,3 +448,11 @@ button, input { font: inherit; }
 .image-options label { display: flex; gap: 5px; align-items: center; }
 .image-pdf-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 @media (max-width: 650px) { .image-pdf-content { grid-template-columns: minmax(0, 1fr) 150px; } .image-thumb { display: none; } }
+
+/* 道具の段は、幅が足りないときは2段に折り返し、ボタンの文字は省略しない（2026-10-02 の利用者の要望）。
+   上の 850px 以下の決まり（文字を「…」で省略する）より後に置いて、上書きする。 */
+.tool-row { flex-wrap: wrap; row-gap: 4px; }
+.tool-row > *, .tool-row .split-button { flex: none; }
+.tool-row .split-main, .tool-row .split-label { min-width: auto; overflow: visible; text-overflow: clip; }
+/* 道具の段が2段になったときに、下の作業領域へ重ならないよう、行の高さを中身に合わせる。 */
+.top-controls { grid-template-rows: 32px auto; }

@@ -89,12 +89,51 @@ test('キーボードでファイルメニューの2番目を実行する', asyn
   await expect.poll(() => page.evaluate(() => window.__karu!.getMenuActions())).toContain('save')
 })
 
-test('1600pxと800pxで上部メニューを2段に収める', async ({ page }) => {
+test('1600pxでは道具の段を1段に収め、狭い幅では折り返して文字を省略しない', async ({ page }) => {
   await openSample(page)
-  for (const width of [1600, 800]) {
+  for (const width of [1600, 831, 800]) {
     await page.setViewportSize({ width, height: 900 })
     await expect(page.locator('.menu-bar')).toHaveCSS('height', '32px')
-    await expect(page.locator('.tool-row')).toHaveCSS('height', '40px')
+    if (width === 1600) await expect(page.locator('.tool-row')).toHaveCSS('height', '40px')
+    else expect(await page.locator('.tool-row').evaluate((el) => el.getBoundingClientRect().height)).toBeLessThanOrEqual(80)
+    // 道具の段のボタンの文字が、省略されたりはみ出したりしていない
+    const clipped = await page.locator('.tool-row').evaluate((row) => [...row.querySelectorAll('button, .split-label')]
+      .filter((el) => el.scrollWidth > el.clientWidth + 1 && !el.classList.contains('split-arrow'))
+      .map((el) => el.textContent))
+    expect(clipped).toEqual([])
+    // 道具の段は画面の右にはみ出さない
+    expect(await page.locator('.tool-row').evaluate((row) => row.scrollWidth <= row.clientWidth + 1)).toBe(true)
+    // 2段になっても、下の作業領域に重ならない
+    expect(await page.evaluate(() => document.querySelector('.tool-row')!.getBoundingClientRect().bottom
+      <= document.querySelector('.document-workspace')!.getBoundingClientRect().top + 0.5)).toBe(true)
     await page.screenshot({ path: `test-results/menu-${width}.png`, fullPage: true })
+  }
+})
+
+test('831pxの幅で、すべてのプルダウンの項目が重ならず、切れず、横にはみ出さない', async ({ page }) => {
+  await openSample(page)
+  await page.setViewportSize({ width: 831, height: 640 })
+  for (const name of ['ファイル▼', '編集▼', '表示▼', 'ページ▼', 'ヘルプ▼', '文字▼', '図形▼', 'ペン▼', '文字に印▼', '計測▼']) {
+    await page.getByRole('button', { name, exact: true }).first().click()
+    const menu = page.locator('.dropdown.open .dropdown-menu')
+    await expect(menu).toBeVisible()
+    const result = await menu.evaluate((element) => {
+      const problems: string[] = []
+      const box = element.getBoundingClientRect()
+      if (element.scrollWidth > element.clientWidth + 1) problems.push('横スクロール')
+      if (box.left < 0 || box.right > window.innerWidth) problems.push('画面外')
+      for (const item of element.querySelectorAll('button')) {
+        const label = item.querySelector('.dropdown-label') as HTMLElement | null
+        const shortcut = item.querySelector('kbd')
+        if (!label) continue
+        const labelBox = label.getBoundingClientRect()
+        if (labelBox.right > item.getBoundingClientRect().right) problems.push(`はみ出し:${label.textContent}`)
+        if (shortcut && labelBox.left + label.scrollWidth > shortcut.getBoundingClientRect().left - 2) problems.push(`重なり:${label.textContent}`)
+      }
+      return problems
+    })
+    expect(result, name).toEqual([])
+    await page.keyboard.press('Escape')
+    await expect(menu).toHaveCount(0)
   }
 })
