@@ -387,3 +387,29 @@ button, input { font: inherit; }
 .annotation-cloud { stroke-linejoin: round; stroke-linecap: round; }
 .issue-editor { position: absolute; z-index: 8; width: 260px; min-height: 90px; resize: vertical; padding: 8px; border: 1px solid #e00000; border-radius: 4px; background: white; color: #222; font: 14px KaruBIZUDGothic, sans-serif; box-shadow: 0 2px 8px #0003; }
 .annotation-rows .issue-status { margin: 4px 8px; max-width: 110px; }
+
+/* Image work happens in its own worker; the compact progress panel leaves the PDF usable. */
+.image-pdf-overlay { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: #0005; }
+.image-pdf-overlay.creating { pointer-events: none; background: transparent; place-items: start end; padding: 110px 20px; }
+.image-pdf-dialog { pointer-events: auto; background: #fff; color: #222; border: 1px solid #cbd0d8; border-radius: 8px; box-shadow: 0 6px 30px #0004; padding: 16px; width: min(850px, 95vw); max-height: 90vh; overflow: auto; }
+.creating .image-pdf-dialog { width: 320px; }
+.image-pdf-dialog h2 { font-size: 18px; margin: 0 0 12px; }
+.image-pdf-dialog h3 { font-size: 14px; margin: 0 0 8px; }
+.image-pdf-content { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 18px; }
+.image-list { list-style: none; padding: 0; margin: 0; height: 320px; overflow: auto; border: 1px solid #ccc; }
+.image-row { display: flex; align-items: center; gap: 6px; min-height: 68px; padding: 6px; border-bottom: 1px solid #ddd; }
+.image-row-label { flex: 1; min-width: 0; overflow-wrap: anywhere; display: grid; gap: 3px; }
+.image-row-label small { color: #555; }
+.image-row-error { color: #b42318; }
+.image-row-error [role=alert] { font-size: 12px; }
+.image-thumb { width: 54px; height: 54px; flex: 0 0 54px; display: grid; place-items: center; background: #eee; }
+.image-thumb img { max-width: 54px; max-height: 54px; }
+.image-preview { text-align: center; }
+.image-paper { margin-inline: auto; position: relative; width: 100%; background: white; border: 1px solid #999; box-shadow: 0 1px 5px #0002; }
+.image-placement { position: absolute; background: #e9edf2; display: grid; place-items: center; overflow: hidden; font-size: 10px; }
+.image-placement img { width: 100%; height: 100%; object-fit: contain; }
+.image-preview nav { margin-top: 8px; }
+.image-options { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0; }
+.image-options label { display: flex; gap: 5px; align-items: center; }
+.image-pdf-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+@media (max-width: 650px) { .image-pdf-content { grid-template-columns: minmax(0, 1fr) 150px; } .image-thumb { display: none; } }

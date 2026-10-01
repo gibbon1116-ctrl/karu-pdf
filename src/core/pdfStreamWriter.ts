@@ -1,4 +1,6 @@
 import type { RasterPagePlan } from './rasterize'
+import { imagePlacementMatrix, type ImagePlacement } from './imagePdfLayout'
+import type { ExifOrientation } from './exif'
 
 export interface PdfWriteTarget {
   write(data: Uint8Array): Promise<void>
@@ -12,6 +14,11 @@ export interface PdfImageBand {
   height: number
   components: number
   format: 'jpeg' | 'png'
+}
+
+export interface PdfImagePlacement extends Omit<ImagePlacement, 'index'> {
+  image: PdfImageBand
+  orientation?: ExifOrientation
 }
 
 interface ParsedPng {
@@ -208,6 +215,37 @@ export class PdfStreamWriter {
     const xObjects = imageObjects.map((objectNumber, index) => `/Im${index} ${objectNumber} 0 R`).join(' ')
     await this.writeObject(pageObject,
       `<< /Type /Page /Parent 1 0 R /MediaBox [0 0 ${pdfNumber(plan.width)} ${pdfNumber(plan.height)}] /Resources << /XObject << ${xObjects} >> >> /Contents ${contentObject} 0 R >>`)
+  }
+
+  async writeImagesPage(paper: { width: number; height: number }, placements: readonly PdfImagePlacement[]): Promise<void> {
+    if (!this.started || this.ended) throw new Error('PDFの書き出し状態が不正です。')
+    if (paper.width <= 0 || paper.height <= 0 || placements.length === 0) throw new Error('画像ページが不正です。')
+    const objects: number[] = []
+    for (const { image } of placements) {
+      const object = this.nextObject++
+      objects.push(object)
+      if (image.width <= 0 || image.height <= 0) throw new Error('画像の大きさが不正です。')
+      if (image.format === 'jpeg') {
+        if (![1, 3, 4].includes(image.components)) throw new Error('JPEG画像の色成分が不正です。')
+        const space = image.components === 1 ? 'Gray' : image.components === 4 ? 'CMYK' : 'RGB'
+        // Adobe CMYK JPEG samples use the inverted convention.
+        const adobe = image.components === 4 && new TextDecoder('latin1').decode(image.bytes.subarray(0, 4096)).includes('Adobe')
+        await this.writeStreamObject(object,
+          `/Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /Device${space} /BitsPerComponent 8 /Filter /DCTDecode${adobe ? ' /Decode [1 0 1 0 1 0 1 0]' : ''}`,
+          [image.bytes], image.bytes.byteLength)
+      } else {
+        const png = parsePngForPdf(image.bytes)
+        if (png.width !== image.width || png.height !== image.height || png.components !== image.components) throw new Error('PNG画像の情報が一致しません。')
+        await this.writeStreamObject(object,
+          `/Type /XObject /Subtype /Image /Width ${png.width} /Height ${png.height} /ColorSpace /Device${png.components === 1 ? 'Gray' : 'RGB'} /BitsPerComponent 8 /Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors ${png.components} /BitsPerComponent 8 /Columns ${png.width} >>`, png.data, png.length)
+      }
+    }
+    const content = ascii(placements.map((p, i) => `q ${imagePlacementMatrix(paper.height, p, p.orientation).map(pdfNumber).join(' ')} cm /Im${i} Do Q`).join('\n'))
+    const contentObject = this.nextObject++
+    await this.writeStreamObject(contentObject, '', [content], content.byteLength)
+    const pageObject = this.nextObject++
+    this.pageObjects.push(pageObject)
+    await this.writeObject(pageObject, `<< /Type /Page /Parent 1 0 R /MediaBox [0 0 ${pdfNumber(paper.width)} ${pdfNumber(paper.height)}] /Resources << /XObject << ${objects.map((n, i) => `/Im${i} ${n} 0 R`).join(' ')} >> >> /Contents ${contentObject} 0 R >>`)
   }
 
   async close(): Promise<void> {

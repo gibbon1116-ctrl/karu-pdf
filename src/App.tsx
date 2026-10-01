@@ -5,6 +5,10 @@ import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
 import { HelpDialog } from './app/HelpDialog'
 import { MenuBar } from './app/MenuBar'
 import { RasterizeDialog } from './app/RasterizeDialog'
+import { ImagesToPdfDialog } from './app/ImagesToPdfDialog'
+import { IMAGE_ACCEPT, isImageFile, pickImages } from './app/imageFiles'
+import { ImageWorkerClient, createImagesPdf } from './client/ImageWorkerClient'
+import type { ImagePdfSettings } from './core/imagePdfLayout'
 import { HeaderFooterDialog } from './app/HeaderFooterDialog'
 import type { HeaderFooterSettings } from './app/headerFooterText'
 import { ScaleDialog } from './app/ScaleDialog'
@@ -83,6 +87,7 @@ declare global {
       removeHeaderFooter(): Promise<PageLayoutTimings | null>
       pageTextLines(pageIndex: number): ReturnType<PdfWorkerPool['pageTextLines']>
       exportDocumentBytes(): Promise<Uint8Array>
+      imagesToPdfToBytes(files: File[], settings: ImagePdfSettings): Promise<Uint8Array>
     }
     launchQueue?: {
       setConsumer(consumer: (params: { files: PdfFileHandle[] }) => void): void
@@ -220,6 +225,7 @@ export default function App() {
   const [organize, setOrganize] = useState<ActiveOrganize | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
   const [rasterizeOpen, setRasterizeOpen] = useState(false)
+  const [imageFiles, setImageFiles] = useState<File[] | null>(null)
   const [headerFooterOpen, setHeaderFooterOpen] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
   const [debug, setDebug] = useState(() => new URLSearchParams(location.search).get('debug') === '1')
@@ -399,9 +405,10 @@ export default function App() {
     refreshTabs()
   }, [discardOrganize, persistView, pool, refreshTabs, tabs])
 
-  const openBuffer = useCallback(async (buffer: ArrayBuffer, name: string, handle: PdfFileHandle | null) => {
+  const openBuffer = useCallback(async (buffer: ArrayBuffer, name: string, handle: PdfFileHandle | null, created = false, signal?: AbortSignal) => {
+    if (signal?.aborted) return
     const byteLength = buffer.byteLength
-    const duplicate = await tabs.findDuplicate({ handle, name, byteLength })
+    const duplicate = created ? null : await tabs.findDuplicate({ handle, name, byteLength })
     if (duplicate) {
       await activateDocument(duplicate.docId)
       return
@@ -419,12 +426,19 @@ export default function App() {
     const docId = createDocId()
     try {
       const result = await pool.open(docId, buffer)
+      if (signal?.aborted) {
+        pool.close(docId)
+        if (activeRef.current) await pool.activate(activeRef.current.docId)
+        openEndRef.current = null; openSharpEndRef.current = null
+        return
+      }
       const remembered = loadViewPosition(documentViewId(name, byteLength))
       const view = remembered ? {
         page: Math.min(remembered.page, result.pageCount),
         zoom: remembered.zoom,
       } : undefined
       const session = new DocumentSession({ docId, name, byteLength, handle, pageSizes: result.pageSizes, view })
+      session.fileOutdated = created
       session.annotationStore.loadScales(result.pageScales ?? [])
       tabs.add(session)
       activeRef.current = session
@@ -702,6 +716,13 @@ export default function App() {
     }
     document.querySelector<HTMLInputElement>('[data-testid="file-input"]')?.click()
   }, [openFile])
+
+  const pickImageFiles = async () => {
+    try {
+      const chosen = await pickImages(() => document.querySelector<HTMLInputElement>('[data-testid="image-file-input"]')?.click())
+      if (chosen.length) setImageFiles(chosen)
+    } catch (reason) { if (!(reason instanceof DOMException && reason.name === 'AbortError')) setError(String(reason)) }
+  }
 
   const changeTool = useCallback(async (next: EditorTool) => {
     await viewerRef.current?.commitEditor()
@@ -1237,6 +1258,14 @@ export default function App() {
         const session = activeRef.current
         return session ? pool.exportDocumentBytes(session.docId) : Promise.resolve(new Uint8Array())
       },
+      imagesToPdfToBytes: async (files, settings) => {
+        const client = new ImageWorkerClient()
+        try {
+          const entries = []
+          for (const file of files) entries.push({ file, info: await client.request(file, 'inspect') })
+          return await createImagesPdf(client, entries, settings)
+        } finally { client.dispose() }
+      },
     }
     return () => { delete window.__karu }
   }, [activateDocument, applyHeaderFooterSettings, applyOrganize, closeDocument, extractToBytes, openBuffer, openOrganize, pool, prepareOutput, rasterizeToBytes, rasterizeToTarget, removeHeaderFooterSettings, saveToBytes, splitToBytes, tabs, undoLastOrganize])
@@ -1258,12 +1287,15 @@ export default function App() {
 
   const handleDrop = async (event: React.DragEvent) => {
     event.preventDefault()
-    const files = [...event.dataTransfer.files].filter((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
+    const files = [...event.dataTransfer.files]
+    const images = files.filter(isImageFile)
     for (let index = 0; index < files.length; index += 1) {
+      if (!(files[index].type === 'application/pdf' || /\.pdf$/i.test(files[index].name))) continue
       const item = event.dataTransfer.items[index] as (DataTransferItem & { getAsFileSystemHandle?: () => Promise<PdfFileHandle> }) | undefined
       const handle = item?.getAsFileSystemHandle ? await item.getAsFileSystemHandle() : null
       await openFile(files[index], handle)
     }
+    if (images.length) setImageFiles(images)
   }
 
   const documents = tabs.list()
@@ -1278,6 +1310,7 @@ export default function App() {
     sources: organize.sources,
     busy: organize.busy,
     onLoadFile: loadOrganizeFile,
+    onImageDrop: setImageFiles,
     onPrepareSources: prepareOrganizeSources,
     onDiscardSources: discardOrganizeSources,
     onCopy: copyOrganizeCards,
@@ -1316,6 +1349,7 @@ export default function App() {
           showFormat={panels.format}
           canUndoOrganize={active?.canUndoOrganize ?? false}
           onOpen={() => void pickFile()}
+          onImagesToPdf={() => void pickImageFiles()}
           onSave={() => { menuActionsRef.current.push('save'); void saveDocument(false) }}
           onSaveAs={() => { menuActionsRef.current.push('save-as'); void saveDocument(true) }}
           onSaveFinalized={() => void saveFinalized()}
@@ -1370,6 +1404,11 @@ export default function App() {
           event.currentTarget.value = ''
         }}
       />
+      <input hidden multiple type="file" accept={IMAGE_ACCEPT} data-testid="image-file-input" onChange={event => {
+        const chosen = [...event.currentTarget.files ?? []]
+        if (chosen.length) setImageFiles(chosen)
+        event.currentTarget.value = ''
+      }} />
       {error && <div className="error" role="alert">{error}</div>}
       {active ? (
         <ErrorBoundary
@@ -1434,6 +1473,14 @@ export default function App() {
         }}
         onSave={(scale, all, recalculate) => { scaleDialog.session.annotationStore.setScale(scaleTargets(all), scale, recalculate); setScaleDialog(null); setScaleTracing(false); refreshTabs() }} />}
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      {imageFiles && <ImagesToPdfDialog files={imageFiles} mode="create" onClose={() => setImageFiles(null)} onComplete={async (bytes, name, signal) => {
+        if (tabs.list().length >= MAX_OPEN_DOCUMENTS) throw new Error('同時に開けるのは8ファイルまでです。タブを閉じてから作成してください。')
+        if (!discardOrganize()) throw new Error('ページ整理の変更を確認してから作成してください。')
+        await viewerRef.current?.commitEditor()
+        if (signal.aborted) return
+        persistView()
+        await openBuffer(copyToArrayBuffer(bytes), name, null, true, signal)
+      }} />}
       <RasterizeDialog
         open={rasterizeOpen && Boolean(active)}
         pageCount={active?.pageSizes.length ?? 0}

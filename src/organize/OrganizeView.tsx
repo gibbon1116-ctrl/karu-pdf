@@ -4,6 +4,8 @@ import type { PageSize } from '../core/mupdfDoc'
 import type { AnnotationStore } from '../editor/AnnotationStore'
 import { Dropdown, type DropdownItem } from '../ui/Dropdown'
 import { PDF_PICKER_TYPES } from '../editor/fileAccess'
+import { ImagesToPdfDialog } from '../app/ImagesToPdfDialog'
+import { IMAGE_ACCEPT, isImageFile, pickImages } from '../app/imageFiles'
 import type { PageCard } from './OrganizeDraft'
 import { OrganizeDraft } from './OrganizeDraft'
 import { nextPreviewZoom, OrganizePagePreview, PREVIEW_ZOOM_STEPS } from './OrganizePreview'
@@ -53,6 +55,7 @@ interface Props {
   annotationStore: AnnotationStore
   busy: boolean
   onLoadFile(file: File): Promise<OrganizeSourceInfo>
+  onImageDrop(files: File[]): void
   onPrepareSources(docIds: string[]): void
   onDiscardSources(docIds: string[]): void
   onCopy(cards: readonly PageCard[]): void
@@ -237,6 +240,8 @@ export function OrganizeView(props: Props) {
   const [position, setPosition] = useState<InsertPosition>('after')
   const [afterPage, setAfterPage] = useState(1)
   const [blankOpen, setBlankOpen] = useState(false)
+  const [imageFiles, setImageFiles] = useState<File[] | null>(null)
+  const imageInsertionRef = useRef(0)
   const [blankCount, setBlankCount] = useState(1)
   const [blankSize, setBlankSize] = useState<'same' | 'a4' | 'a3' | 'b4' | 'b5'>('same')
   const [blankOrientation, setBlankOrientation] = useState<'portrait' | 'landscape'>('portrait')
@@ -367,6 +372,14 @@ export function OrganizeView(props: Props) {
   }
 
   const currentInsertionIndex = () => insertionIndex(position, cards, selectedIds, afterPage)
+
+  const pickImageFiles = async () => {
+    imageInsertionRef.current = insertionIndex('after', cards, selectedIds, cards.length)
+    try {
+      const files = await pickImages(() => document.querySelector<HTMLInputElement>('[data-testid="organize-image-input"]')?.click())
+      if (files.length) setImageFiles(files)
+    } catch (reason) { if (!(reason instanceof DOMException && reason.name === 'AbortError')) setDialogError(String(reason)) }
+  }
 
   const loadFiles = (files: File[], mode: 'insert' | 'replace', fixedIndex: number | null, append = false) => {
     if (files.length === 0) return
@@ -531,6 +544,7 @@ export function OrganizeView(props: Props) {
       <strong>ページ整理</strong>
       <Dropdown label="挿入▼" items={[
         { label: '他のPDFから（複数選択可）', disabled: props.busy, onSelect: () => void pickFiles('insert') },
+        { label: '画像を挿入…', disabled: props.busy, onSelect: () => void pickImageFiles() },
         { label: '白紙のページ', disabled: props.busy, onSelect: () => { setPosition('after'); setBlankOpen(true); setDialogError('') } },
         { label: 'クリップボードのページを貼り付け', disabled: props.busy, onSelect: paste },
       ] satisfies DropdownItem[]} />
@@ -580,6 +594,19 @@ export function OrganizeView(props: Props) {
       void loadFiles(files, fileModeRef.current, fixedDropIndexRef.current)
       event.currentTarget.value = ''
     }} />
+    <input hidden multiple type="file" accept={IMAGE_ACCEPT} data-testid="organize-image-input" onChange={event => {
+      const files = [...event.currentTarget.files ?? []]
+      if (files.length) setImageFiles(files)
+      event.currentTarget.value = ''
+    }} />
+    {imageFiles && <ImagesToPdfDialog files={imageFiles} mode="insert" onClose={() => setImageFiles(null)} onComplete={async (bytes, name, signal) => {
+      const info = await props.onLoadFile(new File([new Uint8Array(bytes)], name, { type: 'application/pdf' }))
+      if (signal.aborted) { props.onDiscardSources([info.docId]); return }
+      const inserted = props.draft.insertPages(imageInsertionRef.current, info.docId, info.pageSizes)
+      setSelection(new Set(inserted.map(card => card.id)))
+      if (inserted[0]) { setFocusedId(inserted[0].id); anchorRef.current = inserted[0].id }
+      props.onPrepareSources([info.docId])
+    }} />}
     {dialogError && !sourceDialog && !blankOpen && !pageSelectionOpen && <p className="organize-inline-error" role="alert">{dialogError}</p>}
     <div className="organize-content">
     <div ref={scrollerRef} className="organize-grid-scroller" tabIndex={0}
@@ -630,8 +657,13 @@ export function OrganizeView(props: Props) {
       onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropIndex(null) }}
       onDrop={(event) => {
         event.preventDefault()
+        event.stopPropagation()
         const at = dropIndex ?? cards.length
-        if (event.dataTransfer.files.length > 0) void loadFiles([...event.dataTransfer.files], 'insert', at)
+        if (event.dataTransfer.files.length > 0) {
+          const files = [...event.dataTransfer.files], images = files.filter(isImageFile)
+          void loadFiles(files.filter(file => /\.pdf$/i.test(file.name) || file.type === 'application/pdf'), 'insert', at)
+          if (images.length) props.onImageDrop(images)
+        }
         else if (dragIdsRef.current.length > 0) props.draft.move(dragIdsRef.current, at)
         dragIdsRef.current = []
         setDropIndex(null)

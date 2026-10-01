@@ -15,6 +15,7 @@ interface Props {
   showFormat: boolean
   canUndoOrganize: boolean
   onOpen(): void
+  onImagesToPdf(): void
   onSave(): void
   onSaveAs(): void
   onSaveFinalized(): void
@@ -62,6 +63,7 @@ export function MenuBar(props: Props) {
       { label: '別名で保存', shortcut: 'Ctrl+Shift+S', disabled: unavailable, onSelect: props.onSaveAs },
       { label: '確定して別名で保存', disabled: unavailable, onSelect: props.onSaveFinalized },
       { label: '画像として保存…', disabled: unavailable, onSelect: props.onSaveRasterized },
+      { label: '画像から PDF を作る…', onSelect: props.onImagesToPdf },
       separator(),
       { label: '印刷', shortcut: 'Ctrl+P', disabled: unavailable, onSelect: props.onPrint },
       separator(),
