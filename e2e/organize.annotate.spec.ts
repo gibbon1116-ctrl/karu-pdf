@@ -216,7 +216,9 @@ test('A3横の白紙を2枚末尾へ挿入する', async ({ page }) => {
   await dialog.getByLabel('白紙の向き').selectOption('landscape')
   await dialog.getByLabel('末尾').check()
   await dialog.getByRole('button', { name: '挿入' }).click()
+  await expect.poll(() => page.evaluate(() => window.__karu!.organizeDraft()!.getCards().length)).toBe(7)
   await page.getByRole('button', { name: '適用', exact: true }).click()
+  await expect.poll(() => pageInfo(page).then((items) => items.length)).toBe(7)
   const info = await pageInfo(page)
   expect(info).toHaveLength(7)
   for (const blank of info.slice(-2)) {
@@ -242,7 +244,9 @@ test('別タブでコピーしたページを貼り付けて適用する', async
   await page.evaluate(() => window.__karu!.openOrganize())
   await page.getByTestId('organize-card-1').click()
   await page.keyboard.press('Control+v')
+  await expect.poll(() => page.evaluate(() => window.__karu!.organizeDraft()!.getCards().length)).toBe(3)
   await page.getByRole('button', { name: '適用', exact: true }).click()
+  await expect.poll(() => pageInfo(page).then((items) => items.length)).toBe(3)
   expect((await pageInfo(page)).map((item) => item.text)).toEqual(['Tab B 1', 'Tab B 2', copiedText])
 })
 

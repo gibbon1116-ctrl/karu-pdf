@@ -6,8 +6,9 @@ import type { SaveMode } from '../core/save'
 import type { PageInfo, PageLayoutCard } from '../core/pageOps'
 import type { RasterPagePlan, RasterizeOptions } from '../core/rasterize'
 import type { SearchMatch, SearchOptions } from '../core/search'
-import type { Point } from '../core/annotations'
+import type { Point, Rect } from '../core/annotations'
 import type { TextSelectionMode, TextSelectionResult } from '../core/textSelection'
+import type { HeaderFooterSettings } from '../app/headerFooterText'
 
 export type DeviceRect = [number, number, number, number]
 export type Priority = 0 | 1 | 2 | 3
@@ -111,6 +112,13 @@ export interface PageHasTextRequest {
   pageIndex: number
 }
 
+export interface PageTextLinesRequest {
+  type: 'pageTextLines'
+  requestId: number
+  docId: string
+  pageIndex: number
+}
+
 export interface LayoutTextRequest {
   type: 'layoutText'
   requestId: number
@@ -149,6 +157,27 @@ export interface ApplyPageLayoutRequest {
   docId: string
   cards: PageLayoutCard[]
   sources: string[]
+}
+
+export interface ApplyHeaderFooterRequest {
+  type: 'applyHeaderFooter'
+  requestId: number
+  docId: string
+  settings: HeaderFooterSettings
+  fileName: string
+  dateText: string
+}
+
+export interface RemoveHeaderFooterRequest {
+  type: 'removeHeaderFooter'
+  requestId: number
+  docId: string
+}
+
+export interface GetHeaderFooterSettingsRequest {
+  type: 'getHeaderFooterSettings'
+  requestId: number
+  docId: string
 }
 
 export interface UndoPageLayoutRequest {
@@ -223,11 +252,15 @@ export type WorkerRequest =
   | CancelSearchRequest
   | SelectTextRequest
   | PageHasTextRequest
+  | PageTextLinesRequest
   | LayoutTextRequest
   | ApplyAndSaveRequest
   | ApplyEditsRequest
   | PrepareOutputRequest
   | ApplyPageLayoutRequest
+  | ApplyHeaderFooterRequest
+  | RemoveHeaderFooterRequest
+  | GetHeaderFooterSettingsRequest
   | UndoPageLayoutRequest
   | ExtractPagesRequest
   | SplitPagesRequest
@@ -315,6 +348,12 @@ export interface PageHasTextResponse {
   hasText: boolean
 }
 
+export interface PageTextLinesResponse {
+  type: 'pageTextLinesResult'
+  requestId: number
+  lines: Rect[]
+}
+
 export interface LayoutTextResponse {
   type: 'textLaidOut'
   requestId: number
@@ -353,13 +392,19 @@ export interface OutputPreparedResponse {
 }
 
 export interface PageLayoutResponse {
-  type: 'pageLayoutApplied' | 'pageLayoutUndone'
+  type: 'pageLayoutApplied' | 'pageLayoutUndone' | 'headerFooterApplied' | 'headerFooterRemoved'
   requestId: number
   bytes: ArrayBuffer
   pageCount: number
   pageSizes: PageSize[]
   hasBackup: boolean
   timings: PageLayoutWorkerTimings
+}
+
+export interface HeaderFooterSettingsResponse {
+  type: 'headerFooterSettings'
+  requestId: number
+  settings: HeaderFooterSettings | null
 }
 
 export interface PagesExtractedResponse {
@@ -425,11 +470,13 @@ export type WorkerResponse =
   | SearchProgressResponse
   | TextSelectedResponse
   | PageHasTextResponse
+  | PageTextLinesResponse
   | LayoutTextResponse
   | ApplyAndSaveResponse
   | AppliedEditsResponse
   | OutputPreparedResponse
   | PageLayoutResponse
+  | HeaderFooterSettingsResponse
   | PagesExtractedResponse
   | PagesSplitResponse
   | PageInfoResponse

@@ -5,6 +5,8 @@ import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
 import { HelpDialog } from './app/HelpDialog'
 import { MenuBar } from './app/MenuBar'
 import { RasterizeDialog } from './app/RasterizeDialog'
+import { HeaderFooterDialog } from './app/HeaderFooterDialog'
+import type { HeaderFooterSettings } from './app/headerFooterText'
 import { ToolRow } from './app/ToolRow'
 import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS, type SidePanelTab } from './app/documentModel'
 import { allSessionAnnotations } from './app/AnnotationListPanel'
@@ -71,6 +73,11 @@ declare global {
       getLastRasterizeMetrics(): RasterizeMetrics | null
       getMenuActions(): string[]
       exportAnnotationCsv(): string
+      getHeaderFooterSettings(): Promise<HeaderFooterSettings | null>
+      applyHeaderFooter(settings: HeaderFooterSettings, dateText?: string): Promise<PageLayoutTimings | null>
+      removeHeaderFooter(): Promise<PageLayoutTimings | null>
+      pageTextLines(pageIndex: number): ReturnType<PdfWorkerPool['pageTextLines']>
+      exportDocumentBytes(): Promise<Uint8Array>
     }
     launchQueue?: {
       setConsumer(consumer: (params: { files: PdfFileHandle[] }) => void): void
@@ -205,6 +212,7 @@ export default function App() {
   const [organize, setOrganize] = useState<ActiveOrganize | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
   const [rasterizeOpen, setRasterizeOpen] = useState(false)
+  const [headerFooterOpen, setHeaderFooterOpen] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
   const [debug, setDebug] = useState(() => new URLSearchParams(location.search).get('debug') === '1')
   const [workspaceFailure, setWorkspaceFailure] = useState(false)
@@ -837,6 +845,7 @@ export default function App() {
     setOrganize(busyState)
     setError('')
     try {
+      const hadHeaderFooter = await pool.getHeaderFooterSettings(session.docId).then(Boolean)
       const editsStarted = performance.now()
       await applyPendingEdits(session)
       const applyEditsMs = performance.now() - editsStarted
@@ -846,7 +855,7 @@ export default function App() {
       closeOrganizeSources(current)
       organizeRef.current = null
       setOrganize(null)
-      showStatus('ページ整理を適用しました')
+      showStatus(hadHeaderFooter ? 'ページの並びが変わりました。ページ番号を付け直すときは、ページ▼ → ページ番号・ヘッダー・フッター で［適用］を押してください' : 'ページ整理を適用しました')
       const mainUpdateMs = performance.now() - mainUpdateStarted
       return {
         ...result.timings,
@@ -872,14 +881,48 @@ export default function App() {
     try {
       const result = await pool.undoPageLayout(session.docId)
       finishPageLayout(session, result)
-      showStatus('直前のページ整理を元に戻しました')
+      showStatus('直前のページ操作を元に戻しました')
     } catch (reason) {
-      setError(`ページ整理を元に戻せませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
+      setError(`直前のページ操作を元に戻せませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
     } finally {
       savingRef.current = false
       setSaving(false)
     }
   }, [finishPageLayout, pool, showStatus])
+
+  const applyHeaderFooterSettings = useCallback(async (settings: HeaderFooterSettings, dateText: string): Promise<PageLayoutTimings | null> => {
+    const session = activeRef.current
+    if (!session || savingRef.current || organizeRef.current) return null
+    savingRef.current = true; setSaving(true); setError('')
+    try {
+      await applyPendingEdits(session)
+      const result = await pool.applyHeaderFooter(session.docId, settings, session.name, dateText)
+      finishPageLayout(session, result)
+      setHeaderFooterOpen(false)
+      showStatus('ページ番号・ヘッダー・フッターを適用しました')
+      return result.timings
+    } catch (reason) {
+      setError(`ページ番号・ヘッダー・フッターを適用できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
+      throw reason
+    } finally { savingRef.current = false; setSaving(false) }
+  }, [applyPendingEdits, finishPageLayout, pool, showStatus])
+
+  const removeHeaderFooterSettings = useCallback(async (): Promise<PageLayoutTimings | null> => {
+    const session = activeRef.current
+    if (!session || savingRef.current || organizeRef.current) return null
+    savingRef.current = true; setSaving(true); setError('')
+    try {
+      await applyPendingEdits(session)
+      const result = await pool.removeHeaderFooter(session.docId)
+      finishPageLayout(session, result)
+      setHeaderFooterOpen(false)
+      showStatus('ページ番号・ヘッダー・フッターを削除しました')
+      return result.timings
+    } catch (reason) {
+      setError(`ページ番号・ヘッダー・フッターを削除できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
+      throw reason
+    } finally { savingRef.current = false; setSaving(false) }
+  }, [applyPendingEdits, finishPageLayout, pool, showStatus])
 
   const selectedCards = useCallback((cardIds: readonly string[]): PageLayoutCard[] => {
     const current = organizeRef.current
@@ -1148,9 +1191,20 @@ export default function App() {
         const session = activeRef.current
         return session ? createAnnotationCsv(allSessionAnnotations(session)) : ''
       },
+      getHeaderFooterSettings: () => activeRef.current ? pool.getHeaderFooterSettings(activeRef.current.docId) : Promise.resolve(null),
+      applyHeaderFooter: (settings, dateText = '2026年10月1日') => applyHeaderFooterSettings(settings, dateText),
+      removeHeaderFooter: removeHeaderFooterSettings,
+      pageTextLines: (pageIndex) => {
+        const session = activeRef.current
+        return session ? pool.pageTextLines(session.docId, pageIndex) : Promise.resolve([])
+      },
+      exportDocumentBytes: () => {
+        const session = activeRef.current
+        return session ? pool.exportDocumentBytes(session.docId) : Promise.resolve(new Uint8Array())
+      },
     }
     return () => { delete window.__karu }
-  }, [activateDocument, applyOrganize, closeDocument, extractToBytes, openBuffer, openOrganize, pool, prepareOutput, rasterizeToBytes, rasterizeToTarget, saveToBytes, splitToBytes, tabs, undoLastOrganize])
+  }, [activateDocument, applyHeaderFooterSettings, applyOrganize, closeDocument, extractToBytes, openBuffer, openOrganize, pool, prepareOutput, rasterizeToBytes, rasterizeToTarget, removeHeaderFooterSettings, saveToBytes, splitToBytes, tabs, undoLastOrganize])
 
   const openRecent = async (item: RecentFile) => {
     try {
@@ -1248,6 +1302,7 @@ export default function App() {
           onZoomOut={() => viewerRef.current?.zoomOut()}
           onFitWidth={() => viewerRef.current?.fitWidth()}
           onOrganize={() => void openOrganize()}
+          onHeaderFooter={() => setHeaderFooterOpen(true)}
           onUndoOrganize={() => void undoLastOrganize()}
           onHelp={() => setHelpOpen(true)}
         />
@@ -1338,6 +1393,19 @@ export default function App() {
         onEstimate={estimateRasterized}
         onSave={saveRasterized}
       />
+      {active && headerFooterOpen && <HeaderFooterDialog
+        open
+        docId={active.docId}
+        fileName={active.name}
+        pageSizes={active.pageSizes}
+        currentPage={page}
+        pool={pool}
+        excludedAnnotations={(pageIndex) => active.annotationStore.touchedObjNums(pageIndex)}
+        loadSettings={() => pool.getHeaderFooterSettings(active.docId)}
+        onApply={async (settings, dateText) => { await applyHeaderFooterSettings(settings, dateText) }}
+        onRemove={async () => { await removeHeaderFooterSettings() }}
+        onClose={() => setHeaderFooterOpen(false)}
+      />}
     </main>
   )
 }

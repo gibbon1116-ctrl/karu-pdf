@@ -6,8 +6,9 @@ import type { SaveMode } from '../core/save'
 import type { PageInfo, PageLayoutCard } from '../core/pageOps'
 import type { RasterizeOptions } from '../core/rasterize'
 import type { SearchOptions } from '../core/search'
-import type { Point } from '../core/annotations'
+import type { Point, Rect } from '../core/annotations'
 import type { TextSelectionMode, TextSelectionResult } from '../core/textSelection'
+import type { HeaderFooterSettings } from '../app/headerFooterText'
 import { MemoryPdfWriteTarget, PdfStreamWriter, type PdfImageBand, type PdfWriteTarget } from '../core/pdfStreamWriter'
 import type {
   AppliedEditsResponse,
@@ -18,9 +19,11 @@ import type {
   LayoutTextResponse,
   ListAnnotationsResponse,
   PageHasTextResponse,
+  PageTextLinesResponse,
   OpenResponse,
   PageInfoResponse,
   PageLayoutResponse,
+  HeaderFooterSettingsResponse,
   PagesExtractedResponse,
   PagesSplitResponse,
   Priority,
@@ -405,6 +408,13 @@ export class PdfWorkerPool {
     return response.hasText
   }
 
+  async pageTextLines(docId: string, pageIndex: number): Promise<Rect[]> {
+    const response = await this.request<PageTextLinesResponse>(this.slots[0], (requestId) => ({
+      type: 'pageTextLines', requestId, docId, pageIndex,
+    }))
+    return response.lines
+  }
+
   async selectText(
     docId: string,
     pageIndex: number,
@@ -651,6 +661,23 @@ export class PdfWorkerPool {
     }
   }
 
+  async getHeaderFooterSettings(docId: string): Promise<HeaderFooterSettings | null> {
+    const response = await this.request<HeaderFooterSettingsResponse>(this.slots[0], (requestId) => ({ type: 'getHeaderFooterSettings', requestId, docId }))
+    return response.settings
+  }
+
+  async applyHeaderFooter(docId: string, settings: HeaderFooterSettings, fileName: string, dateText: string): Promise<PageLayoutResult> {
+    return this.runHeaderFooterOperation(docId, (requestId) => ({ type: 'applyHeaderFooter', requestId, docId, settings, fileName, dateText }))
+  }
+
+  async removeHeaderFooter(docId: string): Promise<PageLayoutResult> {
+    return this.runHeaderFooterOperation(docId, (requestId) => ({ type: 'removeHeaderFooter', requestId, docId }))
+  }
+
+  async exportDocumentBytes(docId: string): Promise<Uint8Array> {
+    return new Uint8Array(await this.exportBuffer(docId))
+  }
+
   async extractPages(docId: string, cards: readonly PageLayoutCard[], sources: readonly string[]): Promise<Uint8Array> {
     const response = await this.request<PagesExtractedResponse>(this.slots[0], (requestId) => ({
       type: 'extractPages', requestId, docId, cards, sources,
@@ -726,6 +753,23 @@ export class PdfWorkerPool {
       type: 'exportBytes', requestId, docId,
     }))
     return response.bytes
+  }
+
+  private async runHeaderFooterOperation(
+    docId: string,
+    makeRequest: (requestId: number) => import('../worker/protocol').ApplyHeaderFooterRequest | import('../worker/protocol').RemoveHeaderFooterRequest,
+  ): Promise<PageLayoutResult> {
+    const poolStarted = performance.now()
+    const workerStarted = performance.now()
+    const response = await this.request<PageLayoutResponse>(this.slots[0], makeRequest)
+    const workerRoundTripMs = performance.now() - workerStarted
+    const reloadStarted = performance.now()
+    await this.reloadDisplayWorkers(docId, response.bytes)
+    const displayReloadMs = performance.now() - reloadStarted
+    this.clearPageAssignments(docId)
+    return { pageCount: response.pageCount, pageSizes: response.pageSizes, hasBackup: response.hasBackup, timings: {
+      ...response.timings, workerRoundTripMs, transferToMainMs: Math.max(0, workerRoundTripMs - response.timings.workerTotalMs), displayReloadMs, poolTotalMs: performance.now() - poolStarted,
+    } }
   }
 
   private async reloadDisplayWorkers(docId: string, buffer: ArrayBuffer): Promise<void> {

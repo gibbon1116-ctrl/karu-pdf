@@ -18,6 +18,7 @@ import { prepareDocumentOutput } from '../core/output'
 import { planRasterPages, renderRasterBand } from '../core/rasterize'
 import { searchPage } from '../core/search'
 import { StructuredTextCache } from '../core/textSelection'
+import { applyHeaderFooter, getHeaderFooterSettings, removeHeaderFooter } from '../core/headerFooter'
 import {
   applyPageLayout,
   extractPages,
@@ -29,6 +30,7 @@ import type {
   ApplyEditsRequest,
   ApplyAndSaveRequest,
   ApplyPageLayoutRequest,
+  ApplyHeaderFooterRequest,
   BeginRasterizeRequest,
   ExtractPagesRequest,
   ExportBytesRequest,
@@ -37,6 +39,8 @@ import type {
   ListAllAnnotationsRequest,
   ListAnnotationsRequest,
   PageHasTextRequest,
+  PageTextLinesRequest,
+  GetHeaderFooterSettingsRequest,
   OpenRequest,
   PrepareOutputRequest,
   RenderRequest,
@@ -45,6 +49,7 @@ import type {
   SelectTextRequest,
   SplitPagesRequest,
   UndoPageLayoutRequest,
+  RemoveHeaderFooterRequest,
   WorkerRequest,
   WorkerResponse,
 } from './protocol'
@@ -74,11 +79,15 @@ type CoreRequest =
   | SearchDocumentRequest
   | SelectTextRequest
   | PageHasTextRequest
+  | PageTextLinesRequest
   | LayoutTextRequest
   | ApplyAndSaveRequest
   | ApplyEditsRequest
   | PrepareOutputRequest
   | ApplyPageLayoutRequest
+  | ApplyHeaderFooterRequest
+  | RemoveHeaderFooterRequest
+  | GetHeaderFooterSettingsRequest
   | UndoPageLayoutRequest
   | ExtractPagesRequest
   | SplitPagesRequest
@@ -194,7 +203,7 @@ scheduler.port1.onmessage = () => {
 // 検索と全書き込みの読み出しは、全ページが終わるまで列を占有する（330 ページで約 8 秒）。
 // その間も文字の選択や書き込みの読み込みが待たされないよう、1 ページごとに、
 // 文書を変えない短い要求だけを先に片付ける。
-const INTERACTIVE_REQUESTS = new Set<WorkerRequest['type']>(['selectText', 'pageHasText', 'listAnnotations', 'layoutText'])
+const INTERACTIVE_REQUESTS = new Set<WorkerRequest['type']>(['selectText', 'pageHasText', 'pageTextLines', 'listAnnotations', 'layoutText'])
 
 async function yieldToInteractiveRequests(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0))
@@ -300,12 +309,22 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       return
     }
 
+    if (request.type === 'pageTextLines') {
+      post({ type: 'pageTextLinesResult', requestId: request.requestId, lines: entry.textSelections.pageTextLines(request.pageIndex) })
+      return
+    }
+
     if (request.type === 'selectText') {
       post({
         type: 'textSelected',
         requestId: request.requestId,
         result: entry.textSelections.select(request.pageIndex, request.from, request.to, request.mode),
       })
+      return
+    }
+
+    if (request.type === 'getHeaderFooterSettings') {
+      post({ type: 'headerFooterSettings', requestId: request.requestId, settings: getHeaderFooterSettings(document) })
       return
     }
 
@@ -498,6 +517,46 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       return
     }
 
+    if (request.type === 'applyHeaderFooter' || request.type === 'removeHeaderFooter') {
+      if (request.type === 'applyHeaderFooter') {
+        await getFontResource(request.settings.font)
+        getDingbatsResource()
+      }
+      const workerStarted = performance.now()
+      const backupStarted = performance.now()
+      const backup = saveDocument(document, 'incremental').bytes
+      const backupMs = performance.now() - backupStarted
+      pageLayoutBackups.set(request.docId, backup)
+      try {
+        const assembleStarted = performance.now()
+        if (request.type === 'applyHeaderFooter') {
+          applyHeaderFooter(document, request.settings, request.fileName, request.dateText, fontResources[request.settings.font]!, fontResources.ZapfDingbats!)
+        } else removeHeaderFooter(document)
+        const assembleMs = performance.now() - assembleStarted
+        const exportStarted = performance.now()
+        const saved = saveDocument(document, 'incremental').bytes
+        const exportMs = performance.now() - exportStarted
+        const primaryReloadStarted = performance.now()
+        const reopened = replaceDocument(request.docId, saved.slice(), true)
+        const primaryReloadMs = performance.now() - primaryReloadStarted
+        const reopenedDocument = reopened.opened.document.asPDF()
+        if (!reopenedDocument) throw new Error('PDF 文書ではありません。')
+        const pageMetadataStarted = performance.now()
+        const pageSizes = getPageSizes(reopenedDocument)
+        const pageMetadataMs = performance.now() - pageMetadataStarted
+        const bytes = saved.buffer as ArrayBuffer
+        post({
+          type: request.type === 'applyHeaderFooter' ? 'headerFooterApplied' : 'headerFooterRemoved', requestId: request.requestId, bytes,
+          pageCount: pageSizes.length, pageSizes, hasBackup: true,
+          timings: { backupMs, assembleMs, exportMs, primaryReloadMs, pageMetadataMs, workerTotalMs: performance.now() - workerStarted },
+        }, [bytes])
+      } catch (error) {
+        replaceDocument(request.docId, backup.slice(), true)
+        throw error
+      }
+      return
+    }
+
     if (request.type === 'undoPageLayout') {
       const workerStarted = performance.now()
       const backup = pageLayoutBackups.get(request.docId)
@@ -626,11 +685,15 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     || message.type === 'searchDocument'
     || message.type === 'selectText'
     || message.type === 'pageHasText'
+    || message.type === 'pageTextLines'
     || message.type === 'layoutText'
     || message.type === 'applyAndSave'
     || message.type === 'applyEdits'
     || message.type === 'prepareOutput'
     || message.type === 'applyPageLayout'
+    || message.type === 'applyHeaderFooter'
+    || message.type === 'removeHeaderFooter'
+    || message.type === 'getHeaderFooterSettings'
     || message.type === 'undoPageLayout'
     || message.type === 'extractPages'
     || message.type === 'splitPages'

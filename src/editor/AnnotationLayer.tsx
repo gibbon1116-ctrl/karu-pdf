@@ -10,11 +10,13 @@ import type { FormatDefaults, FormatTool } from './formatDefaults'
 import { inkStrokePoints, mergeInkAnnotationId, simplifyPoints, type PreviousInkStroke } from './ink'
 import { TextSelectionQueue } from './textSelectionQueue'
 import type { TextSelectionMode, TextSelectionResult } from '../core/textSelection'
+import { hitTextLine } from './textHitTest'
 
 export type EditorTool = 'select' | 'textSelect' | FormatTool
 const TEXT_SELECTION_START = 'karu-pdf:text-selection-start'
 const MULTI_CLICK_MS = 500
 const MULTI_CLICK_DISTANCE = 4
+const TEXT_MARK_TOOLS = new Set<EditorTool>(['textSelect', 'textHighlight', 'underline', 'strikeout'])
 export const EditorToolChangeContext = createContext<(tool: EditorTool) => void>(() => undefined)
 type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 type LineHandle = 'start' | 'end'
@@ -171,8 +173,13 @@ export function AnnotationLayer(props: Props) {
   const dragRef = useRef<DragOperation | null>(null)
   const nudgeRef = useRef<NudgeOperation | null>(null)
   const clickRef = useRef<{ at: number; x: number; y: number; count: number } | null>(null)
+  const textLinesRef = useRef<Rect[] | null>(null)
+  const textLinesRequestedRef = useRef(false)
+  const pointerPointRef = useRef<Point | null>(null)
   const previousInkRef = useRef<PreviousInkStroke | null>(null)
   const loadingLayoutsRef = useRef(new Set<string>())
+  const toolRef = useRef(props.tool)
+  toolRef.current = props.tool
   const [textSelection, setTextSelection] = useState<TextSelectionResult | null>(null)
   const textQueue = useMemo(() => new TextSelectionQueue(
     (input: { from: Point; to: Point; mode: TextSelectionMode }) => props.pool.selectText(
@@ -186,6 +193,38 @@ export function AnnotationLayer(props: Props) {
   const editing = props.editingId ? annotations.find((annotation) => annotation.id === props.editingId) : undefined
 
   useEffect(() => () => textQueue.dispose(), [textQueue])
+
+  const setTextCursor = (cursor: 'text' | 'default' | '') => {
+    const svg = svgRef.current
+    if (svg && svg.style.cursor !== cursor) svg.style.cursor = cursor
+  }
+
+  const updateTextCursor = (point: Point) => {
+    const operation = dragRef.current
+    if (operation?.mode === 'text-selection') {
+      setTextCursor('text')
+      return
+    }
+    setTextCursor(hitTextLine(textLinesRef.current ?? [], point) ? 'text' : 'default')
+  }
+
+  const ensureTextLines = () => {
+    if (!TEXT_MARK_TOOLS.has(props.tool) || textLinesRequestedRef.current) return
+    textLinesRequestedRef.current = true
+    setTextCursor('default')
+    void props.pool.pageTextLines(props.docId, props.pageIndex).then((lines) => {
+      textLinesRef.current = lines
+      const point = pointerPointRef.current
+      if (point && TEXT_MARK_TOOLS.has(toolRef.current)) updateTextCursor(point)
+    }).catch(() => {
+      textLinesRef.current = []
+    })
+  }
+
+  useEffect(() => {
+    if (!TEXT_MARK_TOOLS.has(props.tool)) setTextCursor('')
+    else setTextCursor('default')
+  }, [props.tool])
 
   const flushNudge = () => {
     const operation = nudgeRef.current
@@ -694,6 +733,12 @@ export function AnnotationLayer(props: Props) {
       className={`annotation-layer tool-${props.tool}`}
       data-testid={`annotation-layer-${props.pageIndex}`}
       viewBox={`0 0 ${props.pageSize.width} ${props.pageSize.height}`}
+      onPointerEnter={(event) => {
+        if (!TEXT_MARK_TOOLS.has(props.tool)) return
+        pointerPointRef.current = pointInPage(event.currentTarget, event)
+        ensureTextLines()
+        updateTextCursor(pointerPointRef.current)
+      }}
       onPointerDown={(event) => {
         if (event.button !== 0 || props.editingId) return
         event.currentTarget.closest<HTMLElement>('.viewer')?.focus({ preventScroll: true })
@@ -759,6 +804,7 @@ export function AnnotationLayer(props: Props) {
             clickRef.current = { at: now, x: event.clientX, y: event.clientY, count: clicks }
             const selectionMode: TextSelectionMode = clicks >= 3 ? 'lines' : clicks === 2 ? 'words' : 'chars'
             dragRef.current = { pointerId: event.pointerId, mode: 'text-selection', start, latest: start, id: null, element: null, frame: 0, moved: false, shift: false, ctrl: false, selectionMode, stopMeasurement: beginDragFrameMeasurement('drag') }
+            setTextCursor('text')
             void props.pool.pageHasText(props.docId, props.pageIndex).then((hasText) => {
               if (!hasText) props.onStatus('このページには選択できる文字がありません（スキャン画像など）')
             })
@@ -791,6 +837,12 @@ export function AnnotationLayer(props: Props) {
         svg.setPointerCapture(event.pointerId)
       }}
       onPointerMove={(event) => {
+        if (TEXT_MARK_TOOLS.has(props.tool)) {
+          const point = pointInPage(event.currentTarget, event)
+          pointerPointRef.current = point
+          ensureTextLines()
+          updateTextCursor(point)
+        }
         const operation = dragRef.current
         if (!operation || operation.pointerId !== event.pointerId) return
         operation.latest = pointInPage(event.currentTarget, event)

@@ -36,6 +36,7 @@ interface Props {
   onZoomOut(): void
   onFitWidth(): void
   onOrganize(): void
+  onHeaderFooter(): void
   onUndoOrganize(): void
   onHelp(): void
 }
@@ -93,7 +94,8 @@ export function MenuBar(props: Props) {
     ] },
     { label: 'ページ', items: [
       { label: 'ページ整理', disabled: !props.hasDocument || props.organizing, onSelect: props.onOrganize },
-      { label: 'ページ整理を元に戻す', disabled: !props.canUndoOrganize || props.organizing || props.saving, onSelect: props.onUndoOrganize },
+      { label: 'ページ番号・ヘッダー・フッター…', disabled: unavailable, onSelect: props.onHeaderFooter },
+      { label: '直前のページ操作を元に戻す', disabled: !props.canUndoOrganize || props.organizing || props.saving, onSelect: props.onUndoOrganize },
     ] },
     { label: 'ヘルプ', items: [
       { label: '使い方', onSelect: props.onHelp },

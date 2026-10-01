@@ -1,4 +1,4 @@
-import type { PDFDocument, Point, Quad, StructuredText } from 'mupdf'
+import type { PDFDocument, Point, Quad, Rect, StructuredText } from 'mupdf'
 
 export type TextSelectionMode = 'chars' | 'words' | 'lines'
 
@@ -30,6 +30,28 @@ export class StructuredTextCache {
 
   pageHasText(pageIndex: number): boolean {
     return this.get(pageIndex).hasText
+  }
+
+  pageTextLines(pageIndex: number): Rect[] {
+    const { structured, hasText } = this.get(pageIndex)
+    if (!hasText) return []
+    const lines: Rect[] = []
+    let bbox: Rect | null = null
+    let hasVisibleText = false
+    structured.walk({
+      beginLine: (lineBox) => {
+        bbox = [...lineBox] as Rect
+        hasVisibleText = false
+      },
+      onChar: (value) => {
+        if (value.trim().length > 0) hasVisibleText = true
+      },
+      endLine: () => {
+        if (bbox && hasVisibleText) lines.push(bbox)
+        bbox = null
+      },
+    })
+    return lines
   }
 
   select(

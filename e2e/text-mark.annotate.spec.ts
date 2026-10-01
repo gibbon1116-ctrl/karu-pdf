@@ -129,6 +129,27 @@ test('文字のないページでは短い案内を表示する', async ({ page 
   await expect(page.getByText('このページには選択できる文字がありません（スキャン画像など）', { exact: true })).toBeVisible()
 })
 
+test('文字に印の道具は文字の上だけ文字カーソルになる', async ({ page }) => {
+  await page.goto('/karu-pdf/?test=1')
+  await page.getByTestId('file-input').setInputFiles(sample)
+  await waitForPage(page)
+  const bounds = await textBounds(page)
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await page.keyboard.press('m')
+  const layer = page.getByTestId('annotation-layer-0')
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+  await expect.poll(() => layer.evaluate((element) => getComputedStyle(element).cursor)).toBe('text')
+  const layerBox = await layer.boundingBox()
+  if (!layerBox) throw new Error('注釈レイヤーがありません。')
+  await page.mouse.move(layerBox.x + layerBox.width - 20, bounds.y + bounds.height / 2)
+  await expect.poll(() => layer.evaluate((element) => getComputedStyle(element).cursor)).toBe('default')
+  await chooseMarkTool(page, 'ハイライト')
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+  await expect.poll(() => layer.evaluate((element) => getComputedStyle(element).cursor)).toBe('text')
+  await page.getByRole('button', { name: '選択', exact: true }).click()
+  await expect.poll(() => layer.evaluate((element) => getComputedStyle(element).cursor)).not.toBe('text')
+})
+
 test('方向キー移動をまとめて戻し、複数選択も一緒に動かす', async ({ page }) => {
   await page.goto('/karu-pdf/?test=1')
   await page.getByTestId('file-input').setInputFiles(sample)

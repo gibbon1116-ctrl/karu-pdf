@@ -30,6 +30,14 @@ describe('StructuredTextCache', () => {
       expect(cache.select(2, from, from, 'words').text).toContain('Sample')
       expect(cache.select(2, from, from, 'lines').text).toContain('Sample page 3')
       expect(cache.pageHasText(0)).toBe(true)
+      const lines = cache.pageTextLines(0)
+      expect(lines.length).toBeGreaterThan(0)
+      expect(lines.some((line) => (
+        Math.min(line[0], line[2]) <= Math.min(quad[0], quad[2], quad[4], quad[6])
+        && Math.max(line[0], line[2]) >= Math.max(quad[0], quad[2], quad[4], quad[6])
+        && Math.min(line[1], line[3]) <= Math.min(quad[1], quad[3], quad[5], quad[7])
+        && Math.max(line[1], line[3]) >= Math.max(quad[1], quad[3], quad[5], quad[7])
+      ))).toBe(true)
       expect(cache.size).toBe(1)
     } finally {
       cache.destroy()
@@ -42,7 +50,10 @@ describe('StructuredTextCache', () => {
     const page = document.addPage([0, 0, 100, 100], 0, {}, '')
     try { document.insertPage(-1, page) } finally { page.destroy() }
     const cache = new StructuredTextCache(document)
-    try { expect(cache.pageHasText(0)).toBe(false) }
+    try {
+      expect(cache.pageHasText(0)).toBe(false)
+      expect(cache.pageTextLines(0)).toEqual([])
+    }
     finally { cache.destroy(); document.destroy() }
   })
 })
