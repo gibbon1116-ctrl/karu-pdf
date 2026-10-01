@@ -3,6 +3,7 @@ import { SplitView, type SplitController, type SplitWorkspaceProps } from './Spl
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { RenderScheduler } from '../client/RenderScheduler'
 import type { EditorTool } from '../editor/AnnotationLayer'
+import { CLEAR_EDITOR_SELECTION } from '../editor/interaction'
 import type { FormatDefaults } from '../editor/formatDefaults'
 import { DebugPanel } from '../perf/DebugPanel'
 import { BitmapCache } from '../viewer/BitmapCache'
@@ -87,12 +88,12 @@ export function DocumentWorkspace(props: Props) {
   }, [scheduler])
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSearchHighlights({ matches: [], activeIndex: -1 })
+    const onClear = (event: Event) => {
+      if ((event.target as HTMLElement)?.dataset.docId === props.session.docId) setSearchHighlights({ matches: [], activeIndex: -1 })
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+    window.addEventListener(CLEAR_EDITOR_SELECTION, onClear)
+    return () => window.removeEventListener(CLEAR_EDITOR_SELECTION, onClear)
+  }, [props.session.docId])
 
   if (props.organize) return (
     <div className="document-workspace organize-mode">

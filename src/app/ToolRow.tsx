@@ -24,8 +24,8 @@ const groups: Record<SplitToolGroup, Array<{ tool: EditorTool; label: string; de
     { tool: 'circle', label: '丸', description: '円や楕円を描く', shortcut: 'O' },
   ],
   pen: [
-    { tool: 'highlight', label: '蛍光ペン', description: 'なぞった所に半透明の太い線を引く（Ctrl で直線）', shortcut: 'H' },
-    { tool: 'ink', label: '手書き', description: '細い線で自由に書く', shortcut: 'P' },
+    { tool: 'highlight', label: '蛍光ペン', description: 'なぞった所に半透明の太い線を引く（Shift で水平・垂直・45°、Ctrl で好きな角度の直線）', shortcut: 'H' },
+    { tool: 'ink', label: '手書き', description: '細い線で自由に書く（Shift で水平・垂直・45°、Ctrl で好きな角度の直線）', shortcut: 'P' },
   ],
   measure: [
     { tool: 'distance', label: '距離', description: '2点の間の長さを測る', shortcut: 'K' },

@@ -51,6 +51,7 @@ export function useMeasurementInteraction(props: Props) {
   const cloud = props.tool === 'cloudPolygon'
   const enabled = tracing || cloud || isMeasureTool(props.tool)
   const clear = () => {
+    if (!frame.current && !points.current.length && !cursor.current && !down.current && !vertex.current && !draftRef.current?.firstChild) return
     if (frame.current) cancelAnimationFrame(frame.current)
     if (vertex.current?.element) vertex.current.element.style.visibility = ''
     vertex.current = null
@@ -125,10 +126,9 @@ export function useMeasurementInteraction(props: Props) {
     const onKey = (event: KeyboardEvent) => {
       if ((event.target as Element)?.matches('input,select,textarea,[contenteditable="true"]')) return
       if (!points.current.length && !tracing) return
-      if (!['Backspace', 'Escape', 'Enter'].includes(event.key)) return
+      if (!['Backspace', 'Enter'].includes(event.key)) return
       event.preventDefault(); event.stopImmediatePropagation()
-      if (event.key === 'Escape') { clear(); if (tracing) scaleInteraction.complete(null) }
-      else if (event.key === 'Backspace') { points.current.pop(); cursor.current = null; redraw() }
+      if (event.key === 'Backspace') { points.current.pop(); cursor.current = null; redraw() }
       else commit()
     }
     const otherPage = (event: Event) => { if ((event as CustomEvent<number>).detail !== props.pageIndex) clear() }
@@ -138,7 +138,7 @@ export function useMeasurementInteraction(props: Props) {
   const pointerDown = (event: React.PointerEvent, p: Point): boolean => {
     if (scaleInteraction.tracePage !== null && !tracing) return true
     const target = (event.target as Element).closest('[data-measure-vertex]')
-    if (target) {
+    if (props.tool === 'select' && target) {
       const id = target.getAttribute('data-annotation-id')!, a = props.store.get(id)
       if (a?.vertices && (a.measure || a.kind === 'cloudPolygon')) {
         props.store.touch(id)
@@ -190,6 +190,6 @@ export function useMeasurementInteraction(props: Props) {
     return true
   }
   return { pointerDown, pointerMove, pointerUp, doubleClick: () => { if (enabled) { commit(); return true }; return false },
-    cancel: () => { if (!enabled && !vertex.current) return false; clear(); return true },
+    cancel: () => { if (!points.current.length && !down.current && !vertex.current) return false; clear(); return true },
     draft: <g ref={draftRef} className="measurement-draft" pointerEvents="none" /> }
 }

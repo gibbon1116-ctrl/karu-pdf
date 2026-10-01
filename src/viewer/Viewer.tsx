@@ -7,6 +7,7 @@ import type { SearchMatch } from '../core/search'
 import { EditorToolChangeContext, type EditorTool } from '../editor/AnnotationLayer'
 import type { AnnotationStore } from '../editor/AnnotationStore'
 import type { FormatDefaults } from '../editor/formatDefaults'
+import { CLEAR_EDITOR_SELECTION } from '../editor/interaction'
 import { getMetrics, recordBlankFrame, recordMetric, resetBlankFrames, startMeasure } from '../perf/metrics'
 import type { Priority } from '../worker/protocol'
 import { BitmapCache } from './BitmapCache'
@@ -394,24 +395,6 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     }
   }, [sampleBlankFrame, updateViewport, waitForSharp])
 
-  useEffect(() => {
-    if (props.readOnly) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      const isInput = target?.matches('input, textarea, [contenteditable="true"]') ?? false
-      if (isInput || editingAnnotationId) return
-      if (event.key === 'Escape') {
-        props.onSelectAnnotation(null)
-      } else if ((event.key === 'Delete' || event.key === 'Backspace') && props.selectedAnnotationId) {
-        event.preventDefault()
-        props.annotationStore.remove(props.selectedAnnotationId)
-        props.onSelectAnnotation(null)
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [editingAnnotationId, props.annotationStore, props.onSelectAnnotation, props.selectedAnnotationId])
-
   useLayoutEffect(() => {
     if (props.pageSizes.length === 0 || initialPositionAppliedRef.current) return
     initialPositionAppliedRef.current = true
@@ -564,6 +547,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     editAnnotation: (id) => setEditingAnnotationId(id),
     commitEditor: () => editorCommitRef.current?.() ?? Promise.resolve(),
     clearSelection: () => {
+      scrollerRef.current?.dispatchEvent(new Event(CLEAR_EDITOR_SELECTION, { bubbles: true }))
       props.onSelectAnnotation(null)
       setEditingAnnotationId(null)
     },

@@ -82,7 +82,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     getActiveTextEditorSnapshot,
     getActiveTextEditorSnapshot,
   )
-  const activeSelection = tool === 'select' ? selected : null
+  const activeSelection = selected
   const target = formatTool(activeSelection?.kind ?? (tool === 'select' ? 'text' : tool))
   const values: EditableAnnotation | ToolFormat | null = activeSelection ?? (target ? defaults[target] : null)
   const textTarget = target === 'text' || target === 'callout'

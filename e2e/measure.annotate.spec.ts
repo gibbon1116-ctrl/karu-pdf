@@ -40,6 +40,8 @@ test('縮尺未設定から72ptの距離を測り、書き込みの一覧に実�
 })
 test('頂点の移動で5,080mmへ再計算しUndoで2,540mmへ戻す', async ({ page }) => {
   await open(page); await setScale(page); await distance(page)
+  await expect(page.locator('[data-measure-vertex]')).toHaveCount(0)
+  await page.getByRole('button', { name: '選択', exact: true }).click()
   const handle = page.getByTestId('measure-handle-1'), box = await handle.boundingBox()
   expect(box).not.toBeNull()
   const target = await screenPoint(page, 244, 220)
@@ -71,6 +73,7 @@ test('72pt四方の面積は手計算どおり6.45m²になる', async ({ page }
   await page.keyboard.press('Enter')
   await expect.poll(() => page.evaluate(() => window.__karu!.getEditableAnnotations(0).find(a => a.kind === 'area')?.text)).toBe('6.45 m²')
   await expect(page.locator('.measurement-label')).toHaveText('6.45 m²')
+  await page.getByRole('button', { name: '選択', exact: true }).click()
   // The first vertex must use the same preceding vertex during preview and release.
   const start = await screenPoint(page, 100, 300), end = await screenPoint(page, 120, 280)
   await page.mouse.move(start.x, start.y); await page.mouse.down(); await page.keyboard.down('Shift')
@@ -90,7 +93,7 @@ test('折れ線のBackspaceとEscで点の削除・取消・選択への復帰�
   for (let i = 0; i < 2; i++) { expect(draft[i][0]).toBeCloseTo([100, 172][i], 3); expect(draft[i][1]).toBeCloseTo(250, 3) }
   await page.keyboard.press('Escape'); await expect(page.locator('.measurement-draft polyline')).toHaveCount(0)
   expect(await page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter(a => a.measure).length)).toBe(0)
-  await page.keyboard.press('Escape'); await expect(page.getByRole('button', { name: '選択', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('button', { name: '選択', exact: true })).toHaveAttribute('aria-pressed', 'true')
 })
 test('縮尺変更の値保持・明示再計算・Undoが動作する', async ({ page }) => {
   await open(page); await setScale(page); await distance(page)

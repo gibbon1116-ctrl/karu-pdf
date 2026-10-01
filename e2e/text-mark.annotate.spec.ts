@@ -175,6 +175,7 @@ test('方向キー移動をまとめて戻し、複数選択も一緒に動か�
     squares.push(item)
   }
 
+  await page.getByRole('button', { name: '選択', exact: true }).click()
   await page.keyboard.press('ArrowRight')
   await page.keyboard.press('ArrowRight')
   await page.keyboard.press('ArrowRight')

@@ -8,10 +8,10 @@ export function IssueEditor({ annotation, store, zoom, onClose, registerCommit }
 }) {
   const input = useRef<HTMLTextAreaElement>(null)
   const finished = useRef(false)
-  const close = (cancel = false) => {
+  const close = () => {
     if (finished.current) return
     finished.current = true
-    store.updateIssueText(annotation.id, cancel ? annotation.text : input.current?.value ?? annotation.text)
+    store.updateIssueText(annotation.id, input.current?.value ?? annotation.text)
     onClose()
   }
   useEffect(() => {
@@ -26,8 +26,8 @@ export function IssueEditor({ annotation, store, zoom, onClose, registerCommit }
     style={{ left: annotation.rect[0] * scale, top: annotation.rect[3] * scale + 6 }}
     onKeyDown={event => {
       if (event.nativeEvent.isComposing) return
-      if (event.key === 'Escape' || (event.key === 'Enter' && event.ctrlKey)) {
-        event.preventDefault(); event.stopPropagation(); close(event.key === 'Escape')
+      if (event.key === 'Enter' && event.ctrlKey) {
+        event.preventDefault(); event.stopPropagation(); close()
       }
     }} />
 }

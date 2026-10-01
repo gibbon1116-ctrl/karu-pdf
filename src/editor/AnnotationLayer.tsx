@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { createContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Quad } from 'mupdf'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { nearestCalloutEdgePoint, resizeSymbolRect, SYMBOL_OPTIONS, symbolRectFromDrag, type Point, type Rect } from '../core/annotations'
@@ -15,6 +15,7 @@ import { MeasurementShape, useMeasurementInteraction } from './MeasurementOverla
 import { cloudPath, rectVertices } from '../core/cloud'
 import { issueColor, issueFontSize } from '../core/issues'
 import { IssueEditor } from './IssueEditor'
+import { CLEAR_EDITOR_SELECTION } from './interaction'
 import { ToolIcon } from '../ui/ToolIcon'
 
 export type EditorTool = 'select' | 'textSelect' | FormatTool
@@ -165,7 +166,6 @@ function selectionBounds(quads: readonly Quad[]): Rect | null {
 }
 
 export function AnnotationLayer(props: Props) {
-  const changeTool = useContext(EditorToolChangeContext)
   const version = useSyncExternalStore(props.store.subscribe, props.store.getSnapshot)
   const svgRef = useRef<SVGSVGElement>(null)
   const measurement = useMeasurementInteraction({ svg: svgRef, store: props.store, pageIndex: props.pageIndex, tool: props.tool, defaults: props.formatDefaults, select: props.onSelect })
@@ -186,6 +186,7 @@ export function AnnotationLayer(props: Props) {
   const previousInkRef = useRef<PreviousInkStroke | null>(null)
   const loadingLayoutsRef = useRef(new Set<string>())
   const toolRef = useRef(props.tool)
+  const selectionGenerationRef = useRef(0)
   toolRef.current = props.tool
   const [textSelection, setTextSelection] = useState<TextSelectionResult | null>(null)
   const textQueue = useMemo(() => new TextSelectionQueue(
@@ -393,7 +394,10 @@ export function AnnotationLayer(props: Props) {
     const dy = operation.latest[1] - operation.start[1]
     if (operation.mode === 'text-selection') {
       const input = { from: operation.start, to: operation.latest, mode: operation.selectionMode ?? 'chars' as TextSelectionMode }
-      textQueue.request(input, drawTextSelection)
+      const generation = selectionGenerationRef.current
+      textQueue.request(input, result => {
+        if (generation === selectionGenerationRef.current) drawTextSelection(result)
+      })
       return
     }
     if (operation.mode === 'move') {
@@ -507,11 +511,14 @@ export function AnnotationLayer(props: Props) {
     hideDrafts()
     if (operation.mode === 'text-selection') {
       if (!commit) {
+        selectionGenerationRef.current += 1
         drawTextSelection(null)
         return
       }
       const input = { from: operation.start, to: operation.latest, mode: operation.selectionMode ?? 'chars' as TextSelectionMode }
+      const generation = selectionGenerationRef.current
       void textQueue.finish(input).then((result) => {
+        if (generation !== selectionGenerationRef.current || toolRef.current !== props.tool) return
         drawTextSelection(result)
         if (result.quads.length === 0) return
         if (props.tool === 'textSelect') setTextSelection(result)
@@ -557,9 +564,9 @@ export function AnnotationLayer(props: Props) {
     }
     if (operation.mode === 'ink' && operation.creationKind && operation.points) {
       const modePoints = inkStrokePoints(operation.points, operation.ctrl, operation.shift)
-      const points = operation.ctrl ? modePoints : simplifyPoints(modePoints, 0.5)
+      const points = operation.ctrl || operation.shift ? modePoints : simplifyPoints(modePoints, 0.5)
       if (points.length < 2) return
-      let id = operation.creationKind === 'ink' ? operation.mergeId : null
+      let id = operation.mergeId
       if (id && props.store.get(id)) props.store.appendInkStroke(id, points)
       else {
         const format = props.formatDefaults[operation.creationKind as 'highlight' | 'ink']
@@ -577,14 +584,9 @@ export function AnnotationLayer(props: Props) {
         })
         id = annotation.id
       }
-      if (operation.creationKind === 'highlight') {
-        previousInkRef.current = null
-        props.store.selectOnly(id!)
-        props.onSelect(id!)
-        changeTool('select')
-      } else {
-        previousInkRef.current = { id: id!, pageIndex: props.pageIndex, kind: 'ink', endedAt: performance.now() }
-      }
+      props.store.selectOnly(id!)
+      props.onSelect(id!)
+      previousInkRef.current = { id: id!, pageIndex: props.pageIndex, kind: operation.creationKind as 'highlight' | 'ink', endedAt: performance.now() }
       return
     }
     if (operation.mode === 'line' && operation.creationKind) {
@@ -601,7 +603,6 @@ export function AnnotationLayer(props: Props) {
         opacity: format.opacity,
       })
       props.onSelect(annotation.id)
-      changeTool('select')
       return
     }
     if (operation.mode === 'shape' && operation.creationKind) {
@@ -620,14 +621,13 @@ export function AnnotationLayer(props: Props) {
         opacity: format.opacity,
       })
       props.onSelect(annotation.id)
-      changeTool('select')
       return
     }
     if (operation.mode === 'symbol') {
       const format = props.formatDefaults.symbol
       const rect = symbolRectFromDrag(operation.start, operation.latest, operation.moved, format.symbolSize)
       if (rect[2] - rect[0] < 4) return
-      props.store.create({
+      const annotation = props.store.create({
         pageIndex: props.pageIndex,
         kind: 'symbol',
         rect,
@@ -635,6 +635,7 @@ export function AnnotationLayer(props: Props) {
         symbol: format.symbol,
         opacity: format.opacity,
       })
+      props.onSelect(annotation.id)
       return
     }
     if (operation.mode === 'text' || operation.mode === 'callout') {
@@ -664,6 +665,26 @@ export function AnnotationLayer(props: Props) {
       props.onEdit(annotation.id)
     }
   }
+
+  useEffect(() => {
+    const viewer = svgRef.current?.closest('.viewer')
+    const cancel = () => {
+      const pointerId = dragRef.current?.pointerId
+      finishDrag(false)
+      if (pointerId !== undefined && svgRef.current?.hasPointerCapture(pointerId)) svgRef.current.releasePointerCapture(pointerId)
+      measurement.cancel()
+      selectionGenerationRef.current += 1
+      setTextSelection(null)
+      drawTextSelection(null)
+      clickRef.current = null
+      previousInkRef.current = null
+    }
+    viewer?.addEventListener(CLEAR_EDITOR_SELECTION, cancel)
+    return () => {
+      viewer?.removeEventListener(CLEAR_EDITOR_SELECTION, cancel)
+      cancel()
+    }
+  }, [props.tool, textQueue])
 
   const renderAnnotation = (annotation: EditableAnnotation) => {
     const visible = annotation.objNum === null || touched.has(annotation.objNum)
@@ -744,7 +765,7 @@ export function AnnotationLayer(props: Props) {
         {calloutLine && <line className="annotation-hit annotation-line-hit" data-annotation-id={annotation.id} x1={calloutLine[0][0]} y1={calloutLine[0][1]} x2={calloutLine[1][0]} y2={calloutLine[1][1]} />}
         {selectedIds.has(annotation.id) && <>
           <rect className="annotation-selection" x={selectionRect[0] - 1} y={selectionRect[1] - 1} width={Math.max(2, selectionRect[2] - selectionRect[0] + 2)} height={Math.max(2, selectionRect[3] - selectionRect[1] + 2)} />
-          {singleSelection && annotation.vertices?.map((p, i) => <rect key={i} className="annotation-resize-handle" data-testid={`measure-handle-${i}`} data-measure-vertex={i} data-annotation-id={annotation.id} x={p[0] - handleSize / 2} y={p[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
+          {props.tool === 'select' && singleSelection && annotation.vertices?.map((p, i) => <rect key={i} className="annotation-resize-handle" data-testid={`measure-handle-${i}`} data-measure-vertex={i} data-annotation-id={annotation.id} x={p[0] - handleSize / 2} y={p[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
           {props.tool === 'select' && singleSelection && positions.map(({ handle, x, y }) => <rect key={`${annotation.id}-${handle}`} className="annotation-resize-handle" data-testid={`resize-handle-${handle}`} data-annotation-id={annotation.id} data-resize-handle={handle} x={x - handleSize / 2} y={y - handleSize / 2} width={handleSize} height={handleSize} />)}
           {props.tool === 'select' && singleSelection && line && line.map((point, index) => <rect key={`${annotation.id}-line-${index}`} className="annotation-resize-handle" data-testid={`line-handle-${index === 0 ? 'start' : 'end'}`} data-annotation-id={annotation.id} data-line-handle={index === 0 ? 'start' : 'end'} x={point[0] - handleSize / 2} y={point[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
           {props.tool === 'select' && singleSelection && calloutLine && <rect className="annotation-resize-handle annotation-callout-handle" data-testid="callout-point-handle" data-annotation-id={annotation.id} data-callout-point="true" x={calloutLine[0][0] - handleSize / 2} y={calloutLine[0][1] - handleSize / 2} width={handleSize} height={handleSize} />}
@@ -766,13 +787,23 @@ export function AnnotationLayer(props: Props) {
         updateTextCursor(pointerPointRef.current)
       }}
       onPointerDown={(event) => {
-        if (event.button !== 0 || props.editingId) return
+        if (event.defaultPrevented || event.button !== 0 || props.editingId) return
         event.currentTarget.closest<HTMLElement>('.viewer')?.focus({ preventScroll: true })
         event.preventDefault()
         const svg = event.currentTarget
         const start = pointInPage(svg, event)
         const id = annotationIdFromTarget(event.target)
         if (measurement.pointerDown(event, start)) return
+        if (props.tool === 'text' || props.tool === 'callout') {
+          const annotation = id ? props.store.get(id) : undefined
+          if (annotation?.kind === 'freetext' || annotation?.kind === 'callout') {
+            props.store.touch(annotation.id)
+            props.store.selectOnly(annotation.id)
+            props.onSelect(annotation.id)
+            props.onEdit(annotation.id)
+            return
+          }
+        }
         if (props.tool === 'issue') {
           void props.store.issueNumbers.initialize(() => props.pool.maxIssueNumber(props.docId)).then(() => {
             if (toolRef.current !== 'issue') return
@@ -826,6 +857,7 @@ export function AnnotationLayer(props: Props) {
         } else {
           props.onSelect(null)
           if (props.tool === 'textSelect' || props.tool === 'textHighlight' || props.tool === 'underline' || props.tool === 'strikeout') {
+            selectionGenerationRef.current += 1
             setTextSelection(null)
             drawTextSelection(null)
             window.dispatchEvent(new CustomEvent(TEXT_SELECTION_START, { detail: layerKey }))
@@ -866,7 +898,7 @@ export function AnnotationLayer(props: Props) {
             shift: event.shiftKey,
             ctrl: event.ctrlKey,
             points: mode === 'ink' ? [start] : undefined,
-            mergeId: mode === 'ink' && kind === 'ink' ? mergeInkAnnotationId(previousInkRef.current, props.pageIndex, 'ink', startedAt) : null,
+            mergeId: mode === 'ink' ? mergeInkAnnotationId(previousInkRef.current, props.pageIndex, kind as 'highlight' | 'ink', startedAt) : null,
             stopMeasurement: beginDragFrameMeasurement(mode === 'ink' ? 'ink' : 'drag'),
           }
         }
@@ -933,7 +965,7 @@ export function AnnotationLayer(props: Props) {
     {editing?.issue && <IssueEditor key={editing.id} annotation={editing} store={props.store} zoom={props.zoom} registerCommit={props.registerCommit} onClose={() => props.onEdit(null)} />}
     {editing && !editing.issue && <TextEditor annotation={editing} zoom={props.zoom} pool={props.pool} store={props.store} onClose={(removed) => {
       props.onEdit(null)
-      if (props.tool === 'text' || props.tool === 'callout') { props.onSelect(removed ? null : editing.id); changeTool('select') }
+      props.onSelect(removed ? null : editing.id)
     }} registerCommit={props.registerCommit} />}
   </>
 }

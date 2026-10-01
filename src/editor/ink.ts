@@ -1,11 +1,11 @@
 import type { Point } from '../core/annotations'
 
-export function inkStrokePoints(points: readonly Point[], straight: boolean, snap45: boolean): Point[] {
+export function inkStrokePoints(points: readonly Point[], ctrl: boolean, shift: boolean): Point[] {
   if (points.length === 0) return []
-  if (!straight || points.length === 1) return points.map((point) => [...point])
+  if ((!ctrl && !shift) || points.length === 1) return points.map((point) => [...point])
   const start = points[0]
   const latest = points[points.length - 1]
-  if (!snap45) return [[...start], [...latest]]
+  if (!shift) return [[...start], [...latest]]
   const dx = latest[0] - start[0]
   const dy = latest[1] - start[1]
   const distance = Math.hypot(dx, dy)

@@ -26,7 +26,7 @@ async function waitForPage(page: Page, pageIndex = 0): Promise<void> {
 async function createText(page: Page, text: string): Promise<void> {
   const layer = page.getByTestId('annotation-layer-0')
   await page.getByRole('button', { name: '文字', exact: true }).click()
-  await layer.click({ position: { x: 120, y: 100 } })
+  await layer.click({ position: { x: 120, y: 300 } })
   await page.getByTestId('text-editor').fill(text)
   await page.keyboard.press('Control+Enter')
   await expect(page.getByTestId('text-editor')).toBeHidden()
@@ -94,6 +94,7 @@ test('書式パネルの青・3ptと文字14ptを作成と保存へ反映する'
   await page.mouse.move(box.x + 350, box.y + 300)
   await page.mouse.up()
 
+  await page.getByRole('button', { name: '選択', exact: true }).click()
   await page.getByTestId('annotation-layer-0').click({ position: { x: 30, y: 30 } })
   await page.getByLabel('文字の大きさ').selectOption('14')
   await createText(page, '十四ポイント')

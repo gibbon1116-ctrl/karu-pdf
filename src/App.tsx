@@ -44,7 +44,7 @@ import {
   saveViewPosition,
   type RecentFile,
 } from './editor/recentStore'
-import { getFrameStats, type FrameStats } from './editor/TextEditor'
+import { getFrameStats, isActiveTextEditorComposing, type FrameStats } from './editor/TextEditor'
 import { getMetrics, resetBlankFrames, startMeasure } from './perf/metrics'
 import type { ViewerHandle } from './viewer/Viewer'
 import { OrganizeDraft } from './organize/OrganizeDraft'
@@ -784,6 +784,7 @@ export default function App() {
       try { await session.annotationStore.issueNumbers.initialize(() => pool.maxIssueNumber(session.docId)) } catch (reason) { showStatus(`番号を取得できませんでした: ${String(reason)}`); return }
       if (activeRef.current !== session) return
     }
+    if (next !== 'select') session?.annotationStore.clearSelection()
     setTool(next)
   }, [pool, showStatus])
 
@@ -1138,17 +1139,29 @@ export default function App() {
       const isInput = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false
       const key = event.key.toLowerCase()
       const organizing = organizeRef.current
+      if (event.key === 'Escape') {
+        if (event.isComposing || isActiveTextEditorComposing()) return
+        // メニューは document の capture で閉じる。ダイアログは自身の
+        // cancel / keydown に任せ、背後の道具や選択には触れない。
+        if (document.querySelector('[role="menu"], dialog[open], [role="dialog"]')) return
+        event.preventDefault()
+        if (organizing) { discardOrganize(); return }
+        if (scaleTracing) { setScaleTracing(false); setScalePoints(null); return }
+        const viewer = viewerRef.current
+        target?.blur()
+        void (async () => {
+          await viewer?.commitEditor()
+          viewer?.clearSelection()
+          setTool('select')
+        })()
+        return
+      }
       if (event.ctrlKey && (event.key === '\\' || event.code === 'Backslash')) {
         event.preventDefault()
         toggleSplit()
         return
       }
       if (organizing && !isInput) {
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          discardOrganize()
-          return
-        }
         if (event.ctrlKey && (key === 'z' || key === 'y')) {
           event.preventDefault()
           if (key === 'y' || event.shiftKey) organizing.draft.redo()
@@ -1250,11 +1263,10 @@ export default function App() {
       else if (key === 'n') void changeTool('issue')
       else if (key === 'k') void changeTool('distance')
       else if (key === 'm') void changeTool('textSelect')
-      else if (event.key === 'Escape') { setTool('select'); viewerRef.current?.clearSelection() }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [comparison, activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, openSidePanel, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, tabs, toggleSplit])
+  }, [comparison, scaleTracing, activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, openSidePanel, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, tabs, toggleSplit])
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {

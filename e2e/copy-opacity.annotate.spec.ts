@@ -56,7 +56,7 @@ async function createText(page: Page, x: number, y: number, text: string): Promi
   return created
 }
 
-test('蛍光ペンは1本で選択へ戻り、作った線を選ぶ', async ({ page }) => {
+test('蛍光ペンは1本描いても道具を保ち、作った線を選ぶ', async ({ page }) => {
   await openSample(page)
   const { box, layer } = await layerBox(page)
   await page.getByRole('button', { name: '蛍光ペン', exact: true }).click()
@@ -64,7 +64,7 @@ test('蛍光ペンは1本で選択へ戻り、作った線を選ぶ', async ({ p
   await page.mouse.down()
   await page.mouse.move(box.x + 250, box.y + 150, { steps: 8 })
   await page.mouse.up()
-  await expect(page.getByRole('button', { name: '選択', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('button', { name: '蛍光ペン', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await expect(layer.locator('.annotation-selection')).toHaveCount(1)
   await expect.poll(() => page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter((item) => item.kind === 'highlight').length)).toBe(1)
 })
@@ -89,7 +89,7 @@ test('32ptの記号と透明度を保存して開き直す', async ({ page }) =>
 
 test('3件を別ページへ貼り付け、1回の元に戻すでまとめて消す', async ({ page }) => {
   await openSample(page)
-  const text = await createText(page, 100, 100, 'コピーする文字')
+  const text = await createText(page, 100, 280, 'コピーする文字')
   const square = await createSquare(page, 320, 220)
   const symbol = await createSymbol(page, 470, 150)
   await page.keyboard.press('v')
@@ -112,6 +112,7 @@ test('3件を別ページへ貼り付け、1回の元に戻すでまとめて消
 test('同じページへの連続貼り付けは10pt、20ptずれる', async ({ page }) => {
   await openSample(page)
   const id = await createSquare(page, 180, 180, 40, 40)
+  await page.getByRole('button', { name: '選択', exact: true }).click()
   const layer = page.getByTestId('annotation-layer-0')
   await layer.locator(`g[data-annotation-id="${id}"] .annotation-hit`).click()
   const source = await page.evaluate((value) => window.__karu!.getEditableAnnotations(0).find((item) => item.id === value)!.rect, id)
@@ -128,6 +129,7 @@ test('同じページへの連続貼り付けは10pt、20ptずれる', async ({ 
 test('タブAでコピーした書き込みをタブBへ貼り付ける', async ({ page }) => {
   await openSample(page)
   const id = await createSquare(page, 160, 160)
+  await page.getByRole('button', { name: '選択', exact: true }).click()
   const layer = page.getByTestId('annotation-layer-0')
   await layer.locator(`g[data-annotation-id="${id}"] .annotation-hit`).click()
   await page.keyboard.press('Control+c')

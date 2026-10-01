@@ -20,6 +20,7 @@ const emptyTiming = (): TimingSummary => ({ samples: 0, p95: 0, max: 0 })
 const frameStats: FrameStats = { drag: emptyTiming(), ink: emptyTiming(), input: emptyTiming() }
 const inputSamples: number[] = []
 let activeTextInserter: ((text: string) => void) | null = null
+let activeTextComposing = false
 const activeTextEditorListeners = new Set<() => void>()
 
 export const subscribeActiveTextEditor = (listener: () => void): (() => void) => {
@@ -28,6 +29,7 @@ export const subscribeActiveTextEditor = (listener: () => void): (() => void) =>
 }
 
 export const getActiveTextEditorSnapshot = (): boolean => activeTextInserter !== null
+export const isActiveTextEditorComposing = (): boolean => activeTextComposing
 
 export function insertIntoActiveTextEditor(text: string): boolean {
   if (!activeTextInserter) return false
@@ -137,8 +139,10 @@ export function TextEditor({ annotation, zoom, pool, store, onClose, registerCom
         ])
       }
       onClose(removed)
-    })().finally(() => {
+    })().catch(reason => {
+      // 配置計算に失敗したときは入力を残し、次の確定を再試行できる。
       commitPromiseRef.current = null
+      throw reason
     })
     commitPromiseRef.current = promise
     return promise
@@ -155,9 +159,13 @@ export function TextEditor({ annotation, zoom, pool, store, onClose, registerCom
   }, [commit, registerCommit])
 
   useEffect(() => {
+    activeTextComposing = false
     setActiveTextInserter(insertText)
     return () => {
-      if (activeTextInserter === insertText) setActiveTextInserter(null)
+      if (activeTextInserter === insertText) {
+        activeTextComposing = false
+        setActiveTextInserter(null)
+      }
     }
   }, [insertText])
 
@@ -165,6 +173,8 @@ export function TextEditor({ annotation, zoom, pool, store, onClose, registerCom
     const onPointerDown = (event: PointerEvent) => {
       if (textareaRef.current?.contains(event.target as Node)) return
       if ((event.target as Element | null)?.closest('[data-text-symbol]')) return
+      // このクリックは入力の確定だけ。別ページでも新しい枠を作らない。
+      if ((event.target as Element | null)?.closest('.annotation-layer')) event.preventDefault()
       void commit()
     }
     document.addEventListener('pointerdown', onPointerDown, true)
@@ -210,12 +220,12 @@ export function TextEditor({ annotation, zoom, pool, store, onClose, registerCom
         setValue(event.currentTarget.value)
         recordInputFrame()
       }}
-      onCompositionStart={() => { composingRef.current = true }}
-      onCompositionEnd={() => { composingRef.current = false }}
+      onCompositionStart={() => { composingRef.current = true; activeTextComposing = true }}
+      onCompositionEnd={() => { composingRef.current = false; activeTextComposing = false }}
       onKeyDown={(event) => {
         const composing = composingRef.current || event.nativeEvent.isComposing
         if (composing && (event.key === 'Escape' || event.key === 'Enter')) return
-        if (event.key === 'Escape' || (event.key === 'Enter' && event.ctrlKey)) {
+        if (event.key === 'Enter' && event.ctrlKey) {
           event.preventDefault()
           event.stopPropagation()
           void commit()
