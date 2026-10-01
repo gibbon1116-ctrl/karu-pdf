@@ -6,7 +6,7 @@ import { Dropdown, type DropdownItem } from '../ui/Dropdown'
 import { PDF_PICKER_TYPES } from '../editor/fileAccess'
 import type { PageCard } from './OrganizeDraft'
 import { OrganizeDraft } from './OrganizeDraft'
-import { OrganizePagePreview } from './OrganizePreview'
+import { nextPreviewZoom, OrganizePagePreview, PREVIEW_ZOOM_STEPS } from './OrganizePreview'
 import {
   describePaperSize,
   insertionIndex,
@@ -200,6 +200,21 @@ function OrganizeThumbnail({ card, targetDocId, targetSizes, sources, scheduler,
   }} />
 }
 
+function PreviewZoomControls({ zoom, onZoomChange, label }: { zoom: number; onZoomChange(value: number): void; label: string }) {
+  const percent = Math.round(zoom * 100)
+  const items: DropdownItem[] = PREVIEW_ZOOM_STEPS.map((value) => ({
+    label: `${Math.round(value * 100)}%`,
+    checked: value === zoom,
+    onSelect: () => onZoomChange(value),
+  }))
+  return <div className="organize-preview-zoom">
+    <button type="button" aria-label={`${label}を縮小`} disabled={zoom <= PREVIEW_ZOOM_STEPS[0]} onClick={() => onZoomChange(nextPreviewZoom(zoom, -1))}>−</button>
+    <Dropdown label={`${percent}%`} items={items} buttonClassName="organize-preview-zoom-value" />
+    <button type="button" aria-label={`${label}を拡大`} disabled={zoom >= PREVIEW_ZOOM_STEPS.at(-1)!} onClick={() => onZoomChange(nextPreviewZoom(zoom, 1))}>＋</button>
+    <button type="button" aria-label={`${label}を幅に合わせる`} onClick={() => onZoomChange(1)}>幅</button>
+  </div>
+}
+
 export function OrganizeView(props: Props) {
   const draftVersion = useSyncExternalStore(props.draft.subscribe, props.draft.getSnapshot)
   const cards = props.draft.getCards()
@@ -207,7 +222,6 @@ export function OrganizeView(props: Props) {
   const lightboxRef = useRef<HTMLDivElement>(null)
   const anchorRef = useRef<string | null>(null)
   const focusIndexRef = useRef(0)
-  const panRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
   const dragIdsRef = useRef<string[]>([])
   const fileModeRef = useRef<'insert' | 'replace'>('insert')
   const fixedDropIndexRef = useRef<number | null>(null)
@@ -236,6 +250,7 @@ export function OrganizeView(props: Props) {
   const [splitNumber, setSplitNumber] = useState(2)
   const [previewVisible, setPreviewVisible] = useState(storedPreviewVisible)
   const [previewWidth, setPreviewWidth] = useState(storedPreviewWidth)
+  const [previewZoom, setPreviewZoom] = useState(1)
   const [expandedOpen, setExpandedOpen] = useState(false)
   const [expandedZoom, setExpandedZoom] = useState(1)
   const metrics = DISPLAY_SIZES[displaySize]
@@ -666,10 +681,13 @@ export function OrganizeView(props: Props) {
     {previewVisible && <>
       <div className="organize-preview-resizer" role="separator" aria-label="プレビューの幅を変更" aria-orientation="vertical" onPointerDown={startPreviewResize} />
       <aside className="organize-preview-pane" style={{ width: previewWidth }} aria-label="プレビュー" data-testid="organize-preview-pane">
-        <h2>プレビュー</h2>
+        <header className="organize-preview-header">
+          <h2>プレビュー</h2>
+          <PreviewZoomControls zoom={previewZoom} onZoomChange={setPreviewZoom} label="プレビュー" />
+        </header>
         {focusedCard && focusedPageSize ? <>
           <OrganizePagePreview card={focusedCard} pageSize={focusedPageSize} targetDocId={props.docId} scheduler={props.scheduler}
-            annotationStore={props.annotationStore} fit="width" debounceMs={100} testId="organize-preview-canvas" />
+            annotationStore={props.annotationStore} fit="width" zoom={previewZoom} onZoomChange={setPreviewZoom} debounceMs={150} testId="organize-preview-canvas" />
           <div className="organize-preview-info">
             <strong data-testid="organize-preview-position">{focusedIndex + 1} / {cards.length}</strong>
             <span>{cardOrigin(focusedCard, props.docId, props.sources)}</span>
@@ -687,42 +705,13 @@ export function OrganizeView(props: Props) {
       <header>
         <strong>{focusedIndex + 1} / {cards.length}</strong>
         <span>{cardOrigin(focusedCard, props.docId, props.sources)}</span>
-        <div className="organize-lightbox-zoom">
-          <button type="button" aria-label="縮小" disabled={expandedZoom <= 1} onClick={() => setExpandedZoom((value) => Math.max(1, value - 0.25))}>−</button>
-          <span>{Math.round(expandedZoom * 100)}%</span>
-          <button type="button" aria-label="拡大" disabled={expandedZoom >= 4} onClick={() => setExpandedZoom((value) => Math.min(4, value + 0.25))}>＋</button>
-        </div>
+        <PreviewZoomControls zoom={expandedZoom} onZoomChange={setExpandedZoom} label="拡大プレビュー" />
         <button type="button" aria-label="拡大プレビューを閉じる" onClick={() => setExpandedOpen(false)}>×</button>
       </header>
-      <div className={`organize-lightbox-stage${expandedZoom > 1 ? ' zoomed' : ''}`}
-        onWheel={(event) => {
-          if (!event.ctrlKey) return
-          event.preventDefault()
-          setExpandedZoom((value) => Math.max(1, Math.min(4, value + (event.deltaY < 0 ? 0.25 : -0.25))))
-        }}
-        onPointerDown={(event) => {
-          const target = event.target as HTMLElement
-          if (!target.closest('.organize-preview-canvas, .organize-preview-blank')) {
-            setExpandedOpen(false)
-            return
-          }
-          if (expandedZoom <= 1 || event.button !== 0) return
-          event.currentTarget.setPointerCapture(event.pointerId)
-          panRef.current = { x: event.clientX, y: event.clientY, left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop }
-        }}
-        onPointerMove={(event) => {
-          const start = panRef.current
-          if (!start) return
-          event.currentTarget.scrollLeft = start.left - (event.clientX - start.x)
-          event.currentTarget.scrollTop = start.top - (event.clientY - start.y)
-        }}
-        onPointerUp={(event) => {
-          const wasPanning = panRef.current !== null
-          panRef.current = null
-          if (wasPanning && event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
-        }}>
+      <div className="organize-lightbox-stage">
         <OrganizePagePreview card={focusedCard} pageSize={focusedPageSize} targetDocId={props.docId} scheduler={props.scheduler}
-          annotationStore={props.annotationStore} fit="contain" zoom={expandedZoom} className={expandedZoom > 1 ? 'zoomed' : ''} testId="organize-lightbox-canvas" />
+          annotationStore={props.annotationStore} fit="contain" zoom={expandedZoom} onZoomChange={setExpandedZoom}
+          onBackgroundClick={() => setExpandedOpen(false)} testId="organize-lightbox-canvas" />
       </div>
       <footer>{describePaperSize(focusedPageSize.width, focusedPageSize.height, focusedCard.rotation)}　　Ctrl＋ホイールまたは［＋］［−］で拡大</footer>
     </div>}

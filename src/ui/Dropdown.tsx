@@ -5,6 +5,8 @@ const OPEN_EVENT = 'karu-pdf:dropdown-open'
 export type DropdownItem = {
   type?: 'item'
   label: string
+  icon?: ReactNode
+  description?: string
   shortcut?: string
   disabled?: boolean
   checked?: boolean
@@ -181,7 +183,11 @@ export function Dropdown({ label, items, disabled, className = '', buttonClassNa
             onClick={() => { close(); item.onSelect() }}
           >
             <span className="dropdown-check">{item.checked === undefined ? '' : item.checked ? '✓' : ''}</span>
-            <span className="dropdown-label">{item.label}</span>
+            <span className="dropdown-icon">{item.icon}</span>
+            <span className="dropdown-item-text">
+              <span className="dropdown-label">{item.label}</span>
+              {item.description && <span className="dropdown-description">{item.description}</span>}
+            </span>
             {item.shortcut && <kbd>{item.shortcut}</kbd>}
           </button>)}
       </div>}

@@ -32,4 +32,15 @@ describe('書き込み一覧 CSV', () => {
     expect(lines[1]).toContain('1,1,文字,先')
     expect(lines[2]).toContain('2,2,文字,後')
   })
+
+  it('文字への印を区別できる種類名で出力する', () => {
+    const csv = createAnnotationCsv([
+      annotation({ kind: 'textHighlight', text: '黄色' }),
+      annotation({ kind: 'underline', text: '下線' }),
+      annotation({ kind: 'strikeout', text: '取消' }),
+    ])
+    expect(csv).toContain(',文字ハイライト,黄色,')
+    expect(csv).toContain(',文字に下線,下線,')
+    expect(csv).toContain(',文字に取り消し線,取消,')
+  })
 })

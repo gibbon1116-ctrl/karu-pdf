@@ -11,6 +11,7 @@ import { inkStrokePoints, mergeInkAnnotationId, simplifyPoints, type PreviousInk
 import { TextSelectionQueue } from './textSelectionQueue'
 import type { TextSelectionMode, TextSelectionResult } from '../core/textSelection'
 import { hitTextLine } from './textHitTest'
+import { ToolIcon } from '../ui/ToolIcon'
 
 export type EditorTool = 'select' | 'textSelect' | FormatTool
 const TEXT_SELECTION_START = 'karu-pdf:text-selection-start'
@@ -885,9 +886,9 @@ export function AnnotationLayer(props: Props) {
       top: `${Math.max(0, Math.min(100, (selectionBounds(textSelection.quads)![1] / props.pageSize.height) * 100))}%`,
     }}>
       <button type="button" onClick={copySelectedText}>コピー</button>
-      <button type="button" onClick={() => createMarkup('textHighlight')}>ハイライト</button>
-      <button type="button" onClick={() => createMarkup('underline')}>下線</button>
-      <button type="button" onClick={() => createMarkup('strikeout')}>取り消し線</button>
+      <button type="button" onClick={() => createMarkup('textHighlight')}><ToolIcon tool="textHighlight" />ハイライト</button>
+      <button type="button" onClick={() => createMarkup('underline')}><ToolIcon tool="underline" />下線</button>
+      <button type="button" onClick={() => createMarkup('strikeout')}><ToolIcon tool="strikeout" />取り消し線</button>
     </div>}
     {editing && <TextEditor annotation={editing} zoom={props.zoom} pool={props.pool} store={props.store} onClose={(removed) => {
       props.onEdit(null)

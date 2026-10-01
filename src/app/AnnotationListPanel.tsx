@@ -96,7 +96,10 @@ export function AnnotationListPanel({ session, pool, onSelect }: Props) {
         <button type="button" data-annotation-id={annotation.id} onClick={() => onSelect(annotation)}>
           <span className="annotation-type-icon" aria-hidden="true">{annotationKindLabel(annotation.kind).slice(0, 1)}</span>
           <span className="annotation-page">p.{annotation.pageIndex + 1}</span>
-          <span className="annotation-body" title={annotationBody(annotation)}>{annotationBody(annotation).slice(0, 40) || annotationKindLabel(annotation.kind)}</span>
+          <span className="annotation-summary">
+            <span className="annotation-kind">{annotationKindLabel(annotation.kind)}</span>
+            <span className="annotation-body" title={annotationBody(annotation)}>{annotationBody(annotation).slice(0, 40)}</span>
+          </span>
           <span className="annotation-color" style={{ backgroundColor: annotationColorHex(annotation) }} aria-label={`色 ${annotationColorHex(annotation)}`} />
         </button>
       </li>)}

@@ -47,6 +47,23 @@ test('図形の丸を最後に使った道具として再読み込み後も表�
   await expect(page.getByRole('button', { name: '丸', exact: true })).toBeVisible()
 })
 
+test('道具は名前・アイコン・説明で見分けられる', async ({ page }) => {
+  await openSample(page)
+  const mark = page.getByRole('button', { name: '文字に印▼' })
+  await mark.click()
+  const menu = page.getByRole('menu', { name: '文字に印▼' })
+  await expect(menu.getByText('文字ハイライト', { exact: true })).toBeVisible()
+  await expect(menu.getByText('選んだ文字だけに色を付ける', { exact: true })).toBeVisible()
+  await expect(menu.getByText('選んだ文字の下に線を引く', { exact: true })).toBeVisible()
+  await expect(menu.getByText('選んだ文字の中央に線を引く', { exact: true })).toBeVisible()
+  await expect(menu.locator('svg.tool-icon')).toHaveCount(4)
+  await menu.getByRole('menuitemcheckbox', { name: /文字ハイライト/ }).click()
+  const main = page.getByRole('button', { name: '文字ハイライト', exact: true })
+  await expect(main).toHaveAttribute('aria-pressed', 'true')
+  await expect(main.locator('svg.tool-icon')).toHaveCount(1)
+  await expect(page.getByRole('button', { name: 'ハイライト', exact: true })).toHaveCount(0)
+})
+
 test('メニューから保存、ページ一覧、ページ整理を操作できる', async ({ page }) => {
   await openSample(page)
   await page.getByRole('button', { name: 'ファイル▼' }).click()

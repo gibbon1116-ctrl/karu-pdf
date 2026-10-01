@@ -37,9 +37,9 @@ async function textBounds(page: Page, text = 'Sample page 1') {
   return box
 }
 
-async function chooseMarkTool(page: Page, name: '文字を選択' | 'ハイライト' | '下線' | '取り消し線'): Promise<void> {
+async function chooseMarkTool(page: Page, name: '文字を選択' | '文字ハイライト' | '文字に下線' | '文字に取り消し線'): Promise<void> {
   await page.getByRole('button', { name: '文字に印▼' }).click()
-  await page.getByRole('menuitemcheckbox', { name, exact: true }).click()
+  await page.getByRole('menuitemcheckbox', { name: new RegExp(`^${name}`) }).click()
 }
 
 async function dragText(page: Page, box: { x: number; y: number; width: number; height: number }): Promise<void> {
@@ -84,7 +84,7 @@ test('文字を選択してコピーし、3種類の印を保存して開き直�
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 
   for (const [tool, kind] of [
-    ['ハイライト', 'textHighlight'], ['下線', 'underline'], ['取り消し線', 'strikeout'],
+    ['文字ハイライト', 'textHighlight'], ['文字に下線', 'underline'], ['文字に取り消し線', 'strikeout'],
   ] as const) {
     await chooseMarkTool(page, tool)
     await dragText(page, firstBounds)
@@ -98,6 +98,9 @@ test('文字を選択してコピーし、3種類の印を保存して開き直�
     .map((item) => item.text))).toEqual([
       expect.stringContaining('Sample page 1'), expect.stringContaining('Sample page 1'), expect.stringContaining('Sample page 1'),
     ])
+
+  await page.getByRole('tab', { name: '書き込み' }).click()
+  await expect(page.locator('.annotation-kind').filter({ hasText: '文字ハイライト' }).first()).toHaveText('文字ハイライト')
 
   const bytes = await page.evaluate(async () => Array.from((await window.__karu!.saveToBytes())!))
   await page.evaluate(async (value) => window.__karu!.openBytes(value, 'text-mark-roundtrip.pdf'), bytes)
@@ -143,7 +146,7 @@ test('文字に印の道具は文字の上だけ文字カーソルになる', as
   if (!layerBox) throw new Error('注釈レイヤーがありません。')
   await page.mouse.move(layerBox.x + layerBox.width - 20, bounds.y + bounds.height / 2)
   await expect.poll(() => layer.evaluate((element) => getComputedStyle(element).cursor)).toBe('default')
-  await chooseMarkTool(page, 'ハイライト')
+  await chooseMarkTool(page, '文字ハイライト')
   await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
   await expect.poll(() => layer.evaluate((element) => getComputedStyle(element).cursor)).toBe('text')
   await page.getByRole('button', { name: '選択', exact: true }).click()

@@ -65,6 +65,15 @@ function formatTool(kind: Kind | EditorTool): FormatTool | null {
   return kind === 'freetext' ? 'text' : kind
 }
 
+function formatToolLabel(tool: FormatTool): string {
+  const labels: Record<FormatTool, string> = {
+    text: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角', circle: '丸',
+    highlight: '蛍光ペン', ink: '手書き', symbol: '記号', textHighlight: '文字ハイライト',
+    underline: '文字に下線', strikeout: '文字に取り消し線',
+  }
+  return labels[tool]
+}
+
 export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsChange }: Props) {
   const textEditorOpen = useSyncExternalStore(
     subscribeActiveTextEditor,
@@ -146,7 +155,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
   }
 
   return <aside className="format-panel" aria-label="書式" data-testid="format-panel">
-    <h2>書式</h2>
+    <h2>{target ? `${formatToolLabel(target)}の書式` : '書式'}</h2>
     {!target && <p>道具または書き込みを選んでください。</p>}
     {simpleColorTarget && values && <ColorField label="色" value={values.color} choices={target === 'highlight' || target === 'textHighlight' ? HIGHLIGHT_COLORS : COLORS} onChange={(next) => next && changeColor(next)} />}
     {target === 'symbol' && values && <fieldset>
