@@ -1,0 +1,42 @@
+name: CI
+
+# main へ入る前の検査。外部の Fork からの PR でも、読み取り権限だけで動き、Secrets を渡さない。
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # Ruleset の必須チェックはこの job 名（test-build）で指定する。名前を変えるときは Ruleset も直す。
+  test-build:
+    name: test-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: 通信の監査（ソース）
+        run: npm run audit:network
+      - run: npm test
+      - name: 公開用ビルド（型検査を含む）
+        run: npm run build
+      - name: 固定版のビルドと通信の監査
+        run: |
+          npm run build:fixed
+          npm run audit:network -- --dist
+      - name: HTML 版のビルドと通信の監査
+        run: |
+          npm run build:single
+          npm run audit:network -- --single
