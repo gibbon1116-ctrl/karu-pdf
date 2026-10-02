@@ -1,0 +1,320 @@
+{
+  "verifiedAt": "2026-10-02T01:35:41.592Z",
+  "traces": [
+    {
+      "artifact": "test-results/fixed/fixed-network-初回・通常再起動・オフライン起動と全編集操作-fixed/fixed-network.json",
+      "external": 0,
+      "nonGET": 0,
+      "cspViolations": 0,
+      "totalRequests": 106,
+      "serviceWorkerRequests": 24,
+      "sameOrigin": [
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/?test=1",
+          "purpose": "アプリの HTML"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/App-ChYxZWWb.css",
+          "purpose": "アプリのスタイル"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/App-pA5dPAMW.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/ErrorBoundary-BT9kcckk.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/ErrorBoundary-CbBsdEHy.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/__vite-browser-external-Cn0MOYvd.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/__vite-browser-external-CqGsXVYU.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/client-BIJwKdtj.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/image.worker-BBE1EwX4.js",
+          "purpose": "PDF / 画像 Worker"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/index-Do6678Oz.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/mupdf-wasm-Bvf0xebB.wasm",
+          "purpose": "同梱 MuPDF WASM"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/pdf.worker-B0TIYAIF.js",
+          "purpose": "PDF / 画像 Worker"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/preload-helper-BsHRPewf.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/react-DK6rpPfu.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/react-dom--Xem-99U.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/rolldown-runtime-CbXtAM7H.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/workbox-window.prod.es5-Bd17z0YL.js",
+          "purpose": "Service Worker / Workbox の登録・静的キャッシュ"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/fonts/BIZUDGothic-Regular.ttf",
+          "purpose": "同梱 BIZ UD フォント"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/fonts/BIZUDMincho-Regular.ttf",
+          "purpose": "同梱 BIZ UD フォント"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/icons/icon-192.png",
+          "purpose": "同梱アイコン"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/icons/icon-512.png",
+          "purpose": "同梱アイコン"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/index.html",
+          "purpose": "アプリの HTML"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/manifest.webmanifest",
+          "purpose": "PWA マニフェスト"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/sw.js",
+          "purpose": "Service Worker / Workbox の登録・静的キャッシュ"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/workbox-2fbc6a65.js",
+          "purpose": "Service Worker / Workbox の登録・静的キャッシュ"
+        }
+      ]
+    },
+    {
+      "artifact": "test-results/fixed/fixed-network-初回の通信を記録し、編集・検索・整理・比較・保存を実行する-fixed/fixed-network.json",
+      "external": 0,
+      "nonGET": 0,
+      "cspViolations": 0,
+      "totalRequests": 53,
+      "serviceWorkerRequests": 24,
+      "sameOrigin": [
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/?test=1",
+          "purpose": "アプリの HTML"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/App-ChYxZWWb.css",
+          "purpose": "アプリのスタイル"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/App-pA5dPAMW.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/ErrorBoundary-BT9kcckk.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/ErrorBoundary-CbBsdEHy.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/__vite-browser-external-Cn0MOYvd.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/__vite-browser-external-CqGsXVYU.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/client-BIJwKdtj.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/image.worker-BBE1EwX4.js",
+          "purpose": "PDF / 画像 Worker"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/index-Do6678Oz.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/mupdf-wasm-Bvf0xebB.wasm",
+          "purpose": "同梱 MuPDF WASM"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/pdf.worker-B0TIYAIF.js",
+          "purpose": "PDF / 画像 Worker"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/preload-helper-BsHRPewf.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/react-DK6rpPfu.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/react-dom--Xem-99U.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/rolldown-runtime-CbXtAM7H.js",
+          "purpose": "アプリの JavaScript"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/assets/workbox-window.prod.es5-Bd17z0YL.js",
+          "purpose": "Service Worker / Workbox の登録・静的キャッシュ"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/fonts/BIZUDGothic-Regular.ttf",
+          "purpose": "同梱 BIZ UD フォント"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/fonts/BIZUDMincho-Regular.ttf",
+          "purpose": "同梱 BIZ UD フォント"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/icons/icon-192.png",
+          "purpose": "同梱アイコン"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/icons/icon-512.png",
+          "purpose": "同梱アイコン"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/index.html",
+          "purpose": "アプリの HTML"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/manifest.webmanifest",
+          "purpose": "PWA マニフェスト"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/sw.js",
+          "purpose": "Service Worker / Workbox の登録・静的キャッシュ"
+        },
+        {
+          "url": "http://127.0.0.1:4174/karu-pdf/workbox-2fbc6a65.js",
+          "purpose": "Service Worker / Workbox の登録・静的キャッシュ"
+        }
+      ]
+    }
+  ],
+  "negative": {
+    "outcome": {
+      "fetch": "blocked",
+      "websocket": "blocked",
+      "beacon": true,
+      "image": "blocked",
+      "worker": "{\"blocked\":true,\"count\":2}"
+    },
+    "violations": [
+      "connect-src",
+      "connect-src",
+      "connect-src",
+      "connect-src",
+      "connect-src",
+      "connect-src",
+      "img-src",
+      "img-src"
+    ],
+    "externalRequestEvents": 1,
+    "blockedRequests": [
+      [
+        "https://example.com/fixed-image.png",
+        "csp"
+      ]
+    ],
+    "externalNetworkRequests": 0,
+    "externalResponses": 0
+  },
+  "headers": [
+    {
+      "file": "index.html",
+      "headers": {
+        "cache-control": "no-cache",
+        "connection": "keep-alive",
+        "content-security-policy": "default-src 'self'; connect-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; manifest-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        "content-type": "text/html; charset=utf-8",
+        "date": "Fri, 02 Oct 2026 01:32:06 GMT",
+        "keep-alive": "timeout=5",
+        "permissions-policy": "camera=(), microphone=(), geolocation=()",
+        "referrer-policy": "no-referrer",
+        "transfer-encoding": "chunked",
+        "x-content-type-options": "nosniff"
+      }
+    },
+    {
+      "file": "assets/mupdf-wasm-Bvf0xebB.wasm",
+      "headers": {
+        "content-security-policy": "default-src 'self'; connect-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; manifest-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "permissions-policy": "camera=(), microphone=(), geolocation=()",
+        "cache-control": "no-cache",
+        "content-type": "application/wasm",
+        "date": "Fri, 02 Oct 2026 01:32:10 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      }
+    },
+    {
+      "file": "manifest.webmanifest",
+      "headers": {
+        "content-security-policy": "default-src 'self'; connect-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; manifest-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "permissions-policy": "camera=(), microphone=(), geolocation=()",
+        "cache-control": "no-cache",
+        "content-type": "application/manifest+json",
+        "date": "Fri, 02 Oct 2026 01:32:10 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      }
+    },
+    {
+      "file": "sw.js",
+      "headers": {
+        "content-security-policy": "default-src 'self'; connect-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; manifest-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+        "permissions-policy": "camera=(), microphone=(), geolocation=()",
+        "cache-control": "no-cache",
+        "content-type": "text/javascript; charset=utf-8",
+        "date": "Fri, 02 Oct 2026 01:32:10 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      }
+    }
+  ],
+  "sourceAudit": {
+    "findings": 6,
+    "unapproved": 0
+  },
+  "distAudit": {
+    "findings": 41,
+    "unapproved": 0
+  }
+}

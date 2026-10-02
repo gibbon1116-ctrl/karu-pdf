@@ -1,43 +1,79 @@
 /// <reference types="vitest/config" />
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { execFileSync } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
+import { META_CSP } from './scripts/fixed-policy.mjs'
 
-export default defineConfig({
-  base: '/karu-pdf/',
-  plugins: [
-    react(),
-    VitePWA({
-      registerType: 'prompt',
-      manifest: {
-        name: 'かるPDF',
-        short_name: 'かるPDF',
-        description: 'PDFをパソコンの中だけで編集するアプリ',
-        lang: 'ja',
-        id: '/karu-pdf/',
-        start_url: '/karu-pdf/',
-        scope: '/karu-pdf/',
-        display: 'standalone',
-        theme_color: '#1769aa',
-        background_color: '#fafafa',
-        icons: [
-          { src: '/karu-pdf/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/karu-pdf/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
-        ],
-        file_handlers: [{
-          action: '/karu-pdf/',
-          accept: { 'application/pdf': ['.pdf'] },
-        }],
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), 'VITE_')
+  const fixed = mode === 'fixed'
+  const base = fixed ? env.VITE_BASE_PATH : '/karu-pdf/'
+  if (!base || !base.startsWith('/') || !base.endsWith('/') || base.includes('//') || /[?#\\%]/.test(base)
+    || new URL(base, 'https://base.invalid').pathname !== base) throw new Error('VITE_BASE_PATH must start and end with / and be a normalised local path')
+  let gitCommit = 'unknown'
+  try { gitCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { /* Git is optional. */ }
+  const build = { version: env.VITE_APP_VERSION || '1.0.0-fixed', buildDate: new Date().toISOString(), gitCommit, gitShort: gitCommit.slice(0, 12), base, mode }
+  const runtimePackages = new Set<string>()
+  function distributionPlugin(): Plugin {
+    return {
+      name: 'distribution-regions', enforce: 'pre',
+      transform(code, id) {
+        if (fixed && id.includes('/node_modules/')) {
+          const match = id.replaceAll('\\', '/').match(/\/node_modules\/((?:@[^/]+\/)?[^/]+)\//)
+          if (match) runtimePackages.add(match[1])
+        }
+        if (!id.includes('/src/')) return
+        // These regions preserve the original pages source exactly; fixed code
+        // is selected before TS/JSX compilation in both the app and Workers.
+        code = code.replace(/(?:\{)?\/\* @(fixed|pages):start \*\/(?:\})?([\s\S]*?)(?:\{)?\/\* @\1:end \*\/(?:\})?/g,
+          (_all, region: string, body: string) => (region === 'fixed') === fixed ? body : '')
+        if (fixed && id.endsWith('.css')) code = code.replaceAll('/karu-pdf/', base)
+        return code
       },
-      workbox: {
-        globPatterns: ['**/*.{html,js,css,wasm,ttf,png}'],
-        maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
-        cleanupOutdatedCaches: true,
+      transformIndexHtml(html) {
+        if (!fixed) return html
+        return html.replace('/karu-pdf/fonts/', `${base}fonts/`).replace('<head>', `<head>\n    <meta http-equiv="Content-Security-Policy" content="${META_CSP}" />\n    <link rel="icon" href="${base}icons/icon-192.png" />`)
       },
-    }),
-  ],
-  worker: { format: 'es' },
-  build: { target: 'esnext' },
-  optimizeDeps: { exclude: ['mupdf'] },
-  test: { include: ['tests/**/*.test.ts'] },
+    }
+  }
+  return {
+    base,
+    // Pages receives no new definitions or emitted metadata.
+    define: fixed ? { __FIXED_BUILD__: JSON.stringify(build) } : {},
+    plugins: [
+      distributionPlugin(),
+      react(),
+      VitePWA({
+        registerType: 'prompt',
+        manifest: {
+          name: 'かるPDF', short_name: 'かるPDF', description: 'PDFをパソコンの中だけで編集するアプリ', lang: 'ja',
+          id: base, start_url: base, scope: base, display: 'standalone', theme_color: '#1769aa', background_color: '#fafafa',
+          icons: [
+            { src: `${base}icons/icon-192.png`, sizes: '192x192', type: 'image/png' },
+            { src: `${base}icons/icon-512.png`, sizes: '512x512', type: 'image/png' },
+          ],
+          file_handlers: [{ action: base, accept: { 'application/pdf': ['.pdf'] } }],
+        },
+        workbox: {
+          globPatterns: [fixed ? '**/*.{html,js,css,wasm,ttf,png,webmanifest}' : '**/*.{html,js,css,wasm,ttf,png}'],
+          maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
+          cleanupOutdatedCaches: true,
+        },
+      }),
+      ...(fixed ? [{
+        name: 'fixed-build-metadata',
+        closeBundle() {
+          // Workbox's generated runtime imports these modules (not its build tools).
+          for (const name of ['workbox-core', 'workbox-precaching', 'workbox-routing', 'workbox-strategies']) runtimePackages.add(name)
+          writeFileSync('dist-fixed/build-info.json', JSON.stringify({ ...build, runtimePackages: [...runtimePackages].sort() }, null, 2) + '\n')
+        },
+      } satisfies Plugin] : []),
+    ],
+    worker: { format: 'es', plugins: () => [distributionPlugin()] },
+    build: { target: 'esnext', ...(fixed ? { outDir: 'dist-fixed' } : {}) },
+    optimizeDeps: { exclude: ['mupdf'] },
+    test: { include: ['tests/**/*.test.ts'] },
+  }
 })

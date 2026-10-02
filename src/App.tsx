@@ -1396,7 +1396,7 @@ export default function App() {
     <main className={`app${comparison ? ' comparing' : ''}${updateReady ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { if (!comparison) void handleDrop(event) }}>
       {updateReady && (
         <div className="update-banner" role="status">
-          <span>新しい版があります。</span>
+          {/* @pages:start */}<span>新しい版があります。</span>{/* @pages:end */}{/* @fixed:start */}<span>管理者が配布物を更新しました。再読み込みすると新しい版に切り替わります</span>{/* @fixed:end */}
           <button type="button" onClick={() => void applyUpdate()}>更新する</button>
         </div>
       )}
@@ -1544,7 +1544,7 @@ export default function App() {
       <footer className="status-bar">
         <span>{active ? `${page} / ${active.pageSizes.length} ページ` : 'PDFを開いてください'}</span>
         {!comparison && active?.annotationStore.getScale(page - 1) && <button type="button" className="status-scale" onClick={() => openScale(page - 1)}>{scaleLabel(active.annotationStore.getScale(page - 1)!)}</button>}
-        <span role="status">{runtimeError || status}</span>
+        <span role="status">{runtimeError || status}</span>{/* @fixed:start */}<span style={{ marginLeft: 'auto', fontSize: '11px' }}>固定・閉域版</span>{/* @fixed:end */}
       </footer>
       {scaleDialog && <ScaleDialog key={`${scaleDialog.session.docId}:${scaleDialog.pageIndex}`} pageIndex={scaleDialog.pageIndex} size={scaleDialog.session.pageSizes[scaleDialog.pageIndex]} initial={scaleDialog.session.annotationStore.getScale(scaleDialog.pageIndex)} required={scaleDialog.required} tracing={scaleTracing} points={scalePoints}
         onTrace={() => { viewerRef.current?.scrollToPage(scaleDialog.pageIndex); setScaleTracing(true) }}

@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
-import { DisplayListCache } from '../core/displayListCache'
+/* @fixed:start */import { fixedAssetUrl } from '../fixed/security'
+/* @fixed:end */import { DisplayListCache } from '../core/displayListCache'
 import { openDocument, type OpenedDocument } from '../core/mupdfDoc'
 import { renderRegion } from '../core/render'
 import { ComparePageCache, renderComparePixels } from './compareRender'
@@ -180,7 +181,8 @@ async function getFontResource(name: FontName): Promise<FontResource> {
   if (loaded) return loaded
   const filename = name === 'BIZUDGothic' ? 'BIZUDGothic-Regular.ttf' : 'BIZUDMincho-Regular.ttf'
   const label = name === 'BIZUDGothic' ? 'BIZ UDゴシック' : 'BIZ UD明朝'
-  const response = await fetch(`${import.meta.env.BASE_URL}fonts/${filename}`)
+/* @fixed:start */  const fixedFontUrl = fixedAssetUrl(`fonts/${filename}`, self.location.origin, import.meta.env.BASE_URL)
+/* @fixed:end */  const response = await fetch(/* @fixed:start */fixedFontUrl ?? /* @fixed:end */`${import.meta.env.BASE_URL}fonts/${filename}`)
   if (!response.ok) throw new Error(`${label}を読み込めませんでした (${response.status})。`)
   const fontResource = createFontResource(new Uint8Array(await response.arrayBuffer()), name)
   fontResources[name] = fontResource

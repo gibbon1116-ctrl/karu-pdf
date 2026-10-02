@@ -1,0 +1,128 @@
+[
+  {
+    "file": "src/editor/AnnotationLayer.tsx",
+    "string": "http://www.w3.org/2000/svg",
+    "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/editor/MeasurementOverlay.tsx",
+    "string": "http://www.w3.org/2000/svg",
+    "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/fixed/security.ts",
+    "string": "github.io",
+    "reason": "固定版の起動禁止ホストとの文字列比較。URL や通信先として使わない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "src/worker/pdf.worker.ts",
+    "string": "fetch(",
+    "reason": "アプリのフォント取得 1 か所。固定版では fixedAssetUrl が origin と base の境界を検査する。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "vite.config.ts",
+    "string": "https://base.invalid",
+    "reason": "Vite の配布パス正規化を検査するための架空の基準 URL。通信しない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/App-*.js",
+    "string": "XMLHttpRequest",
+    "reason": "MuPDF/Emscripten の file: 読み取り用フォールバック。固定版は内部サーバーの HTTP(S) を使用する。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/App-*.js",
+    "string": "fetch(",
+    "reason": "MuPDF/Emscripten の同梱 WASM の GET（Worker の追加 1 件は検査済みフォント URL）。PDF は送信しない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/App-*.js",
+    "string": "http://www.w3.org/2000/svg",
+    "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/client-*.js",
+    "string": "https://react.dev/errors/",
+    "reason": "React / React DOM の例外メッセージ用 URL。ライブラリは取得しない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/client-*.js",
+    "string": "http://www.w3.org/2000/svg",
+    "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
+    "maxOccurrences": 5
+  },
+  {
+    "file": "dist-fixed/assets/client-*.js",
+    "string": "http://www.w3.org/1998/Math/MathML",
+    "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
+    "maxOccurrences": 3
+  },
+  {
+    "file": "dist-fixed/assets/client-*.js",
+    "string": "http://www.w3.org/1999/xlink",
+    "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
+    "maxOccurrences": 7
+  },
+  {
+    "file": "dist-fixed/assets/client-*.js",
+    "string": "http://www.w3.org/XML/1998/namespace",
+    "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
+    "maxOccurrences": 3
+  },
+  {
+    "file": "dist-fixed/assets/index-*.js",
+    "string": "fetch(",
+    "reason": "Vite の modulepreload ポリフィル。ビルドが生成した同一配布パス内の JS リンクだけを取得。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/index-*.js",
+    "string": "github.io",
+    "reason": "固定版の起動禁止ホストとの文字列比較。URL や通信先として使わない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/pdf.worker-*.js",
+    "string": "XMLHttpRequest",
+    "reason": "MuPDF/Emscripten の file: 読み取り用フォールバック。固定版は内部サーバーの HTTP(S) を使用する。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/pdf.worker-*.js",
+    "string": "fetch(",
+    "reason": "MuPDF/Emscripten の同梱 WASM の GET（Worker の追加 1 件は検査済みフォント URL）。PDF は送信しない。",
+    "maxOccurrences": 3
+  },
+  {
+    "file": "dist-fixed/assets/react-dom-*.js",
+    "string": "https://react.dev/errors/",
+    "reason": "React / React DOM の例外メッセージ用 URL。ライブラリは取得しない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/sw.js",
+    "string": "importScripts(",
+    "reason": "Workbox の AMD ローダーが sw.js と同じディレクトリの workbox-*.js を取得。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/workbox-*.js",
+    "string": "fetch(",
+    "reason": "Workbox の Strategy/StrategyHandler。静的 precache の GET のみ（5 出現、メソッド宣言も含む）。外部ルートや runtimeCaching は登録しない。",
+    "maxOccurrences": 5
+  },
+  {
+    "file": "dist-fixed/workbox-*.js",
+    "string": "https://bit.ly/wb-precache",
+    "reason": "Workbox の precache 警告メッセージに含む説明 URL。取得しない。",
+    "maxOccurrences": 1
+  }
+]

@@ -6,3 +6,5 @@ test-results/
 playwright-report/
 test-data/real/
 .claude/
+dist-fixed/
+release/

@@ -1,0 +1,21 @@
+name: 固定・閉域版の配布物を作成
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run release:fixed
+      - uses: actions/upload-artifact@v4
+        with:
+          name: karu-pdf-fixed
+          path: release/
+          if-no-files-found: error

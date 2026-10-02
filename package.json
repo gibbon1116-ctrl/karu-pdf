@@ -11,7 +11,12 @@
     "e2e": "playwright test --project=e2e",
     "bench": "playwright test --project=bench",
     "make-test-pdf": "node scripts/make-test-pdf.mjs",
-    "engine-bench": "node scripts/engine-bench.mjs"
+    "engine-bench": "node scripts/engine-bench.mjs",
+    "build:fixed": "tsc --noEmit && vite build --mode fixed",
+    "audit:network": "node scripts/audit-network.mjs",
+    "package:fixed": "node scripts/package-fixed.mjs",
+    "release:fixed": "npm run audit:network && npm test && npm run build:fixed && npm run audit:network -- --dist && npm run package:fixed",
+    "e2e:fixed": "playwright test --project=fixed"
   },
   "dependencies": {
     "mupdf": "1.28.1",
