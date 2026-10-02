@@ -1,4 +1,5 @@
-import type { ExifOrientation } from '../core/exif'
+/* @single:start */import { createSingleWorker } from '../single/runtime'
+/* @single:end */import type { ExifOrientation } from '../core/exif'
 import type { ImagePdfSettings } from '../core/imagePdfLayout'
 import { layoutImages } from '../core/imagePdfLayout'
 import { MemoryPdfWriteTarget, PdfStreamWriter, type PdfImageBand, type PdfImagePlacement } from '../core/pdfStreamWriter'
@@ -7,7 +8,7 @@ export interface ImageInfo { width: number; height: number; orientation: ExifOri
 export interface ImageResult extends ImageInfo { image?: PdfImageBand; thumbnail?: Blob }
 export type ImageTask = 'inspect' | 'thumbnail' | 'convert'
 export class ImageWorkerClient {
-  private worker = new Worker(new URL('../worker/image.worker.ts', import.meta.url), { type: 'module' })
+  private worker = /* @single:start */createSingleWorker('image') ?? /* @single:end */new Worker(new URL('../worker/image.worker.ts', import.meta.url), { type: 'module' })
   private tail: Promise<unknown> = Promise.resolve()
   private next = 0
   private disposed = false

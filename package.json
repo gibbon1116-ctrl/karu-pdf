@@ -16,7 +16,11 @@
     "audit:network": "node scripts/audit-network.mjs",
     "package:fixed": "node scripts/package-fixed.mjs",
     "release:fixed": "npm run audit:network && npm test && npm run build:fixed && npm run audit:network -- --dist && npm run package:fixed",
-    "e2e:fixed": "playwright test --project=fixed"
+    "e2e:fixed": "playwright test --project=fixed",
+    "build:single": "tsc --noEmit && vite build --mode single && node scripts/assemble-single.mjs",
+    "package:single": "node scripts/package-fixed.mjs --single",
+    "release:single": "npm run audit:network && npm test && npm run build:single && npm run audit:network -- --single && npm run package:single",
+    "e2e:single": "playwright test --project=single"
   },
   "dependencies": {
     "mupdf": "1.28.1",

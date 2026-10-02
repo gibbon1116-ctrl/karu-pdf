@@ -45,7 +45,7 @@ npm run build      # 公開用のビルド（dist/）
 - PDF エンジン: [MuPDF.js](https://github.com/ArtifexSoftware/mupdf.js)（Artifex Software、AGPL-3.0）
 - フォント: [BIZ UDゴシック](https://github.com/googlefonts/morisawa-biz-ud-gothic)・[BIZ UD明朝](https://github.com/googlefonts/morisawa-biz-ud-mincho)（Morisawa、SIL Open Font License 1.1。ライセンス文は `public/fonts/` にあります）
 
-## 2つの配布版
+## 3つの配布版
 
 | | 通常版 | 固定・閉域版 |
 |---|---|---|
@@ -55,6 +55,35 @@ npm run build      # 公開用のビルド（dist/）
 | 実行時の取得 | 公開先のアプリ・PWA の静的ファイル | 同じ内部サーバーの配布パス内だけ。外部インターネットを使用しない |
 | PDF の扱い | PC のブラウザ内で処理 | PC のブラウザ内で処理 |
 | 出力 | dist/ | dist-fixed/ と release/ |
+
+3つ目は **HTML ファイル1つの版（固定・閉域）** です。サーバー、インストール、管理者権限は不要で、Edge・Chrome から `file://` で開きます。版は **1.0.0-single**、実行中の取得は CSP の `connect-src 'none'` で禁止し、Service Worker と更新の案内は使いません。すべての編集機能は同じソースから作ります。
+
+### HTML ファイル1つの版
+
+1. `karu-pdf-v1.0.0.html` を自分の PC または共有フォルダに置きます。
+2. ダブルクリックで開きます。既定のブラウザが Edge・Chrome でない場合は、右クリック →「プログラムから開く」→ Edge を選びます。
+3. よく使う場合は Edge のお気に入りに入れるか、デスクトップにショートカットを置きます。
+4. 新しい版にするときは HTML ファイルを差し替えます。
+
+受け取ったファイルを PowerShell で検査し、信頼できる経路で受け取った `.html.sha256` の値と比較してください。ZIP は同じ方法で `.zip.sha256` と比較します。ハッシュの一致だけで配布者の真正性を保証するものではありません。
+
+```powershell
+Get-FileHash -LiteralPath .\karu-pdf-v1.0.0.html -Algorithm SHA256
+Get-FileHash -LiteralPath .\karu-pdf-v1.0.0-single.zip -Algorithm SHA256
+```
+
+開発用の作成・検証コマンド（既存の依存を使用）:
+
+```bash
+npm run release:single
+npm run e2e:single
+```
+
+`release:single` はソース監査 → 単体・結合テスト → 単一 HTML ビルド → HTML の通信監査 → 配布 ZIP を順に作ります。`dist-single/` には HTML だけを出力します。`release/karu-pdf-v1.0.0-single.zip` は HTML、LICENSE、THIRD_PARTY_LICENSES、VERSION.txt、SHA256SUMS.txt、SBOM.cdx.json、使い方.txt を含みます。ZIP と HTML の SHA-256 は ZIP の外にも出力します。`build:single`、`audit:network -- --single`、`package:single` で各段階を実行できます。固定版の手動 GitHub Actions は両方の ZIP を Artifact に入れます。
+
+印刷用の PDF は新しい Blob タブで開きます。ポップアップを許可してください。ブラウザの設定で表示できない場合は、PDF を保存し、Edge で開いて印刷してください。最近使ったファイルにはハンドルと名前だけを保存し、PDF の本体は保存しません。
+
+保証の範囲はアプリの実行コードによる取得・送信です。ブラウザ自体の通信、拡張機能、PC・OS の管理は対象外です。組織のブラウザのポリシーで `file://`、Blob Worker、WASM、ファイル選択が禁止されている場合は使えません。`file://` の IndexedDB は別のローカル HTML と保存場所を共有しうるため、信頼できない HTML を同じブラウザで実行しないでください。設計の詳細は [セキュリティ設計](docs/固定版/セキュリティ設計.md) を参照してください。
 
 固定版の最初の版は **1.0.0-fixed**。通常版のビルド、GitHub Pages 公開ワークフロー、編集機能は維持する。固定版を GitHub Pages で開くと、アプリを起動せずに内部サーバーからの起動を案内する。
 

@@ -4,14 +4,20 @@ import { execFileSync } from 'node:child_process'
 import { CSP } from './fixed-policy.mjs'
 import { walk } from './audit-network.mjs'
 import { createZip, extractZip, sha256, verifySums } from './fixed-zip.mjs'
+import { verifySingle } from './verify-single.mjs'
 
 // Verify both working copy and HEAD; never change Git or the lockfile.
 execFileSync('git', ['diff', '--quiet', '--', 'package-lock.json'], { stdio: ['ignore', 'pipe', 'pipe'] })
 const lockBytes = fs.readFileSync('package-lock.json')
 if (!lockBytes.equals(execFileSync('git', ['show', 'HEAD:package-lock.json'], { maxBuffer: 16 * 1024 * 1024 }))) throw new Error('Lockfile differs from HEAD')
 const lock = JSON.parse(lockBytes), pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
-const build = JSON.parse(fs.readFileSync('dist-fixed/build-info.json', 'utf8'))
-if (build.mode !== 'fixed' || !/^\d+\.\d+\.\d+-fixed$/.test(build.version)) throw new Error('Invalid fixed build metadata')
+const single = process.argv.includes('--single')
+const singleFiles = single ? walk('dist-single') : []
+if (single && (singleFiles.length !== 1 || !singleFiles[0].endsWith('.html'))) throw new Error('Expected one single HTML')
+const singleHtml = single ? fs.readFileSync(singleFiles[0], 'utf8') : ''
+if (single) console.log('SINGLE_VERIFIED', JSON.stringify(verifySingle(singleFiles[0])))
+const build = JSON.parse(single ? singleHtml.match(/<script type="application\/json" id="single-build-info">([\s\S]*?)<\/script>/)?.[1] || 'null' : fs.readFileSync('dist-fixed/build-info.json', 'utf8'))
+if (!build || build.mode !== (single ? 'single' : 'fixed') || !(single ? /^\d+\.\d+\.\d+-single$/ : /^\d+\.\d+\.\d+-fixed$/).test(build.version)) throw new Error('Invalid build metadata')
 const runtime = new Set(build.runtimePackages)
 // Resolve each edge using the lockfile's actual node_modules hierarchy.
 function resolveDependency(from, name) {
@@ -63,20 +69,21 @@ for (const [name, fontFile, licenseFile] of [
   dependencies.push({ ref, dependsOn: [] })
   texts.push(`${name}\nVersion: sha256:${hash}\nLicense: OFL-1.1\n${fs.readFileSync(`public/fonts/${licenseFile}`, 'utf8')}\n`)
 }
-const application = 'karu-pdf-fixed', rootRef = `application:${build.version}`
+const application = single ? 'karu-pdf-single' : 'karu-pdf-fixed', rootRef = `application:${build.version}`
 dependencies.unshift({ ref: rootRef, dependsOn: components.filter(c => c.properties.some(p => p.name === 'karu:bundled-runtime' && p.value === 'true')).map(c => c['bom-ref']) })
 const sbom = { bomFormat: 'CycloneDX', specVersion: '1.5', version: 1,
   metadata: { timestamp: build.buildDate, component: { type: 'application', 'bom-ref': rootRef, name: application, version: build.version } }, components, dependencies }
 const npmVersion = process.env.npm_config_user_agent?.match(/npm\/([^ ]+)/)?.[1]
   || execFileSync(process.execPath, [process.env.npm_execpath || path.join(path.dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js'), '--version'], { encoding: 'utf8' }).trim()
-const versionText = `Application: かるPDF\nDistribution: Fixed / Closed Network\nVersion: ${build.version}\nBuild Date: ${build.buildDate}\nGit Commit: ${build.gitCommit}\nNode Version: ${process.version}\nnpm Version: ${npmVersion}\nnpm lockfile hash: ${sha256(lockBytes)}\nBuild mode: ${build.mode}\nBase path: ${build.base}\nCSP: ${CSP}\n`
-const entries = new Map(walk('dist-fixed').map(p => [p.slice('dist-fixed/'.length), fs.readFileSync(p)]))
+const versionText = `Application: かるPDF\nDistribution: ${single ? 'Single HTML / Closed Network' : 'Fixed / Closed Network'}\nVersion: ${build.version}\nBuild Date: ${build.buildDate}\nGit Commit: ${build.gitCommit}\nNode Version: ${process.version}\nnpm Version: ${npmVersion}\nnpm lockfile hash: ${sha256(lockBytes)}\nBuild mode: ${build.mode}\nBase path: ${single ? 'file://' : build.base}\nCSP: ${single ? build.csp : CSP}\n`
+const entries = new Map((single ? singleFiles : walk('dist-fixed')).map(p => [p.slice((single ? 'dist-single/' : 'dist-fixed/').length), fs.readFileSync(p)]))
+if (single) entries.set('使い方.txt', fs.readFileSync('docs/固定版/HTML版の使い方.txt'))
 entries.set('LICENSE', fs.readFileSync('LICENSE'))
 entries.set('THIRD_PARTY_LICENSES', Buffer.from(texts.join('\n' + '='.repeat(72) + '\n\n')))
 entries.set('VERSION.txt', Buffer.from(versionText)); entries.set('SBOM.cdx.json', Buffer.from(JSON.stringify(sbom, null, 2) + '\n'))
 entries.set('SHA256SUMS.txt', Buffer.from([...entries].sort(([a], [b]) => a.localeCompare(b)).map(([name, bytes]) => `${sha256(bytes)}  ${name}`).join('\n') + '\n'))
 fs.mkdirSync('release', { recursive: true })
-const filename = `karu-pdf-fixed-v${build.version.replace(/-fixed$/, '')}.zip`, zipPath = path.join('release', filename)
+const filename = single ? `karu-pdf-v${build.version}.zip` : `karu-pdf-fixed-v${build.version.replace(/-fixed$/, '')}.zip`, zipPath = path.join('release', filename)
 // Build and verify before replacing an existing release.
 const zip = createZip(entries), temporary = fs.mkdtempSync(path.resolve('release', '.verify-'))
 try {
@@ -85,6 +92,11 @@ try {
   fs.writeFileSync(zipPath, zip)
   const actualHash = sha256(fs.readFileSync(zipPath))
   fs.writeFileSync(zipPath + '.sha256', `${actualHash}  ${filename}\n`)
+  if (single) {
+    const htmlName = path.basename(singleFiles[0]), htmlHash = sha256(fs.readFileSync(singleFiles[0]))
+    fs.writeFileSync(path.join('release', htmlName + '.sha256'), `${htmlHash}  ${htmlName}\n`)
+    console.log(`HTML SHA-256: ${htmlHash}`)
+  }
   console.log(`ZIP extracted and verified: ${names.size} files, ${checked} SHA-256 entries; checksum manifest covered by ZIP hash`)
   console.log(`ZIP SHA-256: ${actualHash}\nLockfile SHA-256: ${sha256(lockBytes)}`)
   console.log(`SBOM: ${components.length} components; bundled runtime: ${components.filter(c => c.properties.some(p => p.name === 'karu:bundled-runtime' && p.value === 'true')).map(c => c.name).join(', ')}`)

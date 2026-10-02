@@ -124,5 +124,47 @@
     "string": "https://bit.ly/wb-precache",
     "reason": "Workbox の precache 警告メッセージに含む説明 URL。取得しない。",
     "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "XMLHttpRequest",
+    "maxOccurrences": 4,
+    "reason": "MuPDF/Emscripten の未使用の file 読み取り分岐。ページと PDF Worker は先に注入した instantiateWasm のみを使う。connect-src none が取得も遮断する。"
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "fetch(",
+    "maxOccurrences": 4,
+    "reason": "MuPDF/Emscripten の未使用の WASM 取得分岐（ページと PDF Worker 各2出現）。注入済み Module を使い、フォントはメッセージで受け取る。connect-src none で実行も禁止。"
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "https://react.dev/errors/",
+    "maxOccurrences": 2,
+    "reason": "React のエラー説明用の文字列（React と React DOM）。通信には使わない。"
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://www.w3.org/2000/svg",
+    "maxOccurrences": 7,
+    "reason": "SVG の名前空間識別子。取得先ではない。"
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://www.w3.org/1998/Math/MathML",
+    "maxOccurrences": 3,
+    "reason": "MathML の名前空間識別子。取得先ではない。"
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://www.w3.org/1999/xlink",
+    "maxOccurrences": 7,
+    "reason": "XLink の名前空間識別子。取得先ではない。"
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://www.w3.org/XML/1998/namespace",
+    "maxOccurrences": 3,
+    "reason": "XML の名前空間識別子。取得先ではない。"
   }
 ]

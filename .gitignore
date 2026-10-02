@@ -8,3 +8,4 @@ test-data/real/
 .claude/
 dist-fixed/
 release/
+dist-single/

@@ -1,4 +1,5 @@
-/// <reference lib="webworker" />
+/* @single:start */import { requestEmbeddedFont } from '../single/workerFonts'
+/* @single:end *//// <reference lib="webworker" />
 /* @fixed:start */import { fixedAssetUrl } from '../fixed/security'
 /* @fixed:end */import { DisplayListCache } from '../core/displayListCache'
 import { openDocument, type OpenedDocument } from '../core/mupdfDoc'
@@ -179,14 +180,18 @@ function getDingbatsResource(): FontResource {
 async function getFontResource(name: FontName): Promise<FontResource> {
   const loaded = fontResources[name]
   if (loaded) return loaded
-  const filename = name === 'BIZUDGothic' ? 'BIZUDGothic-Regular.ttf' : 'BIZUDMincho-Regular.ttf'
+/* @server:start */  const filename = name === 'BIZUDGothic' ? 'BIZUDGothic-Regular.ttf' : 'BIZUDMincho-Regular.ttf'
   const label = name === 'BIZUDGothic' ? 'BIZ UDゴシック' : 'BIZ UD明朝'
 /* @fixed:start */  const fixedFontUrl = fixedAssetUrl(`fonts/${filename}`, self.location.origin, import.meta.env.BASE_URL)
 /* @fixed:end */  const response = await fetch(/* @fixed:start */fixedFontUrl ?? /* @fixed:end */`${import.meta.env.BASE_URL}fonts/${filename}`)
   if (!response.ok) throw new Error(`${label}を読み込めませんでした (${response.status})。`)
   const fontResource = createFontResource(new Uint8Array(await response.arrayBuffer()), name)
   fontResources[name] = fontResource
-  return fontResource
+  return fontResource/* @server:end *//* @single:start */
+  const resource = createFontResource(await requestEmbeddedFont(name), name)
+  fontResources[name] = resource
+  return resource
+/* @single:end */
 }
 
 async function loadFontsForEdits(edits: readonly import('../core/annotations').AnnotationEdit[]): Promise<void> {
@@ -698,6 +703,8 @@ function cancelQueuedForDocument(docId: string, message: string): void {
 
 scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const message = event.data
+/* @single:start */  if ((message as { type: string }).type === 'single-font-response') return
+/* @single:end */
   if (message.type === 'clearCompare') {
     for (const job of activeComparisons.values()) job.cancelled = true
     for (let i = queue.length - 1; i >= 0; i--) if (queue[i].type === 'renderCompare') {

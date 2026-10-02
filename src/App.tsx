@@ -1544,7 +1544,7 @@ export default function App() {
       <footer className="status-bar">
         <span>{active ? `${page} / ${active.pageSizes.length} ページ` : 'PDFを開いてください'}</span>
         {!comparison && active?.annotationStore.getScale(page - 1) && <button type="button" className="status-scale" onClick={() => openScale(page - 1)}>{scaleLabel(active.annotationStore.getScale(page - 1)!)}</button>}
-        <span role="status">{runtimeError || status}</span>{/* @fixed:start */}<span style={{ marginLeft: 'auto', fontSize: '11px' }}>固定・閉域版</span>{/* @fixed:end */}
+        <span role="status">{runtimeError || status}</span>{/* @single:start */}<span style={{ marginLeft: 'auto', fontSize: '11px' }}>固定・閉域版（HTML）</span>{/* @single:end */}{/* @fixed:start */}<span style={{ marginLeft: 'auto', fontSize: '11px' }}>固定・閉域版</span>{/* @fixed:end */}
       </footer>
       {scaleDialog && <ScaleDialog key={`${scaleDialog.session.docId}:${scaleDialog.pageIndex}`} pageIndex={scaleDialog.pageIndex} size={scaleDialog.session.pageSizes[scaleDialog.pageIndex]} initial={scaleDialog.session.annotationStore.getScale(scaleDialog.pageIndex)} required={scaleDialog.required} tracing={scaleTracing} points={scalePoints}
         onTrace={() => { viewerRef.current?.scrollToPage(scaleDialog.pageIndex); setScaleTracing(true) }}

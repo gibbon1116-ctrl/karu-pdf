@@ -23,4 +23,11 @@ if (blocksFixedStartup(location.hostname)) {
     createRoot(root).render(<ErrorBoundary fallback={(_error, reset) => <main role="alert"><p>表示中に問題が起きました。</p><button onClick={reset}>表示し直す</button></main>}><App /></ErrorBoundary>)
   })
 }
-/* @fixed:end */
+/* @fixed:end *//* @single:start */
+import { createRoot as createSingleRoot } from 'react-dom/client'
+import SingleApp from './App'
+import { ErrorBoundary as SingleBoundary } from './app/ErrorBoundary'
+import { watchDisplayFonts } from './single/runtime'
+watchDisplayFonts()
+createSingleRoot(document.getElementById('root')!).render(<SingleBoundary fallback={(_error, reset) => <main role="alert"><p>表示中に問題が起きました。</p><button onClick={reset}>表示し直す</button></main>}><SingleApp /></SingleBoundary>)
+/* @single:end */
