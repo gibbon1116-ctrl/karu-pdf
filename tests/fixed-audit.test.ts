@@ -18,3 +18,16 @@ it('監査 CLI の終了コード、文字列、行、許可の範囲を実フ�
     fs.writeFileSync(file, `const a='${namespace}', b='${namespace}'`); expect(run().status).toBe(1)
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
+
+it('起動用 cmd も外部 URL と PowerShell の通信 API を監査する', () => {
+  const dir = fs.mkdtempSync('tests/.cmd-audit-'), file = `${dir}/payload.cmd`, allow = `${dir}/allow.json`
+  try {
+    fs.writeFileSync(allow, '[]')
+    for (const payload of ['https://external.example/private', 'Invoke-WebRequest $url', 'New-Object Net.WebClient', 'curl.exe $url']) {
+      fs.writeFileSync(file, payload)
+      const result = spawnSync(process.execPath, ['scripts/audit-network.mjs', `--file=${file}`, `--allowlist=${allow}`], { encoding: 'utf8' })
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain(payload.split(' ')[0] === 'New-Object' ? 'WebClient' : payload.split(' ')[0])
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})

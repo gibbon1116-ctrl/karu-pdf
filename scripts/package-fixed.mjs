@@ -5,6 +5,7 @@ import { CSP } from './fixed-policy.mjs'
 import { walk } from './audit-network.mjs'
 import { createZip, extractZip, sha256, verifySums } from './fixed-zip.mjs'
 import { verifySingle } from './verify-single.mjs'
+import { makeIco } from './make-ico.mjs'
 
 // Verify both working copy and HEAD; never change Git or the lockfile.
 execFileSync('git', ['diff', '--quiet', '--', 'package-lock.json'], { stdio: ['ignore', 'pipe', 'pipe'] })
@@ -77,7 +78,15 @@ const npmVersion = process.env.npm_config_user_agent?.match(/npm\/([^ ]+)/)?.[1]
   || execFileSync(process.execPath, [process.env.npm_execpath || path.join(path.dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js'), '--version'], { encoding: 'utf8' }).trim()
 const versionText = `Application: かるPDF\nDistribution: ${single ? 'Single HTML / Closed Network' : 'Fixed / Closed Network'}\nVersion: ${build.version}\nBuild Date: ${build.buildDate}\nGit Commit: ${build.gitCommit}\nNode Version: ${process.version}\nnpm Version: ${npmVersion}\nnpm lockfile hash: ${sha256(lockBytes)}\nBuild mode: ${build.mode}\nBase path: ${single ? 'file://' : build.base}\nCSP: ${single ? build.csp : CSP}\n`
 const entries = new Map((single ? singleFiles : walk('dist-fixed')).map(p => [p.slice((single ? 'dist-single/' : 'dist-fixed/').length), fs.readFileSync(p)]))
-if (single) entries.set('使い方.txt', fs.readFileSync('docs/固定版/HTML版の使い方.txt'))
+if (single) {
+  entries.set('使い方.txt', fs.readFileSync('docs/固定版/HTML版の使い方.txt'))
+  for (const name of ['かるPDFを開く.cmd', 'デスクトップにショートカットを作る.cmd']) {
+    const bytes = fs.readFileSync(path.join('scripts/launchers', name))
+    if (bytes.some(byte => byte > 127)) throw new Error('Launcher must be ASCII: ' + name)
+    entries.set(name, bytes)
+  }
+  entries.set('karu-pdf.ico', makeIco())
+}
 entries.set('LICENSE', fs.readFileSync('LICENSE'))
 entries.set('THIRD_PARTY_LICENSES', Buffer.from(texts.join('\n' + '='.repeat(72) + '\n\n')))
 entries.set('VERSION.txt', Buffer.from(versionText)); entries.set('SBOM.cdx.json', Buffer.from(JSON.stringify(sbom, null, 2) + '\n'))

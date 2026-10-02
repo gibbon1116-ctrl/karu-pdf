@@ -60,10 +60,14 @@ npm run build      # 公開用のビルド（dist/）
 
 ### HTML ファイル1つの版
 
-1. `karu-pdf-v1.0.0.html` を自分の PC または共有フォルダに置きます。
-2. ダブルクリックで開きます。既定のブラウザが Edge・Chrome でない場合は、右クリック →「プログラムから開く」→ Edge を選びます。
-3. よく使う場合は Edge のお気に入りに入れるか、デスクトップにショートカットを置きます。
-4. 新しい版にするときは HTML ファイルを差し替えます。
+1. ZIP を展開したフォルダを、自分の PC または共有フォルダに置きます。
+2. 「デスクトップにショートカットを作る.cmd」を1回ダブルクリックします。デスクトップとスタートメニューに「かるPDF」ができます。
+3. 以後は、デスクトップの「かるPDF」から起動します。Edge（無ければ Chrome）の、タブ・アドレスバー・お気に入りの無い専用の窓で開きます。
+4. ショートカットを作らずに使う場合は「かるPDFを開く.cmd」をダブルクリックします。HTML を直接ダブルクリックすると普通のタブで開きます（編集機能は使えます）。
+5. フォルダを移したら、もう一度 2. を行います。新しい版にするときは配布物を一式差し替え、ショートカットも作り直します。
+6. 組織のポリシーで cmd・PowerShell・`file://` が禁止されている場合は使えません。
+
+起動には Windows 標準の PowerShell 5.1 を使います。管理者権限は不要です。普段のブラウザのプロファイルを使うため、最近使ったファイルを引き継ぎます。普通のタブでの初期画面には専用の窓への案内があり、「今後表示しない」で消せます。
 
 受け取ったファイルを PowerShell で検査し、信頼できる経路で受け取った `.html.sha256` の値と比較してください。ZIP は同じ方法で `.zip.sha256` と比較します。ハッシュの一致だけで配布者の真正性を保証するものではありません。
 
@@ -79,7 +83,7 @@ npm run release:single
 npm run e2e:single
 ```
 
-`release:single` はソース監査 → 単体・結合テスト → 単一 HTML ビルド → HTML の通信監査 → 配布 ZIP を順に作ります。`dist-single/` には HTML だけを出力します。`release/karu-pdf-v1.0.0-single.zip` は HTML、LICENSE、THIRD_PARTY_LICENSES、VERSION.txt、SHA256SUMS.txt、SBOM.cdx.json、使い方.txt を含みます。ZIP と HTML の SHA-256 は ZIP の外にも出力します。`build:single`、`audit:network -- --single`、`package:single` で各段階を実行できます。固定版の手動 GitHub Actions は両方の ZIP を Artifact に入れます。
+`release:single` はソース監査 → 単体・結合テスト → 単一 HTML ビルド → HTML の通信監査 → 配布 ZIP を順に作ります。`dist-single/` には HTML だけを出力します。`release/karu-pdf-v1.0.0-single.zip` は HTML、LICENSE、THIRD_PARTY_LICENSES、VERSION.txt、SHA256SUMS.txt、SBOM.cdx.json、使い方.txt、2つの起動用 cmd、karu-pdf.ico を含みます。ZIP と HTML の SHA-256 は ZIP の外にも出力します。`build:single`、`audit:network -- --single`、`package:single` で各段階を実行できます。固定版の手動 GitHub Actions は両方の ZIP を Artifact に入れます。
 
 印刷用の PDF は新しい Blob タブで開きます。ポップアップを許可してください。ブラウザの設定で表示できない場合は、PDF を保存し、Edge で開いて印刷してください。最近使ったファイルにはハンドルと名前だけを保存し、PDF の本体は保存しません。
 

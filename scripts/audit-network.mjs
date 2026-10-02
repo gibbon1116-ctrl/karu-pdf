@@ -6,8 +6,9 @@ export function walk(root) {
 }
 // License texts, README, development documents and tests are not executable
 // runtime inputs; scanning them would confuse attribution URLs with requests.
-const textFile = /\.(?:[cm]?[jt]sx?|css|html|svg|webmanifest|json)$/i
+const textFile = /\.(?:[cm]?[jt]sx?|css|html|svg|webmanifest|json|cmd)$/i
 const pattern = /https?:\/\/[^\s"'`<>\\)]+|(?<=["'`(=:\s])\/\/(?:[\w-]+\.)+[\w-]+[^\s"'`<>\\)]*|\bfetch\s*\(|\b(?:XMLHttpRequest|WebSocket|sendBeacon|EventSource|RTCPeerConnection)\b|\bimportScripts\s*\(|\b(?:google-analytics|googletagmanager|sentry|mixpanel|segment|jsdelivr|unpkg|cdnjs|github\.io|github\.com|githubusercontent|googleapis|gstatic)\b/gi
+const cmdNetwork = /\b(?:Invoke-WebRequest|Invoke-RestMethod|WebClient|HttpClient|DownloadString|DownloadFile|Start-BitsTransfer|curl(?:\.exe)?|wget(?:\.exe)?|bitsadmin(?:\.exe)?|certutil(?:\.exe)?)\b/gi
 function matchesFile(file, glob) {
   const escaped = glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('*', '[^/]*')
   return new RegExp(`^${escaped}$`).test(file)
@@ -22,7 +23,8 @@ export function auditFiles(files, allowlist = [], single = false) {
   for (const file of files) {
     if (!textFile.test(file) || /(?:^|\/)(?:LICENSE|OFL-|THIRD_PARTY_LICENSES)/i.test(file)) continue
     const raw = fs.readFileSync(file, 'utf8'), source = single ? stripEmbeddedBase64(raw) : raw
-    for (const match of source.matchAll(pattern)) {
+    const matches = [...source.matchAll(pattern), ...(file.endsWith('.cmd') ? source.matchAll(cmdNetwork) : [])]
+    for (const match of matches) {
       const finding = { file, string: match[0], line: source.slice(0, match.index).split('\n').length, context: source.slice(Math.max(0, match.index - 65), match.index + match[0].length + 65).replaceAll('\n', ' ') }
       inventory.push(finding)
       const rule = allowlist.find(r => r.reason && r.string === match[0] && matchesFile(file, r.file))
@@ -37,7 +39,8 @@ export function runAudit(args = process.argv.slice(2)) {
   const dist = args.includes('--dist')
   const single = args.includes('--single')
   const fixtures = args.filter(a => a.startsWith('--file=')).map(a => a.slice(7))
-  const files = fixtures.length ? fixtures : single ? walk('dist-single') : dist ? walk('dist-fixed') : [...walk('src'), ...walk('public'), 'index.html', 'vite.config.ts']
+  const launchers = fs.existsSync('scripts/launchers') ? walk('scripts/launchers').filter(file => file.endsWith('.cmd')) : []
+  const files = fixtures.length ? fixtures : single ? [...walk('dist-single'), ...launchers] : dist ? walk('dist-fixed') : [...walk('src'), ...walk('public'), ...launchers, 'index.html', 'vite.config.ts']
   const allowlist = JSON.parse(fs.readFileSync(args.find(a => a.startsWith('--allowlist='))?.slice(12) || 'scripts/audit-allowlist.json', 'utf8'))
   const result = auditFiles(files, allowlist, single)
   for (const item of result.violations) console.error(`${item.file}:${item.line} ${JSON.stringify(item.string)}\n  ${item.context}`)

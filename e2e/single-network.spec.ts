@@ -194,8 +194,17 @@ test('版表示・file:// 印刷タブ・保存先への実書き込み内容を
   const build = JSON.parse(fs.readFileSync(path.join('dist-single', htmlFile), 'utf8').match(/id="single-build-info">([\s\S]*?)<\/script>/)![1])
   for (const text of ['1.0.0-single', build.buildDate, build.gitCommit, 'HTML ファイル1つの版（固定・閉域）', '使用しない（CSP で禁止）', 'ファイルの差し替え']) await expect(page.getByRole('dialog', { name: 'かるPDFについて' })).toContainText(text)
   await page.keyboard.press('Escape')
+  const waitForSaveReady = async () => {
+    // A write completes before recent-file bookkeeping and the saving guard.
+    // Wait for the public UI to accept the next save/print operation.
+    await page.getByRole('button', { name: 'ファイル▼' }).click()
+    await expect(page.getByRole('menuitem', { name: /^上書き保存/ })).toBeEnabled()
+    await page.keyboard.press('Escape')
+  }
   await page.keyboard.press('Control+Shift+s'); await expect.poll(() => page.evaluate(() => (window as unknown as { __singleWrites: number[][] }).__singleWrites.length)).toBe(1)
+  await waitForSaveReady()
   await page.keyboard.press('Control+s'); await expect.poll(() => page.evaluate(() => (window as unknown as { __singleWrites: number[][] }).__singleWrites.length)).toBe(2)
+  await waitForSaveReady()
   const writes = await page.evaluate(() => (window as unknown as { __singleWrites: number[][] }).__singleWrites)
   for (const bytes of writes) {
     const doc = new mupdf.PDFDocument(new Uint8Array(bytes))

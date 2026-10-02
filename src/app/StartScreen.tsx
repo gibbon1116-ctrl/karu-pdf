@@ -1,4 +1,7 @@
 import type { RecentFile } from '../editor/recentStore'
+/* @single:start */
+import { LauncherHint } from '../single/LauncherHint'
+/* @single:end */
 
 interface Props {
   recent: readonly RecentFile[]
@@ -16,6 +19,9 @@ export function StartScreen({ recent, onOpen, onOpenRecent, onRemoveRecent, onHe
         <button type="button" className="start-open" onClick={onOpen}>PDF を開く</button>
         <button type="button" className="start-help-button" onClick={onHelp}>使い方</button>
         <p>ここにファイルをドラッグ＆ドロップ</p>
+        {/* @single:start */}
+        <LauncherHint />
+        {/* @single:end */}
       </div>
       <section className="recent-files" aria-label="最近使ったファイル">
         <h2>最近使ったファイル</h2>
