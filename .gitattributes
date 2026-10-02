@@ -1,0 +1,2 @@
+# Windows のバッチファイルは CRLF でないと goto などが不安定になるため、常に CRLF で扱う
+*.cmd text eol=crlf
