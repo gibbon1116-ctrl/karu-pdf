@@ -30,13 +30,13 @@
     "maxOccurrences": 1
   },
   {
-    "file": "dist-fixed/assets/organizeUtils-*.js",
+    "file": "dist-fixed/assets/annotationCsv-*.js",
     "string": "XMLHttpRequest",
-    "reason": "文字抽出の遅延読込により共有チャンクへ移った MuPDF/Emscripten 標準ローダー。従来の App チャンクと同じ file: 読み取り分岐。固定版では内部 HTTP(S) を使う。",
+    "reason": "引継ぎ画面と一覧で共有するチャンクへ移った既存 MuPDF/Emscripten 標準ローダー。従来の App チャンクと同じ file: 読み取り分岐。固定版では内部 HTTP(S) を使う。",
     "maxOccurrences": 2
   },
   {
-    "file": "dist-fixed/assets/organizeUtils-*.js",
+    "file": "dist-fixed/assets/annotationCsv-*.js",
     "string": "fetch(",
     "reason": "共有チャンクへ移った MuPDF/Emscripten 標準ローダー。同梱 WASM の同一 origin GET だけで、PDF の送信先ではない。配布版の通信試験で確認する。",
     "maxOccurrences": 2
