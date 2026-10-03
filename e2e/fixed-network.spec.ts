@@ -228,5 +228,5 @@ test('版・日付・コミット・配布形態を表示する', async ({ page 
   await page.getByRole('button', { name: 'ヘルプ▼', exact: true }).click()
   await page.getByRole('menuitem', { name: 'このアプリについて', exact: true }).click()
   const about = page.getByRole('dialog', { name: 'かるPDFについて' })
-  for (const text of ['1.0.0-fixed', build.buildDate, build.gitShort, build.gitCommit, '固定・閉域版', '外部通信: 使用しない', '管理者による手動更新']) await expect(about).toContainText(text)
+  for (const text of [build.version, build.buildDate, build.gitShort, build.gitCommit, '固定・閉域版', '外部通信: 使用しない', '管理者による手動更新']) await expect(about).toContainText(text)
 })

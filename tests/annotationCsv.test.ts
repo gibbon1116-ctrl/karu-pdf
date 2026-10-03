@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { EditableAnnotation } from '../src/editor/AnnotationStore'
-import { createAnnotationCsv, createIssueCsv } from '../src/app/annotationCsv'
+import { createAnnotationCsv, createIssueCsv, createChangeCsv } from '../src/app/annotationCsv'
 
 function annotation(values: Partial<EditableAnnotation> = {}): EditableAnnotation {
   return {
@@ -13,6 +13,14 @@ function annotation(values: Partial<EditableAnnotation> = {}): EditableAnnotatio
 }
 
 describe('書き込み一覧 CSV', () => {
+  it('指摘と変更のCSVを区別し、変更理由と関連IDを出力する', () => {
+    const issue=annotation({kind:'issue',text:'電源を確認',issue:{number:1,status:'open',id:'issue-1'}})
+    const change=annotation({kind:'issue',text:'位置を変更',issue:{number:2,status:'revised',id:'change-2',recordKind:'change',changeReason:'=設備干渉',relatedIssueId:'issue-1'}})
+    expect(createIssueCsv([issue,change])).toContain('電源を確認')
+    expect(createIssueCsv([issue,change])).not.toContain('位置を変更')
+    expect(createChangeCsv([issue,change])).toContain("位置を変更,'=設備干渉,issue-1,修正済")
+    expect(createChangeCsv([issue,change])).not.toContain('電源を確認')
+  })
   it.each(['=1+1', '+SUM(1)', '-1+1', '@SUM(1)', '  =1+1', '\t=1+1', '\r=1+1', '\n=1+1', '＝1+1'])('文字列 %j を数式ではなく文字として出力する', text => {
     const item = annotation({ text })
     expect(createAnnotationCsv([item])).toContain("'" + text.replace(/\r?\n/g, '\r\n'))

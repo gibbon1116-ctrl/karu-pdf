@@ -61,6 +61,21 @@ test('種類別カウントをクリックし、取消・種類変更・保存�
   expect(await page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter(a => a.count).length)).toBe(2)
 })
 
+test('変更箇所と理由・関連指摘を記録し、PDF保存と再読込で維持する', async ({ page }) => {
+  await open(page); await page.keyboard.press('n')
+  await expect(page.getByRole('button',{name:'指摘',exact:true})).toHaveAttribute('aria-pressed','true')
+  await place(page,100,200,'回路の指摘');await page.keyboard.press('Escape')
+  const relatedId=await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).find(a=>a.issue)!.issue!.id!)
+  await choose(page,'文字','変更記録');await expect(page.getByRole('button',{name:'変更記録',exact:true})).toHaveAttribute('aria-pressed','true')
+  await place(page,160,250,'回路名称を変更');await page.keyboard.press('Escape')
+  await page.getByRole('tab',{name:'書き込み',exact:true}).click();await page.getByLabel('書き込みの種類').selectOption('change')
+  await page.getByRole('button',{name:'変更 2 の詳細',exact:true}).click()
+  await page.getByLabel('変更理由',{exact:true}).fill('機器変更に伴う修正');await page.getByLabel('関連指摘を選ぶ').selectOption(relatedId)
+  await page.getByLabel('指摘 2 の状態',{exact:true}).selectOption('revised')
+  await reopen(page)
+  expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).find(a=>a.issue?.recordKind==='change'))).toMatchObject({text:'回路名称を変更',issue:{recordKind:'change',changeReason:'機器変更に伴う修正',relatedIssueId:relatedId,status:'revised'}})
+})
+
 test('雲四角をドラッグして8ハンドルで編集し、保存後にも雲の属性と座標が戻る',async({page})=>{
   await open(page);await choose(page,'図形','雲（四角）')
   const start=await point(page,100,220),end=await point(page,240,304)

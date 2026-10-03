@@ -43,6 +43,21 @@ export function compositeCompare(old: ComparePixels, next: ComparePixels, thresh
   return { width: old.width, height: old.height, rgba }
 }
 
+export function blendCompare(old: ComparePixels, next: ComparePixels, opacity = .5): ComparePixels {
+  checkSizes(old, next)
+  if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) throw new Error('透過率が不正です。')
+  const rgba = new Uint8ClampedArray(old.rgba.length)
+  for (let i = 0; i < rgba.length; i += 4) {
+    for (let k = 0; k < 3; k++) {
+      const a = old.rgba[i+k]*old.rgba[i+3]/255+255-old.rgba[i+3]
+      const b = next.rgba[i+k]*next.rgba[i+3]/255+255-next.rgba[i+3]
+      rgba[i+k] = a*(1-opacity)+b*opacity
+    }
+    rgba[i+3] = 255
+  }
+  return { width: old.width, height: old.height, rgba }
+}
+
 /** Remove isolated dots, dilate by 2px, then find 8-connected components.
  * Boxes enclose the ORIGINAL differing pixels, not the expanded mask. */
 export function detectDifferences(input: Uint8Array, width: number, height: number, scale = 1): CompareRect[] {

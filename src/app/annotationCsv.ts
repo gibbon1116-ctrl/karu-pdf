@@ -71,7 +71,7 @@ export function annotationCsvFileName(pdfName: string): string {
 
 export const ISSUE_CSV_HEADER = ['番号', 'ページ', '指摘の内容', '状態', '回答', '位置（x, y mm）', '分野', '修正確認', '図面番号', '指摘ID', '引継ぎ元ID', '引継ぎ元文書']
 export function createIssueCsv(annotations: readonly EditableAnnotation[]): string {
-  const rows = annotations.filter(a => a.issue).sort((a, b) => a.issue!.number - b.issue!.number).map(a => [
+  const rows = annotations.filter(a => a.issue && a.issue.recordKind !== 'change').sort((a, b) => a.issue!.number - b.issue!.number).map(a => [
     a.issue!.number, a.pageIndex + 1, a.text, issueStatusLabel(a.issue!.status), a.issue!.answer ?? '',
     `${decimal(a.rect[0])}, ${decimal(a.rect[1])}`,
     a.issue!.discipline ?? '', a.issue!.verification ?? '', a.issue!.drawingNumber ?? '', a.issue!.id ?? '', a.issue!.sourceId ?? '', a.issue!.sourceDocument ?? '',
@@ -82,4 +82,11 @@ export function issueCsvFileName(pdfName: string): string { return pdfName.repla
 
 export function createCountCsv(annotations: readonly EditableAnnotation[]): string {
   return '\uFEFF' + [['種類', 'ページ', '個数'], ...countSummary(annotations).map(a => [a.group, a.pageIndex + 1, a.total])].map(row => row.map(quote).join(',')).join('\r\n') + '\r\n'
+}
+
+export function createChangeCsv(annotations: readonly EditableAnnotation[]): string {
+  const rows = annotations.filter(a => a.issue?.recordKind === 'change').sort((a,b) => a.issue!.number-b.issue!.number).map(a => [
+    a.issue!.number, a.pageIndex+1, a.text, a.issue!.changeReason ?? '', a.issue!.relatedIssueId ?? '', issueStatusLabel(a.issue!.status), a.issue!.drawingNumber ?? '', a.issue!.id ?? '', `${decimal(a.rect[0])}, ${decimal(a.rect[1])}`,
+  ])
+  return '\uFEFF' + [['番号', 'ページ', '変更内容', '変更理由', '関連指摘ID', '状態', '図面番号', '変更ID', '位置（x, y mm）'], ...rows].map(row => row.map(quote).join(',')).join('\r\n') + '\r\n'
 }

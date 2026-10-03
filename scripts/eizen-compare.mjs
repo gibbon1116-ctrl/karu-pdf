@@ -83,7 +83,7 @@ const quality = files.map(file => {
 const output = {
   timestamp: new Date().toISOString(), inputs: { before: before.map(record => record.path), after: after.map(record => record.path), network: network.map(record => record.path) },
   comparisons, quality,
-  decision: comparisons.some(row => row.gated && row.status !== '中央値5%以内') ? '次の機能へ進む前に要調査' : '中央値比較5%以内。回収前ヒープ・白抜け・ばらつき・メモリ解放・未測定項目を別途確認',
+  decision: '測定値を記録。2026-10-04の利用者指示により数十ms程度の差の採否は操作確認で判断する。5%超過だけで次工程を止めない。大きな遅延・メモリ増加・白抜け・未測定項目は別途確認。',
   limitations: ['フレームp95は各試行のp95の中央値。', 'OSキャッシュと他アプリは制御していない。', '定点メモリはピークではない。', '保存先の上書きI/Oは未測定。ダウンロード完了時間は自動化の遅延を含むため5%判定に用いていない。'],
 }
 await fs.mkdir(path.dirname(outputPath), { recursive: true })

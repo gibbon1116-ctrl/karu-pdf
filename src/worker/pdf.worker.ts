@@ -526,8 +526,9 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
 
     if (request.type === 'prepareOutput') {
       await loadFontsForEdits(request.edits)
+      if (request.correction) await getFontResource('BIZUDGothic')
       const source = saveDocument(document, 'incremental').bytes
-      const output = prepareDocumentOutput(source, request.edits, fontResources, request.bake, request.safe)
+      const output = prepareDocumentOutput(source, request.edits, fontResources, request.bake, request.safe, request.correction)
       const bytes = output.bytes.buffer as ArrayBuffer
       post({
         type: 'outputPrepared', requestId: request.requestId, bytes,

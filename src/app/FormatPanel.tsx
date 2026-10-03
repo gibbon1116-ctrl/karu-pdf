@@ -70,6 +70,7 @@ function formatTool(kind: Kind | EditorTool): FormatTool | null {
 
 function formatToolLabel(tool: FormatTool): string {
   const labels: Record<FormatTool, string> = {
+    change: '変更記録',
     count: '個数カウント', cloudSquare: '雲（四角）', cloudPolygon: '雲（多角形）', issue: '指摘', distance: '距離', perimeter: '連続した長さ', area: '面積', text: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角', circle: '丸',
     highlight: '蛍光ペン', ink: '手書き', symbol: '記号', textHighlight: '文字ハイライト',
     underline: '文字に下線', strikeout: '文字に取り消し線',
@@ -84,14 +85,14 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     getActiveTextEditorSnapshot,
   )
   const activeSelection = selected
-  const target = activeSelection?.count ? 'count' : formatTool(activeSelection?.kind ?? (tool === 'select' ? 'text' : tool))
+  const target = activeSelection?.count ? 'count' : activeSelection?.issue?.recordKind === 'change' ? 'change' : formatTool(activeSelection?.kind ?? (tool === 'select' ? 'text' : tool))
   const values: EditableAnnotation | ToolFormat | null = activeSelection ?? (target ? defaults[target] : null)
   const textTarget = target === 'text' || target === 'callout'
   const cloudTarget = target === 'cloudSquare' || target === 'cloudPolygon'
   const shapeTarget = target === 'square' || target === 'circle' || cloudTarget
   const measureTarget = target === 'distance' || target === 'perimeter' || target === 'area'
   const simpleColorTarget = cloudTarget || target === 'count' || target === 'issue' || measureTarget || target === 'line' || target === 'arrow' || target === 'highlight' || target === 'ink' || target === 'textHighlight' || target === 'underline' || target === 'strikeout' || target === 'symbol'
-  const opacityTarget = !cloudTarget && target !== 'issue' && simpleColorTarget && target !== 'underline' && target !== 'strikeout'
+  const opacityTarget = !cloudTarget && target !== 'issue' && target !== 'change' && simpleColorTarget && target !== 'underline' && target !== 'strikeout'
 
   const changeDefault = (changes: Partial<ToolFormat>) => {
     if (target) onDefaultsChange(updateToolFormat(defaults, target, changes))
@@ -190,7 +191,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
       if (activeSelection) store.update(activeSelection.id, { countGroup: group })
       else changeDefault({ countGroup: group })
     }} /></label>}
-    {target === 'issue' && values && <>
+    {(target === 'issue' || target === 'change') && values && <>
       <label>大きさ<select aria-label="指摘の大きさ" value={activeSelection ? Math.round(activeSelection.rect[2] - activeSelection.rect[0]) : (values as ToolFormat).symbolSize} onChange={event => changeSymbolSize(Number(event.currentTarget.value))}>
         <option value="12">小（12 pt）</option><option value="16">中（16 pt）</option><option value="24">大（24 pt）</option>
       </select></label>

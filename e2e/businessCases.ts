@@ -48,7 +48,7 @@ async function firstPage(page: Page) {
 }
 async function square(page: Page) {
   await page.getByRole('button', { name: '図形▼', exact: true }).click()
-  await page.getByRole('menuitemcheckbox', { name: /^四角 / }).click()
+  await page.getByRole('menuitemcheckbox', { name: '四角', exact: true }).click()
   const start = await point(page, 15, 25), end = await point(page, 160, 75)
   await page.mouse.move(start.x, start.y); await page.mouse.down(); await page.mouse.move(end.x, end.y, { steps: 4 }); await page.mouse.up()
   await page.getByRole('button', { name: '選択', exact: true }).click()
@@ -107,7 +107,7 @@ export function businessCases(url: string) {
       await page.getByRole('button', { name: '選択', exact: true }).click()
       await page.keyboard.press('Escape')
       await page.getByRole('button', { name: kind === 'arrow' ? '図形▼' : 'ペン▼', exact: true }).click()
-      await page.getByRole('menuitemcheckbox', { name: new RegExp(`^(?:✓ )?${name} `) }).click()
+      await page.getByRole('menuitemcheckbox', { name, exact: true }).click()
       if (kind === 'arrow') await page.getByLabel('矢印先端の大きさ').selectOption('24')
       const start = await point(page, 80, y), end = await point(page, 180, y + 27)
       await page.keyboard.down('Shift'); await page.mouse.move(start.x, start.y); await page.mouse.down(); await page.mouse.move(end.x, end.y, { steps: 4 }); await page.mouse.up(); await page.keyboard.up('Shift')
@@ -117,7 +117,7 @@ export function businessCases(url: string) {
     }
     await page.getByRole('button', { name: '選択', exact: true }).click(); await page.keyboard.press('Escape')
     await page.getByRole('button', { name: '文字▼', exact: true }).click()
-    await page.getByRole('menuitemcheckbox', { name: /^吹き出し / }).click()
+    await page.getByRole('menuitemcheckbox', { name: '吹き出し', exact: true }).click()
     await page.getByLabel('矢印先端の大きさ').selectOption('16')
     const tip = await point(page, 70, 340), box = await point(page, 160, 360)
     await page.mouse.move(tip.x, tip.y); await page.mouse.down(); await page.mouse.move(box.x, box.y, { steps: 4 }); await page.mouse.up()

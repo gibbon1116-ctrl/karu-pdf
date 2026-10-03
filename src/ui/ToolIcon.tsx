@@ -15,6 +15,7 @@ const common = {
 export function ToolIcon({ tool, className = '' }: Props) {
   const content = (() => {
     switch (tool) {
+      case 'change':
       case 'issue': return <><circle {...common} cx="8" cy="8" r="6" /><text x="8" y="11" textAnchor="middle" fontSize="9" fill="currentColor">1</text></>
       case 'cloudSquare':
       case 'cloudPolygon': return <path {...common} d="M3 4Q1 1 5 3Q8 0 10 3Q15 1 13 5Q17 8 13 10Q15 15 10 13Q7 17 5 13Q0 15 3 10Q0 7 3 4Z" />

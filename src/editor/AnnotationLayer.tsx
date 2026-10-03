@@ -194,9 +194,9 @@ export function AnnotationLayer(props: Props) {
   const compactCounts = annotations.filter(a => a.count && a.symbol === 'circle').length > 500
   const countPaths = new Map<string, { d: string; stroke: string; opacity: number }>()
   if (compactCounts) for (const a of annotations) {
-    if (!a.count || a.symbol !== 'circle' || selectedIds.has(a.id) || a.objNum !== null && !touched.has(a.objNum)) continue
+    if (!a.count || a.symbol !== 'circle' || singleSelection && selectedIds.has(a.id) || a.objNum !== null && !touched.has(a.objNum) && !selectedIds.has(a.id)) continue
     const [x0, y0, x1, y1] = a.rect, r = (x1 - x0) * .35, x = (x0 + x1) / 2, y = (y0 + y1) / 2
-    const stroke = color(a.color), key = `${stroke}:${a.opacity}`
+    const stroke = selectedIds.has(a.id) ? '#006cff' : color(a.color), key = `${stroke}:${a.opacity}`
     const group = countPaths.get(key) ?? { d: '', stroke, opacity: a.opacity }
     group.d += `M${x-r},${y}a${r},${r} 0 1,0 ${r*2},0a${r},${r} 0 1,0 ${-r*2},0 `
     countPaths.set(key, group)
@@ -696,7 +696,7 @@ export function AnnotationLayer(props: Props) {
   }, [props.tool, textQueue])
 
   const renderAnnotation = (annotation: EditableAnnotation) => {
-    if (compactCounts && annotation.count && annotation.symbol === 'circle' && !selectedIds.has(annotation.id)) return null
+    if (compactCounts && annotation.count && annotation.symbol === 'circle' && !(singleSelection && selectedIds.has(annotation.id))) return null
     const visible = annotation.objNum === null || touched.has(annotation.objNum)
     const [x0, y0, x1, y1] = annotation.rect
     const handleSize = 8 / Math.max(0.01, props.zoom * CSS_PX_PER_PT)
@@ -815,11 +815,13 @@ export function AnnotationLayer(props: Props) {
             return
           }
         }
-        if (props.tool === 'issue') {
+        if (props.tool === 'issue' || props.tool === 'change') {
+          const creationTool = props.tool
           void props.store.issueNumbers.initialize(() => props.pool.maxIssueNumber(props.docId)).then(() => {
-            if (toolRef.current !== 'issue') return
-            const f = props.formatDefaults.issue
-            const annotation = props.store.create({ pageIndex: props.pageIndex, kind: 'issue', rect: symbolRectFromDrag(start, start, false, f.symbolSize), color: f.color })
+            if (toolRef.current !== creationTool) return
+            const f = props.formatDefaults[creationTool]
+            const annotation = props.store.create({ pageIndex: props.pageIndex, kind: 'issue', rect: symbolRectFromDrag(start, start, false, f.symbolSize), color: f.color,
+              issue: props.tool === 'change' ? { number: props.store.issueNumbers.next(), status: 'open', version: 1, id: crypto.randomUUID(), recordKind: 'change' } : null })
             props.store.selectOnly(annotation.id); props.onSelect(annotation.id); props.onEdit(annotation.id)
           }).catch(reason => props.onStatus(`指摘を作れませんでした: ${String(reason)}`))
           return
@@ -970,6 +972,10 @@ export function AnnotationLayer(props: Props) {
       top: `${Math.max(0, Math.min(100, (selectionBounds(textSelection.quads)![1] / props.pageSize.height) * 100))}%`,
     }}>
       <button type="button" onClick={copySelectedText}>コピー</button>
+      <button type="button" onClick={() => {
+        const rect = selectionBounds(textSelection.quads)
+        if (rect) document.dispatchEvent(new CustomEvent('karu-pdf:text-correction', { detail: { docId: props.docId, pageIndex: props.pageIndex, rect, originalText: textSelection.text } }))
+      }}>文字を修正…</button>
       <button type="button" onClick={() => createMarkup('textHighlight')}><ToolIcon tool="textHighlight" />ハイライト</button>
       <button type="button" onClick={() => createMarkup('underline')}><ToolIcon tool="underline" />下線</button>
       <button type="button" onClick={() => createMarkup('strikeout')}><ToolIcon tool="strikeout" />取り消し線</button>

@@ -18,6 +18,14 @@ function rgb(image: { width: number; rgba: Uint8ClampedArray }, x: number, y: nu
   return [...image.rgba.slice(i, i + 3)]
 }
 describe('実際のMuPDF描画による比較', () => {
+  it('transparency uses real page pixels and similarity alignment retains zero-difference geometry', async () => {
+    const old = makeComparePdf(), next = makeComparePdf({ shift: 20, width: 800, height: 800 })
+    const aligned = await compare(old, next, { offset: [-20,0], alignment: { scale: 1, rotation: 0 }, detect: true })
+    expect(aligned.differences).toEqual([])
+    const oldOnly = await compare(old, makeComparePdf({ revised: true }), { overlayMode: 'blend', blend: 0 })
+    const newOnly = await compare(old, makeComparePdf({ revised: true }), { overlayMode: 'blend', blend: 1 })
+    expect(rgb(oldOnly, 201, 90)).toEqual([0,0,0]); expect(rgb(newOnly, 201, 90)).toEqual([255,255,255])
+  })
   it('同じ文書・ページの再描画と検出は同じDisplayListを再利用し、画素は灰で差分ゼロになる', async () => {
     const document = new mupdf.PDFDocument(makeComparePdf()), cache = new ComparePageCache(document)
     try {

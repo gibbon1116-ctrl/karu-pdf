@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { makeComparePdf } from '../tests/compareFixtures'
 
-async function openComparison(page: Page, shift = 0) {
+async function openComparison(page: Page, shift = 0, seedIssue = false) {
   await page.addInitScript(() => {
     const target = window as Window & { __compareJobs?: Array<{ oldPage: number; newPage: number; worker: number }> }
     target.__compareJobs = []
@@ -20,6 +20,14 @@ async function openComparison(page: Page, shift = 0) {
   await page.waitForFunction(() => Boolean(window.__karu))
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, 'old.pdf'), [...makeComparePdf({ count: 3 })])
   const oldId = await page.evaluate(() => window.__karu!.listTabs()[0].docId)
+  if (seedIssue) {
+    const layer = page.getByTestId('annotation-layer-0'); await expect(layer).toBeVisible()
+    await page.keyboard.press('n')
+    await expect(page.getByRole('button', { name: '指摘', exact: true })).toHaveAttribute('aria-pressed','true')
+    const point = await layer.evaluate(el => { const b = el.getBoundingClientRect(); return { x: b.left+b.width*.4, y: b.top+b.height*.4 } })
+    await page.mouse.click(point.x,point.y)
+    await page.getByTestId('issue-editor').fill('回路名称を確認'); await page.getByTestId('issue-editor').press('Control+Enter'); await page.keyboard.press('Escape')
+  }
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, 'new.pdf'), [...makeComparePdf({ revised: true, shift, count: 4, annotation: true })])
   await page.evaluate(id => window.__karu!.activateTab(id), oldId)
   await page.getByRole('button', { name: '表示▼', exact: true }).click()
@@ -30,6 +38,58 @@ async function openComparison(page: Page, shift = 0) {
   await expect(page.getByTestId('compare-old').locator('.page-view')).toHaveAttribute('data-sharp', 'true')
   await expect(page.getByTestId('compare-view')).toHaveAttribute('data-detection-ms', /\d/)
 }
+
+test('透過を切り替え、2組の基準点で図面のずれを補正し、ページ対応を呼び戻す', async ({ page }) => {
+  test.setTimeout(60000)
+  await openComparison(page, 20)
+  await page.getByLabel('重ね合わせの表示').selectOption('blend')
+  await page.getByLabel('新版の濃さ').fill('0.25')
+  await expect(page.getByLabel('新版の濃さ')).toHaveValue('0.25')
+  await page.getByText('位置合わせ・ページ対応・指摘引継ぎ', { exact: true }).click()
+  await page.getByRole('button', { name: '2点で位置合わせ', exact: true }).click()
+  await expect(page.getByTestId('compare-new').locator('.page-view')).toHaveAttribute('data-has-bitmap','true')
+  await expect.poll(() => page.getByTestId('compare-old').evaluate(el => el.querySelector('.page-view')!.getBoundingClientRect().width-el.getBoundingClientRect().width)).toBeLessThan(1)
+  const anchor = async (pane: string,x: number,y: number) => {
+    const p = await page.getByTestId(pane).locator('.page-view').evaluate((el, v) => { const b=el.getBoundingClientRect(), x=b.left+b.width*v.x/400,y=b.top+b.height*v.y/400; return { x,y,hit:document.elementFromPoint(x,y)?.closest('.compare-pane')?.getAttribute('data-testid'), box:[b.left,b.top,b.width,b.height] } }, {x,y})
+    expect(p.hit, JSON.stringify(p)).toBe(pane)
+    await page.mouse.click(p.x,p.y)
+  }
+  await anchor('compare-old',80,80); await anchor('compare-new',100,80)
+  await anchor('compare-old',200,180); await anchor('compare-new',220,180)
+  await expect.poll(() => page.getByTestId('compare-view').getAttribute('data-offset-x').then(Number)).toBeCloseTo(-20,2)
+  await expect.poll(() => page.getByTestId('compare-view').getAttribute('data-alignment-scale').then(Number)).toBeCloseTo(1,3)
+  await page.getByText('位置合わせ・ページ対応・指摘引継ぎ', { exact: true }).click()
+  await page.getByLabel('比較の図面番号').fill('E-01')
+  await page.getByRole('button', { name: 'このページ対応を記録' }).click()
+  await page.screenshot({path:'work/review-comparison.png'})
+  await page.getByRole('button', { name: '次の組 ›', exact: true }).click()
+  await page.getByLabel('記録したページ対応').selectOption('0')
+  await expect(page.getByLabel('比較の旧ページ番号')).toHaveValue('1')
+  await expect(page.getByLabel('比較の図面番号')).toHaveValue('E-01')
+})
+
+test('前回指摘は候補を確認してから追加し、再実行で重複せず新版のPDFに保存できる', async ({ page }) => {
+  test.setTimeout(60000)
+  await openComparison(page, 0, true)
+  await page.getByText('位置合わせ・ページ対応・指摘引継ぎ', { exact: true }).click()
+  await page.getByLabel('比較の新ページ番号').fill('2')
+  await page.getByLabel('比較の図面番号').fill('E-01')
+  await page.getByRole('button', { name: 'この図面の指摘を引き継ぐ' }).click()
+  const dialog = page.getByRole('dialog', { name: '前回指摘の引継ぎ' })
+  await dialog.getByRole('button', { name: '全候補を選択' }).click()
+  await expect(dialog.getByRole('button', { name: '選択した指摘を新版に追加' })).toBeDisabled()
+  await dialog.getByLabel('図面番号・ページ対応・候補位置を確認しました').check()
+  await dialog.getByRole('button', { name: '選択した指摘を新版に追加' }).click()
+  await page.getByRole('button', { name: 'この図面の指摘を引き継ぐ' }).click()
+  await expect(dialog).toContainText('引継ぎ済')
+  await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
+  await page.getByRole('button', { name: '終わる', exact: true }).click()
+  await page.evaluate(async () => { const id=window.__karu!.listTabs().find(t=>t.name==='new.pdf')!.docId; await window.__karu!.activateTab(id); const b=await window.__karu!.saveToBytes(); if(!b)throw Error('保存失敗'); await window.__karu!.openBytes(b,'引継ぎ済.pdf') })
+  await page.getByRole('tab', { name: '書き込み', exact: true }).click()
+  await expect(page.locator('.annotation-type-icon')).toContainText(['1'])
+  const issue = await page.evaluate(() => window.__karu!.getEditableAnnotations(1).find(a=>a.issue))
+  expect(issue).toMatchObject({ text: '回路名称を確認', issue: { sourceDocument: 'old.pdf', drawingNumber: 'E-01', status: 'open' } })
+})
 async function raster(page: Page, pane = 'compare-old') {
   return page.getByTestId(pane).locator('.preview-canvas').evaluate(el => {
     const c = el as HTMLCanvasElement

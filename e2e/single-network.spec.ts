@@ -192,7 +192,7 @@ test('版表示・file:// 印刷タブ・保存先への実書き込み内容を
   await expect(page.locator('.status-bar')).toContainText('固定・閉域版（HTML）')
   await page.getByRole('button', { name: 'ヘルプ▼' }).click(); await page.getByRole('menuitem', { name: 'このアプリについて', exact: true }).click()
   const build = JSON.parse(fs.readFileSync(path.join('dist-single', htmlFile), 'utf8').match(/id="single-build-info">([\s\S]*?)<\/script>/)![1])
-  for (const text of ['1.0.0-single', build.buildDate, build.gitCommit, 'HTML ファイル1つの版（固定・閉域）', '使用しない（CSP で禁止）', 'ファイルの差し替え']) await expect(page.getByRole('dialog', { name: 'かるPDFについて' })).toContainText(text)
+  for (const text of [build.version, build.buildDate, build.gitCommit, 'HTML ファイル1つの版（固定・閉域）', '使用しない（CSP で禁止）', 'ファイルの差し替え']) await expect(page.getByRole('dialog', { name: 'かるPDFについて' })).toContainText(text)
   await page.keyboard.press('Escape')
   const waitForSaveReady = async () => {
     // A write completes before recent-file bookkeeping and the saving guard.

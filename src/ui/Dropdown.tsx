@@ -176,6 +176,8 @@ export function Dropdown({ label, items, disabled, className = '', buttonClassNa
             key={`${item.label}-${index}`}
             type="button"
             role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+            aria-label={item.label}
+            aria-describedby={item.description ? `${id}-${index}-description` : undefined}
             aria-checked={item.checked === undefined ? undefined : item.checked}
             disabled={item.disabled}
             onClick={() => { close(); item.onSelect() }}
@@ -184,7 +186,7 @@ export function Dropdown({ label, items, disabled, className = '', buttonClassNa
             <span className="dropdown-icon">{item.icon}</span>
             <span className="dropdown-item-text">
               <span className="dropdown-label">{item.label}</span>
-              {item.description && <span className="dropdown-description">{item.description}</span>}
+              {item.description && <span id={`${id}-${index}-description`} className="dropdown-description">{item.description}</span>}
             </span>
             {item.shortcut && <kbd>{item.shortcut}</kbd>}
           </button>)}

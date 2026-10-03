@@ -45,6 +45,9 @@ export interface RenderRequest {
 }
 
 export interface CompareOptions {
+  overlayMode?: 'changes' | 'blend'
+  blend?: number
+  alignment?: import('../core/registration').Alignment
   detection?: import('../core/compare').CompareDetection
   tolerance?: number
   docId: string
@@ -181,6 +184,7 @@ export interface ApplyEditsRequest {
 }
 
 export interface PrepareOutputRequest {
+  correction?: import('../core/textCorrection').TextCorrection
   safe?: import('../core/safeOutput').SafeOutputOptions
   type: 'prepareOutput'
   requestId: number

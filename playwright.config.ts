@@ -17,6 +17,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   use: {
+    actionTimeout: 30_000,
     baseURL: 'http://127.0.0.1:4173',
     channel: process.env.PLAYWRIGHT_CHANNEL === 'chromium' ? undefined : 'msedge',
     headless: true,

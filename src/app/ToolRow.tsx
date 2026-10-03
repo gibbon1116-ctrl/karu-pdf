@@ -11,6 +11,7 @@ export const DEFAULT_LAST_TOOLS: LastSplitTools = { text: 'text', shape: 'line',
 
 const groups: Record<SplitToolGroup, Array<{ tool: EditorTool; label: string; description: string; shortcut: string }>> = {
   text: [
+    { tool: 'change', label: '変更記録', description: '変更箇所と内容・理由・関連指摘を記録する', shortcut: '' },
     { tool: 'issue', label: '指摘', description: '番号を付けて、指摘の内容を書く', shortcut: 'N' },
     { tool: 'text', label: '文字', description: '文字を入力する', shortcut: 'T' },
     { tool: 'callout', label: '吹き出し', description: '指す位置から文字枠を引き出す', shortcut: 'C' },

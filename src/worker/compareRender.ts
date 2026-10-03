@@ -1,5 +1,5 @@
 import mupdf, { type Document, type DisplayList, type Rect } from 'mupdf'
-import { compositeCompare, detectDifferences, differenceMask, type ComparePixels, type CompareRect } from '../core/compare'
+import { blendCompare, compositeCompare, detectDifferences, differenceMask, type ComparePixels, type CompareRect } from '../core/compare'
 import { makeRenderBands } from '../viewer/bandedRender'
 import type { CompareOptions } from './protocol'
 
@@ -23,13 +23,14 @@ export class ComparePageCache {
   destroy() { for (const list of this.lists.values()) list.destroy(); this.lists.clear() }
 }
 
-function draw(list: DisplayList, rect: Rect, scale: number, dx = 0, dy = 0): ComparePixels {
+function draw(list: DisplayList, rect: Rect, scale: number, dx = 0, dy = 0, rotation = 0): ComparePixels {
   const bounds = list.getBounds()
   const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, rect, true)
   const device = new mupdf.DrawDevice(mupdf.Matrix.identity, pixmap)
   try {
     pixmap.clear(255)
-    list.run(device, [scale, 0, 0, scale, dx - bounds[0] * scale, dy - bounds[1] * scale])
+    const c = Math.cos(rotation)*scale, s = Math.sin(rotation)*scale
+    list.run(device, [c, s, -s, c, dx-bounds[0]*c+bounds[1]*s, dy-bounds[0]*s-bounds[1]*c])
     device.close()
     return { width: pixmap.getWidth(), height: pixmap.getHeight(), rgba: new Uint8ClampedArray(pixmap.getPixels()) }
   } finally { device.destroy(); pixmap.destroy() }
@@ -47,8 +48,10 @@ export async function renderComparePixels(oldCache: ComparePageCache, newCache: 
   const scale = options.detect ? Math.min(1, 2000 / Math.max(width, height)) : options.renderScale
   const rect: Rect = options.detect ? [0, 0, Math.ceil(width * scale), Math.ceil(height * scale)]
     : options.deviceRect ?? [0, 0, Math.ceil(width * scale), Math.ceil(height * scale)]
-  const ratio = width / (newBounds[2] - newBounds[0])
-  const identical = oldList === newList && ratio === 1 && options.offset[0] === 0 && options.offset[1] === 0
+  const alignment = options.alignment ?? { scale: 1, rotation: 0 }
+  if (!Number.isFinite(alignment.scale) || alignment.scale < .01 || alignment.scale > 100 || !Number.isFinite(alignment.rotation) || options.offset.some(n => !Number.isFinite(n) || Math.abs(n) > 1e7)) throw new Error('位置合わせが不正です。')
+  const ratio = width / (newBounds[2] - newBounds[0])*alignment.scale
+  const identical = oldList === newList && ratio === 1 && alignment.rotation === 0 && options.offset[0] === 0 && options.offset[1] === 0
   const bands = makeRenderBands('compare', rect)
   const result: ComparedPixels = { width: rect[2] - rect[0], height: rect[3] - rect[1], rgba: new Uint8ClampedArray((rect[2] - rect[0]) * (rect[3] - rect[1]) * 4) }
   const mask = options.detect ? new Uint8Array(result.width * result.height) : null
@@ -56,8 +59,8 @@ export async function renderComparePixels(oldCache: ComparePageCache, newCache: 
     await checkpoint()
     const a = options.output === 'new' && !mask ? null : draw(oldList, band.rect, scale)
     await checkpoint()
-    const b = options.output === 'old' && !mask ? null : identical && a ? a : draw(newList, band.rect, scale * ratio, options.offset[0] * scale, options.offset[1] * scale)
-    const image = options.output === 'old' ? a! : options.output === 'new' ? b! : compositeCompare(a!, b!, undefined, options.detection, options.tolerance)
+    const b = options.output === 'old' && !mask ? null : identical && a ? a : draw(newList, band.rect, scale * ratio, options.offset[0] * scale, options.offset[1] * scale, alignment.rotation)
+    const image = options.output === 'old' ? a! : options.output === 'new' ? b! : options.overlayMode === 'blend' ? blendCompare(a!, b!, options.blend) : compositeCompare(a!, b!, undefined, options.detection, options.tolerance)
     result.rgba.set(image.rgba, (band.rect[1] - rect[1]) * result.width * 4)
     if (mask && !identical) mask.set(differenceMask(a!, b!, undefined, options.detection, options.tolerance), (band.rect[1] - rect[1]) * result.width)
   }

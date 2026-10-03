@@ -18,8 +18,8 @@ PDF の本体はブラウザの中だけで処理し、最近使ったファイ�
 新しい版は配布物を一式差し替え、2. をもう一度行います。自動更新はありません。
 
 受け取った HTML の SHA-256 を PowerShell で確認してください。
-  Get-FileHash -LiteralPath .\karu-pdf-v1.0.0.html -Algorithm SHA256
-結果を、信頼できる経路で受け取った karu-pdf-v1.0.0.html.sha256 の値と比較します。
+  Get-FileHash -LiteralPath .\karu-pdf-v1.1.0.html -Algorithm SHA256
+結果を、信頼できる経路で受け取った karu-pdf-v1.1.0.html.sha256 の値と比較します。
 ZIP 全体も同じ方法で .zip.sha256 と比較してください。
 ハッシュの一致だけでは配布者の真正性は証明できません。
 

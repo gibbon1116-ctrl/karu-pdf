@@ -562,9 +562,9 @@ export class PdfWorkerPool {
     }
   }
 
-  async prepareOutput(docId: string, edits: AnnotationEdit[], bake: boolean, safe?: import('../core/safeOutput').SafeOutputOptions): Promise<PreparedOutputResult> {
+  async prepareOutput(docId: string, edits: AnnotationEdit[], bake: boolean, safe?: import('../core/safeOutput').SafeOutputOptions, correction?: import('../core/textCorrection').TextCorrection): Promise<PreparedOutputResult> {
     const response = await this.request<OutputPreparedResponse>(this.slots[0], (requestId) => ({
-      type: 'prepareOutput', requestId, docId, edits, bake, safe,
+      type: 'prepareOutput', requestId, docId, edits, bake, safe, correction,
     }))
     return {
       bytes: new Uint8Array(response.bytes),

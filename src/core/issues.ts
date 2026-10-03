@@ -6,17 +6,19 @@ export interface Issue {
   number: number; status: typeof ISSUE_STATUSES[number]
   version?: 1; id?: string; discipline?: string; answer?: string; verification?: string; drawingNumber?: string
   sourceId?: string; sourceDocument?: string
+  recordKind?: 'issue' | 'change'; changeReason?: string; relatedIssueId?: string
 }
 export function parseIssue(json: string | null): Issue | null {
   try {
-    if (!json || json.length > 24000) return null
+    if (!json || json.length > 64000) return null
     const value = JSON.parse(json) as Issue
     if (!value || !Number.isSafeInteger(value.number) || value.number <= 0 || !ISSUE_STATUSES.includes(value.status)) return null
     const result: Issue = { number: value.number, status: value.status }
     if (value.version !== undefined) { if (value.version !== 1) return null; result.version = 1 }
-    for (const key of ['id', 'discipline', 'answer', 'verification', 'drawingNumber', 'sourceId', 'sourceDocument'] as const) {
+    if (value.recordKind !== undefined) { if (value.recordKind !== 'issue' && value.recordKind !== 'change') return null; result.recordKind = value.recordKind }
+    for (const key of ['id', 'discipline', 'answer', 'verification', 'drawingNumber', 'sourceId', 'sourceDocument', 'changeReason', 'relatedIssueId'] as const) {
       if (value[key] === undefined) continue
-      const maximum = key === 'answer' || key === 'verification' ? 8000 : 200
+      const maximum = key === 'answer' || key === 'verification' || key === 'changeReason' ? 8000 : 200
       if (typeof value[key] !== 'string' || value[key]!.length > maximum) return null
       result[key] = value[key]
     }

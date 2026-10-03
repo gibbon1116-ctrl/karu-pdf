@@ -4,10 +4,10 @@ import type { EditableAnnotation } from '../editor/AnnotationStore'
 import type { DocumentSession } from './documentModel'
 import { ISSUE_STATUSES, issueStatusLabel, unresolvedIssue, type Issue } from '../core/issues'
 import { IssueDetails } from './IssueDetails'
-import { createIssueCsv, createCountCsv, issueCsvFileName, annotationBody, annotationColorHex, annotationCsvFileName, annotationKindLabel, createAnnotationCsv } from './annotationCsv'
+import { createIssueCsv, createCountCsv, createChangeCsv, issueCsvFileName, annotationBody, annotationColorHex, annotationCsvFileName, annotationKindLabel, createAnnotationCsv } from './annotationCsv'
 import { countSummary } from '../core/counts'
 
-type Filter = 'count' | 'issue' | 'issueOpen' | 'issueDone' | 'measure' | 'all' | 'text' | 'callout' | 'shape' | 'symbol' | 'pen' | 'markup'
+type Filter = 'change' | 'count' | 'issue' | 'issueOpen' | 'issueDone' | 'measure' | 'all' | 'text' | 'callout' | 'shape' | 'symbol' | 'pen' | 'markup'
 
 interface Props {
   session: DocumentSession
@@ -17,6 +17,8 @@ interface Props {
 }
 
 function matchesFilter(annotation: EditableAnnotation, filter: Filter): boolean {
+  if (filter === 'change') return annotation.issue?.recordKind === 'change'
+  if (filter.startsWith('issue') && annotation.issue?.recordKind === 'change') return false
   if (filter === 'count') return !!annotation.count
   if (filter === 'issue') return !!annotation.issue
   if (filter === 'issueOpen') return !!annotation.issue && unresolvedIssue(annotation.issue)
@@ -97,7 +99,7 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
     && (!issueStatus || annotation.issue?.status === issueStatus)
   ))
   if (filter.startsWith('issue')) filtered.sort((a, b) => a.issue!.number - b.issue!.number)
-  const issues = annotations.filter(annotation => annotation.issue)
+  const issues = annotations.filter(annotation => annotation.issue && annotation.issue.recordKind !== 'change')
   const unresolved = issues.filter(annotation => unresolvedIssue(annotation.issue!) && annotation.pageIndex + 1 >= firstPage && annotation.pageIndex + 1 <= lastPage)
   const pageCount = Math.max(1, Math.ceil(filtered.length / 100))
   const visiblePage = Math.min(rowPage, pageCount - 1)
@@ -106,7 +108,7 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
   return <section className="annotation-list-panel" aria-label="書き込みの一覧">
     <div className="annotation-filters">
       <label>種類<select aria-label="書き込みの種類" value={filter} onChange={(event) => setFilter(event.currentTarget.value as Filter)}>
-        <option value="all">すべて</option><option value="text">文字</option><option value="callout">吹き出し</option>
+        <option value="all">すべて</option><option value="text">文字</option><option value="callout">吹き出し</option><option value="change">変更記録</option>
         <option value="count">個数カウント</option><option value="issue">指摘</option><option value="issueOpen">指摘（未確認）</option><option value="issueDone">指摘（確認済・旧対応済）</option><option value="measure">計測</option><option value="shape">図形</option><option value="symbol">記号</option><option value="pen">ペン</option><option value="markup">文字への印</option>
       </select></label>
       <div><label>ページ<input aria-label="開始ページ" type="number" min="1" max={session.pageSizes.length} value={firstPage} onChange={(event) => setFirstPage(Number(event.currentTarget.value))} /></label><span>〜</span><label><span className="visually-hidden">終了ページ</span><input aria-label="終了ページ" type="number" min="1" max={session.pageSizes.length} value={lastPage} onChange={(event) => setLastPage(Number(event.currentTarget.value))} /></label></div>
@@ -130,7 +132,8 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
     }}>番号を振り直す</button>
     {loading && <p className="side-panel-message" role="status">書き込みを読み込み中… {progress.processed} / {progress.total} ページ</p>}
     {error && <p className="side-panel-message error-text">{error}</p>}
-    {detail && <IssueDetails key={detail.id} annotation={detail} store={session.annotationStore} readOnly={!!session.editRestriction} onClose={() => setDetailId(null)} />}
+    {detail && <IssueDetails key={detail.id} annotation={detail} store={session.annotationStore} readOnly={!!session.editRestriction} onClose={() => setDetailId(null)} relatedIssues={annotations} onNavigate={onSelect} />}
+    {filter === 'change' && <button disabled={loading} onClick={() => void saveCsv(createChangeCsv(filtered), session.name.replace(/\.pdf$/i, '') + '_変更一覧.csv').catch(reason => setError(String(reason)))}>変更一覧をCSVに書き出す</button>}
     {filter === 'count' && <div aria-label="個数の集計">
       {countSummary(filtered).map(a => <p key={JSON.stringify([a.group, a.pageIndex])}>{a.group} p.{a.pageIndex + 1}: {a.total}個</p>)}
       <button disabled={loading} onClick={() => void saveCsv(createCountCsv(filtered), session.name.replace(/\.pdf$/i, '') + '_個数.csv').catch(reason => setError(String(reason)))}>個数をCSVに書き出す</button>
@@ -153,7 +156,7 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
         </button>
         {annotation.issue && <><select disabled={!!session.editRestriction} className="issue-status" aria-label={`指摘 ${annotation.issue.number} の状態`} value={annotation.issue.status} onChange={event => session.annotationStore.updateIssueDetails(annotation.id, { status: event.currentTarget.value as Issue['status'] })}>
           {ISSUE_STATUSES.map(status => <option key={status} value={status}>{issueStatusLabel(status)}</option>)}
-        </select><button className="issue-detail-button" onClick={() => { setDetailId(annotation.id); onSelect(annotation) }}>指摘 {annotation.issue.number} の詳細</button></>}
+        </select><button className="issue-detail-button" onClick={() => { setDetailId(annotation.id); onSelect(annotation) }}>{annotation.issue.recordKind === 'change' ? '変更' : '指摘'} {annotation.issue.number} の詳細</button></>}
       </li>)}
     </ol>
   </section>

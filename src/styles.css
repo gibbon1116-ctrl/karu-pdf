@@ -486,3 +486,14 @@ button, input { font: inherit; }
 .issue-details p { font-size: 12px; margin: 0; }
 .issue-detail-button { font-size: 12px; }
 .annotation-layer.tool-count { pointer-events: auto; cursor: crosshair; }
+.issue-transfer-dialog { position: fixed; top: auto; left: auto; right: 16px; bottom: 16px; margin: 0; z-index: 30; width: min(440px, calc(100vw - 48px)); max-height: 65vh; overflow: auto; }
+.issue-transfer-dialog li { margin-bottom: 10px; }
+.issue-transfer-dialog small { display: block; }
+.compare-registration { flex-basis: 100%; }
+.compare-registration[open] { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.compare-registration summary { cursor: pointer; }
+.compare-registration[open] summary { width: 100%; }
+.compare-registration input[type="text"], .compare-registration input:not([type]) { width: 100px; }
+.text-correction-dialog { width: min(550px, calc(100vw - 48px)); }
+.text-correction-dialog label { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
+.text-correction-dialog input:not([type=number]) { flex: 1; min-width: 0; }
