@@ -191,6 +191,16 @@ export function AnnotationLayer(props: Props) {
   const selectedIds = new Set(props.store.selectedIds())
   const singleSelection = selectedIds.size === 1
   const touched = useMemo(() => new Set(props.store.touchedObjNums(props.pageIndex)), [version, props.pageIndex, props.store])
+  const compactCounts = annotations.filter(a => a.count && a.symbol === 'circle').length > 500
+  const countPaths = new Map<string, { d: string; stroke: string; opacity: number }>()
+  if (compactCounts) for (const a of annotations) {
+    if (!a.count || a.symbol !== 'circle' || selectedIds.has(a.id) || a.objNum !== null && !touched.has(a.objNum)) continue
+    const [x0, y0, x1, y1] = a.rect, r = (x1 - x0) * .35, x = (x0 + x1) / 2, y = (y0 + y1) / 2
+    const stroke = color(a.color), key = `${stroke}:${a.opacity}`
+    const group = countPaths.get(key) ?? { d: '', stroke, opacity: a.opacity }
+    group.d += `M${x-r},${y}a${r},${r} 0 1,0 ${r*2},0a${r},${r} 0 1,0 ${-r*2},0 `
+    countPaths.set(key, group)
+  }
   const editing = props.editingId ? annotations.find((annotation) => annotation.id === props.editingId) : undefined
 
   useEffect(() => () => textQueue.dispose(), [textQueue])
@@ -449,7 +459,7 @@ export function AnnotationLayer(props: Props) {
     const rect = operation.mode === 'shape' || operation.mode === 'marquee'
       ? shapeRect(operation.start, operation.latest, operation.creationKind === 'circle' && operation.shift)
       : operation.mode === 'symbol'
-        ? symbolRectFromDrag(operation.start, operation.latest, operation.moved, props.formatDefaults.symbol.symbolSize)
+        ? symbolRectFromDrag(operation.start, operation.latest, operation.moved, props.formatDefaults[props.tool === 'count' ? 'count' : 'symbol'].symbolSize)
       : operation.mode === 'callout'
         ? [
             operation.moved ? operation.latest[0] : operation.start[0] + 40,
@@ -621,12 +631,13 @@ export function AnnotationLayer(props: Props) {
       return
     }
     if (operation.mode === 'symbol') {
-      const format = props.formatDefaults.symbol
+      const format = props.formatDefaults[props.tool === 'count' ? 'count' : 'symbol']
       const rect = symbolRectFromDrag(operation.start, operation.latest, operation.moved, format.symbolSize)
       if (rect[2] - rect[0] < 4) return
       const annotation = props.store.create({
         pageIndex: props.pageIndex,
         kind: 'symbol',
+        count: props.tool === 'count' ? { version: 1, id: crypto.randomUUID(), group: format.countGroup?.trim() || 'その他機器' } : null,
         rect,
         color: format.color,
         symbol: format.symbol,
@@ -685,6 +696,7 @@ export function AnnotationLayer(props: Props) {
   }, [props.tool, textQueue])
 
   const renderAnnotation = (annotation: EditableAnnotation) => {
+    if (compactCounts && annotation.count && annotation.symbol === 'circle' && !selectedIds.has(annotation.id)) return null
     const visible = annotation.objNum === null || touched.has(annotation.objNum)
     const [x0, y0, x1, y1] = annotation.rect
     const handleSize = 8 / Math.max(0.01, props.zoom * CSS_PX_PER_PT)
@@ -790,7 +802,8 @@ export function AnnotationLayer(props: Props) {
         event.preventDefault()
         const svg = event.currentTarget
         const start = pointInPage(svg, event)
-        const id = annotationIdFromTarget(event.target)
+        const id = annotationIdFromTarget(event.target) ?? (compactCounts && props.tool === 'select'
+          ? annotations.findLast(a => a.count && start[0] >= a.rect[0] && start[0] <= a.rect[2] && start[1] >= a.rect[1] && start[1] <= a.rect[3])?.id ?? null : null)
         if (measurement.pointerDown(event, start)) return
         if (props.tool === 'text' || props.tool === 'callout') {
           const annotation = id ? props.store.get(id) : undefined
@@ -878,7 +891,7 @@ export function AnnotationLayer(props: Props) {
             return
           }
           const kind = props.tool === 'text' ? 'freetext' : props.tool
-          const mode = props.tool === 'text' ? 'text' : props.tool === 'callout' ? 'callout' : props.tool === 'symbol' ? 'symbol' : props.tool === 'line' || props.tool === 'arrow' ? 'line' : props.tool === 'highlight' || props.tool === 'ink' ? 'ink' : 'shape'
+          const mode = props.tool === 'text' ? 'text' : props.tool === 'callout' ? 'callout' : props.tool === 'symbol' || props.tool === 'count' ? 'symbol' : props.tool === 'line' || props.tool === 'arrow' ? 'line' : props.tool === 'highlight' || props.tool === 'ink' ? 'ink' : 'shape'
           const shown = kind === 'cloudSquare' ? draftCloudRef.current : mode === 'line' ? draftLineRef.current : mode === 'ink' ? draftInkRef.current : draftRectRef.current
           if (shown) shown.style.display = 'block'
           if (mode === 'callout' && draftLineRef.current) draftLineRef.current.style.display = 'block'
@@ -886,7 +899,7 @@ export function AnnotationLayer(props: Props) {
           dragRef.current = {
             pointerId: event.pointerId,
             mode,
-            creationKind: kind,
+            creationKind: kind === 'count' ? 'symbol' : kind,
             start,
             latest: start,
             id: null,
@@ -941,6 +954,7 @@ export function AnnotationLayer(props: Props) {
     >
       <rect className="annotation-surface" x="0" y="0" width={props.pageSize.width} height={props.pageSize.height} />
       {annotations.map(renderAnnotation)}
+      {[...countPaths].map(([key, group]) => <path key={key} data-testid="count-batch" d={group.d} stroke={group.stroke} strokeWidth={.6} opacity={group.opacity} fill="none" pointerEvents="stroke" />)}
       {measurement.draft}
       <path ref={draftCloudRef} style={{ display: 'none' }} pointerEvents="none" />
       <g ref={textSelectionRef} className="text-selection-quads" aria-hidden="true" />

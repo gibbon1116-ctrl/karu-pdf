@@ -97,7 +97,22 @@ it('issue CSV has exact columns, numeric order, escaped CRLF/commas/quotes, empt
   store.create({ kind: 'issue', pageIndex: 0, rect: [0,0,16,16], issue: { number: 2, status: 'open' }, text: '先頭' })
   store.create({ kind: 'square', pageIndex: 0, rect: [0,0,10,10] })
   const all = [0,2].flatMap(i => store.getPageAnnotations(i))
-  expect(createIssueCsv(all)).toBe('\uFEFF番号,ページ,指摘の内容,状態,対応,"位置（x, y mm）"\r\n2,1,先頭,未対応,,"0.00, 0.00"\r\n12,3,"確認,""寸法""\r\n次の行",対応済,,"25.40, 50.80"\r\n')
+  expect(createIssueCsv(all)).toBe('\uFEFF番号,ページ,指摘の内容,状態,回答,"位置（x, y mm）",分野,修正確認,図面番号,指摘ID,引継ぎ元ID,引継ぎ元文書\r\n2,1,先頭,未回答,,"0.00, 0.00",,,,,,\r\n12,3,"確認,""寸法""\r\n次の行",対応済（旧版）,,"25.40, 50.80",,,,,,\r\n')
   expect(createAnnotationCsv(all)).toContain('指摘,"№ 12 確認,""寸法""\r\n次の行"')
   expect(issueCsvFileName('図面.PDF')).toBe('図面_指摘一覧.csv')
+})
+
+it('review details survive renumber and history, copies receive another stable identity', () => {
+  const store = new AnnotationStore(), a = store.create({ kind: 'issue', pageIndex: 0, rect: [0,0,16,16] })
+  const identity = a.issue!.id
+  store.updateIssueDetails(a.id, { status: 'answered', discipline: '電気', answer: '変更します', drawingNumber: 'E-01' })
+  store.updateIssueDetails(a.id, { status: 'confirmed', verification: '新版で確認' })
+  store.undo(); expect(store.get(a.id)?.issue?.status).toBe('answered')
+  store.redo(); store.renumberIssues()
+  expect(store.get(a.id)?.issue).toMatchObject({ id: identity, status: 'confirmed', answer: '変更します' })
+  store.selectOnly(a.id)
+  const copy = store.pasteAnnotations(store.copySelected(), 0, { width: 600, height: 800 }, 20)[0]
+  expect(store.get(copy)?.issue?.id).not.toBe(identity)
+  expect(() => store.updateIssueDetails(a.id, { answer: 'a'.repeat(8001) })).toThrow()
+  expect(parseIssue('{"number":1,"status":"done"}')).toEqual({ number: 1, status: 'done' })
 })

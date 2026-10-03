@@ -3,9 +3,10 @@ import type { FontName } from '../core/fontMetrics'
 
 export const FORMAT_STORAGE_KEY = 'karu-pdf:format'
 
-export type FormatTool = 'cloudSquare' | 'cloudPolygon' | 'issue' | 'distance' | 'perimeter' | 'area' | 'text' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
+export type FormatTool = 'count' | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'distance' | 'perimeter' | 'area' | 'text' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
 export interface ToolFormat {
+  countGroup?: string
   arrowHeadSize?: number | null
   cloudIntensity: 0 | 1 | 2
   color: RGB
@@ -54,6 +55,7 @@ function format(
 }
 
 export const DEFAULT_FORMAT: FormatDefaults = {
+  count: { ...format([0, .25, 1]), symbol: 'circle', symbolSize: 8, countGroup: '照明器具' },
   cloudSquare: format(red, 1, 10.5, 'BIZUDGothic', null, red),
   cloudPolygon: format(red, 1, 10.5, 'BIZUDGothic', null, red),
   issue: format(red),
@@ -95,6 +97,7 @@ function readTool(value: unknown, fallback: ToolFormat): ToolFormat {
     boxOpacity: typeof item.boxOpacity === 'number' && [0.25, 0.5, 0.75, 1].includes(item.boxOpacity) ? item.boxOpacity : fallback.boxOpacity,
     symbolSize: typeof item.symbolSize === 'number' && [8, 12, 16, 24, 32, 48, 72].includes(item.symbolSize) ? item.symbolSize : fallback.symbolSize,
     symbol: SYMBOL_OPTIONS.some((option) => option.name === item.symbol) ? item.symbol as SymbolName : fallback.symbol,
+    countGroup: typeof item.countGroup === 'string' && item.countGroup.trim() && item.countGroup.length <= 80 ? item.countGroup : fallback.countGroup,
   }
 }
 

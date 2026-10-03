@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { SYMBOL_OPTIONS, type RGB, type SymbolName } from '../core/annotations'
-import { issueStatusLabel } from '../core/issues'
+import { ISSUE_STATUSES, issueStatusLabel } from '../core/issues'
 import type { CloudIntensity } from '../core/cloud'
 import type { FontName } from '../core/fontMetrics'
 import type { EditorTool } from '../editor/AnnotationLayer'
@@ -70,7 +70,7 @@ function formatTool(kind: Kind | EditorTool): FormatTool | null {
 
 function formatToolLabel(tool: FormatTool): string {
   const labels: Record<FormatTool, string> = {
-    cloudSquare: '雲（四角）', cloudPolygon: '雲（多角形）', issue: '指摘', distance: '距離', perimeter: '連続した長さ', area: '面積', text: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角', circle: '丸',
+    count: '個数カウント', cloudSquare: '雲（四角）', cloudPolygon: '雲（多角形）', issue: '指摘', distance: '距離', perimeter: '連続した長さ', area: '面積', text: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角', circle: '丸',
     highlight: '蛍光ペン', ink: '手書き', symbol: '記号', textHighlight: '文字ハイライト',
     underline: '文字に下線', strikeout: '文字に取り消し線',
   }
@@ -84,13 +84,13 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     getActiveTextEditorSnapshot,
   )
   const activeSelection = selected
-  const target = formatTool(activeSelection?.kind ?? (tool === 'select' ? 'text' : tool))
+  const target = activeSelection?.count ? 'count' : formatTool(activeSelection?.kind ?? (tool === 'select' ? 'text' : tool))
   const values: EditableAnnotation | ToolFormat | null = activeSelection ?? (target ? defaults[target] : null)
   const textTarget = target === 'text' || target === 'callout'
   const cloudTarget = target === 'cloudSquare' || target === 'cloudPolygon'
   const shapeTarget = target === 'square' || target === 'circle' || cloudTarget
   const measureTarget = target === 'distance' || target === 'perimeter' || target === 'area'
-  const simpleColorTarget = cloudTarget || target === 'issue' || measureTarget || target === 'line' || target === 'arrow' || target === 'highlight' || target === 'ink' || target === 'textHighlight' || target === 'underline' || target === 'strikeout' || target === 'symbol'
+  const simpleColorTarget = cloudTarget || target === 'count' || target === 'issue' || measureTarget || target === 'line' || target === 'arrow' || target === 'highlight' || target === 'ink' || target === 'textHighlight' || target === 'underline' || target === 'strikeout' || target === 'symbol'
   const opacityTarget = !cloudTarget && target !== 'issue' && simpleColorTarget && target !== 'underline' && target !== 'strikeout'
 
   const changeDefault = (changes: Partial<ToolFormat>) => {
@@ -178,18 +178,24 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
         >{item.glyph}</button>)}
       </div>
     </fieldset>}
-    {target === 'symbol' && values && <label>
+    {(target === 'symbol' || target === 'count') && values && <label>
       大きさ
       <select aria-label="記号の大きさ" value={activeSelection?.kind === 'symbol' ? Math.round(activeSelection.rect[2] - activeSelection.rect[0]) : (values as ToolFormat).symbolSize} onChange={(event) => changeSymbolSize(Number(event.currentTarget.value))}>
         {SYMBOL_SIZES.map((value) => <option key={value} value={value}>{value} pt</option>)}
       </select>
     </label>}
+    {target === 'count' && <label>種類<input aria-label="カウントの種類" maxLength={80} key={activeSelection?.id ?? 'count-default'} defaultValue={activeSelection?.count?.group ?? defaults.count.countGroup ?? '照明器具'} onBlur={event => {
+      const group = event.currentTarget.value.trim()
+      if (!group) return
+      if (activeSelection) store.update(activeSelection.id, { countGroup: group })
+      else changeDefault({ countGroup: group })
+    }} /></label>}
     {target === 'issue' && values && <>
       <label>大きさ<select aria-label="指摘の大きさ" value={activeSelection ? Math.round(activeSelection.rect[2] - activeSelection.rect[0]) : (values as ToolFormat).symbolSize} onChange={event => changeSymbolSize(Number(event.currentTarget.value))}>
         <option value="12">小（12 pt）</option><option value="16">中（16 pt）</option><option value="24">大（24 pt）</option>
       </select></label>
       {activeSelection?.issue && <label>状態<select aria-label="指摘の状態" value={activeSelection.issue.status} onChange={event => store.update(activeSelection.id, { issueStatus: event.currentTarget.value as 'open' | 'done' })}>
-        {(['open', 'done'] as const).map(status => <option key={status} value={status}>{issueStatusLabel(status)}</option>)}
+        {ISSUE_STATUSES.map(status => <option key={status} value={status}>{issueStatusLabel(status)}</option>)}
       </select></label>}
     </>}
     {cloudTarget && values && <label>雲の大きさ<select aria-label="雲の大きさ" value={values.cloudIntensity ?? 1} onChange={event => {

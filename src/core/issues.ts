@@ -1,16 +1,31 @@
 import type { PDFDocument } from 'mupdf'
 import type { RGB, Rect } from './annotations'
 
-export interface Issue { number: number; status: 'open' | 'done' }
+export const ISSUE_STATUSES = ['open', 'answered', 'revised', 'confirmed', 'done'] as const
+export interface Issue {
+  number: number; status: typeof ISSUE_STATUSES[number]
+  version?: 1; id?: string; discipline?: string; answer?: string; verification?: string; drawingNumber?: string
+  sourceId?: string; sourceDocument?: string
+}
 export function parseIssue(json: string | null): Issue | null {
   try {
-    const value = JSON.parse(json ?? '') as Issue
-    return Number.isSafeInteger(value.number) && value.number > 0 && (value.status === 'open' || value.status === 'done')
-      ? { number: value.number, status: value.status } : null
+    if (!json || json.length > 24000) return null
+    const value = JSON.parse(json) as Issue
+    if (!value || !Number.isSafeInteger(value.number) || value.number <= 0 || !ISSUE_STATUSES.includes(value.status)) return null
+    const result: Issue = { number: value.number, status: value.status }
+    if (value.version !== undefined) { if (value.version !== 1) return null; result.version = 1 }
+    for (const key of ['id', 'discipline', 'answer', 'verification', 'drawingNumber', 'sourceId', 'sourceDocument'] as const) {
+      if (value[key] === undefined) continue
+      const maximum = key === 'answer' || key === 'verification' ? 8000 : 200
+      if (typeof value[key] !== 'string' || value[key]!.length > maximum) return null
+      result[key] = value[key]
+    }
+    return result
   } catch { return null }
 }
-export const issueStatusLabel = (status: Issue['status']) => status === 'done' ? '対応済' : '未対応'
-export const issueColor = (issue: Issue, color: RGB): RGB => issue.status === 'done' ? [.5, .5, .5] : color
+export const issueStatusLabel = (status: Issue['status']) => ({ open: '未回答', answered: '回答済', revised: '修正済', confirmed: '確認済', done: '対応済（旧版）' })[status]
+export const unresolvedIssue = (issue: Issue): boolean => issue.status !== 'confirmed'
+export const issueColor = (issue: Issue, color: RGB): RGB => issue.status === 'done' || issue.status === 'confirmed' ? [.5, .5, .5] : color
 export function issueFontSize(number: number, size: number): number {
   // BIZ UD Gothic has half-em digits; leave room inside the circle for any digit count.
   return Math.min(size * .62, size * 1.1 / String(number).length)

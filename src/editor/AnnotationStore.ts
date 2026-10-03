@@ -4,12 +4,14 @@ import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
 import { measureBounds, measureText, type MeasureKind, type MeasureSettings, type PageScale } from '../core/measure'
 import { History, type HistoryStep } from './history'
-import { IssueNumbers, issueOrder, type Issue } from '../core/issues'
+import { IssueNumbers, issueOrder, parseIssue, type Issue } from '../core/issues'
 import type { CloudIntensity } from '../core/cloud'
+import type { CountMark } from '../core/counts'
 
 export type Kind = MeasureKind | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
 export interface EditableAnnotation {
+  count?: CountMark | null
   arrowHeadSize?: number | null
   cloudIntensity?: CloudIntensity | null
   issue?: Issue | null
@@ -73,6 +75,7 @@ function clonePoints(points: readonly Point[]): Point[] {
 function cloneState(annotation: AnnotationState): AnnotationState {
   return {
     ...annotation,
+    count: annotation.count ? { ...annotation.count } : null,
     issue: annotation.issue ? { ...annotation.issue } : null,
     measure: annotation.measure ? { ...annotation.measure } : null,
     vertices: annotation.vertices?.map(p => [...p] as Point) ?? null,
@@ -105,7 +108,7 @@ function publicAnnotation(annotation: StoredAnnotation, dirty: boolean): Editabl
 
 function persistedState(state: AnnotationState): unknown {
   return {
-    issue: state.issue, cloudIntensity: state.cloudIntensity,
+    issue: state.issue, count: state.count, cloudIntensity: state.cloudIntensity,
     measure: state.measure, vertices: state.vertices,
     pageIndex: state.pageIndex,
     kind: state.kind,
@@ -243,6 +246,7 @@ export class AnnotationStore {
         const kind = info.kind as Kind
         const annotation: StoredAnnotation = {
           issue: info.issue ? { ...info.issue } : null,
+          count: info.count ? { ...info.count } : null,
           cloudIntensity: info.cloudIntensity ?? null,
           id,
           objNum: info.objNum,
@@ -388,6 +392,7 @@ export class AnnotationStore {
   }
 
   create(input: {
+    count?: CountMark | null
     issue?: Issue | null
     cloudIntensity?: CloudIntensity | null
     measure?: MeasureSettings | null
@@ -416,7 +421,8 @@ export class AnnotationStore {
   }): EditableAnnotation {
     const id = `new-${this.nextNewId++}`
     const annotation: StoredAnnotation = {
-      issue: input.kind === 'issue' ? input.issue ? { ...input.issue } : { number: this.issueNumbers.next(), status: 'open' } : null,
+      count: input.count ? { ...input.count } : null,
+      issue: input.kind === 'issue' ? input.issue ? { ...input.issue } : { number: this.issueNumbers.next(), status: 'open', version: 1, id: crypto.randomUUID() } : null,
       cloudIntensity: input.cloudIntensity ?? (input.kind === 'cloudSquare' || input.kind === 'cloudPolygon' ? 1 : null),
       id,
       objNum: null,
@@ -603,6 +609,7 @@ export class AnnotationStore {
   }
 
   update(id: string, values: {
+    countGroup?: string
     issueStatus?: Issue['status']
     cloudIntensity?: CloudIntensity
     color?: RGB
@@ -620,6 +627,7 @@ export class AnnotationStore {
     symbol?: SymbolName
   }): void {
     this.mutate(id, (annotation) => {
+      if (values.countGroup !== undefined && annotation.count && values.countGroup.trim() && values.countGroup.length <= 80) annotation.count.group = values.countGroup.trim()
       if (values.issueStatus && annotation.issue) annotation.issue.status = values.issueStatus
       if (values.cloudIntensity !== undefined) annotation.cloudIntensity = values.cloudIntensity
       if (values.color) annotation.color = [...values.color]
@@ -639,6 +647,15 @@ export class AnnotationStore {
       if (annotation.kind === 'callout' && annotation.calloutPoint) {
         annotation.calloutLine = [[...annotation.calloutPoint], nearestCalloutEdgePoint(annotation.rect, annotation.calloutPoint)]
       }
+    })
+  }
+
+  updateIssueDetails(id: string, values: Partial<Omit<Issue, 'number' | 'id' | 'version'>>): void {
+    this.mutate(id, annotation => {
+      if (!annotation.issue) return
+      const next = parseIssue(JSON.stringify({ ...annotation.issue, ...values, version: 1, id: annotation.issue.id ?? crypto.randomUUID() }))
+      if (!next) throw new Error('指摘の情報が不正、または長すぎます。')
+      annotation.issue = next
     })
   }
 
@@ -700,7 +717,8 @@ export class AnnotationStore {
     const created: AnnotationState[] = []
     for (const item of source) {
       const annotation = this.create({
-        issue: item.issue ? { ...item.issue, number: this.issueNumbers.next() } : null,
+        count: item.count ? { ...item.count, id: crypto.randomUUID() } : null,
+        issue: item.issue ? { ...item.issue, number: this.issueNumbers.next(), version: 1, id: crypto.randomUUID() } : null,
         cloudIntensity: item.cloudIntensity,
         pageIndex,
         kind: item.kind,
@@ -978,6 +996,7 @@ export class AnnotationStore {
         rect: annotation.rect,
         color: annotation.color,
         symbol: annotation.symbol ?? 'check' as const,
+        count: annotation.count,
         opacity: annotation.opacity,
       }
       return create ? { kind: 'createSymbol', ...common } : { kind: 'updateSymbol', objNum: savedObjNum, ...common }

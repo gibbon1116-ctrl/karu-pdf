@@ -74,6 +74,28 @@ function pdfiumCount(data: Uint8Array, rect: Rect, color: 'red' | 'gray'): numbe
   }
 }
 describe('cloud and issue PDF results', () => {
+  it('count metadata survives save, reopen, move and change of type', () => {
+    const doc = new mupdf.PDFDocument(source)
+    const count = { version: 1 as const, id: 'count-1', group: '照明器具' }
+    try {
+      expect(applyEdits(doc, [{ kind: 'createSymbol', pageIndex: 0, rect: [100,100,108,108], count, color: [0,0,1], symbol: 'circle' }], resources()).errors).toEqual([])
+      const a = listAnnotations(doc, 0).find(a => a.count)!
+      expect(applyEdits(doc, [{ kind: 'updateSymbol', objNum: a.objNum, pageIndex: 0, rect: [200,100,208,108], count: { ...count, group: '感知器' }, color: [0,0,1], symbol: 'circle' }], resources()).errors).toEqual([])
+      const reopened = new mupdf.PDFDocument(bytes(doc))
+      try { expect(listAnnotations(reopened, 0).find(a => a.count)).toMatchObject({ rect: [200,100,208,108], count: { ...count, group: '感知器' } }) }
+      finally { reopened.destroy() }
+    } finally { doc.destroy() }
+  })
+  it('review metadata and stable identity survive PDF save and reopen', () => {
+    const doc = new mupdf.PDFDocument(source)
+    const details = { version: 1 as const, id: 'review-1', number: 1, status: 'confirmed' as const, discipline: '電気', answer: '配線修正', verification: '新版確認', drawingNumber: 'E-01' }
+    try {
+      expect(applyEdits(doc, [{ kind: 'createIssue', pageIndex: 0, rect: [100,100,116,116], issue: details, text: '回路確認', color: [1,0,0] }], resources()).errors).toEqual([])
+      const reopened = new mupdf.PDFDocument(bytes(doc))
+      try { expect(listAnnotations(reopened, 0).find(a => a.issue)?.issue).toEqual(details) }
+      finally { reopened.destroy() }
+    } finally { doc.destroy() }
+  })
   it('MuPDF native clouds generate curves for medium/large, but I=0 is a plain border', () => {
     const doc=new mupdf.PDFDocument(source), page=doc.loadPage(0)
     try {

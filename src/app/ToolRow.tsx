@@ -28,6 +28,7 @@ const groups: Record<SplitToolGroup, Array<{ tool: EditorTool; label: string; de
     { tool: 'ink', label: '手書き', description: '細い線で自由に書く（Shift で5°刻み、Ctrl で好きな角度の直線）', shortcut: 'P' },
   ],
   measure: [
+    { tool: 'count', label: '個数カウント', description: '種類別にクリックして個数を数える', shortcut: '' },
     { tool: 'distance', label: '距離', description: '2点の間の長さを測る', shortcut: 'K' },
     { tool: 'perimeter', label: '連続した長さ', description: '折れ線の長さの合計を測る', shortcut: '' },
     { tool: 'area', label: '面積', description: '囲んだ範囲の面積を測る', shortcut: '' },

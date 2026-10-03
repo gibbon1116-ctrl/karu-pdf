@@ -34,6 +34,33 @@ async function reopen(page:Page) {
   await expect(page.getByTestId('annotation-layer-0')).toBeVisible()
 }
 
+test('指摘の回答・分野・修正確認を入力し、4段階の状態とともに保存する', async ({ page }) => {
+  await open(page); await page.keyboard.press('n'); await place(page, 160, 200, '回路確認')
+  await page.keyboard.press('Escape'); await page.getByRole('tab', { name: '書き込み', exact: true }).click()
+  await page.getByRole('button', { name: '指摘 1 の詳細', exact: true }).click()
+  await page.getByLabel('指摘の分野', { exact: true }).fill('電気')
+  await page.getByLabel('指摘の回答', { exact: true }).fill('配線を修正')
+  await page.getByLabel('指摘の修正確認', { exact: true }).fill('新版で確認')
+  await page.getByLabel('指摘 1 の状態', { exact: true }).selectOption('confirmed')
+  await reopen(page)
+  const a = await page.evaluate(() => window.__karu!.getEditableAnnotations(0).find(a => a.issue)?.issue)
+  expect(a).toMatchObject({ status: 'confirmed', discipline: '電気', answer: '配線を修正', verification: '新版で確認' })
+  expect(a?.id).toMatch(/^[0-9a-f-]{36}$/)
+})
+
+test('種類別カウントをクリックし、取消・種類変更・保存再読込で個数を維持する', async ({ page }) => {
+  await open(page)
+  await page.getByRole('button', { name: '計測▼' }).click()
+  await page.getByRole('menuitemcheckbox', { name: '個数カウント', exact: false }).click()
+  await click(page, 100, 200); await click(page, 150, 200); await click(page, 200, 200)
+  await page.keyboard.press('Control+z')
+  await page.keyboard.press('Escape'); await page.getByRole('tab', { name: '書き込み', exact: true }).click()
+  await page.getByLabel('書き込みの種類').selectOption('count')
+  await expect(page.getByLabel('個数の集計')).toContainText('照明器具 p.1: 2個')
+  await reopen(page)
+  expect(await page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter(a => a.count).length)).toBe(2)
+})
+
 test('雲四角をドラッグして8ハンドルで編集し、保存後にも雲の属性と座標が戻る',async({page})=>{
   await open(page);await choose(page,'図形','雲（四角）')
   const start=await point(page,100,220),end=await point(page,240,304)
@@ -85,7 +112,7 @@ test('指摘一覧の番号順・状態・CSV・振り直しとUndoを実結果�
   await expect(page.locator('.annotation-type-icon')).toHaveText(['1','2','3'])
   await page.getByLabel('指摘 2 の状態',{exact:true}).selectOption('done')
   const csv=await page.evaluate(()=>window.__karu!.exportIssueCsv())
-  expect(csv).toBe('\uFEFF番号,ページ,指摘の内容,状態,対応,"位置（x, y mm）"\r\n1,1,下の指摘,未対応,,"67.73, 103.01"\r\n2,1,"確認,""寸法""\r\n次の行",対応済,,"32.46, 74.79"\r\n3,1,中の指摘,未対応,,"67.73, 85.37"\r\n')
+  expect(csv.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<ID>')).toBe('\uFEFF番号,ページ,指摘の内容,状態,回答,"位置（x, y mm）",分野,修正確認,図面番号,指摘ID,引継ぎ元ID,引継ぎ元文書\r\n1,1,下の指摘,未回答,,"67.73, 103.01",,,,<ID>,,\r\n2,1,"確認,""寸法""\r\n次の行",対応済（旧版）,,"32.46, 74.79",,,,<ID>,,\r\n3,1,中の指摘,未回答,,"67.73, 85.37",,,,<ID>,,\r\n')
   expect(await page.evaluate(()=>window.__karu!.exportAnnotationCsv())).toContain('指摘,"№ 2 確認,""寸法""')
   page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'番号を振り直す',exact:true}).click()
   expect((await issues(page)).map(a=>[a.number,a.text])).toEqual([[3,'下の指摘'],[1,'確認,"寸法"\n次の行'],[2,'中の指摘']])

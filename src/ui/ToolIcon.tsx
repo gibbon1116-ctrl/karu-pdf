@@ -35,6 +35,7 @@ export function ToolIcon({ tool, className = '' }: Props) {
         return <><rect {...common} x="2.7" y="2.7" width="10.6" height="10.6" rx=".6" /></>
       case 'circle':
         return <><circle {...common} cx="8" cy="8" r="5.3" /></>
+      case 'count':
       case 'symbol':
         return <><path {...common} d="m8 2 1.7 3.6 3.9.5-2.9 2.7.8 3.9L8 10.8l-3.5 1.9.8-3.9-2.9-2.7 3.9-.5z" /></>
       case 'highlight':

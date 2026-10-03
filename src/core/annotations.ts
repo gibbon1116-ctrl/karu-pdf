@@ -22,6 +22,7 @@ import {
 import { layoutText } from './textLayout'
 import { cloudArcs, cloudBounds, rectVertices, type CloudIntensity } from './cloud'
 import { parseIssue, issueColor, issueFontSize, type Issue } from './issues'
+import { parseCount, type CountMark } from './counts'
 import { createMeasureDictionary, invertMatrix, measureBounds, measureLabel, measureText, pageUnitFactor, readMeasureSettings, transformMeasurePoint, writePageScale, type MeasureKind, type MeasureSettings, type PageScale } from './measure'
 
 export type Rect = [number, number, number, number]
@@ -65,6 +66,7 @@ export type AnnotationKind =
   | 'other'
 
 export interface AnnotationInfo {
+  count?: CountMark | null
   arrowHeadSize?: number | null
   cloudIntensity?: CloudIntensity | null
   issue?: Issue | null
@@ -119,8 +121,8 @@ export type AnnotationEdit =
   | { kind: 'updateInk'; objNum: number; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number; inkKind?: 'highlight' | 'ink' }
   | { kind: 'createTextMarkup'; pageIndex: number; markup: 'Highlight' | 'Underline' | 'StrikeOut'; quads: Quad[]; color: RGB; opacity: number; markedText: string }
   | { kind: 'updateTextMarkup'; objNum: number; pageIndex: number; markup: 'Highlight' | 'Underline' | 'StrikeOut'; quads: Quad[]; color: RGB; opacity: number; markedText: string }
-  | { kind: 'createSymbol'; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName; opacity?: number }
-  | { kind: 'updateSymbol'; objNum: number; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName; opacity?: number }
+  | { kind: 'createSymbol'; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName; opacity?: number; count?: CountMark | null }
+  | { kind: 'updateSymbol'; objNum: number; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName; opacity?: number; count?: CountMark | null }
   | { kind: 'delete'; objNum: number; pageIndex: number }
 
 export interface ApplyError {
@@ -361,7 +363,7 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
           const symbol = type === 'Stamp' ? asSymbolName(readName(object, 'KaruSymbol')) : null
           const inkKind = type === 'Ink' ? readName(object, 'KaruInkKind') : null
           return {
-            cloudIntensity, issue,
+            cloudIntensity, issue, count: type === 'Stamp' ? parseCount(readString(object, 'KaruCount')) : null,
             measure: measurement,
             vertices: measureVertices,
             objNum: object.asIndirect(),
@@ -1457,6 +1459,14 @@ export function applyEdits(
           object.destroy()
         }
         configureSymbol(doc, annotation, edit.rect, edit.color, edit.symbol, edit.opacity ?? 1, isNew)
+        const countObject = annotation.getObject()
+        try {
+          if (edit.count) {
+            if (!parseCount(JSON.stringify(edit.count))) throw new Error('個数カウントの種類が不正です。')
+            setPdfString(doc, countObject, 'KaruCount', JSON.stringify(edit.count))
+            annotation.setContents(`個数: ${edit.count.group}`)
+          } else countObject.delete('KaruCount')
+        } finally { countObject.destroy() }
         if (isNew) result.created.push(objectNumber(annotation))
         continue
       }
