@@ -1,3 +1,4 @@
+import { arrowHeadSize } from './lineGeometry'
 import mupdf, {
   type PDFAnnotation,
   type PDFAnnotationLineEndingStyle,
@@ -64,6 +65,7 @@ export type AnnotationKind =
   | 'other'
 
 export interface AnnotationInfo {
+  arrowHeadSize?: number | null
   cloudIntensity?: CloudIntensity | null
   issue?: Issue | null
   measure?: MeasureSettings | null
@@ -105,12 +107,12 @@ export type AnnotationEdit =
   | { kind: 'updateMeasure'; objNum: number; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number }
   | { kind: 'createFreeText'; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number; textOpacity?: number; boxOpacity?: number }
   | { kind: 'updateFreeText'; objNum: number; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number; textOpacity?: number; boxOpacity?: number }
-  | { kind: 'createCallout'; pageIndex: number; rect: Rect; point: Point; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number; textOpacity?: number; boxOpacity?: number }
-  | { kind: 'updateCallout'; objNum: number; pageIndex: number; rect: Rect; point: Point; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number; textOpacity?: number; boxOpacity?: number }
+  | { kind: 'createCallout'; pageIndex: number; rect: Rect; point: Point; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number; textOpacity?: number; boxOpacity?: number; arrowHeadSize?: number | null }
+  | { kind: 'updateCallout'; objNum: number; pageIndex: number; rect: Rect; point: Point; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number; textOpacity?: number; boxOpacity?: number; arrowHeadSize?: number | null }
   | { kind: 'createSquare'; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null; opacity?: number }
   | { kind: 'updateSquare'; objNum: number; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null; opacity?: number }
-  | { kind: 'createLine'; pageIndex: number; line: [Point, Point]; color: RGB; borderWidth: number; lineEnding: LineEnding; opacity?: number }
-  | { kind: 'updateLine'; objNum: number; pageIndex: number; line: [Point, Point]; color: RGB; borderWidth: number; lineEnding: LineEnding; opacity?: number }
+  | { kind: 'createLine'; pageIndex: number; line: [Point, Point]; color: RGB; borderWidth: number; lineEnding: LineEnding; opacity?: number; arrowHeadSize?: number | null }
+  | { kind: 'updateLine'; objNum: number; pageIndex: number; line: [Point, Point]; color: RGB; borderWidth: number; lineEnding: LineEnding; opacity?: number; arrowHeadSize?: number | null }
   | { kind: 'createCircle'; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null; opacity?: number }
   | { kind: 'updateCircle'; objNum: number; pageIndex: number; rect: Rect; color: AnnotationColor; borderWidth: number; interiorColor?: RGB | null; opacity?: number }
   | { kind: 'createInk'; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number; inkKind?: 'highlight' | 'ink' }
@@ -156,6 +158,7 @@ interface AppearanceTask {
   textOpacity: number
   boxOpacity: number
   calloutLine: [Point, Point] | null
+  arrowHeadSize?: number | null
   temporaryPageIndex?: number
 }
 
@@ -376,6 +379,7 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             textColor: type === 'FreeText' ? parsed.color : null,
             strokeColor,
             interiorColor,
+            arrowHeadSize: readNumber(object, 'KaruArrowHeadSize'),
             borderWidth: style?.present ? style.borderWidth ?? borderWidth : borderWidth,
             opacity,
             textOpacity: type === 'FreeText' ? style?.textOpacity ?? 1 : null,
@@ -521,8 +525,8 @@ export function nearestCalloutEdgePoint(rect: Rect, point: Point): Point {
   ))
 }
 
-function calloutOuterRect(textRect: Rect, point: Point, borderWidth: number): Rect {
-  const margin = Math.max(4, borderWidth * 4)
+function calloutOuterRect(textRect: Rect, point: Point, borderWidth: number, size?: number | null): Rect {
+  const margin = Math.max(4, borderWidth * 4, arrowHeadSize(size, borderWidth) + borderWidth)
   return [
     Math.min(textRect[0], point[0] - margin),
     Math.min(textRect[1], point[1] - margin),
@@ -571,8 +575,9 @@ function writeCalloutGeometry(
   textRect: Rect,
   point: Point,
   borderWidth: number,
+  size?: number | null,
 ): { outerRect: Rect; line: [Point, Point] } {
-  const outerRect = calloutOuterRect(textRect, point, borderWidth)
+  const outerRect = calloutOuterRect(textRect, point, borderWidth, size)
   const line: [Point, Point] = [[...point], nearestCalloutEdgePoint(textRect, point)]
   annotation.setIntent('FreeTextCallout')
   annotation.setRect(outerRect)
@@ -677,6 +682,39 @@ function configureLine(
   annotation.setLineEndingStyles(lineEnding.start, lineEnding.end)
   annotation.setOpacity(opacity)
   annotation.update()
+}
+
+function writeArrowSize(doc: PDFDocument, annotation: PDFAnnotation, size?: number | null): void {
+  if (size != null && (!Number.isFinite(size) || size < 2 || size > 72)) throw new Error('矢印先端の大きさは2～72 ptで指定してください。')
+  const object = annotation.getObject()
+  try {
+    if (size == null) object.delete('KaruArrowHeadSize')
+    else setPdfNumber(doc, object, 'KaruArrowHeadSize', size)
+  } finally { object.destroy() }
+}
+
+function configureArrowAppearance(doc: PDFDocument, page: PDFPage, annotation: PDFAnnotation, edit: Extract<AnnotationEdit, { kind: 'createLine' | 'updateLine' }>): void {
+  writeArrowSize(doc, annotation, edit.arrowHeadSize)
+  if (edit.lineEnding.end !== 'OpenArrow' || edit.lineEnding.start !== 'None') return
+  const size = arrowHeadSize(edit.arrowHeadSize, edit.borderWidth), [start, end] = edit.line
+  const angle = Math.atan2(end[1] - start[1], end[0] - start[0])
+  const left: Point = [end[0] - Math.cos(angle - Math.PI / 6) * size, end[1] - Math.sin(angle - Math.PI / 6) * size]
+  const right: Point = [end[0] - Math.cos(angle + Math.PI / 6) * size, end[1] - Math.sin(angle + Math.PI / 6) * size]
+  const margin = Math.max(1, edit.borderWidth), bounds = vertexBounds([start, end, left, right])
+  const rect: Rect = [bounds[0] - margin, bounds[1] - margin, bounds[2] + margin, bounds[3] + margin]
+  const object = annotation.getObject()
+  try { setVisibleRect(doc, page, object, rect) } finally { object.destroy() }
+  const display = new mupdf.DisplayList([0, 0, rect[2] - rect[0], rect[3] - rect[1]])
+  const device = new mupdf.DisplayListDevice(display), path = new mupdf.Path()
+  const stroke = new mupdf.StrokeState({ lineWidth: edit.borderWidth, lineCap: 'Butt', lineJoin: 'Miter', miterLimit: 10 })
+  try {
+    path.moveTo(start[0] - rect[0], start[1] - rect[1]); path.lineTo(end[0] - rect[0], end[1] - rect[1])
+    path.moveTo(left[0] - rect[0], left[1] - rect[1]); path.lineTo(end[0] - rect[0], end[1] - rect[1]); path.lineTo(right[0] - rect[0], right[1] - rect[1])
+    device.strokePath(path, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, edit.color, 1)
+    device.close(); annotation.setAppearanceFromDisplayList(null, null, mupdf.Matrix.identity, display)
+    const target = annotation.getObject(), ap = target.get('AP', 'N')
+    try { orientVisibleAppearance(doc, page, rect, target, ap) } finally { ap.destroy(); target.destroy() }
+  } finally { stroke.destroy(); path.destroy(); device.destroy(); display.destroy() }
 }
 
 function configureCircle(
@@ -1109,7 +1147,7 @@ function makeTemporaryAppearance(
       const [tip, end] = task.calloutLine
       const lineColor = task.borderColor ?? task.color
       const width = Math.max(0.5, task.borderWidth)
-      const arrowSize = Math.max(8, width * 5)
+      const arrowSize = arrowHeadSize(task.arrowHeadSize, width)
       const angle = Math.atan2(end[1] - tip[1], end[0] - tip[0])
       const linePath = new mupdf.Path()
       const stroke = new mupdf.StrokeState({
@@ -1362,6 +1400,7 @@ export function applyEdits(
         if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
         if (!isNew && annotation.getType() !== 'Line') throw new Error('更新対象は Line ではありません。')
         configureLine(annotation, edit.line, edit.color, edit.borderWidth, edit.lineEnding, edit.opacity ?? 1)
+        configureArrowAppearance(doc, page, annotation, edit)
         if (isNew) result.created.push(objectNumber(annotation))
         continue
       }
@@ -1430,7 +1469,7 @@ export function applyEdits(
       if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
       if (!isNew && annotation.getType() !== 'FreeText') throw new Error('更新対象は FreeText ではありません。')
       const borderWidth = edit.borderWidth ?? 1
-      const outerRect = isCallout ? calloutOuterRect(edit.rect, edit.point, borderWidth) : edit.rect
+      const outerRect = isCallout ? calloutOuterRect(edit.rect, edit.point, borderWidth, edit.arrowHeadSize) : edit.rect
       const width = outerRect[2] - outerRect[0]
       const height = outerRect[3] - outerRect[1]
       if (width <= 0 || height <= 0) throw new Error('FreeText の Rect は正の幅と高さが必要です。')
@@ -1459,7 +1498,8 @@ export function applyEdits(
         isNew,
       )
       let calloutLine: [Point, Point] | null = null
-      if (isCallout) calloutLine = writeCalloutGeometry(doc, annotation, edit.rect, edit.point, borderWidth).line
+      if (isCallout) calloutLine = writeCalloutGeometry(doc, annotation, edit.rect, edit.point, borderWidth, edit.arrowHeadSize).line
+      if (isCallout) writeArrowSize(doc, annotation, edit.arrowHeadSize)
       if (isNew) result.created.push(objectNumber(annotation))
       const textRect: Rect = [
         edit.rect[0] - outerRect[0],
@@ -1483,6 +1523,7 @@ export function applyEdits(
         borderWidth,
         textOpacity: edit.textOpacity ?? 1,
         boxOpacity: edit.boxOpacity ?? 1,
+        arrowHeadSize: isCallout ? edit.arrowHeadSize : null,
         calloutLine: calloutLine ? [
           [calloutLine[0][0] - outerRect[0], calloutLine[0][1] - outerRect[1]],
           [calloutLine[1][0] - outerRect[0], calloutLine[1][1] - outerRect[1]],

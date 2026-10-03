@@ -8,6 +8,7 @@ import type { EditorTool } from '../editor/AnnotationLayer'
 import type { AnnotationStore, EditableAnnotation, Kind } from '../editor/AnnotationStore'
 import { updateToolFormat, type FormatDefaults, type FormatTool, type ToolFormat } from '../editor/formatDefaults'
 import { getActiveTextEditorSnapshot, insertIntoActiveTextEditor, subscribeActiveTextEditor } from '../editor/TextEditor'
+import { SnippetPanel } from './SnippetPanel'
 
 const COLORS: Array<{ name: string; value: RGB; css: string }> = [
   { name: '赤', value: [1, 0, 0], css: '#e00000' },
@@ -204,6 +205,17 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
         {(target === 'highlight' ? HIGHLIGHT_WIDTHS : textTarget ? TEXT_BORDER_WIDTHS : WIDTHS).map((value) => <option key={value} value={value}>{value} pt</option>)}
       </select>
     </label>}
+    {(target === 'arrow' || target === 'callout') && values && <label>
+      矢印先端の大きさ
+      <select aria-label="矢印先端の大きさ" value={values.arrowHeadSize ?? 'auto'} onChange={event => {
+        const next = event.target.value === 'auto' ? null : Number(event.target.value)
+        if (activeSelection) store.update(activeSelection.id, { arrowHeadSize: next })
+        else changeDefault({ arrowHeadSize: next })
+      }}>
+        <option value="auto">線幅に合わせる（既定）</option>
+        {[...new Set([4, 6, 8, 12, 16, 24, 32, ...(values.arrowHeadSize ? [values.arrowHeadSize] : [])])].sort((a, b) => a - b).map(size => <option key={size} value={size}>{size} pt</option>)}
+      </select>
+    </label>}
     {shapeTarget && values && <label>
       透明度
       <select aria-label="透明度" value={values.opacity} onChange={(event) => changeOpacity(Number(event.currentTarget.value))}>
@@ -245,6 +257,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
         </select>
       </label>
     </>}
+    {textEditorOpen && <SnippetPanel />}
     {textEditorOpen && <fieldset>
       <legend>記号を挿入</legend>
       <div className="text-symbol-grid">

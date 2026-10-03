@@ -6,6 +6,40 @@ const LAST_OPENED_KEY = 'lastOpened'
 const RECENT_KEY = 'recent'
 const VIEW_STORAGE_KEY = 'karu-pdf:view'
 const MAX_VIEW_ENTRIES = 50
+const HISTORY_SETTING_KEY = 'karu-pdf:remember-history'
+let historyGeneration = 0
+let rememberMemory: boolean | null = null
+
+export function remembersHistory(): boolean {
+  if (rememberMemory !== null) return rememberMemory
+  try { return storageOrNull()?.getItem(HISTORY_SETTING_KEY) !== 'false' } catch { return false }
+}
+
+export async function clearFileHistory(): Promise<void> {
+  historyGeneration++
+  lastOpenedMemory = null
+  recentMemory = []
+  let failure: unknown
+  try { storageOrNull()?.removeItem(VIEW_STORAGE_KEY) } catch (error) { failure = error }
+  const database = await openDatabase()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(HANDLE_STORE, 'readwrite')
+      transaction.objectStore(HANDLE_STORE).clear()
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = transaction.onabort = () => reject(transaction.error ?? new Error('履歴の削除に失敗しました。'))
+    })
+  } finally { database.close() }
+  if (failure) throw failure
+}
+
+export async function setRemembersHistory(enabled: boolean): Promise<void> {
+  rememberMemory = enabled
+  let failure: unknown
+  try { storageOrNull()?.setItem(HISTORY_SETTING_KEY, String(enabled)) } catch (error) { failure = error }
+  if (!enabled) await clearFileHistory()
+  if (failure) throw failure
+}
 export const MAX_RECENT_FILES = 10
 
 export interface LastOpenedFile {
@@ -44,11 +78,14 @@ function openDatabase(): Promise<IDBDatabase> {
 }
 
 export async function saveLastOpenedHandle(handle: PdfFileHandle, name: string): Promise<void> {
+  if (!remembersHistory()) return
+  const generation = historyGeneration
   const value: LastOpenedFile = { handle, name, openedAt: Date.now() }
   lastOpenedMemory = value
   try {
     const database = await openDatabase()
     try {
+      if (!remembersHistory() || generation !== historyGeneration) return
       await new Promise<void>((resolve, reject) => {
         const transaction = database.transaction(HANDLE_STORE, 'readwrite')
         transaction.objectStore(HANDLE_STORE).put(value, LAST_OPENED_KEY)
@@ -62,10 +99,12 @@ export async function saveLastOpenedHandle(handle: PdfFileHandle, name: string):
   } catch {
     // 記憶機能が使えない環境でも、PDFを開く通常の操作は続ける。
   }
-  await addRecentFile(handle, name, value.openedAt)
+  if (remembersHistory() && generation === historyGeneration) await addRecentFile(handle, name, value.openedAt)
 }
 
 export async function loadLastOpenedHandle(): Promise<LastOpenedFile | null> {
+  if (!remembersHistory()) return null
+  const generation = historyGeneration
   if (lastOpenedMemory) return lastOpenedMemory
   try {
     const database = await openDatabase()
@@ -75,7 +114,7 @@ export async function loadLastOpenedHandle(): Promise<LastOpenedFile | null> {
         request.onsuccess = () => resolve(request.result as LastOpenedFile | undefined)
         request.onerror = () => reject(request.error ?? new Error('前回のファイルの場所を読めませんでした。'))
       })
-      if (!value?.handle || typeof value.name !== 'string' || typeof value.openedAt !== 'number') return null
+      if (generation !== historyGeneration || !remembersHistory() || !value?.handle || typeof value.name !== 'string' || typeof value.openedAt !== 'number') return null
       lastOpenedMemory = value
       return value
     } finally {
@@ -117,10 +156,12 @@ export async function removeRecentEntry(current: readonly RecentFile[], handle: 
   return next
 }
 
-async function writeRecentFiles(entries: RecentFile[]): Promise<void> {
+async function writeRecentFiles(entries: RecentFile[], generation = historyGeneration): Promise<void> {
+  if (!remembersHistory() || generation !== historyGeneration) return
   recentMemory = entries
   const database = await openDatabase()
   try {
+    if (!remembersHistory() || generation !== historyGeneration) return
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(HANDLE_STORE, 'readwrite')
       transaction.objectStore(HANDLE_STORE).put(entries, RECENT_KEY)
@@ -134,6 +175,8 @@ async function writeRecentFiles(entries: RecentFile[]): Promise<void> {
 }
 
 export async function loadRecentFiles(): Promise<RecentFile[]> {
+  if (!remembersHistory()) return []
+  const generation = historyGeneration
   if (recentMemory) return [...recentMemory]
   try {
     const database = await openDatabase()
@@ -143,7 +186,7 @@ export async function loadRecentFiles(): Promise<RecentFile[]> {
         request.onsuccess = () => resolve(request.result)
         request.onerror = () => reject(request.error ?? new Error('最近使ったファイルを読めませんでした。'))
       })
-      if (!Array.isArray(value)) return []
+      if (!remembersHistory() || generation !== historyGeneration || !Array.isArray(value)) return []
       recentMemory = value.filter((item): item is RecentFile => Boolean(
         item && typeof item === 'object'
         && (item as RecentFile).handle
@@ -160,9 +203,12 @@ export async function loadRecentFiles(): Promise<RecentFile[]> {
 }
 
 export async function addRecentFile(handle: PdfFileHandle, name: string, openedAt = Date.now()): Promise<RecentFile[]> {
+  if (!remembersHistory()) return []
+  const generation = historyGeneration
   const next = await prependRecentFile(await loadRecentFiles(), { handle, name, openedAt })
+  if (!remembersHistory() || generation !== historyGeneration) return []
   try {
-    await writeRecentFiles(next)
+    await writeRecentFiles(next, generation)
   } catch {
     recentMemory = next
   }
@@ -170,6 +216,29 @@ export async function addRecentFile(handle: PdfFileHandle, name: string, openedA
 }
 
 export async function removeRecentFile(handle: PdfFileHandle): Promise<RecentFile[]> {
+  const current = await loadRecentFiles()
+  const names: string[] = []
+  for (const item of current) if (await sameHandle(item.handle, handle)) names.push(item.name)
+  const previous = await loadLastOpenedHandle()
+  if (previous && await sameHandle(previous.handle, handle)) {
+    lastOpenedMemory = null
+    const database = await openDatabase()
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction(HANDLE_STORE, 'readwrite')
+        transaction.objectStore(HANDLE_STORE).delete(LAST_OPENED_KEY)
+        transaction.oncomplete = () => resolve()
+        transaction.onerror = transaction.onabort = () => reject(transaction.error)
+      })
+    } finally { database.close() }
+    names.push(previous.name)
+  }
+  const storage = storageOrNull()
+  if (storage) {
+    const positions = readViewPositions(storage)
+    for (const key of Object.keys(positions)) if (names.some(name => key.startsWith(`${name}\n`))) delete positions[key]
+    storage.setItem(VIEW_STORAGE_KEY, JSON.stringify(positions))
+  }
   const next = await removeRecentEntry(await loadRecentFiles(), handle)
   try {
     await writeRecentFiles(next)
@@ -217,6 +286,7 @@ function readViewPositions(storage: Storage): ViewPositionMap {
 }
 
 export function saveViewPosition(documentId: string, page: number, zoom: number, now = Date.now()): void {
+  if (!remembersHistory()) return
   try {
     const storage = storageOrNull()
     if (!storage || !documentId || !Number.isInteger(page) || page < 1 || !Number.isFinite(zoom) || zoom <= 0) return
@@ -232,6 +302,7 @@ export function saveViewPosition(documentId: string, page: number, zoom: number,
 }
 
 export function loadViewPosition(documentId: string): ViewPosition | null {
+  if (!remembersHistory()) return null
   try {
     const storage = storageOrNull()
     if (!storage) return null

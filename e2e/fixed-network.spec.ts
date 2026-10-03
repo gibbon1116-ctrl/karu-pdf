@@ -36,9 +36,17 @@ function purpose(url: string) {
   return 'アプリの HTML'
 }
 async function record(context: BrowserContext) {
-  const requests: Array<Promise<{ url: string; method: string; headers: Record<string, string>; body: string | null; source: string }>> = []
+  const requests: Array<Promise<{ url: string; method: string; headers: Record<string, string>; headerFallback: boolean; body: string | null; source: string }>> = []
   const violations: unknown[] = []
-  context.on('request', req => requests.push(req.allHeaders().then(headers => ({ url: req.url(), method: req.method(), headers, body: req.postData(), source: req.serviceWorker() ? 'Service Worker' : 'Page / Worker' }))))
+  context.on('request', req => {
+    const cachedHeaders = req.headers()
+    const headers = req.allHeaders().then(headers => ({ headers, headerFallback: false })).catch(error => {
+      if (!String(error).includes('Worker closed')) throw error
+      // A reload can terminate the Worker before the protocol header query completes.
+      return { headers: cachedHeaders, headerFallback: true }
+    })
+    requests.push(headers.then(details => ({ url: req.url(), method: req.method(), ...details, body: req.postData(), source: req.serviceWorker() ? 'Service Worker' : 'Page / Worker' })))
+  })
   await context.exposeBinding('__recordFixedViolation', (_source, value) => { violations.push(value) })
   await context.addInitScript(() => document.addEventListener('securitypolicyviolation', event => {
     void (window as unknown as Window & { __recordFixedViolation(value: unknown): Promise<void> }).__recordFixedViolation({ directive: event.effectiveDirective, blockedURI: event.blockedURI })

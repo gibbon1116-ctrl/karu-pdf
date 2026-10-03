@@ -10,6 +10,7 @@ import type { CloudIntensity } from '../core/cloud'
 export type Kind = MeasureKind | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
 export interface EditableAnnotation {
+  arrowHeadSize?: number | null
   cloudIntensity?: CloudIntensity | null
   issue?: Issue | null
   measure?: MeasureSettings | null
@@ -114,6 +115,7 @@ function persistedState(state: AnnotationState): unknown {
     font: state.font,
     color: state.color,
     borderWidth: state.borderWidth,
+    arrowHeadSize: state.arrowHeadSize ?? null,
     opacity: state.opacity,
     textOpacity: state.textOpacity,
     boxOpacity: state.boxOpacity,
@@ -253,6 +255,7 @@ export class AnnotationStore {
           fontSize: info.fontSize ?? DEFAULT_FONT_SIZE,
           font: info.fontName === 'BIZUDMincho' ? 'BIZUDMincho' : 'BIZUDGothic',
           color: [...((kind === 'freetext' || kind === 'callout' ? info.textColor : info.strokeColor) ?? DEFAULT_COLOR)],
+          arrowHeadSize: info.arrowHeadSize ?? null,
           borderWidth: info.borderWidth ?? DEFAULT_BORDER_WIDTH,
           opacity: info.opacity ?? 1,
           textOpacity: info.textOpacity ?? 1,
@@ -396,6 +399,7 @@ export class AnnotationStore {
     fontSize?: number
     font?: FontName
     color?: RGB
+    arrowHeadSize?: number | null
     borderWidth?: number
     opacity?: number
     textOpacity?: number
@@ -425,6 +429,7 @@ export class AnnotationStore {
       fontSize: input.fontSize ?? DEFAULT_FONT_SIZE,
       font: input.font ?? 'BIZUDGothic',
       color: [...(input.color ?? DEFAULT_COLOR)],
+      arrowHeadSize: input.arrowHeadSize ?? null,
       borderWidth: input.borderWidth ?? DEFAULT_BORDER_WIDTH,
       opacity: input.opacity ?? 1,
       textOpacity: input.textOpacity ?? 1,
@@ -601,6 +606,7 @@ export class AnnotationStore {
     issueStatus?: Issue['status']
     cloudIntensity?: CloudIntensity
     color?: RGB
+    arrowHeadSize?: number | null
     borderWidth?: number
     fontSize?: number
     font?: FontName
@@ -617,6 +623,7 @@ export class AnnotationStore {
       if (values.issueStatus && annotation.issue) annotation.issue.status = values.issueStatus
       if (values.cloudIntensity !== undefined) annotation.cloudIntensity = values.cloudIntensity
       if (values.color) annotation.color = [...values.color]
+      if (values.arrowHeadSize !== undefined) annotation.arrowHeadSize = values.arrowHeadSize
       if (values.borderWidth !== undefined) annotation.borderWidth = values.borderWidth
       if (values.interiorColor !== undefined) annotation.interiorColor = values.interiorColor ? [...values.interiorColor] : null
       if (values.borderColor !== undefined) annotation.borderColor = values.borderColor ? [...values.borderColor] : null
@@ -705,6 +712,7 @@ export class AnnotationStore {
         font: item.font,
         color: item.color,
         borderWidth: item.borderWidth,
+        arrowHeadSize: item.arrowHeadSize ?? null,
         opacity: item.opacity,
         textOpacity: item.textOpacity,
         boxOpacity: item.boxOpacity,
@@ -920,6 +928,7 @@ export class AnnotationStore {
         backgroundColor: annotation.interiorColor,
         borderColor: annotation.borderColor,
         borderWidth: annotation.borderWidth,
+        arrowHeadSize: annotation.arrowHeadSize ?? null,
         textOpacity: annotation.textOpacity,
         boxOpacity: annotation.boxOpacity,
       }
@@ -935,6 +944,7 @@ export class AnnotationStore {
         line: annotation.line!,
         color: annotation.color,
         borderWidth: annotation.borderWidth,
+        arrowHeadSize: annotation.arrowHeadSize ?? null,
         opacity: annotation.opacity,
         lineEnding: { start: 'None' as const, end: annotation.kind === 'arrow' ? 'OpenArrow' as const : 'None' as const },
       }

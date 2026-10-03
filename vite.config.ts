@@ -5,6 +5,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { META_CSP } from './scripts/fixed-policy.mjs'
+import { sourceSnapshot } from './scripts/source-snapshot.mjs'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_')
@@ -15,7 +16,8 @@ export default defineConfig(({ mode }) => {
     || new URL(base, 'https://base.invalid').pathname !== base) throw new Error('VITE_BASE_PATH must start and end with / and be a normalised local path')
   let gitCommit = 'unknown'
   try { gitCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { /* Git is optional. */ }
-  const build = { version: env.VITE_APP_VERSION || '1.0.0-fixed', buildDate: new Date().toISOString(), gitCommit, gitShort: gitCommit.slice(0, 12), base, mode }
+  const snapshot = fixed || single ? sourceSnapshot() : null
+  const build = { version: env.VITE_APP_VERSION || '1.0.0-fixed', buildDate: new Date().toISOString(), gitCommit, gitShort: gitCommit.slice(0, 12), base, mode, sourceHash: snapshot?.sourceHash, sourceDirty: snapshot?.sourceDirty }
   const runtimePackages = new Set<string>()
   function distributionPlugin(): Plugin {
     return {
@@ -68,14 +70,14 @@ export default defineConfig(({ mode }) => {
         },
       })] : []),
       ...(single ? [{ name: 'single-build-metadata', closeBundle() {
-        writeFileSync('dist-single/build-info.json', JSON.stringify({ ...build, runtimePackages: [...runtimePackages].sort() }, null, 2) + '\n')
+        writeFileSync('dist-single/build-info.json', JSON.stringify({ ...build, sourceFiles: snapshot?.sourceFiles, runtimePackages: [...runtimePackages].sort() }, null, 2) + '\n')
       } } satisfies Plugin] : []),
       ...(fixed ? [{
         name: 'fixed-build-metadata',
         closeBundle() {
           // Workbox's generated runtime imports these modules (not its build tools).
           for (const name of ['workbox-core', 'workbox-precaching', 'workbox-routing', 'workbox-strategies']) runtimePackages.add(name)
-          writeFileSync('dist-fixed/build-info.json', JSON.stringify({ ...build, runtimePackages: [...runtimePackages].sort() }, null, 2) + '\n')
+          writeFileSync('dist-fixed/build-info.json', JSON.stringify({ ...build, sourceFiles: snapshot?.sourceFiles, runtimePackages: [...runtimePackages].sort() }, null, 2) + '\n')
         },
       } satisfies Plugin] : []),
     ],

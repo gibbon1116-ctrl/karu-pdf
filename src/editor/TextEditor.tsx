@@ -32,15 +32,17 @@ export const getActiveTextEditorSnapshot = (): boolean => activeTextInserter !==
 export const isActiveTextEditorComposing = (): boolean => activeTextComposing
 
 export function insertIntoActiveTextEditor(text: string): boolean {
-  if (!activeTextInserter) return false
+  if (!activeTextInserter || activeTextComposing) return false
   activeTextInserter(text)
   return true
 }
 
-function setActiveTextInserter(inserter: ((text: string) => void) | null): void {
+export function setActiveTextInserter(inserter: ((text: string) => void) | null): void {
   activeTextInserter = inserter
   for (const listener of activeTextEditorListeners) listener()
 }
+
+export function setTextEditorComposing(composing: boolean): void { activeTextComposing = composing }
 
 function summarize(samples: readonly number[]): TimingSummary {
   if (samples.length === 0) return emptyTiming()

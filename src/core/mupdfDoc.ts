@@ -1,4 +1,5 @@
 import mupdf, { type Document } from 'mupdf'
+import { pdfEditRestriction } from './pdfRestrictions'
 
 export interface PageSize {
   width: number
@@ -6,6 +7,7 @@ export interface PageSize {
 }
 
 export interface OpenedDocument {
+  editRestriction: string | null
   document: Document
   pageCount: number
   pageSizes: PageSize[]
@@ -19,6 +21,10 @@ export function openDocument(bytes: Uint8Array): OpenedDocument {
   const openStart = now()
   const document = mupdf.Document.openDocument(bytes, 'application/pdf')
   const openMs = now() - openStart
+  if (document.needsPassword()) {
+    document.destroy()
+    throw new Error('パスワードが必要なPDFには対応していません。権限のある方法で解除したコピーを使用してください。')
+  }
   if (!document.isPDF()) {
     document.destroy()
     throw new Error('PDF ファイルではありません。')
@@ -37,5 +43,5 @@ export function openDocument(bytes: Uint8Array): OpenedDocument {
     }
   }
 
-  return { document, pageCount, pageSizes, openMs, sizesMs: now() - sizesStart }
+  return { document, pageCount, pageSizes, openMs, sizesMs: now() - sizesStart, editRestriction: pdfEditRestriction(document.asPDF()!) }
 }

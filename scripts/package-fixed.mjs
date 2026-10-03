@@ -6,6 +6,7 @@ import { walk } from './audit-network.mjs'
 import { createZip, extractZip, sha256, verifySums } from './fixed-zip.mjs'
 import { verifySingle } from './verify-single.mjs'
 import { makeIco } from './make-ico.mjs'
+import { verifyBuildSource } from './source-snapshot.mjs'
 
 // Verify both working copy and HEAD; never change Git or the lockfile.
 execFileSync('git', ['diff', '--quiet', '--', 'package-lock.json'], { stdio: ['ignore', 'pipe', 'pipe'] })
@@ -19,6 +20,7 @@ const singleHtml = single ? fs.readFileSync(singleFiles[0], 'utf8') : ''
 if (single) console.log('SINGLE_VERIFIED', JSON.stringify(verifySingle(singleFiles[0])))
 const build = JSON.parse(single ? singleHtml.match(/<script type="application\/json" id="single-build-info">([\s\S]*?)<\/script>/)?.[1] || 'null' : fs.readFileSync('dist-fixed/build-info.json', 'utf8'))
 if (!build || build.mode !== (single ? 'single' : 'fixed') || !(single ? /^\d+\.\d+\.\d+-single$/ : /^\d+\.\d+\.\d+-fixed$/).test(build.version)) throw new Error('Invalid build metadata')
+verifyBuildSource(build, process.cwd(), process.argv.includes('--allow-dirty'))
 const runtime = new Set(build.runtimePackages)
 // Resolve each edge using the lockfile's actual node_modules hierarchy.
 function resolveDependency(from, name) {

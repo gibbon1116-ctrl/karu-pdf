@@ -39,6 +39,7 @@ export interface ViewerHandle {
 }
 
 interface Props {
+  onNavigate?(): void
   minZoom?: number
   renderVariant?: string
   compareRegions?: readonly import('../core/compare').CompareRect[]
@@ -497,6 +498,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     zoomOut: () => stepZoom(-1),
     fitWidth,
     scrollToPage: (index) => {
+      props.onNavigate?.()
       beginInteraction()
       const page = layoutRef.current.pages[Math.max(0, Math.min(layoutRef.current.pages.length - 1, index))]
       ignoreScrollForPrefetchRef.current = true
@@ -507,6 +509,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       })
     },
     scrollToPosition: (index, x, y) => {
+      props.onNavigate?.()
       beginInteraction()
       const currentLayout = layoutRef.current
       const page = currentLayout.pages[Math.max(0, Math.min(currentLayout.pages.length - 1, index))]
@@ -525,6 +528,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       })
     },
     zoomToRect: (index, rect) => {
+      props.onNavigate?.()
       beginInteraction()
       const el = scrollerRef.current
       if (!el) return

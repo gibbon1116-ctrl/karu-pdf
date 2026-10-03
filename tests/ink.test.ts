@@ -16,23 +16,23 @@ describe('手書きの軌跡', () => {
     expect(mergeInkAnnotationId(previous, 2, 'highlight', 2_000)).toBeNull()
   })
 
-  it('Ctrlでは始点と終点の2点、Shift単独でも45度刻みの2点にする', () => {
+  it('Ctrlでは始点と終点の2点、Shift単独でも5度刻みの2点にする', () => {
     const curved: [number, number][] = [[0, 0], [5, 20], [30, 11]]
     expect(inkStrokePoints(curved, false, false)).toEqual(curved)
     expect(inkStrokePoints(curved, true, false)).toEqual([[0, 0], [30, 11]])
     const snapped = inkStrokePoints(curved, true, true)
     expect(snapped).toHaveLength(2)
-    expect(snapped[1][1]).toBeCloseTo(0, 6)
+    expect(Math.atan2(snapped[1][1], snapped[1][0])).toBeCloseTo(20 * Math.PI / 180, 6)
     expect(Math.hypot(snapped[1][0], snapped[1][1])).toBeCloseTo(Math.hypot(30, 11), 6)
     expect(inkStrokePoints(curved, false, true)).toEqual(snapped)
   })
 
   it.each([
-    [[10, 20], [70, 25], 0],
-    [[10, 20], [15, 80], Math.PI / 2],
-    [[10, 20], [70, 55], Math.PI / 4],
-    [[10, 20], [-50, -15], -3 * Math.PI / 4],
-  ] as const)('Shiftで水平・垂直・45度にそろえ、長さと始点を保つ: %j → %j', (start, end, angle) => {
+    [[10, 20], [70, 25], 5 * Math.PI / 180],
+    [[10, 20], [15, 80], 85 * Math.PI / 180],
+    [[10, 20], [70, 55], 30 * Math.PI / 180],
+    [[10, 20], [-50, -15], -150 * Math.PI / 180],
+  ] as const)('Shiftで5度刻みにそろえ、長さと始点を保つ: %j → %j', (start, end, angle) => {
     const points: [number, number][] = [[...start], [22, 90], [...end]]
     const snapped = inkStrokePoints(points, false, true)
     expect(snapped).toHaveLength(2)

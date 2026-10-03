@@ -375,7 +375,7 @@ test('メニュー・縮尺ダイアログ・なぞる途中のEscは道具を�
 })
 
 for (const [name, kind] of [['蛍光ペン', 'highlight'], ['手書き', 'ink']] as const) {
-  test(`${name}のShift・Ctrl+Shiftは45°と水平、Ctrlは任意角度の2点になる`, async ({ page }) => {
+  test(`${name}のShift・Ctrl+Shiftは5度刻み、Ctrlは任意角度の2点になる`, async ({ page }) => {
     await open(page)
     const ids = (await annotations(page)).map(a => a.id)
     await choose(page, 'ペン', name)
@@ -393,9 +393,9 @@ for (const [name, kind] of [['蛍光ペン', 'highlight'], ['手書き', 'ink']]
     expect(strokes).toHaveLength(4)
     strokes.forEach(p => expect(p).toHaveLength(2))
     const deltas = strokes.map(p => [p[1][0] - p[0][0], p[1][1] - p[0][1]])
-    expect(deltas[0][0]).toBeCloseTo(deltas[0][1], 6)
-    expect(deltas[1][1]).toBeCloseTo(0, 6)
-    expect(deltas[2][0]).toBeCloseTo(deltas[2][1], 6)
+    expect(Math.atan2(deltas[0][1], deltas[0][0])).toBeCloseTo(30 * Math.PI / 180, 6)
+    expect(Math.atan2(deltas[1][1], deltas[1][0])).toBeCloseTo(5 * Math.PI / 180, 6)
+    expect(Math.atan2(deltas[2][1], deltas[2][0])).toBeCloseTo(30 * Math.PI / 180, 6)
     expect(deltas[3][0]).toBeCloseTo(100, 3)
     expect(deltas[3][1]).toBeCloseTo(58, 3)
     await expect(page.getByRole('button', { name, exact: true })).toHaveAttribute('aria-pressed', 'true')

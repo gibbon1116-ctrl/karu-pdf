@@ -1,3 +1,4 @@
+import { constrainLinePoint } from '../core/lineGeometry'
 import type { Point } from '../core/annotations'
 
 export function inkStrokePoints(points: readonly Point[], ctrl: boolean, shift: boolean): Point[] {
@@ -6,12 +7,7 @@ export function inkStrokePoints(points: readonly Point[], ctrl: boolean, shift: 
   const start = points[0]
   const latest = points[points.length - 1]
   if (!shift) return [[...start], [...latest]]
-  const dx = latest[0] - start[0]
-  const dy = latest[1] - start[1]
-  const distance = Math.hypot(dx, dy)
-  if (distance === 0) return [[...start], [...latest]]
-  const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * Math.PI / 4
-  return [[...start], [start[0] + Math.cos(angle) * distance, start[1] + Math.sin(angle) * distance]]
+  return [[...start], constrainLinePoint(start, latest, true)]
 }
 
 function distanceToSegment(point: Point, start: Point, end: Point): number {

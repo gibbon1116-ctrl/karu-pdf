@@ -5,6 +5,14 @@ import { Dropdown, type DropdownItem } from '../ui/Dropdown'
 import type { SidePanelTab } from './documentModel'
 
 interface Props {
+  editRestriction?: string | null
+  onPrivacy(): void
+  onSheetSizes(): void
+  onSafeOutput(): void
+  canViewBack: boolean
+  canViewForward: boolean
+  onViewBack(): void
+  onViewForward(): void
   fileName: string | null
   dirty: boolean
   hasDocument: boolean
@@ -61,13 +69,15 @@ export function MenuBar(props: Props) {
   }, [aboutOpen])
 
   const unavailable = !props.hasDocument || props.saving || props.organizing
+  const editingUnavailable = unavailable || !!props.editRestriction
   const menus: Array<{ label: string; items: DropdownItem[] }> = [
     { label: 'ファイル', items: [
       { label: '開く', shortcut: 'Ctrl+O', onSelect: props.onOpen },
-      { label: '上書き保存', shortcut: 'Ctrl+S', disabled: unavailable, onSelect: props.onSave },
-      { label: '別名で保存', shortcut: 'Ctrl+Shift+S', disabled: unavailable, onSelect: props.onSaveAs },
-      { label: '確定して別名で保存', disabled: unavailable, onSelect: props.onSaveFinalized },
-      { label: '画像として保存…', disabled: unavailable, onSelect: props.onSaveRasterized },
+      { label: '上書き保存', shortcut: 'Ctrl+S', disabled: editingUnavailable, onSelect: props.onSave },
+      { label: '別名で保存', shortcut: 'Ctrl+Shift+S', disabled: editingUnavailable, onSelect: props.onSaveAs },
+      { label: '確定して別名で保存', disabled: editingUnavailable, onSelect: props.onSaveFinalized },
+      { label: '共有・提出用に保存…', disabled: editingUnavailable, onSelect: props.onSafeOutput },
+      { label: '画像として保存…', disabled: editingUnavailable, onSelect: props.onSaveRasterized },
       { label: '画像から PDF を作る…', onSelect: props.onImagesToPdf },
       separator(),
       { label: '印刷', shortcut: 'Ctrl+P', disabled: unavailable, onSelect: props.onPrint },
@@ -78,15 +88,18 @@ export function MenuBar(props: Props) {
       { label: '元に戻す', shortcut: 'Ctrl+Z', disabled: !props.canUndo, onSelect: props.onUndo },
       { label: 'やり直し', shortcut: 'Ctrl+Y', disabled: !props.canRedo, onSelect: props.onRedo },
       separator(),
-      { label: '切り取り', shortcut: 'Ctrl+X', disabled: !props.hasDocument, onSelect: props.onCut },
+      { label: '切り取り', shortcut: 'Ctrl+X', disabled: editingUnavailable, onSelect: props.onCut },
       { label: 'コピー', shortcut: 'Ctrl+C', disabled: !props.hasDocument, onSelect: props.onCopy },
-      { label: '貼り付け', shortcut: 'Ctrl+V', disabled: !props.hasDocument, onSelect: props.onPaste },
-      { label: '複製', shortcut: 'Ctrl+D', disabled: !props.hasDocument, onSelect: props.onDuplicate },
+      { label: '貼り付け', shortcut: 'Ctrl+V', disabled: editingUnavailable, onSelect: props.onPaste },
+      { label: '複製', shortcut: 'Ctrl+D', disabled: editingUnavailable, onSelect: props.onDuplicate },
       separator(),
       { label: '選択を外す', shortcut: 'Esc', disabled: !props.hasDocument, onSelect: props.onClearSelection },
-      { label: '選んだ書き込みを削除', shortcut: 'Delete', disabled: !props.hasDocument, onSelect: props.onDeleteSelection },
+      { label: '選んだ書き込みを削除', shortcut: 'Delete', disabled: editingUnavailable, onSelect: props.onDeleteSelection },
     ] },
     { label: '表示', items: [
+      { label: '前の表示に戻る', shortcut: 'Alt+←', disabled: unavailable || !props.canViewBack, onSelect: props.onViewBack },
+      { label: '次の表示に進む', shortcut: 'Alt+→', disabled: unavailable || !props.canViewForward, onSelect: props.onViewForward },
+      separator(),
       { label: 'ページ一覧', checked: props.showThumbnails && props.sidePanelTab === 'pages', onSelect: () => {
         if (props.showThumbnails && props.sidePanelTab === 'pages') props.onToggleThumbnails()
         else props.onOpenSidePanel('pages')
@@ -102,11 +115,13 @@ export function MenuBar(props: Props) {
       { label: '幅に合わせる', disabled: !props.hasDocument, onSelect: props.onFitWidth },
     ] },
     { label: 'ページ', items: [
-      { label: 'ページ整理', disabled: !props.hasDocument || props.organizing, onSelect: props.onOrganize },
-      { label: 'ページ番号・ヘッダー・フッター…', disabled: unavailable, onSelect: props.onHeaderFooter },
+      { label: '用紙サイズ一覧…', disabled: unavailable, onSelect: props.onSheetSizes },
+      { label: 'ページ整理', disabled: editingUnavailable, onSelect: props.onOrganize },
+      { label: 'ページ番号・ヘッダー・フッター…', disabled: editingUnavailable, onSelect: props.onHeaderFooter },
       { label: '直前のページ操作を元に戻す', disabled: !props.canUndoOrganize || props.organizing || props.saving, onSelect: props.onUndoOrganize },
     ] },
     { label: 'ヘルプ', items: [
+      { label: '履歴の設定…', onSelect: props.onPrivacy },
       { label: '使い方', onSelect: props.onHelp },
       { label: 'このアプリについて', onSelect: () => setAboutOpen(true) },
     ] },
@@ -118,6 +133,7 @@ export function MenuBar(props: Props) {
         {menu.label}<span aria-hidden="true">▼</span>
       </Dropdown>)}
       <span className="menu-file-name" title={props.fileName ?? ''}>
+        {props.editRestriction && <span role="status" title={props.editRestriction}>閲覧専用: {props.editRestriction} </span>}
         {props.fileName ?? 'PDF未選択'}{props.dirty && <span aria-label="未保存"> ●</span>}
       </span>
     </header>

@@ -7,6 +7,8 @@ import { renderRegion } from '../core/render'
 import { ComparePageCache, renderComparePixels } from './compareRender'
 import { readDocumentScales } from '../core/measure'
 import { applyEdits, listAnnotations } from '../core/annotations'
+import { applyEditsAtomically, applyAndSaveAtomically, pdfOperation } from '../core/editTransaction'
+import { assertEditablePdf } from '../core/pdfRestrictions'
 import { maxIssueNumber } from '../core/issues'
 import type { MaxIssueNumberRequest } from './protocol'
 import {
@@ -132,11 +134,11 @@ function disposeDocument(docId: string): void {
   pageLayoutBackups.delete(docId)
 }
 
-function replaceDocument(docId: string, bytes: Uint8Array, keepBackup = false): WorkerDocument {
+function replaceDocument(docId: string, bytes: Uint8Array, keepBackup = false, prepared?: OpenedDocument): WorkerDocument {
+  const opened = prepared ?? openDocument(bytes)
   const backup = keepBackup ? pageLayoutBackups.get(docId) : undefined
   disposeDocument(docId)
   if (backup) pageLayoutBackups.set(docId, backup)
-  const opened = openDocument(bytes)
   const pdf = opened.document.asPDF()
   if (!pdf) {
     opened.document.destroy()
@@ -153,6 +155,7 @@ function sourceDocuments(ids: readonly string[]): Map<string, import('mupdf').PD
     const entry = documents.get(id)
     const document = entry?.opened.document.asPDF()
     if (!document) throw new Error(`追加元の PDF が開かれていません: ${id}`)
+    assertEditablePdf(document)
     result.set(id, document)
   }
   return result
@@ -314,6 +317,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         type: 'opened',
         requestId: request.requestId,
         pageCount: opened.pageCount,
+        editRestriction: opened.editRestriction,
         pageSizes: opened.pageSizes,
         pageScales: readDocumentScales(pdf),
         openMs: opened.openMs,
@@ -344,6 +348,8 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
     if (!entry) throw new Error('PDF が開かれていません。')
     const document = entry.opened.document.asPDF()
     if (!document) throw new Error('PDF 文書ではありません。')
+
+    if (entry.opened.editRestriction && ['applyEdits', 'applyAndSave', 'applyPageLayout', 'applyHeaderFooter', 'removeHeaderFooter', 'extractPages', 'splitPages', 'beginRasterize'].includes(request.type)) assertEditablePdf(document)
 
     if (request.type === 'listAnnotations') {
       post({
@@ -513,7 +519,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
     if (request.type === 'prepareOutput') {
       await loadFontsForEdits(request.edits)
       const source = saveDocument(document, 'incremental').bytes
-      const output = prepareDocumentOutput(source, request.edits, fontResources, request.bake)
+      const output = prepareDocumentOutput(source, request.edits, fontResources, request.bake, request.safe)
       const bytes = output.bytes.buffer as ArrayBuffer
       post({
         type: 'outputPrepared', requestId: request.requestId, bytes,
@@ -533,7 +539,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       pageLayoutBackups.set(request.docId, backup)
       try {
         const assembleStarted = performance.now()
-        applyPageLayout(request.docId, document, request.cards, sourceDocuments(request.sources))
+        pdfOperation(document, () => applyPageLayout(request.docId, document, request.cards, sourceDocuments(request.sources)))
         const assembleMs = performance.now() - assembleStarted
         // ページ木を書き換えた文書を同じインスタンスから続けて増分保存すると、
         // MuPDF 1.28.1 では次の保存で参照が欠けることがある。最初の増分出力を
@@ -583,9 +589,9 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       pageLayoutBackups.set(request.docId, backup)
       try {
         const assembleStarted = performance.now()
-        if (request.type === 'applyHeaderFooter') {
+        pdfOperation(document, () => { if (request.type === 'applyHeaderFooter') {
           applyHeaderFooter(document, request.settings, request.fileName, request.dateText, fontResources[request.settings.font]!, fontResources.ZapfDingbats!)
-        } else removeHeaderFooter(document)
+        } else removeHeaderFooter(document) })
         const assembleMs = performance.now() - assembleStarted
         const exportStarted = performance.now()
         const saved = saveDocument(document, 'incremental').bytes
@@ -656,9 +662,9 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
     }
 
     await loadFontsForEdits(request.edits)
-    const applied = applyEdits(document, request.edits, fontResources)
-    entry.displayLists.clear()
     if (request.type === 'applyEdits') {
+      const applied = applyEditsAtomically(document, request.edits, fontResources)
+      entry.displayLists.clear()
       post({
         type: 'editsApplied', requestId: request.requestId,
         created: applied.created,
@@ -668,8 +674,12 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       })
       return
     }
-    const saved = saveDocument(document, request.mode)
-    if (saved.mode === 'full') replaceDocument(request.docId, saved.bytes.slice(), true)
+    const { applied, saved, opened } = applyAndSaveAtomically(document, request.edits, fontResources, request.mode)
+    entry.displayLists.clear()
+    // MuPDF 1.28.1 can emit a recursive /Prev xref when saving the same
+    // instance incrementally again (including a retry after an IO failure).
+    // Reopen every completed output as the next baseline before transferring.
+    replaceDocument(request.docId, saved.bytes, true, opened)
     const bytes = saved.bytes.buffer as ArrayBuffer
     post({
       type: 'appliedAndSaved',

@@ -37,7 +37,10 @@ function decimal(value: number): string {
 }
 
 function quote(value: string | number): string {
-  const text = String(value).replace(/\r?\n/g, '\r\n')
+  // Quoting alone does not stop spreadsheet formula evaluation. Only protect
+  // strings; real numeric fields must remain numbers.
+  const unsafe = typeof value === 'string' && (/^[\t\r\n]/.test(value) || /^[\s\u0000-\u001f]*[=+\-@＝＋－＠]/.test(value))
+  const text = (unsafe ? `'${value}` : String(value)).replace(/\r?\n/g, '\r\n')
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
 }
 

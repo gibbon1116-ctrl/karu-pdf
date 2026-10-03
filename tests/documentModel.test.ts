@@ -46,7 +46,7 @@ describe('DocumentTabsModel', () => {
     expect(() => tabs.add(session(9))).toThrow('同時に開けるのは8ファイルまでです')
   })
 
-  it('ハンドルはisSameEntry、ハンドルなしは名前とバイト数で重複判定する', async () => {
+  it('ハンドルはisSameEntry、ハンドルなしは同名・同容量でも別文書にする', async () => {
     const tabs = new DocumentTabsModel()
     const firstHandle = handle('first.pdf', 'same.pdf')
     tabs.add(new DocumentSession({
@@ -56,7 +56,7 @@ describe('DocumentTabsModel', () => {
       docId: 'bytes', name: 'memory.pdf', byteLength: 30, handle: null, pageSizes: [],
     }))
     expect((await tabs.findDuplicate({ handle: handle('same.pdf'), name: 'renamed.pdf', byteLength: 999 }))?.docId).toBe('handled')
-    expect((await tabs.findDuplicate({ handle: null, name: 'memory.pdf', byteLength: 30 }))?.docId).toBe('bytes')
+    expect(await tabs.findDuplicate({ handle: null, name: 'memory.pdf', byteLength: 30 })).toBeNull()
     expect(await tabs.findDuplicate({ handle: null, name: 'memory.pdf', byteLength: 31 })).toBeNull()
   })
 })

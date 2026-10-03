@@ -3,6 +3,15 @@ import { compositeCompare, detectDifferences, differenceLocation, differenceMask
 
 const pixels = (values: number[][]): ComparePixels => ({ width: values.length, height: 1, rgba: new Uint8ClampedArray(values.flatMap(v => [...v, 255])) })
 describe('比較の画素と領域', () => {
+  it('色の変更と薄い灰を色モードで検出し、透明RGBの差は無視する', () => {
+    const old = pixels([[255, 0, 0], [255, 255, 255], [0, 0, 0]])
+    const next = pixels([[0, 0, 255], [220, 220, 220], [255, 0, 0]])
+    old.rgba[11] = next.rgba[11] = 0
+    expect([...differenceMask(old, next)]).toEqual([0, 0, 0])
+    expect([...differenceMask(old, next, undefined, 'color', 24)]).toEqual([1, 1, 0])
+    expect([...differenceMask(old, next, undefined, 'color', 48)]).toEqual([1, 0, 0])
+    expect([...compositeCompare(old, next, undefined, 'color').rgba.slice(0, 4)]).toEqual([255, 0, 255, 255])
+  })
   it('共通は灰、旧だけは赤、新だけは青、背景は白になる', () => {
     const a = pixels([[0, 0, 0], [0, 0, 0], [255, 255, 255], [255, 255, 255]])
     const b = pixels([[0, 0, 0], [255, 255, 255], [0, 0, 0], [255, 255, 255]])

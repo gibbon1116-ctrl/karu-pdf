@@ -29,6 +29,18 @@ const existingFreeText: AnnotationInfo = {
 }
 
 describe('AnnotationStore', () => {
+  it('矢印の先端サイズ変更をUndo・Redoし、コピーと保存用編集に引き継ぐ', () => {
+    const store = new AnnotationStore()
+    const arrow = store.create({ pageIndex: 0, kind: 'arrow', rect: [20, 20, 80, 40], line: [[20, 20], [80, 40]], arrowHeadSize: 24 })
+    store.update(arrow.id, { arrowHeadSize: 4 })
+    expect(store.get(arrow.id)?.arrowHeadSize).toBe(4)
+    store.undo(); expect(store.get(arrow.id)?.arrowHeadSize).toBe(24)
+    store.redo(); expect(store.get(arrow.id)?.arrowHeadSize).toBe(4)
+    store.selectOnly(arrow.id)
+    const target = new AnnotationStore(), ids = target.pasteAnnotations(store.copySelected(), 0, { width: 200, height: 200 }, 10)
+    expect(target.get(ids[0])?.arrowHeadSize).toBe(4)
+    expect(target.toEdits()[0]).toMatchObject({ kind: 'createLine', arrowHeadSize: 4 })
+  })
   it('既存注釈を読み、触れる、動かす、文字を更新する', async () => {
     const store = new AnnotationStore()
     await store.ensurePageLoaded(0, async () => [existingFreeText])

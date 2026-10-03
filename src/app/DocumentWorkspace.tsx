@@ -34,6 +34,7 @@ export interface OrganizeWorkspaceState {
 }
 
 interface Props {
+  onNavigate(): void
   split: SplitWorkspaceProps | null
   session: DocumentSession
   pool: PdfWorkerPool
@@ -135,6 +136,7 @@ export function DocumentWorkspace(props: Props) {
         }}
         onSearchHighlights={setSearchHighlights}
         onEditAnnotation={(annotation) => {
+          if (props.session.editRestriction) { props.onStatus(props.session.editRestriction); return }
           props.session.annotationStore.touch(annotation.id)
           props.session.annotationStore.selectOnly(annotation.id)
           props.onToolChange('select')
@@ -149,6 +151,8 @@ export function DocumentWorkspace(props: Props) {
       />}
       <div ref={viewerSlotRef} className={props.split ? 'viewer-slot split-view' : 'viewer-slot'} style={props.split ? { gridTemplateColumns: `minmax(0, ${props.split.settings.ratio}fr) 6px minmax(0, ${1 - props.split.settings.ratio}fr)` } : undefined}>
       <Viewer
+        readOnly={!!props.session.editRestriction}
+        onNavigate={props.onNavigate}
         ref={props.viewerRef}
         docId={props.session.docId}
         pool={props.pool}
@@ -188,7 +192,7 @@ export function DocumentWorkspace(props: Props) {
         leftRef={props.viewerRef} containerRef={viewerSlotRef} controllerRef={splitControllerRef}
         formatDefaults={props.formatDefaults} onStatus={props.onStatus} />}
       </div>
-      {props.showFormat && <FormatPanel
+      {props.showFormat && !props.session.editRestriction && <FormatPanel
         selected={selected}
         tool={props.tool}
         store={props.session.annotationStore}

@@ -1,6 +1,33 @@
 export type ExifOrientation = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
 export interface ExifInfo { orientation: ExifOrientation; dateTime?: string }
 
+/** Remove EXIF/XMP, IPTC, comments and embedded previews without recompressing
+ * the JPEG pixels. Keep ICC profiles and Adobe colour-transform markers. */
+export function stripJpegMetadata(bytes: Uint8Array): Uint8Array {
+  if (bytes[0] !== 255 || bytes[1] !== 216) throw new Error('JPEGデータが不正です。')
+  const chunks = [bytes.subarray(0, 2)]
+  let offset = 2, changed = false
+  while (offset < bytes.length) {
+    const start = offset
+    if (bytes[offset++] !== 255) throw new Error('JPEG構造を検証できません。')
+    while (bytes[offset] === 255) offset++
+    const marker = bytes[offset++]
+    if (marker === 218 || marker === 217) { chunks.push(bytes.subarray(start)); offset = bytes.length; break }
+    if (marker === 1 || marker >= 208 && marker <= 215) { chunks.push(bytes.subarray(start, offset)); continue }
+    const length = bytes[offset] * 256 + bytes[offset + 1]
+    if (length < 2 || offset + length > bytes.length) throw new Error('JPEGメタデータが不正です。')
+    const end = offset + length
+    if (marker === 225 || marker === 237 || marker === 254 || marker === 224) changed = true
+    else chunks.push(bytes.subarray(start, end))
+    offset = end
+  }
+  if (!changed) return bytes
+  const result = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0))
+  let position = 0
+  for (const chunk of chunks) { result.set(chunk, position); position += chunk.length }
+  return result
+}
+
 // Only bounded TIFF reads. Malformed metadata must never prevent opening a JPEG.
 export function readExif(bytes: Uint8Array): ExifInfo {
   const result: ExifInfo = { orientation: 1 }

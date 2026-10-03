@@ -1,3 +1,4 @@
+import { constrainLinePoint } from './lineGeometry'
 import type { PDFDocument, PDFObject, PDFPage } from 'mupdf'
 import type { Point, Rect } from './annotations'
 
@@ -17,7 +18,12 @@ export interface PageScale extends Omit<MeasureSettings, 'kind'> {
 }
 export const PT_MM = 25.4 / 72
 export const PAPER_LONG_MM: Record<Exclude<Paper, 'PDF'>, number> = { A0: 1189, A1: 841, A2: 594, A3: 420, A4: 297 }
-export const SCALE_CHOICES = [1, 2, 5, 10, 20, 25, 30, 50, 100, 150, 200, 250, 300, 500, 600, 1000, 1200, 2500, 5000]
+export const SCALE_PRESETS = [
+  { label: '詳細図など', denominators: [1, 2, 5, 10, 20, 25, 30] },
+  { label: '平面・立面・断面図など', denominators: [50, 100, 150, 200] },
+  { label: '配置・敷地・広域図など', denominators: [250, 300, 500, 600, 1000, 1200, 2500, 5000] },
+] as const
+export const SCALE_CHOICES: readonly number[] = SCALE_PRESETS.flatMap(group => [...group.denominators])
 
 function positive(value: number): number {
   if (!Number.isFinite(value) || value <= 0) throw new Error('縮尺と長さには正の数を入力してください。')
@@ -67,12 +73,7 @@ export function measureText(points: readonly Point[], settings: MeasureSettings)
   const number = new Intl.NumberFormat('ja-JP', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value)
   return `${settings.kind === 'perimeter' ? '合計 ' : ''}${number} ${area ? 'm²' : settings.unit}`
 }
-export function constrainMeasurePoint(start: Point, end: Point, shift: boolean): Point {
-  if (!shift) return end
-  const length = Math.hypot(end[0] - start[0], end[1] - start[1])
-  const angle = Math.round(Math.atan2(end[1] - start[1], end[0] - start[0]) / (Math.PI / 4)) * Math.PI / 4
-  return [start[0] + Math.cos(angle) * length, start[1] + Math.sin(angle) * length]
-}
+export const constrainMeasurePoint = constrainLinePoint
 export function pointInsidePolygon(p: Point, points: readonly Point[]): boolean {
   let inside = false
   points.forEach((a, i) => {

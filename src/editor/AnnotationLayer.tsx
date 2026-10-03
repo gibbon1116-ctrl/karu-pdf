@@ -1,3 +1,4 @@
+import { constrainLinePoint, arrowHeadSize } from '../core/lineGeometry'
 import { createContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Quad } from 'mupdf'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
@@ -98,15 +99,7 @@ function targetValue<T extends string>(target: EventTarget | null, name: string)
   return (target as Element | null)?.closest(`[data-${name}]`)?.getAttribute(`data-${name}`) as T | null
 }
 
-function constrainedEnd(start: Point, end: Point, shift: boolean): Point {
-  if (!shift) return end
-  const dx = end[0] - start[0]
-  const dy = end[1] - start[1]
-  const distance = Math.hypot(dx, dy)
-  if (distance === 0) return end
-  const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * Math.PI / 4
-  return [start[0] + Math.cos(angle) * distance, start[1] + Math.sin(angle) * distance]
-}
+const constrainedEnd = constrainLinePoint
 
 function shapeRect(start: Point, end: Point, square: boolean): Rect {
   let dx = end[0] - start[0]
@@ -418,7 +411,8 @@ export function AnnotationLayer(props: Props) {
     }
     if (operation.mode === 'line-end' && operation.originalLine && operation.lineHandle) {
       const line = operation.originalLine.map((point) => [...point]) as [Point, Point]
-      line[operation.lineHandle === 'start' ? 0 : 1] = operation.latest
+      const index = operation.lineHandle === 'start' ? 0 : 1
+      line[index] = constrainedEnd(line[1 - index], operation.latest, operation.shift)
       const preview = linePreviewRef.current
       preview?.setAttribute('x1', String(line[0][0]))
       preview?.setAttribute('y1', String(line[0][1]))
@@ -541,7 +535,8 @@ export function AnnotationLayer(props: Props) {
     }
     if (operation.mode === 'line-end' && operation.id && operation.originalLine && operation.lineHandle) {
       const line = operation.originalLine.map((point) => [...point]) as [Point, Point]
-      line[operation.lineHandle === 'start' ? 0 : 1] = operation.latest
+      const index = operation.lineHandle === 'start' ? 0 : 1
+      line[index] = constrainedEnd(line[1 - index], operation.latest, operation.shift)
       props.store.updateLine(operation.id, line)
       return
     }
@@ -579,6 +574,7 @@ export function AnnotationLayer(props: Props) {
           rect,
           color: format.color,
           borderWidth: format.borderWidth,
+        arrowHeadSize: format.arrowHeadSize,
           opacity: format.opacity,
           inkList: [points],
         })
@@ -600,6 +596,7 @@ export function AnnotationLayer(props: Props) {
         line: [[...operation.start], end],
         color: format.color,
         borderWidth: format.borderWidth,
+        arrowHeadSize: format.arrowHeadSize,
         opacity: format.opacity,
       })
       props.onSelect(annotation.id)
@@ -656,6 +653,7 @@ export function AnnotationLayer(props: Props) {
         interiorColor: format.fillColor,
         borderColor: format.borderColor,
         borderWidth: format.borderWidth,
+        arrowHeadSize: format.arrowHeadSize,
         textOpacity: format.textOpacity,
         boxOpacity: format.boxOpacity,
         calloutPoint: callout ? operation.start : null,
@@ -729,7 +727,7 @@ export function AnnotationLayer(props: Props) {
         {visible && annotation.kind === 'circle' && <ellipse className="annotation-shape" cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} rx={(x1 - x0) / 2} ry={(y1 - y0) / 2} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && line && <>
           <line className="annotation-line" x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]} stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} opacity={annotation.opacity} />
-          {annotation.kind === 'arrow' && <polyline className="annotation-line" points={arrowHead(line, Math.max(8, annotation.borderWidth * 5))} fill="none" stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} opacity={annotation.opacity} />}
+          {annotation.kind === 'arrow' && <polyline className="annotation-line" points={arrowHead(line, arrowHeadSize(annotation.arrowHeadSize, annotation.borderWidth))} fill="none" stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} opacity={annotation.opacity} />}
         </>}
         {visible && (annotation.kind === 'highlight' || annotation.kind === 'ink') && annotation.inkList?.map((stroke, index) => (
           <polyline key={`${annotation.id}-stroke-${index}`} className="annotation-ink" points={stroke.map((point) => `${point[0]},${point[1]}`).join(' ')} fill="none" stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} opacity={annotation.opacity} />
@@ -753,7 +751,7 @@ export function AnnotationLayer(props: Props) {
         >{symbolGlyph}</text>}
         {visible && calloutLine && <>
           <line className="annotation-callout-line" x1={calloutLine[0][0]} y1={calloutLine[0][1]} x2={calloutLine[1][0]} y2={calloutLine[1][1]} stroke={color(calloutColor)} strokeWidth={Math.max(0.5, annotation.borderWidth)} opacity={annotation.boxOpacity} />
-          <polyline className="annotation-callout-line" points={calloutArrowHead(calloutLine, Math.max(8, annotation.borderWidth * 5))} fill="none" stroke={color(calloutColor)} strokeWidth={Math.max(0.5, annotation.borderWidth)} opacity={annotation.boxOpacity} />
+          <polyline className="annotation-callout-line" points={calloutArrowHead(calloutLine, arrowHeadSize(annotation.arrowHeadSize, annotation.borderWidth))} fill="none" stroke={color(calloutColor)} strokeWidth={Math.max(0.5, annotation.borderWidth)} opacity={annotation.boxOpacity} />
         </>}
         {visible && (annotation.kind === 'freetext' || annotation.kind === 'callout') && <g className="annotation-text-frame">
           <rect className="annotation-text-box" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.boxOpacity} />

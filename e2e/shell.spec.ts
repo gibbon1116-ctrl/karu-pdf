@@ -120,12 +120,11 @@ test('書式パネルの青・3ptと文字14ptを作成と保存へ反映する'
   })).toEqual({ square: true, text: true })
 })
 
-test('同じファイルは重複せず、全タブを閉じると開始画面へ戻る', async ({ page }) => {
+test('同名同容量だけでは同一文書と扱わず、全タブを閉じると開始画面へ戻る', async ({ page }) => {
   await page.goto('/karu-pdf/?test=1')
   await page.getByTestId('file-input').setInputFiles(sample)
   await page.getByTestId('file-input').setInputFiles(sample)
-  await expect.poll(() => page.evaluate(() => window.__karu!.listTabs().length)).toBe(1)
-  const docId = await page.evaluate(() => window.__karu!.listTabs()[0].docId)
-  await page.evaluate((id) => window.__karu!.closeTab(id), docId)
+  await expect.poll(() => page.evaluate(() => window.__karu!.listTabs().length)).toBe(2)
+  await page.evaluate(async () => { for (const tab of window.__karu!.listTabs()) await window.__karu!.closeTab(tab.docId) })
   await expect(page.getByTestId('start-screen')).toBeVisible()
 })

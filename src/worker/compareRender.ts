@@ -57,9 +57,9 @@ export async function renderComparePixels(oldCache: ComparePageCache, newCache: 
     const a = options.output === 'new' && !mask ? null : draw(oldList, band.rect, scale)
     await checkpoint()
     const b = options.output === 'old' && !mask ? null : identical && a ? a : draw(newList, band.rect, scale * ratio, options.offset[0] * scale, options.offset[1] * scale)
-    const image = options.output === 'old' ? a! : options.output === 'new' ? b! : compositeCompare(a!, b!)
+    const image = options.output === 'old' ? a! : options.output === 'new' ? b! : compositeCompare(a!, b!, undefined, options.detection, options.tolerance)
     result.rgba.set(image.rgba, (band.rect[1] - rect[1]) * result.width * 4)
-    if (mask && !identical) mask.set(differenceMask(a!, b!), (band.rect[1] - rect[1]) * result.width)
+    if (mask && !identical) mask.set(differenceMask(a!, b!, undefined, options.detection, options.tolerance), (band.rect[1] - rect[1]) * result.width)
   }
   await checkpoint()
   if (mask) {

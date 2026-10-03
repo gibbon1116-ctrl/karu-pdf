@@ -43,6 +43,7 @@ import type {
 } from '../worker/protocol'
 
 export interface OpenResult {
+  editRestriction?: string | null
   pageScales?: (PageScale | null)[]
   pageCount: number
   pageSizes: PageSize[]
@@ -261,6 +262,7 @@ export class PdfWorkerPool {
     const first = responses[0]
     return {
       pageCount: first.pageCount,
+      editRestriction: first.editRestriction,
       pageSizes: first.pageSizes,
       pageScales: first.pageScales,
       openMs: first.openMs,
@@ -270,7 +272,7 @@ export class PdfWorkerPool {
 
   async openSource(docId: string, bytes: ArrayBuffer): Promise<OpenResult> {
     const response = await this.openOnSlot(this.slots[this.primaryWorkerIndex], docId, bytes)
-    return { pageCount: response.pageCount, pageSizes: response.pageSizes, pageScales: response.pageScales, openMs: response.openMs, sizesMs: response.sizesMs }
+    return { editRestriction: response.editRestriction, pageCount: response.pageCount, pageSizes: response.pageSizes, pageScales: response.pageScales, openMs: response.openMs, sizesMs: response.sizesMs }
   }
 
   async openSourceDisplays(docId: string, file: Blob): Promise<void> {
@@ -533,9 +535,9 @@ export class PdfWorkerPool {
     }
   }
 
-  async prepareOutput(docId: string, edits: AnnotationEdit[], bake: boolean): Promise<PreparedOutputResult> {
+  async prepareOutput(docId: string, edits: AnnotationEdit[], bake: boolean, safe?: import('../core/safeOutput').SafeOutputOptions): Promise<PreparedOutputResult> {
     const response = await this.request<OutputPreparedResponse>(this.slots[0], (requestId) => ({
-      type: 'prepareOutput', requestId, docId, edits, bake,
+      type: 'prepareOutput', requestId, docId, edits, bake, safe,
     }))
     return {
       bytes: new Uint8Array(response.bytes),

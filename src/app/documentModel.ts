@@ -3,6 +3,7 @@ import type { AnnotationEdit } from '../core/annotations'
 import type { SaveMode } from '../core/save'
 import { AnnotationStore } from '../editor/AnnotationStore'
 import type { PdfFileHandle } from '../editor/fileAccess'
+import { ViewHistory } from '../viewer/ViewHistory'
 
 export const MAX_OPEN_DOCUMENTS = 8
 export const MAX_INCREMENTAL_SAVES = 5
@@ -23,6 +24,7 @@ export function normalizeSidePanelTab(value: unknown): SidePanelTab {
 }
 
 export interface DocumentSessionInit {
+  editRestriction?: string | null
   docId: string
   name: string
   byteLength: number
@@ -32,6 +34,8 @@ export interface DocumentSessionInit {
 }
 
 export class DocumentSession {
+  readonly editRestriction: string | null
+  readonly viewHistory = new ViewHistory()
   readonly docId: string
   readonly name: string
   readonly byteLength: number
@@ -55,6 +59,7 @@ export class DocumentSession {
   private lastFullByteLength: number
 
   constructor(init: DocumentSessionInit) {
+    this.editRestriction = init.editRestriction ?? null
     this.docId = init.docId
     this.name = init.name
     this.byteLength = init.byteLength
@@ -111,6 +116,7 @@ export class DocumentSession {
   }
 
   updateAfterPageLayout(pageSizes: PageSize[], canUndoOrganize: boolean, scales?: import('../core/measure').PageScale[] | (import('../core/measure').PageScale | null)[]): void {
+    this.viewHistory.clear()
     this.savedPageRevisions.clear()
     this.savedRevision = 0
     this.splitSnapshotRevision = 0
@@ -142,7 +148,9 @@ export async function isSameDocument(session: DocumentSession, candidate: Docume
     }
   }
   if (session.handle || candidate.handle) return session.handle === candidate.handle
-  return session.name === candidate.name && session.byteLength === candidate.byteLength
+  // Names and lengths cannot identify a revised drawing. Without a file
+  // handle open a separate tab instead of reading/hash-copying large PDFs.
+  return false
 }
 
 export class DocumentTabsModel {

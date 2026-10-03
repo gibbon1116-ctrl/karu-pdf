@@ -69,6 +69,8 @@ export function CompareView(props: Props) {
   const [oldPage, setOldPage] = useState(() => Math.max(0, Math.min(props.old.pageSizes.length - 1, props.old.view.page - 1)))
   const [newPage, setNewPage] = useState(() => Math.max(0, Math.min(props.next.pageSizes.length - 1, props.old.view.page - 1)))
   const [includeAnnotations, setInclude] = useState(false)
+  const [detection, setDetection] = useState<'lines' | 'color'>('lines')
+  const [tolerance, setTolerance] = useState(24)
   const [offsets, setOffsets] = useState<Record<string, [number, number]>>({})
   const [committedOffsets, setCommittedOffsets] = useState<Record<string, [number, number]>>({})
   const [regions, setRegions] = useState<CompareRect[]>([]), [active, setActive] = useState(-1)
@@ -81,8 +83,8 @@ export function CompareView(props: Props) {
   const offset = offsets[pair] ?? zeroOffset, committed = committedOffsets[pair] ?? zeroOffset
   const size = props.old.pageSizes[oldPage]
   const options = useMemo<CompareOptions>(() => ({ docId: props.old.docId, newDocId: props.next.docId,
-    pageIndex: oldPage, newPageIndex: newPage, renderScale: 1, deviceRect: null, offset: committed, includeAnnotations }),
-  [props.old.docId, props.next.docId, oldPage, newPage, committed, includeAnnotations])
+    pageIndex: oldPage, newPageIndex: newPage, renderScale: 1, deviceRect: null, offset: committed, includeAnnotations, detection, tolerance }),
+  [props.old.docId, props.next.docId, oldPage, newPage, committed, includeAnnotations, detection, tolerance])
   useEffect(() => {
     root.current?.focus()
     let cancelled = false
@@ -163,11 +165,13 @@ export function CompareView(props: Props) {
         <button aria-label="前の違い" disabled={!regions.length} onClick={() => chooseDifference(previousDifference)}>‹</button>
         <button aria-label="次の違い" disabled={!regions.length} onClick={() => chooseDifference(active + 1)}>›</button>
         <label><input type="checkbox" checked={includeAnnotations} onChange={e => setInclude(e.target.checked)} />書き込みも比べる</label>
+        <label>検出<select aria-label="比較の検出方法" value={detection} onChange={e => setDetection(e.target.value as 'lines' | 'color')}><option value="lines">線の追加・削除</option><option value="color">色・濃さの変更</option></select></label>
+        {detection === 'color' && <label>感度<select aria-label="比較の感度" value={tolerance} onChange={e => setTolerance(Number(e.target.value))}><option value={48}>低</option><option value={24}>標準</option><option value={8}>高</option></select></label>}
         <span>位置合わせ: 方向キー（Shift: 10px） <output>{offset[0].toFixed(2)}, {offset[1].toFixed(2)} pt</output></span>
         <button onClick={() => setOffsets(previous => ({ ...previous, [pair]: zeroOffset }))}>戻す</button>
         <button onClick={props.onClose}>終わる</button>
       </div>
-      <small>赤＝旧版だけ、青＝新版だけ、灰＝共通。保存済みの書き込みを比較します。</small>
+      <small>{detection === 'color' ? '紫＝色・濃さの違い。小さな差は感度と画像解像度により省略されます。' : '赤＝旧版だけ、青＝新版だけ、灰＝共通。色や濃さだけの変更は検出しません。'} 保存済みの書き込みを比較します。</small>
       {(props.old.dirty || props.next.dirty) && <small>未保存の書き込みは表示されません。</small>}
     </header>
     {failure && <p role="alert">{failure}</p>}

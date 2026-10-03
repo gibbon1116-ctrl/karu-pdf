@@ -4,9 +4,14 @@ import { expect, test } from '@playwright/test'
 
 const sample = path.resolve('test-data/sample-small.pdf')
 
-test('前回のページと倍率を文書ごとに復元する', async ({ page }) => {
+test('ファイルハンドルから開いた文書の前回のページと倍率を復元する', async ({ page }) => {
+  const bytes = Array.from(await fs.readFile(sample))
+  await page.addInitScript(pdfBytes => {
+    const handle = { name: 'sample-small.pdf', getFile: async () => new File([new Uint8Array(pdfBytes)], 'sample-small.pdf', { type: 'application/pdf' }) }
+    window.showOpenFilePicker = async () => [handle] as any
+  }, bytes)
   await page.goto('/karu-pdf/?test=1')
-  await page.getByTestId('file-input').setInputFiles(sample)
+  await page.getByRole('button', { name: 'PDFを開く', exact: true }).click()
   await expect(page.getByText('1 / 5')).toBeVisible()
   await expect(page.locator('.zoom-value')).toContainText('%')
   await page.evaluate(() => window.__karu!.scrollToPage(2))
@@ -21,7 +26,7 @@ test('前回のページと倍率を文書ごとに復元する', async ({ page 
   }, { timeout: 3_000 })).toContainEqual({ page: 3, zoom: 1.5 })
 
   await page.reload()
-  await page.getByTestId('file-input').setInputFiles(sample)
+  await page.getByRole('button', { name: 'PDFを開く', exact: true }).click()
   await expect(page.getByText('150%')).toBeVisible()
   await expect(page.getByText('3 / 5')).toBeVisible()
   await expect(page.locator('.page-view[data-page-index="2"]')).toBeVisible()

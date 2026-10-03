@@ -8,6 +8,9 @@ import type { ViewPosition } from './viewer/viewSync'
 import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
 import { HelpDialog } from './app/HelpDialog'
 import { MenuBar } from './app/MenuBar'
+import { PrivacyDialog } from './app/PrivacyDialog'
+import { SheetSizeDialog } from './app/SheetSizeDialog'
+import { SafeOutputDialog } from './app/SafeOutputDialog'
 import { CompareDialog } from './app/CompareDialog'
 import { CompareView } from './app/CompareView'
 import { RasterizeDialog } from './app/RasterizeDialog'
@@ -234,6 +237,9 @@ export default function App() {
   const [saving, setSaving] = useState(false)
   const [organize, setOrganize] = useState<ActiveOrganize | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [privacyOpen, setPrivacyOpen] = useState(false)
+  const [sheetSizesOpen, setSheetSizesOpen] = useState(false)
+  const [safeOutputOpen, setSafeOutputOpen] = useState(false)
   const [compareDialog, setCompareDialog] = useState(false)
   const [comparison, setComparison] = useState<{ old: DocumentSession; next: DocumentSession } | null>(null)
   const [rasterizeOpen, setRasterizeOpen] = useState(false)
@@ -260,6 +266,18 @@ export default function App() {
     return all ? scaleDialog.session.pageSizes.flatMap((p, i) => Math.abs(p.width - size.width) < .01 && Math.abs(p.height - size.height) < .01 ? [i] : []) : [scaleDialog.pageIndex]
   }
   const refreshTabs = useCallback(() => setTabsVersion((value) => value + 1), [])
+  const rememberNavigation = useCallback(() => {
+    const session = activeRef.current, viewer = viewerRef.current
+    if (!session || !viewer) return
+    session.viewHistory.remember(viewer.getViewPosition()); refreshTabs()
+  }, [refreshTabs])
+  const moveViewHistory = useCallback((direction: 'back' | 'forward') => {
+    const session = activeRef.current, viewer = viewerRef.current
+    if (!session || !viewer || organizeRef.current) return
+    const position = session.viewHistory.move(direction, viewer.getViewPosition())
+    if (position) viewer.applyViewPosition(position)
+    refreshTabs()
+  }, [refreshTabs])
   const updateSplit = useCallback((next: SplitSettings) => {
     setSplit(next)
     saveSplitSettings(next)
@@ -393,7 +411,7 @@ export default function App() {
 
   const persistView = useCallback((session: DocumentSession | null = activeRef.current) => {
     if (!session) return
-    saveViewPosition(documentViewId(session.name, session.byteLength), session.view.page, session.view.zoom)
+    if (session.handle) saveViewPosition(documentViewId(session.name, session.byteLength), session.view.page, session.view.zoom)
   }, [])
 
   const scheduleViewPersistence = useCallback(() => {
@@ -479,12 +497,12 @@ export default function App() {
         openEndRef.current = null; openSharpEndRef.current = null
         return
       }
-      const remembered = loadViewPosition(documentViewId(name, byteLength))
+      const remembered = handle ? loadViewPosition(documentViewId(name, byteLength)) : null
       const view = remembered ? {
         page: Math.min(remembered.page, result.pageCount),
         zoom: remembered.zoom,
       } : undefined
-      const session = new DocumentSession({ docId, name, byteLength, handle, pageSizes: result.pageSizes, view })
+      const session = new DocumentSession({ docId, name, byteLength, handle, pageSizes: result.pageSizes, editRestriction: result.editRestriction, view })
       session.fileOutdated = created
       session.annotationStore.loadScales(result.pageScales ?? [])
       tabs.add(session)
@@ -578,6 +596,8 @@ export default function App() {
       await viewerRef.current?.commitEditor()
       const edits = session.annotationStore.toEdits()
       const result = await pool.applyAndSave(session.docId, edits, session.nextSaveMode())
+      if (result.errors.length > 0) throw new Error(result.errors.map(item => item.message).join(' / '))
+      session.fileOutdated = true
       session.annotationStore.markApplied(result)
       session.recordSavedRendering(edits, result.errors)
       session.recordSave(result.mode, result.bytes.byteLength)
@@ -607,6 +627,8 @@ export default function App() {
       await viewerRef.current?.commitEditor()
       const edits = session.annotationStore.toEdits()
       const result = await pool.applyAndSave(session.docId, edits, session.nextSaveMode())
+      if (result.errors.length > 0) throw new Error(result.errors.map(item => item.message).join(' / '))
+      session.fileOutdated = true
       session.annotationStore.markApplied(result)
       session.recordSavedRendering(edits, result.errors)
       session.recordSave(result.mode, result.bytes.byteLength)
@@ -725,6 +747,31 @@ export default function App() {
     }
   }, [beginSave, endSave, prepareOutput, showStatus])
 
+  const saveSafeOutput = useCallback(async (redact: boolean) => {
+    const session = activeRef.current
+    if (!session || !beginSave()) return
+    setError('')
+    try {
+      const name = session.name.replace(/\.pdf$/i, '') + '_共有用.pdf'
+      const handle = window.showSaveFilePicker ? await pickSaveHandle(name, session.handle ?? undefined) : null
+      if (handle && session.handle && (handle === session.handle || (handle.isSameEntry && await handle.isSameEntry(session.handle)))) throw new Error('元の編集文書とは別のファイルを選んでください。')
+      await viewerRef.current?.commitEditor()
+      const redactions = redact ? session.annotationStore.selectedIds().flatMap(id => {
+        const annotation = session.annotationStore.get(id)
+        return annotation?.kind === 'square' ? [{ pageIndex: annotation.pageIndex, rect: annotation.rect }] : []
+      }) : []
+      if (redact && !redactions.length) throw new Error('墨消しする四角を選択してください。')
+      const result = await pool.prepareOutput(session.docId, session.annotationStore.toEdits(), true, { redactions })
+      if (result.errors.length) throw new Error(result.errors.map(item => item.message).join(' / '))
+      if (handle) await writePdf(handle, result.bytes)
+      else downloadPdf(result.bytes, name)
+      setSafeOutputOpen(false)
+      showStatus('共有用PDFを保存しました。提出前に内容を確認してください。')
+    } catch (reason) {
+      if (!(reason instanceof DOMException && reason.name === 'AbortError')) setError(`共有用PDFを保存できませんでした: ${String(reason)}`)
+    } finally { endSave() }
+  }, [beginSave, endSave, pool, showStatus])
+
   const printDocument = useCallback(async () => {
     const session = activeRef.current
     if (!session || !beginSave()) return
@@ -780,6 +827,7 @@ export default function App() {
   const changeTool = useCallback(async (next: EditorTool) => {
     await viewerRef.current?.commitEditor()
     const session = activeRef.current
+    if (session?.editRestriction && next !== 'select') { showStatus(session.editRestriction); return }
     if (next === 'issue' && session) {
       try { await session.annotationStore.issueNumbers.initialize(() => pool.maxIssueNumber(session.docId)) } catch (reason) { showStatus(`番号を取得できませんでした: ${String(reason)}`); return }
       if (activeRef.current !== session) return
@@ -812,6 +860,8 @@ export default function App() {
     const edits = session.annotationStore.toEdits()
     if (edits.length === 0) return
     const result = await pool.applyEdits(session.docId, edits)
+    if (result.errors.length) throw new Error(result.errors.map(item => item.message).join(' / '))
+    session.fileOutdated = true
     session.annotationStore.markApplied(result)
     session.recordSavedRendering(edits, result.errors)
     session.fileOutdated = true
@@ -1138,7 +1188,13 @@ export default function App() {
       const target = event.target as HTMLElement | null
       const isInput = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false
       const key = event.key.toLowerCase()
+      if (!isInput && activeRef.current?.editRestriction && ((event.ctrlKey || event.metaKey) && ['s', 'x', 'v', 'd', 'z', 'y'].includes(key) || ['delete', 'backspace'].includes(key))) {
+        event.preventDefault(); showStatus(activeRef.current.editRestriction); return
+      }
       const organizing = organizeRef.current
+      if (event.altKey && !event.ctrlKey && !event.metaKey && !event.isComposing && !isActiveTextEditorComposing() && !isInput && !organizing && !document.querySelector('[role="menu"], dialog[open], [role="dialog"]') && (key === 'arrowleft' || key === 'arrowright') && target?.closest('.viewer')) {
+        event.preventDefault(); moveViewHistory(key === 'arrowleft' ? 'back' : 'forward'); return
+      }
       if (event.key === 'Escape') {
         if (event.isComposing || isActiveTextEditorComposing()) return
         // メニューは document の capture で閉じる。ダイアログは自身の
@@ -1266,7 +1322,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [comparison, scaleTracing, activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, openSidePanel, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, tabs, toggleSplit])
+  }, [comparison, scaleTracing, activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, moveViewHistory, openSidePanel, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, showStatus, tabs, toggleSplit])
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -1409,6 +1465,14 @@ export default function App() {
       />
       <div className="top-controls">
         <MenuBar
+          editRestriction={active?.editRestriction}
+          onPrivacy={() => setPrivacyOpen(true)}
+          onSheetSizes={() => setSheetSizesOpen(true)}
+          onSafeOutput={() => setSafeOutputOpen(true)}
+          canViewBack={active?.viewHistory.canBack ?? false}
+          canViewForward={active?.viewHistory.canForward ?? false}
+          onViewBack={() => moveViewHistory('back')}
+          onViewForward={() => moveViewHistory('forward')}
           fileName={active?.name ?? null}
           dirty={active?.dirty ?? false}
           hasDocument={!!active}
@@ -1451,6 +1515,7 @@ export default function App() {
           onHelp={() => setHelpOpen(true)}
         />
         <ToolRow
+          readOnly={!!active?.editRestriction}
           tool={tool}
           hasDocument={!!active}
           zoom={zoom}
@@ -1484,6 +1549,9 @@ export default function App() {
         if (chosen.length) setImageFiles(chosen)
         event.currentTarget.value = ''
       }} />
+      {privacyOpen && <PrivacyDialog onClose={() => setPrivacyOpen(false)} onChange={refreshRecent} />}
+      {sheetSizesOpen && active && <SheetSizeDialog sizes={active.pageSizes} onClose={() => setSheetSizesOpen(false)} onPage={index => viewerRef.current?.scrollToPage(index)} />}
+      {safeOutputOpen && active && <SafeOutputDialog error={error} busy={saving} regions={active.annotationStore.selectedIds().flatMap(id => { const annotation = active.annotationStore.get(id); return annotation?.kind === 'square' ? [{ pageIndex: annotation.pageIndex, rect: annotation.rect }] : [] })} onClose={() => setSafeOutputOpen(false)} onSave={redact => void saveSafeOutput(redact)} />}
       {error && <div className="error" role="alert">{error}</div>}
       {comparison ? <CompareView old={comparison.old} next={comparison.next} pool={pool} formatDefaults={formatDefaults} onClose={() => {
         void (async () => {
@@ -1505,6 +1573,7 @@ export default function App() {
           <WorkspaceFailureProbe fail={workspaceFailure}>
           <ScaleInteractionContext.Provider value={{ request: i => openScale(i, true), tracePage: scaleTracing ? scaleDialog?.pageIndex ?? null : null, complete: p => { setScalePoints(p); setScaleTracing(false) } }}>
           <DocumentWorkspace
+          onNavigate={rememberNavigation}
           key={`${active.docId}:${active.pageRevision}`}
           session={active}
           pool={pool}

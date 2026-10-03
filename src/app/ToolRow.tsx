@@ -24,8 +24,8 @@ const groups: Record<SplitToolGroup, Array<{ tool: EditorTool; label: string; de
     { tool: 'circle', label: '丸', description: '円や楕円を描く', shortcut: 'O' },
   ],
   pen: [
-    { tool: 'highlight', label: '蛍光ペン', description: 'なぞった所に半透明の太い線を引く（Shift で水平・垂直・45°、Ctrl で好きな角度の直線）', shortcut: 'H' },
-    { tool: 'ink', label: '手書き', description: '細い線で自由に書く（Shift で水平・垂直・45°、Ctrl で好きな角度の直線）', shortcut: 'P' },
+    { tool: 'highlight', label: '蛍光ペン', description: 'なぞった所に半透明の太い線を引く（Shift で5°刻み、Ctrl で好きな角度の直線）', shortcut: 'H' },
+    { tool: 'ink', label: '手書き', description: '細い線で自由に書く（Shift で5°刻み、Ctrl で好きな角度の直線）', shortcut: 'P' },
   ],
   measure: [
     { tool: 'distance', label: '距離', description: '2点の間の長さを測る', shortcut: 'K' },
@@ -81,6 +81,7 @@ function descriptionFor(tool: EditorTool): string {
 }
 
 interface Props {
+  readOnly?: boolean
   tool: EditorTool
   hasDocument: boolean
   zoom: number
@@ -117,11 +118,11 @@ export function ToolRow(props: Props) {
     if (group === 'measure') items.push({ type: 'separator' }, { label: '縮尺の設定…', description: 'このページの縮尺を決める', onSelect: props.onScale })
     return <div key={group} className={`split-button${active ? ' active' : ''}`}>
       <button type="button" className="split-main" title={`${labelFor(lastTools[group])}: ${descriptionFor(lastTools[group])}（${label}: ${groups[group].map((item) => item.label).join('・')}）`}
-        aria-pressed={active} disabled={!props.hasDocument} onClick={() => props.onToolChange(lastTools[group])}>
+        aria-pressed={active} disabled={!props.hasDocument || props.readOnly} onClick={() => props.onToolChange(lastTools[group])}>
         <ToolIcon tool={lastTools[group]} /><span className="split-label">{labelFor(lastTools[group])}</span>
       </button>
       <span className="split-arrow-wrap" title={`${label}の道具を選ぶ`}>
-        <Dropdown label={`${label}▼`} items={items} disabled={!props.hasDocument} buttonClassName="split-arrow">
+        <Dropdown label={`${label}▼`} items={items} disabled={!props.hasDocument || props.readOnly} buttonClassName="split-arrow">
           <span aria-hidden="true">▼</span><span className="visually-hidden">{label}▼</span>
         </Dropdown>
       </span>
@@ -140,7 +141,7 @@ export function ToolRow(props: Props) {
     {splitButton('pen', 'ペン')}
     {splitButton('mark', '文字に印')}
     {splitButton('measure', '計測')}
-    <button type="button" className={props.tool === 'symbol' ? 'active' : ''} title="記号: 記号を置く" aria-pressed={props.tool === 'symbol'} disabled={!props.hasDocument} onClick={() => props.onToolChange('symbol')}><ToolIcon tool="symbol" />記号</button>
+    <button type="button" className={props.tool === 'symbol' ? 'active' : ''} title="記号: 記号を置く" aria-pressed={props.tool === 'symbol'} disabled={!props.hasDocument || props.readOnly} onClick={() => props.onToolChange('symbol')}><ToolIcon tool="symbol" />記号</button>
     <span className="tool-row-separator" />
     <button type="button" className="icon-button" title="元に戻す" aria-label="元に戻す" disabled={!props.canUndo} onClick={props.onUndo}>↶ 戻す</button>
     <button type="button" className="icon-button" title="やり直し" aria-label="やり直し" disabled={!props.canRedo} onClick={props.onRedo}>↷ やり直し</button>

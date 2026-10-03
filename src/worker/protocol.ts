@@ -42,6 +42,8 @@ export interface RenderRequest {
 }
 
 export interface CompareOptions {
+  detection?: import('../core/compare').CompareDetection
+  tolerance?: number
   docId: string
   newDocId: string
   pageIndex: number
@@ -164,6 +166,7 @@ export interface ApplyEditsRequest {
 }
 
 export interface PrepareOutputRequest {
+  safe?: import('../core/safeOutput').SafeOutputOptions
   type: 'prepareOutput'
   requestId: number
   docId: string
@@ -298,6 +301,7 @@ export interface ReadyResponse {
 }
 
 export interface OpenResponse {
+  editRestriction?: string | null
   pageScales?: (PageScale | null)[]
   type: 'opened'
   requestId: number

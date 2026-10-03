@@ -9,3 +9,14 @@ test-data/real/
 dist-fixed/
 release/
 dist-single/
+
+# Drawings and internal documents must not be published accidentally.
+*.pdf
+*.dwg
+*.dxf
+*.ifc
+*.rvt
+*.rfa
+*.docx
+*.xlsx
+*.pptx

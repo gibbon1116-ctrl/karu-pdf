@@ -6,6 +6,7 @@ export const FORMAT_STORAGE_KEY = 'karu-pdf:format'
 export type FormatTool = 'cloudSquare' | 'cloudPolygon' | 'issue' | 'distance' | 'perimeter' | 'area' | 'text' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
 export interface ToolFormat {
+  arrowHeadSize?: number | null
   cloudIntensity: 0 | 1 | 2
   color: RGB
   borderWidth: number
@@ -39,6 +40,7 @@ function format(
   symbolSize = 16,
 ): ToolFormat {
   return {
+    arrowHeadSize: null,
     cloudIntensity: 1,
     color: [...color], borderWidth, fontSize, font,
     fillColor: fillColor ? [...fillColor] : null,
@@ -80,6 +82,7 @@ function readTool(value: unknown, fallback: ToolFormat): ToolFormat {
   const item = value && typeof value === 'object' ? value as Partial<ToolFormat> : {}
   const legacyBorder = fallback.borderColor && validColor(item.color) ? item.color : fallback.borderColor
   return {
+    arrowHeadSize: typeof item.arrowHeadSize === 'number' && Number.isFinite(item.arrowHeadSize) && item.arrowHeadSize >= 2 && item.arrowHeadSize <= 72 ? item.arrowHeadSize : null,
     cloudIntensity: item.cloudIntensity === 0 || item.cloudIntensity === 1 || item.cloudIntensity === 2 ? item.cloudIntensity : fallback.cloudIntensity,
     color: validColor(item.color) ? [...item.color] : [...fallback.color],
     borderWidth: typeof item.borderWidth === 'number' && Number.isFinite(item.borderWidth) ? item.borderWidth : fallback.borderWidth,

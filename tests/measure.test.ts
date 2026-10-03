@@ -50,7 +50,7 @@ describe('実寸と表示の計算', () => {
     expect(measureText(points, { ...settings, decimals: 2 })).toBe('2,540.00 mm')
     expect(measureText([[0, 0], [72000, 0]], { ...settings, unit: 'm' })).toBe('2,540.00 m')
   })
-  it.each([[10, 1, 0], [1, 10, Math.PI / 2], [9, 10, Math.PI / 4], [-9, -10, -3 * Math.PI / 4]])('Shiftの角度 %s,%s', (x, y, angle) => {
+  it.each([[10, 1, 5 * Math.PI / 180], [1, 10, 85 * Math.PI / 180], [9, 10, 50 * Math.PI / 180], [-9, -10, -130 * Math.PI / 180]])('Shiftの角度 %s,%s', (x, y, angle) => {
     const p = constrainMeasurePoint([0, 0], [x, y], true)
     expect(Math.atan2(p[1], p[0])).toBeCloseTo(angle)
     expect(Math.hypot(...p)).toBeCloseTo(Math.hypot(x, y))

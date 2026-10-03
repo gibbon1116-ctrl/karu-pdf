@@ -2,11 +2,21 @@
 export type CompareRect = [number, number, number, number]
 export interface ComparePixels { width: number; height: number; rgba: Uint8ClampedArray<ArrayBuffer> }
 export const COMPARE_THRESHOLD = 200
+export type CompareDetection = 'lines' | 'color'
 
-export function differenceMask(old: ComparePixels, next: ComparePixels, threshold = COMPARE_THRESHOLD): Uint8Array {
+function colorDifference(a: Uint8ClampedArray, b: Uint8ClampedArray, i: number, tolerance: number): boolean {
+  for (let channel = 0; channel < 3; channel++) {
+    const old = a[i + channel] * a[i + 3] / 255 + 255 - a[i + 3]
+    const next = b[i + channel] * b[i + 3] / 255 + 255 - b[i + 3]
+    if (Math.abs(old - next) > tolerance) return true
+  }
+  return false
+}
+
+export function differenceMask(old: ComparePixels, next: ComparePixels, threshold = COMPARE_THRESHOLD, mode: CompareDetection = 'lines', tolerance = 24): Uint8Array {
   checkSizes(old, next)
   const mask = new Uint8Array(old.width * old.height)
-  for (let p = 0; p < mask.length; p++) mask[p] = Number(dark(old.rgba, p * 4, threshold) !== dark(next.rgba, p * 4, threshold))
+  for (let p = 0; p < mask.length; p++) mask[p] = Number(mode === 'color' ? colorDifference(old.rgba, next.rgba, p * 4, tolerance) : dark(old.rgba, p * 4, threshold) !== dark(next.rgba, p * 4, threshold))
   return mask
 }
 function dark(data: Uint8ClampedArray, i: number, threshold: number) {
@@ -16,11 +26,15 @@ function dark(data: Uint8ClampedArray, i: number, threshold: number) {
 function checkSizes(a: ComparePixels, b: ComparePixels) {
   if (a.width !== b.width || a.height !== b.height || a.rgba.length !== a.width * a.height * 4 || b.rgba.length !== a.rgba.length) throw new Error('比較画像の大きさが一致しません。')
 }
-export function compositeCompare(old: ComparePixels, next: ComparePixels, threshold = COMPARE_THRESHOLD): ComparePixels {
+export function compositeCompare(old: ComparePixels, next: ComparePixels, threshold = COMPARE_THRESHOLD, mode: CompareDetection = 'lines', tolerance = 24): ComparePixels {
   checkSizes(old, next)
   const rgba = new Uint8ClampedArray(old.rgba.length)
   for (let i = 0; i < rgba.length; i += 4) {
     const a = dark(old.rgba, i, threshold), b = old === next ? a : dark(next.rgba, i, threshold)
+    if (mode === 'color' && old !== next && colorDifference(old.rgba, next.rgba, i, tolerance)) {
+      rgba[i] = 255; rgba[i + 1] = 0; rgba[i + 2] = 255; rgba[i + 3] = 255
+      continue
+    }
     rgba[i] = a && b ? 128 : a || !b ? 255 : 0
     rgba[i + 1] = a && b ? 128 : a || b ? 0 : 255
     rgba[i + 2] = a && b ? 128 : b || !a ? 255 : 0

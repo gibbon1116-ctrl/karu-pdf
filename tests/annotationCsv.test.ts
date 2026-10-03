@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { EditableAnnotation } from '../src/editor/AnnotationStore'
-import { createAnnotationCsv } from '../src/app/annotationCsv'
+import { createAnnotationCsv, createIssueCsv } from '../src/app/annotationCsv'
 
 function annotation(values: Partial<EditableAnnotation> = {}): EditableAnnotation {
   return {
@@ -13,6 +13,13 @@ function annotation(values: Partial<EditableAnnotation> = {}): EditableAnnotatio
 }
 
 describe('書き込み一覧 CSV', () => {
+  it.each(['=1+1', '+SUM(1)', '-1+1', '@SUM(1)', '  =1+1', '\t=1+1', '\r=1+1', '\n=1+1', '＝1+1'])('文字列 %j を数式ではなく文字として出力する', text => {
+    const item = annotation({ text })
+    expect(createAnnotationCsv([item])).toContain("'" + text.replace(/\r?\n/g, '\r\n'))
+    const issue = annotation({ text, kind: 'issue', issue: { number: 1, status: 'open' } })
+    expect(createIssueCsv([issue])).toContain("'" + text.replace(/\r?\n/g, '\r\n'))
+    expect(createIssueCsv([issue])).toContain('\r\n1,2,')
+  })
   it('BOM、CRLF、クォート、mm座標と大きさを出力する', () => {
     const csv = createAnnotationCsv([annotation()])
     expect(csv.charCodeAt(0)).toBe(0xFEFF)

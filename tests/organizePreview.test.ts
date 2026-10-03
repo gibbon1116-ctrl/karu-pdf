@@ -8,7 +8,9 @@ import {
 
 describe('ページ整理プレビューの倍率計算', () => {
   it('倍率の段階を上げ下げし、両端で止まる', () => {
-    expect(nextPreviewZoom(1, -1)).toBe(1)
+    expect(nextPreviewZoom(1, -1)).toBe(0.75)
+    expect(nextPreviewZoom(0.25, -1)).toBe(0.25)
+    expect(nextPreviewZoom(0.5, -1)).toBe(0.25)
     expect(nextPreviewZoom(1, 1)).toBe(1.5)
     expect(nextPreviewZoom(1.5, 1)).toBe(2)
     expect(nextPreviewZoom(8, 1)).toBe(8)

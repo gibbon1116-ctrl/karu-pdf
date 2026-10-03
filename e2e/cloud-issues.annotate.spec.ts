@@ -60,7 +60,7 @@ test('雲多角形は02iと同じ4点・Enter・Backspace・Shift・頂点編集
   const start=await point(page,100,220),end=await point(page,120,200)
   await page.mouse.move(start.x,start.y);await page.mouse.down();await page.keyboard.down('Shift');await page.mouse.move(end.x,end.y);await page.mouse.up();await page.keyboard.up('Shift')
   const moved=await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).find(a=>a.kind==='cloudPolygon')!.vertices![0])
-  expect(moved[0]).toBeCloseTo(100,3);expect(moved[1]).toBeLessThan(220)
+  expect(moved[0]).toBeCloseTo(100 + Math.cos(80 * Math.PI / 180) * Math.hypot(20, 104),3);expect(moved[1]).toBeLessThan(220)
   await page.keyboard.press('Control+z')
   await expect.poll(()=>page.evaluate(()=>window.__karu!.getEditableAnnotations(0).find(a=>a.kind==='cloudPolygon')!.vertices![0][1])).toBeCloseTo(220,3)
   await reopen(page);await expect.poll(()=>page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.kind==='cloudPolygon').length)).toBe(1)

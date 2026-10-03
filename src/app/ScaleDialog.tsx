@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { calibratedScale, ratioScale, scaleLabel, SCALE_CHOICES, type PageScale, type Paper } from '../core/measure'
+import { calibratedScale, ratioScale, scaleLabel, SCALE_CHOICES, SCALE_PRESETS, type PageScale, type Paper } from '../core/measure'
 import type { Point } from '../core/annotations'
 import type { PageSize } from '../core/mupdfDoc'
 
@@ -19,6 +19,7 @@ export function ScaleDialog(props: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [mode, setMode] = useState(props.initial?.source === 'calibration' ? 'calibration' : 'ratio')
   const [ratio, setRatio] = useState(String(props.initial?.denominator ?? 100))
+  const [preset, setPreset] = useState(() => SCALE_CHOICES.includes(props.initial?.denominator ?? 100) ? String(props.initial?.denominator ?? 100) : 'custom')
   const [paper, setPaper] = useState<Paper>(props.initial?.paper ?? 'PDF')
   const [unit, setUnit] = useState<'mm' | 'm'>(props.initial?.unit ?? 'mm')
   const [decimals, setDecimals] = useState<number | null>(props.initial?.decimals ?? null)
@@ -61,8 +62,14 @@ export function ScaleDialog(props: Props) {
       </> : <>
         <fieldset disabled={busy}>
           <label><input type="radio" name="scale-mode" checked={mode === 'ratio'} onChange={() => setMode('ratio')} />縮尺を入力</label>
-          <label>縮尺 1 / <input aria-label="縮尺の分母" list="scale-ratios" value={ratio} onChange={e => setRatio(e.currentTarget.value)} disabled={mode !== 'ratio'} inputMode="decimal" /></label>
-          <datalist id="scale-ratios">{SCALE_CHOICES.map(n => <option key={n} value={n} />)}</datalist>
+          <label>よく使う縮尺<select aria-label="よく使う縮尺" value={preset} onChange={event => {
+            const value = event.currentTarget.value; setPreset(value)
+            if (value !== 'custom') setRatio(value)
+          }} disabled={mode !== 'ratio'}>
+            {SCALE_PRESETS.map(group => <optgroup key={group.label} label={group.label}>{group.denominators.map(value => <option key={value} value={value}>1/{value}</option>)}</optgroup>)}
+            <option value="custom">任意入力</option>
+          </select></label>
+          <label>縮尺 1 / <input aria-label="縮尺の分母" value={ratio} onChange={event => { setRatio(event.currentTarget.value); setPreset('custom') }} disabled={mode !== 'ratio'} inputMode="decimal" /></label>
           <label>原図の用紙<select aria-label="原図の用紙" value={paper} onChange={e => setPaper(e.currentTarget.value as Paper)} disabled={mode !== 'ratio'}><option value="PDF">このPDFの大きさのまま</option>{['A0', 'A1', 'A2', 'A3', 'A4'].map(p => <option key={p}>{p}</option>)}</select></label>
           <label><input type="radio" name="scale-mode" checked={mode === 'calibration'} onChange={() => setMode('calibration')} />図面の寸法をなぞって合わせる</label>
           <button type="button" disabled={mode !== 'calibration'} onClick={props.onTrace}>なぞる</button>

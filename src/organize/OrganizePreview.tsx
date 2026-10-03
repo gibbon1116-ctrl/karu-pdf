@@ -6,7 +6,7 @@ import { computeDetailRegion } from '../viewer/detailRegion'
 import type { DeviceRect } from '../worker/protocol'
 import type { PageCard } from './OrganizeDraft'
 
-export const PREVIEW_ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8] as const
+export const PREVIEW_ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8] as const
 export const MAX_PREVIEW_FULL_PIXELS = 8_000_000
 const DETAIL_DEBOUNCE_MS = 150
 
