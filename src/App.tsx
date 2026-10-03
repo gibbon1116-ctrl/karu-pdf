@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { DocumentTabs } from './app/DocumentTabs'
 import { DocumentWorkspace } from './app/DocumentWorkspace'
 import { loadSplitSettings, saveSplitSettings, type SplitSettings } from './app/SplitView'
@@ -30,6 +30,7 @@ import { allSessionAnnotations } from './app/AnnotationListPanel'
 import { createIssueCsv, createAnnotationCsv } from './app/annotationCsv'
 import { StartScreen } from './app/StartScreen'
 import { ErrorBoundary } from './app/ErrorBoundary'
+import { PdfOpeningFeedback, PdfOpeningStore, type PdfOpening } from './app/PdfOpeningFeedback'
 import { PdfWorkerPool, type ApplyAndSaveResult, type PageLayoutTimings, type PreparedOutputResult, type RasterizeMetrics } from './client/PdfWorkerPool'
 import type { RasterizeOptions } from './core/rasterize'
 import { BlobPdfWriteTarget, type PdfWriteTarget } from './core/pdfStreamWriter'
@@ -57,6 +58,8 @@ import { splitCardGroups, type OrganizeSplitMode } from './organize/organizeUtil
 import type { PageLayoutCard } from './core/pageOps'
 import { registerPwa } from './pwa'
 import './styles.css'
+
+const TextExportDialog = lazy(() => import('./app/TextExportDialog'))
 
 declare global {
   interface Window {
@@ -210,6 +213,13 @@ export default function App() {
   const viewSaveTimerRef = useRef<number | undefined>(undefined)
   const savingRef = useRef(false)
   const openQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const openingSequenceRef = useRef(0)
+  const openingRef = useRef<PdfOpening | null>(null)
+  const openingStoreRef = useRef<PdfOpeningStore | null>(null)
+  if (!openingStoreRef.current) openingStoreRef.current = new PdfOpeningStore()
+  const openingStore = openingStoreRef.current
+  const openMeasuredDocRef = useRef<string | null>(null)
+  const textExtractionAbortRef = useRef<AbortController | null>(null)
   const organizeRef = useRef<ActiveOrganize | null>(null)
   const organizeClipboardRef = useRef<{ cards: PageCard[]; sources: OrganizeSourceInfo[] } | null>(null)
   const annotationClipboardRef = useRef<{
@@ -232,6 +242,8 @@ export default function App() {
   const [panels, setPanels] = useState(loadPanels)
   const [recent, setRecent] = useState<RecentFile[]>([])
   const [error, setError] = useState('')
+  const errorRef = useRef(error)
+  errorRef.current = error
   const [runtimeError, setRuntimeError] = useState('')
   const [status, setStatus] = useState('')
   const [saving, setSaving] = useState(false)
@@ -240,6 +252,7 @@ export default function App() {
   const [privacyOpen, setPrivacyOpen] = useState(false)
   const [sheetSizesOpen, setSheetSizesOpen] = useState(false)
   const [safeOutputOpen, setSafeOutputOpen] = useState(false)
+  const [textExportOpen, setTextExportOpen] = useState(false)
   const [compareDialog, setCompareDialog] = useState(false)
   const [comparison, setComparison] = useState<{ old: DocumentSession; next: DocumentSession } | null>(null)
   const [rasterizeOpen, setRasterizeOpen] = useState(false)
@@ -250,6 +263,39 @@ export default function App() {
   const [workspaceFailure, setWorkspaceFailure] = useState(false)
   const [focusSearchVersion, setFocusSearchVersion] = useState(0)
   const testMode = new URLSearchParams(location.search).get('test') === '1'
+
+  const beginOpening = useCallback((name: string, id = ++openingSequenceRef.current) => {
+    textExtractionAbortRef.current?.abort()
+    const next: PdfOpening = { id, name, stage: 'reading', docId: null }
+    openingRef.current = next
+    openingStore.set(next)
+    if (errorRef.current) setError('')
+    return id
+  }, [openingStore])
+  const advanceOpening = useCallback((id: number, patch: Partial<PdfOpening>) => {
+    if (openingRef.current?.id !== id) return
+    const next = { ...openingRef.current, ...patch }
+    openingRef.current = next
+    openingStore.set(next)
+  }, [openingStore])
+  const finishOpening = useCallback((id: number) => {
+    if (openingRef.current?.id !== id) return
+    openingRef.current = null
+    openingStore.set(null)
+  }, [openingStore])
+  const finishOpeningDocument = useCallback((docId: string) => {
+    if (openingRef.current?.docId === docId) finishOpening(openingRef.current.id)
+  }, [finishOpening])
+  const failOpeningRender = useCallback((docId: string, reason: unknown) => {
+    if (openingRef.current?.docId !== docId) return
+    finishOpeningDocument(docId)
+    setError(`ページを表示できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
+  }, [finishOpeningDocument])
+  const trackTextExtraction = useCallback((controller: AbortController) => {
+    textExtractionAbortRef.current?.abort()
+    textExtractionAbortRef.current = controller
+    return () => { if (textExtractionAbortRef.current === controller) textExtractionAbortRef.current = null }
+  }, [])
   const active = tabs.active
   activeRef.current = active
   organizeRef.current = organize
@@ -387,10 +433,18 @@ export default function App() {
     const onError = (event: ErrorEvent) => {
       console.error('アプリで予期しないエラーが発生しました。', event.error ?? event.message)
       setRuntimeError('画面の処理で問題が起きました。書き込みは保持されています。')
+      if (openingRef.current) {
+        finishOpening(openingRef.current.id)
+        setError('PDFの表示中に問題が起きました。開き直してください。')
+      }
     }
     const onUnhandledRejection = (event: PromiseRejectionEvent) => {
       console.error('未処理の Promise エラーが発生しました。', event.reason)
       setRuntimeError('画面の処理で問題が起きました。書き込みは保持されています。')
+      if (openingRef.current) {
+        finishOpening(openingRef.current.id)
+        setError('PDFの表示中に問題が起きました。開き直してください。')
+      }
     }
     window.addEventListener('error', onError)
     window.addEventListener('unhandledrejection', onUnhandledRejection)
@@ -398,7 +452,7 @@ export default function App() {
       window.removeEventListener('error', onError)
       window.removeEventListener('unhandledrejection', onUnhandledRejection)
     }
-  }, [])
+  }, [finishOpening])
 
   useEffect(() => {
     updateServiceWorkerRef.current = registerPwa({
@@ -436,6 +490,7 @@ export default function App() {
   }, [closeOrganizeSources])
 
   const activateDocument = useCallback(async (docId: string) => {
+    textExtractionAbortRef.current?.abort()
     const current = activeRef.current
     if (current?.docId === docId) return
     if (!discardOrganize()) return
@@ -443,13 +498,14 @@ export default function App() {
     persistView(current)
     await pool.activate(docId)
     if (!tabs.activate(docId)) return
+    if (openingRef.current?.stage === 'displaying' && openingRef.current.docId !== docId) finishOpening(openingRef.current.id)
     const next = tabs.active
     activeRef.current = next
     setPage(next?.view.page ?? 0)
     setZoom(next?.view.zoom ?? 1)
     setTool('select')
     refreshTabs()
-  }, [discardOrganize, persistView, pool, refreshTabs, tabs])
+  }, [discardOrganize, finishOpening, persistView, pool, refreshTabs, tabs])
 
   const swapSplit = useCallback(async (right: DocumentSession, rightPosition: ViewPosition, leftPosition: ViewPosition) => {
     const left = activeRef.current
@@ -470,33 +526,41 @@ export default function App() {
     viewerRef.current?.applyViewPosition(pending.position)
   }, [active?.docId])
 
-  const openBuffer = useCallback(async (buffer: ArrayBuffer, name: string, handle: PdfFileHandle | null, created = false, signal?: AbortSignal) => {
+  const openBuffer = useCallback(async (buffer: ArrayBuffer, name: string, handle: PdfFileHandle | null, created = false, signal?: AbortSignal, trackedId?: number) => {
     if (signal?.aborted) return
+    const requestId = trackedId ?? beginOpening(name)
     const byteLength = buffer.byteLength
-    const duplicate = created ? null : await tabs.findDuplicate({ handle, name, byteLength })
-    if (duplicate) {
-      await activateDocument(duplicate.docId)
-      return
-    }
-    if (tabs.list().length >= MAX_OPEN_DOCUMENTS) {
-      setError('同時に開けるのは8ファイルまでです')
-      return
-    }
-
-    setError('')
-    setStatus('')
-    resetBlankFrames()
-    openEndRef.current = startMeasure('open')
-    openSharpEndRef.current = startMeasure('open-sharp')
-    const docId = createDocId()
+    let docId: string | null = null
     try {
+      const duplicate = created ? null : await tabs.findDuplicate({ handle, name, byteLength })
+      if (duplicate) {
+        await activateDocument(duplicate.docId)
+        finishOpening(requestId)
+        return
+      }
+      if (tabs.list().length >= MAX_OPEN_DOCUMENTS) {
+        finishOpening(requestId)
+        setError('同時に開けるのは8ファイルまでです')
+        return
+      }
+      setError('')
+      setStatus('')
+      resetBlankFrames()
+      openEndRef.current = startMeasure('open')
+      openSharpEndRef.current = startMeasure('open-sharp')
+      docId = createDocId()
+      openMeasuredDocRef.current = docId
+      advanceOpening(requestId, { name, stage: 'opening', docId })
       const result = await pool.open(docId, buffer)
       if (signal?.aborted) {
         pool.close(docId)
         if (activeRef.current) await pool.activate(activeRef.current.docId)
         openEndRef.current = null; openSharpEndRef.current = null
+        openMeasuredDocRef.current = null
+        finishOpening(requestId)
         return
       }
+      if (!result.pageCount) throw new Error('PDFにページがありません。')
       const remembered = handle ? loadViewPosition(documentViewId(name, byteLength)) : null
       const view = remembered ? {
         page: Math.min(remembered.page, result.pageCount),
@@ -511,45 +575,64 @@ export default function App() {
       setZoom(session.view.zoom)
       setTool('select')
       refreshTabs()
+      advanceOpening(requestId, { stage: 'displaying' })
       if (handle) {
         await saveLastOpenedHandle(handle, name)
         refreshRecent()
       }
     } catch (reason) {
-      pool.close(docId)
-      openEndRef.current = null
-      openSharpEndRef.current = null
+      if (docId) pool.close(docId)
+      if (openMeasuredDocRef.current === docId) {
+        openEndRef.current = null
+        openSharpEndRef.current = null
+        openMeasuredDocRef.current = null
+      }
+      finishOpening(requestId)
       setError(`PDFを開けませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
       throw reason
     }
-  }, [activateDocument, pool, refreshRecent, refreshTabs, tabs])
+  }, [activateDocument, advanceOpening, beginOpening, finishOpening, pool, refreshRecent, refreshTabs, tabs])
 
-  const openFile = useCallback((file: File, handle: PdfFileHandle | null = null): Promise<void> => {
+  const enqueueOpen = useCallback((name: string, read: () => Promise<{ file: File; handle: PdfFileHandle | null }>): Promise<void> => {
+    const requestId = ++openingSequenceRef.current
+    if (!openingRef.current) beginOpening(name, requestId)
     const operation = openQueueRef.current.then(async () => {
-      const duplicate = await tabs.findDuplicate({ handle, name: file.name, byteLength: file.size })
-      if (duplicate) {
-        await activateDocument(duplicate.docId)
-        return
+      if (openingRef.current?.id !== requestId) beginOpening(name, requestId)
+      try {
+        const { file, handle } = await read()
+        const duplicate = await tabs.findDuplicate({ handle, name: file.name, byteLength: file.size })
+        if (duplicate) {
+          await activateDocument(duplicate.docId)
+          finishOpening(requestId)
+          return
+        }
+        await openBuffer(await file.arrayBuffer(), file.name, handle, false, undefined, requestId)
+      } catch (reason) {
+        finishOpening(requestId)
+        setError(`PDFを開けませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
+        throw reason
       }
-      await openBuffer(await file.arrayBuffer(), file.name, handle)
     })
     openQueueRef.current = operation.catch(() => undefined)
     return operation
-  }, [activateDocument, openBuffer, tabs])
+  }, [activateDocument, beginOpening, finishOpening, openBuffer, tabs])
+
+  const openFile = useCallback((file: File, handle: PdfFileHandle | null = null) => enqueueOpen(file.name, async () => ({ file, handle })), [enqueueOpen])
+  const openHandle = useCallback((handle: PdfFileHandle) => enqueueOpen(handle.name ?? 'PDF', async () => ({ file: await handle.getFile(), handle })), [enqueueOpen])
 
   useEffect(() => {
     window.launchQueue?.setConsumer((params) => {
       void (async () => {
         for (const handle of params.files) {
           try {
-            await openFile(await handle.getFile(), handle)
+            await openHandle(handle)
           } catch (reason) {
             setError(`PDFを開けませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
           }
         }
       })()
     })
-  }, [openFile])
+  }, [openHandle])
 
   const closeDocument = useCallback(async (docId: string, confirmDirty = true) => {
     const documents = tabs.list()
@@ -566,19 +649,21 @@ export default function App() {
     }
     tabs.close(docId)
     pool.close(docId)
+    finishOpeningDocument(docId)
     const next = tabs.active
     activeRef.current = next
     setPage(next?.view.page ?? 0)
     setZoom(next?.view.zoom ?? 1)
     setTool('select')
     refreshTabs()
-  }, [discardOrganize, persistView, pool, refreshTabs, tabs])
+  }, [discardOrganize, finishOpeningDocument, persistView, pool, refreshTabs, tabs])
 
   const beginSave = useCallback(() => {
     if (savingRef.current) {
       showStatus('保存中です')
       return false
     }
+    textExtractionAbortRef.current?.abort()
     savingRef.current = true
     setSaving(true)
     return true
@@ -806,7 +891,7 @@ export default function App() {
       try {
         const remembered = await loadLastOpenedHandle()
         const handles = await pickOpenHandles(remembered?.handle)
-        for (const handle of handles) await openFile(await handle.getFile(), handle)
+        for (const handle of handles) await openHandle(handle)
       } catch (reason) {
         if (!(reason instanceof DOMException && reason.name === 'AbortError')) {
           setError(`PDFを開けませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
@@ -815,7 +900,7 @@ export default function App() {
       return
     }
     document.querySelector<HTMLInputElement>('[data-testid="file-input"]')?.click()
-  }, [openFile])
+  }, [openHandle])
 
   const pickImageFiles = async () => {
     try {
@@ -1400,10 +1485,10 @@ export default function App() {
 
   const openRecent = async (item: RecentFile) => {
     try {
-      if (item.handle.requestPermission && await item.handle.requestPermission({ mode: 'read' }) !== 'granted') {
-        throw new Error('ファイルを開く許可が得られませんでした。')
-      }
-      await openFile(await item.handle.getFile(), item.handle)
+      await enqueueOpen(item.name, async () => {
+        if (item.handle.requestPermission && await item.handle.requestPermission({ mode: 'read' }) !== 'granted') throw new Error('ファイルを開く許可が得られませんでした。')
+        return { file: await item.handle.getFile(), handle: item.handle }
+      })
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason)
       setError(`最近使ったファイルを開けませんでした: ${message}`)
@@ -1417,12 +1502,18 @@ export default function App() {
     event.preventDefault()
     const files = [...event.dataTransfer.files]
     const images = files.filter(isImageFile)
+    const operations: Promise<void>[] = []
     for (let index = 0; index < files.length; index += 1) {
       if (!(files[index].type === 'application/pdf' || /\.pdf$/i.test(files[index].name))) continue
       const item = event.dataTransfer.items[index] as (DataTransferItem & { getAsFileSystemHandle?: () => Promise<PdfFileHandle> }) | undefined
-      const handle = item?.getAsFileSystemHandle ? await item.getAsFileSystemHandle() : null
-      await openFile(files[index], handle)
+      // Request native handles during the drop event, before its protected data
+      // becomes unavailable. File reads and PDF opens remain serialized.
+      const handle = item?.getAsFileSystemHandle ? item.getAsFileSystemHandle() : Promise.resolve(null)
+      void handle.catch(() => undefined)
+      const file = files[index]
+      operations.push(enqueueOpen(file.name, async () => ({ file, handle: await handle })))
     }
+    await Promise.allSettled(operations)
     if (images.length) setImageFiles(images)
   }
 
@@ -1449,7 +1540,7 @@ export default function App() {
     onSplit: (mode) => void splitAndSave(mode),
   } : null
   return (
-    <main className={`app${comparison ? ' comparing' : ''}${updateReady ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { if (!comparison) void handleDrop(event) }}>
+    <main className={`app${comparison ? ' comparing' : ''}${updateReady ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { if (!comparison) void handleDrop(event).catch(reason => setError(`PDFを開けませんでした: ${String(reason)}`)) }}>
       {updateReady && (
         <div className="update-banner" role="status">
           {/* @pages:start */}<span>新しい版があります。</span>{/* @pages:end */}{/* @fixed:start */}<span>管理者が配布物を更新しました。再読み込みすると新しい版に切り替わります</span>{/* @fixed:end */}
@@ -1468,6 +1559,7 @@ export default function App() {
           editRestriction={active?.editRestriction}
           onPrivacy={() => setPrivacyOpen(true)}
           onSheetSizes={() => setSheetSizesOpen(true)}
+          onExtractText={() => setTextExportOpen(true)}
           onSafeOutput={() => setSafeOutputOpen(true)}
           canViewBack={active?.viewHistory.canBack ?? false}
           canViewForward={active?.viewHistory.canForward ?? false}
@@ -1540,7 +1632,7 @@ export default function App() {
         data-testid="file-input"
         onChange={(event) => {
           const files = [...(event.currentTarget.files ?? [])]
-          void (async () => { for (const file of files) await openFile(file) })()
+          void (async () => { for (const file of files) await openFile(file).catch(() => undefined) })()
           event.currentTarget.value = ''
         }}
       />
@@ -1551,8 +1643,14 @@ export default function App() {
       }} />
       {privacyOpen && <PrivacyDialog onClose={() => setPrivacyOpen(false)} onChange={refreshRecent} />}
       {sheetSizesOpen && active && <SheetSizeDialog sizes={active.pageSizes} onClose={() => setSheetSizesOpen(false)} onPage={index => viewerRef.current?.scrollToPage(index)} />}
+      {textExportOpen && active && !saving && !organize && <ErrorBoundary resetKey={`${active.docId}:${active.pageRevision}:${active.savedRevision}`} onError={reason => { setError(`文字抽出の画面を読み込めませんでした: ${reason.message}`); setTextExportOpen(false) }} fallback={() => <p role="alert">文字抽出の画面を読み込めませんでした。</p>}>
+        <Suspense fallback={<div className="pdf-opening" role="status">文字抽出を準備しています</div>}>
+          <TextExportDialog key={`${active.docId}:${active.pageRevision}:${active.savedRevision}`} docId={active.docId} name={active.name} pageCount={active.pageSizes.length} currentPage={Math.max(0, page - 1)} pool={pool} track={trackTextExtraction} onClose={() => setTextExportOpen(false)} />
+        </Suspense>
+      </ErrorBoundary>}
       {safeOutputOpen && active && <SafeOutputDialog error={error} busy={saving} regions={active.annotationStore.selectedIds().flatMap(id => { const annotation = active.annotationStore.get(id); return annotation?.kind === 'square' ? [{ pageIndex: annotation.pageIndex, rect: annotation.rect }] : [] })} onClose={() => setSafeOutputOpen(false)} onSave={redact => void saveSafeOutput(redact)} />}
       {error && <div className="error" role="alert">{error}</div>}
+      <PdfOpeningFeedback store={openingStore} />
       {comparison ? <CompareView old={comparison.old} next={comparison.next} pool={pool} formatDefaults={formatDefaults} onClose={() => {
         void (async () => {
           try { if (activeRef.current) await pool.activate(activeRef.current.docId); setComparison(null) }
@@ -1561,6 +1659,7 @@ export default function App() {
       }} /> : active ? (
         <ErrorBoundary
           resetKey={`${active.docId}:${active.pageRevision}`}
+          onError={reason => failOpeningRender(active.docId, reason)}
           onReset={() => setWorkspaceFailure(false)}
           fallback={(_reason, reset) => <section className="workspace-error" role="alert">
             <p>表示中に問題が起きました。書き込みは消えていません。</p>
@@ -1590,8 +1689,14 @@ export default function App() {
           onSideTabChange={(tab) => openSidePanel(tab, tab === 'search')}
           onPageChange={(next) => { setPage(next); scheduleViewPersistence() }}
           onZoomChange={(next) => { setZoom(next); scheduleViewPersistence() }}
-          onFirstBitmap={() => { openEndRef.current?.(); openEndRef.current = null }}
-          onFirstSharp={() => { openSharpEndRef.current?.(); openSharpEndRef.current = null }}
+          onFirstBitmap={() => {
+            if (openMeasuredDocRef.current === active.docId) { openEndRef.current?.(); openEndRef.current = null }
+            finishOpeningDocument(active.docId)
+          }}
+          onFirstSharp={() => {
+            if (openMeasuredDocRef.current === active.docId) { openSharpEndRef.current?.(); openSharpEndRef.current = null; openMeasuredDocRef.current = null }
+          }}
+          onRenderError={reason => failOpeningRender(active.docId, reason)}
           onStatus={showStatus}
           organize={workspaceOrganize}
           split={split.enabled && !workspaceOrganize ? {

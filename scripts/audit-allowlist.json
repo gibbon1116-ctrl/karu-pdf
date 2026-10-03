@@ -30,6 +30,18 @@
     "maxOccurrences": 1
   },
   {
+    "file": "dist-fixed/assets/organizeUtils-*.js",
+    "string": "XMLHttpRequest",
+    "reason": "文字抽出の遅延読込により共有チャンクへ移った MuPDF/Emscripten 標準ローダー。従来の App チャンクと同じ file: 読み取り分岐。固定版では内部 HTTP(S) を使う。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/organizeUtils-*.js",
+    "string": "fetch(",
+    "reason": "共有チャンクへ移った MuPDF/Emscripten 標準ローダー。同梱 WASM の同一 origin GET だけで、PDF の送信先ではない。配布版の通信試験で確認する。",
+    "maxOccurrences": 2
+  },
+  {
     "file": "dist-fixed/assets/App-*.js",
     "string": "XMLHttpRequest",
     "reason": "MuPDF/Emscripten の file: 読み取り用フォールバック。固定版は内部サーバーの HTTP(S) を使用する。",

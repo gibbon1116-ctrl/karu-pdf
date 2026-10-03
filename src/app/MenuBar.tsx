@@ -8,6 +8,7 @@ interface Props {
   editRestriction?: string | null
   onPrivacy(): void
   onSheetSizes(): void
+  onExtractText(): void
   onSafeOutput(): void
   canViewBack: boolean
   canViewForward: boolean
@@ -79,6 +80,7 @@ export function MenuBar(props: Props) {
       { label: '共有・提出用に保存…', disabled: editingUnavailable, onSelect: props.onSafeOutput },
       { label: '画像として保存…', disabled: editingUnavailable, onSelect: props.onSaveRasterized },
       { label: '画像から PDF を作る…', onSelect: props.onImagesToPdf },
+      { label: '図面内文字を抽出…', disabled: unavailable, onSelect: props.onExtractText },
       separator(),
       { label: '印刷', shortcut: 'Ctrl+P', disabled: unavailable, onSelect: props.onPrint },
       separator(),

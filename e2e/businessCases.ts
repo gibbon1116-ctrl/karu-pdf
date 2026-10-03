@@ -1,4 +1,5 @@
 import mupdf from 'mupdf'
+import fs from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 
 function pdf(word = 'AAAA'): Buffer {
@@ -78,6 +79,28 @@ async function mockWrites(page: Page, fail = false, injectError = false) {
 }
 
 export function businessCases(url: string) {
+  test('明示実行で図面文字をCSVに出し、配布形態にかかわらず再抽出と終了後のキャッシュを制限する', async ({ page }) => {
+    await open(page, url)
+    expect((await page.evaluate(() => window.__karu!.getWorkerStats())).extractedTextCacheBytes).toBe(0)
+    await menu(page, 'ファイル', '図面内文字を抽出…')
+    const dialog = page.getByRole('dialog', { name: '図面内文字を抽出' })
+    await dialog.getByLabel('抽出するページ').selectOption('all')
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await dialog.getByRole('button', { name: '文字を抽出', exact: true }).click()
+      await expect(dialog.getByRole('link', { name: '抽出結果を保存' })).toBeVisible()
+      const download = page.waitForEvent('download')
+      await dialog.getByRole('link', { name: '抽出結果を保存' }).click()
+      const csv = await fs.readFile(await (await download).path() as string, 'utf8')
+      expect(csv.startsWith('\uFEFF')).toBe(true)
+      expect(csv.match(/SECRET AAAA/g)).toHaveLength(3)
+      expect(csv.match(/PUBLIC/g)).toHaveLength(3)
+      const bytes = (await page.evaluate(() => window.__karu!.getWorkerStats())).extractedTextCacheBytes
+      expect(bytes).toBeGreaterThan(0); expect(bytes).toBeLessThanOrEqual(4 * 1024 * 1024)
+    }
+    await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
+    for (const docId of await page.evaluate(() => window.__karu!.listTabs().map(tab => tab.docId))) await page.evaluate(docId => window.__karu!.closeTab(docId), docId)
+    await expect.poll(async () => (await page.evaluate(() => window.__karu!.getWorkerStats())).extractedTextCacheBytes).toBe(0)
+  })
   test('矢印・吹き出しの先端サイズと5度刻みを保存後も保持する', async ({ page }) => {
     await open(page, url)
     for (const [name, kind, y] of [['矢印', 'arrow', 170], ['蛍光ペン', 'highlight', 220], ['手書き', 'ink', 290]] as const) {

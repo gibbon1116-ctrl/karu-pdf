@@ -4,6 +4,7 @@ interface Props {
   children: ReactNode
   fallback(error: Error, reset: () => void): ReactNode
   onReset?(): void
+  onError?(error: Error): void
   resetKey?: string | number
 }
 
@@ -19,6 +20,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
+    this.props.onError?.(error)
     console.error('表示中に例外が発生しました。', error, info)
   }
 

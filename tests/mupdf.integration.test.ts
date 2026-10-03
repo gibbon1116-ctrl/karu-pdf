@@ -16,6 +16,24 @@ async function openSample() {
 }
 
 describe('MuPDF integration', () => {
+  it('表示用の読込は全ページ寸法取得を省いても回転ページを同じ画素で描画する', async () => {
+    const bytes = new Uint8Array(await fs.readFile(samplePath))
+    const full = openDocument(bytes), display = openDocument(bytes, false)
+    const fullCache = new DisplayListCache(full.document), displayCache = new DisplayListCache(display.document)
+    try {
+      expect(display.pageCount).toBe(full.pageCount)
+      expect(display.pageSizes).toEqual([])
+      expect(display.editRestriction).toBe(full.editRestriction)
+      const normal = renderRegion(fullCache, 4, .5, null)
+      const lazy = renderRegion(displayCache, 4, .5, null)
+      expect([lazy.width, lazy.height]).toEqual([normal.width, normal.height])
+      expect(Buffer.from(lazy.rgba).equals(Buffer.from(normal.rgba))).toBe(true)
+    } finally {
+      fullCache.destroy(); displayCache.destroy()
+      full.document.destroy(); display.document.destroy()
+    }
+  })
+
   it('ページ数と回転反映済みのページサイズを返す', async () => {
     const opened = await openSample()
     try {

@@ -48,6 +48,7 @@ import type {
   ListAnnotationsRequest,
   PageHasTextRequest,
   PageTextLinesRequest,
+  ExtractPageTextRequest,
   GetHeaderFooterSettingsRequest,
   OpenRequest,
   PrepareOutputRequest,
@@ -92,6 +93,7 @@ type CoreRequest =
   | SelectTextRequest
   | PageHasTextRequest
   | PageTextLinesRequest
+  | ExtractPageTextRequest
   | LayoutTextRequest
   | ApplyAndSaveRequest
   | ApplyEditsRequest
@@ -110,7 +112,7 @@ type CoreRequest =
 type QueuedRequest =
   | (RenderRequest & { sequence: number })
   | (RenderCompareRequest & { sequence: number })
-  | (CoreRequest & { sequence: number; priority: -1 })
+  | (CoreRequest & { sequence: number; priority: -1 | 3 })
 const queue: QueuedRequest[] = []
 const scheduler = new MessageChannel()
 
@@ -306,7 +308,8 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
   try {
     if (request.type === 'open') {
       disposeDocument(request.docId)
-      const opened = openDocument(new Uint8Array(request.bytes))
+      const includeMetadata = request.includePageMetadata !== false
+      const opened = openDocument(new Uint8Array(request.bytes), includeMetadata)
       const pdf = opened.document.asPDF()
       if (!pdf) {
         opened.document.destroy()
@@ -319,7 +322,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         pageCount: opened.pageCount,
         editRestriction: opened.editRestriction,
         pageSizes: opened.pageSizes,
-        pageScales: readDocumentScales(pdf),
+        pageScales: includeMetadata ? readDocumentScales(pdf) : [],
         openMs: opened.openMs,
         sizesMs: opened.sizesMs,
       })
@@ -371,6 +374,11 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
 
     if (request.type === 'pageTextLines') {
       post({ type: 'pageTextLinesResult', requestId: request.requestId, lines: entry.textSelections.pageTextLines(request.pageIndex) })
+      return
+    }
+
+    if (request.type === 'extractPageText') {
+      post({ type: 'pageTextExtracted', requestId: request.requestId, result: entry.textSelections.extractPage(request.pageIndex) })
       return
     }
 
@@ -715,6 +723,14 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const message = event.data
 /* @single:start */  if ((message as { type: string }).type === 'single-font-response') return
 /* @single:end */
+  if (message.type === 'cancelTextExtraction') {
+    const index = queue.findIndex(job => job.type === 'extractPageText' && job.requestId === message.requestId)
+    if (index >= 0) {
+      queue.splice(index, 1)
+      post({ type: 'error', requestId: message.requestId, message: '文字抽出を中止しました。' })
+    }
+    return
+  }
   if (message.type === 'clearCompare') {
     for (const job of activeComparisons.values()) job.cancelled = true
     for (let i = queue.length - 1; i >= 0; i--) if (queue[i].type === 'renderCompare') {
@@ -754,6 +770,12 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     const previous = activeAnnotationLists.get(message.docId)
     if (previous !== undefined) cancelledAnnotationLists.add(previous)
     activeAnnotationLists.set(message.docId, message.requestId)
+  }
+  if (message.type === 'extractPageText') {
+    queue.push({ ...message, priority: 3, sequence: sequence++ })
+    queue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence)
+    schedule()
+    return
   }
   if (
     message.type === 'listAnnotations'
@@ -819,6 +841,7 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
       queueLength: queue.length + (running ? 1 : 0),
       displayListCount: [...documents.values()].reduce((sum, entry) => sum + entry.displayLists.count, 0),
       displayListBytes: [...documents.values()].reduce((sum, entry) => sum + entry.displayLists.usedBytes, 0),
+      extractedTextCacheBytes: [...documents.values()].reduce((sum, entry) => sum + entry.textSelections.extractedCacheBytes, 0),
       processedCount,
     })
     return

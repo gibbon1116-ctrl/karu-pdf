@@ -100,4 +100,32 @@ describe('RenderScheduler', () => {
     expect(resultBitmap.close).toHaveBeenCalledOnce()
     expect(cache.size).toBe(0); expect(ready).not.toHaveBeenCalled()
   })
+
+  it('可視描画の失敗を通知し、待機要求を除去する', async () => {
+    const { backend, tasks } = backendHarness()
+    const failure = vi.fn(), ready = vi.fn()
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const scheduler = new RenderScheduler(backend, new BitmapCache(), new BitmapCache(), '', failure)
+      scheduler.want('failed', params, 0, ready)
+      const error = new Error('描画に失敗')
+      tasks[0].reject(error); await flush()
+      expect(failure).toHaveBeenCalledWith(error, params, 0)
+      expect(scheduler.pendingCount()).toBe(0)
+      expect(ready).not.toHaveBeenCalled()
+    } finally { log.mockRestore() }
+  })
+
+  it('閉じた画面の遅い失敗で次の画面へエラーを通知しない', async () => {
+    const { backend, tasks } = backendHarness()
+    const failure = vi.fn()
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const scheduler = new RenderScheduler(backend, new BitmapCache(), new BitmapCache(), '', failure)
+      scheduler.want('closed', params, 0, () => {})
+      scheduler.destroy(); tasks[0].reject(new Error('古い要求の失敗')); await flush()
+      expect(failure).not.toHaveBeenCalled()
+      expect(scheduler.pendingCount()).toBe(0)
+    } finally { log.mockRestore() }
+  })
 })

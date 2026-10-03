@@ -53,6 +53,7 @@ interface Props {
   onZoomChange(zoom: number): void
   onFirstBitmap(): void
   onFirstSharp(): void
+  onRenderError(error: unknown): void
   onStatus(message: string): void
   organize: OrganizeWorkspaceState | null
 }
@@ -60,11 +61,15 @@ interface Props {
 export function DocumentWorkspace(props: Props) {
   const viewerSlotRef = useRef<HTMLDivElement>(null)
   const splitControllerRef = useRef<SplitController>(null)
+  const renderErrorRef = useRef(props.onRenderError)
+  renderErrorRef.current = props.onRenderError
   const [searchHighlights, setSearchHighlights] = useState<SearchHighlightState>({ matches: [], activeIndex: -1 })
   const scheduler = useMemo(() => new RenderScheduler(
     props.pool,
     new BitmapCache(),
     new BitmapCache(64 * 1024 * 1024),
+    '',
+    (error, _params, priority) => { if (priority === 0) renderErrorRef.current(error) },
   ), [props.pool, props.session.docId, props.session.pageRevision])
   const initialView = useMemo(() => {
     const value = props.session.fitOnFirstView

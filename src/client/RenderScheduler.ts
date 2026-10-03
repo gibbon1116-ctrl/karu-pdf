@@ -29,6 +29,7 @@ export class RenderScheduler {
     readonly cache: BitmapCache,
     readonly warmCache = new BitmapCache(64 * 1024 * 1024),
     private readonly keyPrefix = '',
+    private readonly onError?: (error: unknown, params: RenderParams, priority: Priority) => void,
   ) {}
 
   want(
@@ -69,7 +70,11 @@ export class RenderScheduler {
         created.waiters.clear()
       }).catch((error) => {
         if (this.requests.get(key) === created) this.requests.delete(key)
-        if (!(error instanceof CancelledRenderError)) console.error(error)
+        if (!(error instanceof CancelledRenderError)) {
+          console.error(error)
+          if (!this.destroyed && created.waiters.size) this.onError?.(error, created.params, created.priority)
+        }
+        created.waiters.clear()
       })
     }
 

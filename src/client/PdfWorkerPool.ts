@@ -24,6 +24,7 @@ import type {
   ListAnnotationsResponse,
   PageHasTextResponse,
   PageTextLinesResponse,
+  ExtractPageTextResponse,
   OpenResponse,
   PageInfoResponse,
   PageLayoutResponse,
@@ -128,8 +129,9 @@ export interface PoolStats {
   queueLength: number
   displayListCount: number
   displayListBytes: number
+  extractedTextCacheBytes: number
   processedCount: number
-  workers: Array<{ index: number; queueLength: number; displayListCount: number; displayListBytes: number; processedCount: number }>
+  workers: Array<{ index: number; queueLength: number; displayListCount: number; displayListBytes: number; extractedTextCacheBytes: number; processedCount: number }>
 }
 
 export interface WorkerRenderLogEntry {
@@ -193,6 +195,7 @@ interface WorkerSlot {
   queueLength: number
   ready: Promise<void>
   markReady(): void
+  markFailed(error: Error): void
 }
 
 type Pending = {
@@ -244,8 +247,12 @@ export class PdfWorkerPool {
     this.slots = Array.from({ length: this.workerCount }, (_, index) => {
       const worker = /* @single:start */createSingleWorker('pdf') ?? /* @single:end */new Worker(new URL('../worker/pdf.worker.ts', import.meta.url), { type: 'module' })
       let markReady: () => void = () => {}
-      const ready = new Promise<void>((resolve) => { markReady = resolve })
-      const slot: WorkerSlot = { index, worker, documents: new Set(), queueLength: 0, ready, markReady }
+      let markFailed: (error: Error) => void = () => {}
+      const ready = new Promise<void>((resolve, reject) => { markReady = resolve; markFailed = reject })
+      // The worker may fail before the user opens a file. Preserve the rejected
+      // readiness promise for open(), while avoiding an unhandled rejection.
+      void ready.catch(() => undefined)
+      const slot: WorkerSlot = { index, worker, documents: new Set(), queueLength: 0, ready, markReady, markFailed }
       worker.onmessage = (event: MessageEvent<WorkerResponse>) => this.onMessage(slot, event.data)
       worker.onerror = (event) => this.failWorker(slot, new Error(event.message || 'Worker でエラーが発生しました。'))
       return slot
@@ -425,10 +432,11 @@ export class PdfWorkerPool {
       type: 'stats', requestId,
     }))))
     return {
-      workers: workers.map(({ queueLength, displayListCount, displayListBytes, processedCount }, index) => ({ index, queueLength, displayListCount, displayListBytes, processedCount })),
+      workers: workers.map(({ queueLength, displayListCount, displayListBytes, extractedTextCacheBytes, processedCount }, index) => ({ index, queueLength, displayListCount, displayListBytes, extractedTextCacheBytes, processedCount })),
       queueLength: workers.reduce((sum, worker) => sum + worker.queueLength, 0),
       displayListCount: workers.reduce((sum, worker) => sum + worker.displayListCount, 0),
       displayListBytes: workers.reduce((sum, worker) => sum + worker.displayListBytes, 0),
+      extractedTextCacheBytes: workers.reduce((sum, worker) => sum + worker.extractedTextCacheBytes, 0),
       processedCount: workers.reduce((sum, worker) => sum + worker.processedCount, 0),
     }
   }
@@ -456,6 +464,25 @@ export class PdfWorkerPool {
       type: 'pageTextLines', requestId, docId, pageIndex,
     }))
     return response.lines
+  }
+
+  async extractPageText(docId: string, pageIndex: number, signal?: AbortSignal): Promise<import('../core/textExtract').ExtractedPageText> {
+    if (signal?.aborted) throw new DOMException('文字抽出を中止しました。', 'AbortError')
+    let id = -1
+    const promise = this.request<ExtractPageTextResponse>(this.slots[0], requestId => {
+      id = requestId
+      return { type: 'extractPageText', requestId, docId, pageIndex }
+    })
+    const cancel = () => {
+      this.slots[0].worker.postMessage({ type: 'cancelTextExtraction', requestId: id })
+      this.pendingRequests.get(id)?.reject(new DOMException('文字抽出を中止しました。', 'AbortError'))
+      this.pendingRequests.delete(id)
+    }
+    signal?.addEventListener('abort', cancel, { once: true })
+    try {
+      if (signal?.aborted) cancel()
+      return (await promise).result
+    } finally { signal?.removeEventListener('abort', cancel) }
   }
 
   async selectText(
@@ -781,7 +808,7 @@ export class PdfWorkerPool {
     const requestId = this.nextId++
     const response = await new Promise<OpenResponse>((resolve, reject) => {
       this.pendingRequests.set(requestId, { resolve: (value) => resolve(value as OpenResponse), reject })
-      slot.worker.postMessage({ type: 'open', requestId, docId, bytes: buffer }, [buffer])
+      slot.worker.postMessage({ type: 'open', requestId, docId, bytes: buffer, includePageMetadata: slot.index === this.primaryWorkerIndex }, [buffer])
     })
     if ((this.documentVersions.get(docId) ?? 0) !== version) {
       slot.worker.postMessage({ type: 'close', docId })
@@ -938,6 +965,7 @@ export class PdfWorkerPool {
   }
 
   private failWorker(slot: WorkerSlot, error: Error): void {
+    slot.markFailed(error)
     console.error(`PDF Worker ${slot.index} failed`, error)
     for (const [jobId, pending] of this.pendingRenders) {
       if (pending.slot === slot) {

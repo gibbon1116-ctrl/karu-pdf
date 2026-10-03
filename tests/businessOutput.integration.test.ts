@@ -103,6 +103,11 @@ describe('図面の保存・共有と電子署名保護', () => {
       bytes = saveDocument(doc, 'full').bytes
     } finally { root.destroy(); value.destroy(); field.destroy(); doc.destroy() }
     expect(() => prepareDocumentOutput(bytes!, [], {}, true, { redactions: [] })).toThrow('電子署名')
+    const display = openDocument(bytes!, false)
+    try {
+      expect(display.editRestriction).toContain('電子署名')
+      expect(display.pageSizes).toEqual([])
+    } finally { display.document.destroy() }
     expect(prepareDocumentOutput(bytes!, [], {}, false).bytes).toEqual(bytes!)
   })
   it('空の署名欄は編集可能、DocMDP付きは閲覧専用にする', () => {

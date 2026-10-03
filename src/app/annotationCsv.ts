@@ -36,7 +36,7 @@ function decimal(value: number): string {
   return (value * PT_TO_MM).toFixed(2)
 }
 
-function quote(value: string | number): string {
+export function quote(value: string | number): string {
   // Quoting alone does not stop spreadsheet formula evaluation. Only protect
   // strings; real numeric fields must remain numbers.
   const unsafe = typeof value === 'string' && (/^[\t\r\n]/.test(value) || /^[\s\u0000-\u001f]*[=+\-@＝＋－＠]/.test(value))

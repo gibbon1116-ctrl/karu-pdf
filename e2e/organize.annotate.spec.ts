@@ -353,6 +353,16 @@ test('材料PDFの確認失敗を行に表示し、成功したPDFだけ挿入�
 })
 
 test('重い図面の描画中でも挿入ダイアログをすぐ表示してページ数を確認する', async ({ page }) => {
+  await page.addInitScript(() => {
+    const NativeWorker = Worker, workers: Worker[] = []
+    Object.assign(window, { __organizePdfWorkers: workers })
+    window.Worker = class extends NativeWorker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options)
+        if (String(url).includes('pdf.worker')) workers.push(this)
+      }
+    }
+  })
   const realDirectory = path.resolve('test-data/real')
   const realDrawing = path.join(realDirectory, '七ヶ浜町_実施設計図.pdf')
   const drawing = fs.existsSync(realDrawing) ? realDrawing : path.resolve('test-data/heavy-300p.pdf')
@@ -370,6 +380,17 @@ test('重い図面の描画中でも挿入ダイアログをすぐ表示して�
   await expect(page.locator('.page-view').first()).toBeVisible({ timeout: 180_000 })
   await page.evaluate(() => window.__karu!.openOrganize())
   await expect(page.getByTestId('organize-view')).toBeVisible()
+  // The visible thumbnails can finish before a backoff poll reaches the
+  // queue. Submit bounded real raster jobs to a display Worker so this test
+  // exercises document metadata while rendering is actually still queued.
+  await page.evaluate(() => {
+    const workers = (window as unknown as { __organizePdfWorkers: Worker[] }).__organizePdfWorkers
+    const docId = window.__karu!.listTabs()[0].docId
+    for (let index = 0; index < 200; index++) workers[1].postMessage({
+      type: 'render', docId, jobId: 1_000_000 + index, pageIndex: 0,
+      renderScale: 16, deviceRect: [0, 0, 1000, 1000], priority: 0,
+    })
+  })
   await expect.poll(
     () => page.evaluate(() => window.__karu!.getWorkerStats().then((stats) => stats.queueLength)),
     { timeout: 10_000 },

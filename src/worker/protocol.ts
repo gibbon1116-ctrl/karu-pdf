@@ -9,6 +9,7 @@ import type { RasterPagePlan, RasterizeOptions } from '../core/rasterize'
 import type { SearchMatch, SearchOptions } from '../core/search'
 import type { Point, Rect } from '../core/annotations'
 import type { TextSelectionMode, TextSelectionResult } from '../core/textSelection'
+import type { ExtractedPageText } from '../core/textExtract'
 import type { HeaderFooterSettings } from '../app/headerFooterText'
 
 export type DeviceRect = [number, number, number, number]
@@ -28,6 +29,8 @@ export interface OpenRequest {
   requestId: number
   docId: string
   bytes: ArrayBuffer
+  // The document Worker supplies UI metadata; render Workers load pages lazily.
+  includePageMetadata?: boolean
 }
 
 export interface RenderRequest {
@@ -139,6 +142,18 @@ export interface PageTextLinesRequest {
   requestId: number
   docId: string
   pageIndex: number
+}
+
+export interface ExtractPageTextRequest {
+  type: 'extractPageText'
+  requestId: number
+  docId: string
+  pageIndex: number
+}
+
+export interface CancelTextExtractionRequest {
+  type: 'cancelTextExtraction'
+  requestId: number
 }
 
 export interface LayoutTextRequest {
@@ -279,6 +294,8 @@ export type WorkerRequest =
   | SelectTextRequest
   | PageHasTextRequest
   | PageTextLinesRequest
+  | ExtractPageTextRequest
+  | CancelTextExtractionRequest
   | LayoutTextRequest
   | ApplyAndSaveRequest
   | ApplyEditsRequest
@@ -332,6 +349,7 @@ export interface StatsResponse {
   queueLength: number
   displayListCount: number
   displayListBytes: number
+  extractedTextCacheBytes: number
   processedCount: number
 }
 
@@ -384,6 +402,12 @@ export interface PageTextLinesResponse {
   type: 'pageTextLinesResult'
   requestId: number
   lines: Rect[]
+}
+
+export interface ExtractPageTextResponse {
+  type: 'pageTextExtracted'
+  requestId: number
+  result: ExtractedPageText
 }
 
 export interface LayoutTextResponse {
@@ -505,6 +529,7 @@ export type WorkerResponse =
   | TextSelectedResponse
   | PageHasTextResponse
   | PageTextLinesResponse
+  | ExtractPageTextResponse
   | LayoutTextResponse
   | ApplyAndSaveResponse
   | AppliedEditsResponse

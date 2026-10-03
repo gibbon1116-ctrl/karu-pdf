@@ -17,7 +17,7 @@ export interface OpenedDocument {
 
 const now = () => performance.now()
 
-export function openDocument(bytes: Uint8Array): OpenedDocument {
+export function openDocument(bytes: Uint8Array, includePageSizes = true): OpenedDocument {
   const openStart = now()
   const document = mupdf.Document.openDocument(bytes, 'application/pdf')
   const openMs = now() - openStart
@@ -33,7 +33,7 @@ export function openDocument(bytes: Uint8Array): OpenedDocument {
   const sizesStart = now()
   const pageCount = document.countPages()
   const pageSizes: PageSize[] = []
-  for (let index = 0; index < pageCount; index += 1) {
+  for (let index = 0; includePageSizes && index < pageCount; index += 1) {
     const page = document.loadPage(index)
     try {
       const [x0, y0, x1, y1] = page.getBounds()
