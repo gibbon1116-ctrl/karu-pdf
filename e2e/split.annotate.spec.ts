@@ -42,6 +42,9 @@ test('双方からページ・割合・幅の比率を合わせ、同期をオ�
   const before = await panePosition(page, 'right')
   await page.getByTestId('right-viewer').hover()
   await page.mouse.wheel(0, 210)
+  // Equal fractions also match the old, unmoved view. First require the wheel
+  // to have moved its source pane, then verify propagation to the other pane.
+  await expect.poll(async () => (await panePosition(page, 'right')).top).toBeGreaterThan(before.top)
   await expect.poll(async () => {
     const left = await panePosition(page, 'left'), right = await panePosition(page, 'right')
     return Math.abs(left.fraction - right.fraction)
