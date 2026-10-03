@@ -1,4 +1,5 @@
 import mupdf from 'mupdf'
+import { extractTextLines } from '../src/core/textExtract'
 import fs from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 
@@ -231,7 +232,7 @@ export function businessCases(url: string) {
     await page.locator('.viewer').focus(); await page.keyboard.press('Alt+ArrowLeft')
     await expect(page.locator('.page-view[data-page-index="0"]')).toBeInViewport()
   })
-  test('指摘への定型文挿入、未対応の件数・絞込・次の指摘を確認する', async ({ page }) => {
+  test('指摘への定型文挿入、未確認の件数・絞込・次の指摘を確認する', async ({ page }) => {
     await open(page, url)
     await page.locator('.viewer').focus()
     await page.keyboard.press('n')
@@ -246,14 +247,38 @@ export function businessCases(url: string) {
     await page.getByRole('button', { name: '選択', exact: true }).click()
     await menu(page, '表示', '書き込みの一覧')
     const panel = page.getByRole('region', { name: '書き込みの一覧' })
-    await expect(panel).toContainText('未対応 1 / 指摘 1')
+    await expect(panel).toContainText('未確認 1 / 指摘 1')
     await page.getByLabel('書き込みの種類').selectOption('issueOpen')
     await page.getByRole('button', { name: '次の未対応指摘（ページ範囲内）' }).click()
     await page.getByLabel('指摘 1 の状態').selectOption('done')
-    await expect(panel).toContainText('未対応 0 / 指摘 1')
+    await expect(panel).toContainText('未確認 1 / 指摘 1')
+    await page.getByLabel('指摘 1 の状態').selectOption('confirmed')
+    await expect(panel).toContainText('未確認 0 / 指摘 1')
     await expect(panel.locator('.annotation-rows li')).toHaveCount(0)
     await page.getByLabel('書き込みの種類').selectOption('issueDone')
     await expect(panel.locator('.annotation-rows li')).toHaveCount(1)
+  })
+  test('試用版の本文修正コピーと個数カウントを配布形態ごとに保存できる', async ({page}) => {
+    await open(page,url)
+    const doc=new mupdf.PDFDocument(pdf()), nativePage=doc.loadPage(0), list=nativePage.toDisplayList(false), text=list.toStructuredText('preserve-whitespace')
+    let line: ReturnType<typeof extractTextLines>['lines'][number]
+    try {line=extractTextLines(text,nativePage.getBounds(),0).lines.find(l=>l.text.includes('SECRET AAAA'))!}
+    finally {text.destroy();list.destroy();nativePage.destroy();doc.destroy()}
+    await page.evaluate(line=>document.dispatchEvent(new CustomEvent('karu-pdf:text-correction',{detail:{docId:window.__karu!.listTabs()[0].docId,pageIndex:0,rect:line.rect,originalText:line.text}})),line!)
+    const dialog=page.getByRole('dialog',{name:'既存文字の修正'})
+    await dialog.getByLabel('修正文',{exact:true}).fill('新図面注記');await dialog.getByLabel('修正文の文字サイズ').fill('8')
+    await dialog.getByRole('button',{name:'修正したコピーを開く'}).click()
+    await expect.poll(()=>page.evaluate(()=>window.__karu!.listTabs().length)).toBe(2)
+    await expect(dialog).not.toBeVisible()
+    await page.getByRole('button',{name:'計測▼',exact:true}).click();await page.getByRole('menuitemcheckbox',{name:'個数カウント',exact:true}).click()
+    await expect(page.getByRole('button',{name:'個数カウント',exact:true})).toHaveAttribute('aria-pressed','true')
+    const p=await point(page,80,130);await page.mouse.click(p.x,p.y)
+    const saved=await page.evaluate(async()=>Array.from((await window.__karu!.saveToBytes())!))
+    const result=new mupdf.PDFDocument(new Uint8Array(saved)), savedPage=result.loadPage(0), savedList=savedPage.toDisplayList(false), savedText=savedList.toStructuredText('')
+    try {expect(savedText.asText()).toContain('新図面注記');expect(savedText.asText()).not.toContain('SECRET AAAA')}
+    finally {savedText.destroy();savedList.destroy();savedPage.destroy();result.destroy()}
+    await page.evaluate(b=>window.__karu!.openBytes(b,'試用機能保存.pdf'),saved)
+    await expect.poll(()=>page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count?.group==='照明器具').length)).toBe(1)
   })
   test('文字の定型文登録と挿入が入力カーソルを保ち、記憶は明示選択する', async ({ page }) => {
     await open(page, url); await page.keyboard.press('t')
