@@ -48,6 +48,9 @@ export function Dropdown({ label, items, disabled, className = '', buttonClassNa
   const openMenu = (focus: 'first' | 'last' | 'none' = 'none') => {
     if (disabled) return
     window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: id }))
+    setAlignRight(false)
+    setOpenAbove(false)
+    setMenuMaxHeight(null)
     setOpen(true)
     if (focus !== 'none') requestAnimationFrame(() => {
       const buttons = enabledButtons(menuRef.current)
@@ -89,21 +92,16 @@ export function Dropdown({ label, items, disabled, className = '', buttonClassNa
 
   useLayoutEffect(() => {
     if (!open || !menuRef.current) return
-    setAlignRight(false)
-    setOpenAbove(false)
-    setMenuMaxHeight(null)
-    const frame = requestAnimationFrame(() => {
-      const rect = menuRef.current?.getBoundingClientRect()
-      const triggerRect = triggerRef.current?.getBoundingClientRect()
-      if (!rect || !triggerRect) return
-      setAlignRight(rect.right > window.innerWidth - 8)
-      const spaceBelow = window.innerHeight - triggerRect.bottom - 8
-      const spaceAbove = triggerRect.top - 8
-      const shouldOpenAbove = rect.height > spaceBelow && spaceAbove > spaceBelow
-      setOpenAbove(shouldOpenAbove)
-      setMenuMaxHeight(Math.max(0, Math.floor(shouldOpenAbove ? spaceAbove : spaceBelow)))
-    })
-    return () => cancelAnimationFrame(frame)
+    const rect = menuRef.current.getBoundingClientRect()
+    const triggerRect = triggerRef.current?.getBoundingClientRect()
+    if (!triggerRect) return
+    // Commit the fit before paint; a visible menu must already fit the screen.
+    setAlignRight(rect.right > window.innerWidth - 8)
+    const spaceBelow = window.innerHeight - triggerRect.bottom - 8
+    const spaceAbove = triggerRect.top - 8
+    const shouldOpenAbove = rect.height > spaceBelow && spaceAbove > spaceBelow
+    setOpenAbove(shouldOpenAbove)
+    setMenuMaxHeight(Math.max(0, Math.floor(shouldOpenAbove ? spaceAbove : spaceBelow)))
   }, [open])
 
   const moveMenuBar = (direction: -1 | 1) => {

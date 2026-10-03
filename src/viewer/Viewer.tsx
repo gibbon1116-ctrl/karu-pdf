@@ -128,6 +128,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   const zoomRef = useRef(initialZoom)
   const syncMutedRef = useRef(false)
   const syncFrameRef = useRef(0)
+  const rectFocusRef = useRef<{ index: number; rect: readonly number[] } | null>(null)
   const layoutRef = useRef(initialLayout)
   const [zoom, setZoomState] = useState(initialZoom)
   const [committedZoom, setCommittedZoom] = useState(initialZoom)
@@ -232,6 +233,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   }, [waitForSharp])
 
   const beginInteraction = useCallback(() => {
+    rectFocusRef.current = null
     if (syncFrameRef.current) {
       cancelAnimationFrame(syncFrameRef.current)
       syncFrameRef.current = 0
@@ -323,6 +325,18 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     props.onPageChange((current?.index ?? 0) + 1)
     if (!syncMutedRef.current) props.onViewChange?.()
   }, [props.onPageChange, props.onScrollPositionChange, props.onViewChange])
+
+  useLayoutEffect(() => {
+    const focus = rectFocusRef.current, el = scrollerRef.current
+    if (!focus || !el) return
+    rectFocusRef.current = null
+    const layout = layoutRef.current, page = layout.pages[focus.index], rect = focus.rect, next = zoomRef.current
+    if (!page) return
+    // Zoom and its target position become visible in the same paint.
+    el.scrollLeft = Math.max(0, (Math.max(layout.maxWidth, el.clientWidth) - page.width) / 2 + (rect[0] + rect[2]) / 2 * CSS_PX_PER_PT * next - el.clientWidth / 2)
+    el.scrollTop = Math.max(0, page.top + (rect[1] + rect[3]) / 2 * CSS_PX_PER_PT * next - el.clientHeight / 2)
+    updateViewport()
+  })
 
   useLayoutEffect(() => {
     updateViewport()
@@ -533,16 +547,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       const el = scrollerRef.current
       if (!el) return
       const next = Math.max(minZoom, Math.min(8, (el.clientWidth - 64) / (Math.max(1, rect[2] - rect[0]) * CSS_PX_PER_PT), (el.clientHeight - 64) / (Math.max(1, rect[3] - rect[1]) * CSS_PX_PER_PT)))
-      setZoom(next)
-      const layout = computePageLayout(props.pageSizes, next), page = layout.pages[index]
-      if (!page) return
-      cancelAnimationFrame(syncFrameRef.current)
-      syncFrameRef.current = requestAnimationFrame(() => {
-        syncFrameRef.current = 0
-        el.scrollLeft = Math.max(0, (Math.max(layout.maxWidth, el.clientWidth) - page.width) / 2 + (rect[0] + rect[2]) / 2 * CSS_PX_PER_PT * next - el.clientWidth / 2)
-        el.scrollTop = Math.max(0, page.top + (rect[1] + rect[3]) / 2 * CSS_PX_PER_PT * next - el.clientHeight / 2)
-        updateViewport()
-      })
+      rectFocusRef.current = { index, rect: [...rect] }
+      setZoom(next, undefined, true)
     },
     isIdle: () => scheduler.pendingCount() === 0,
     isSharp: isSharpNow,
