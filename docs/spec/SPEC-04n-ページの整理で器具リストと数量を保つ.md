@@ -32,6 +32,7 @@
 - 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
 - 変更してよいファイル: `src/core/pageOps.ts`、`src/core/countFixtures.ts`（読み書きの補助関数が要る場合だけ）、`src/app/documentModel.ts`（`updateAfterPageLayout` まわりだけ）、`src/App.tsx`（`finishPageLayout` まわりだけ）、`src/app/FixturePanel.tsx`・`src/app/AnnotationListPanel.tsx`（読込の `useEffect` の条件だけ）、`src/worker/pdf.worker.ts`（必要な場合だけ）、`tests/`、`e2e/`
 - 変更しないファイル: 上記以外。特に `src/core/annotations.ts`、`src/editor/`
+- **並行作業の注意:** 別の作業（SPEC-04m 追補）が同時に `src/editor/AnnotationStore.ts`、`src/editor/AnnotationLayer.tsx`、`src/viewer/PageView.tsx`、`src/viewer/Viewer.tsx`、`e2e/cloud-issues.annotate.spec.ts` を変更している。これらには触れないこと。また、作業ツリーには SPEC-04m の未コミットの変更（`src/app/AnnotationListPanel.tsx`、`src/core/issues.ts` など）が入っている。`AnnotationListPanel.tsx` は読込の `useEffect` の条件だけを変え、SPEC-04m の変更を消さないこと。
 
 ## 変更内容
 
