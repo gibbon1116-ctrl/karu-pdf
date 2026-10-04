@@ -17,10 +17,13 @@ export function isExternalUrl(value: string, page: Pick<Location, 'href' | 'orig
   try {
     const url = new URL(value, page.href)
     if (url.protocol === 'blob:' || url.protocol === 'data:' || url.href === 'about:blank') return false
+    // A file:// page has origin "null" by the standard, but Chromium reports "file://".
+    const pageUrl = new URL(page.href), filePage = pageUrl.protocol === 'file:' || page.origin === 'null'
     if (url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'ws:' || url.protocol === 'wss:' || url.protocol === 'ftp:') {
-      return page.origin === 'null' || url.origin !== page.origin
+      return filePage || url.origin !== page.origin
     }
-    return !(url.protocol === 'file:' && page.origin === 'null' && new URL(page.href).protocol === 'file:')
+    // Only files on the same machine or share as the page; another UNC host is another computer.
+    return !(url.protocol === 'file:' && pageUrl.protocol === 'file:' && url.host === pageUrl.host)
   } catch { return true }
 }
 

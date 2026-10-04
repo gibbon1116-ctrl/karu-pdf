@@ -5,6 +5,8 @@ import { answerExternalLink, closeExternalSendAlert, getExternalSendRecords, get
 
 const page = { href: 'https://inside.example/app/index.html', origin: 'https://inside.example' }
 const local = { href: 'file:///C:/app/karu.html', origin: 'null' }
+// Chromium (Edge) reports location.origin "file://" for a file page.
+const chromiumLocal = { href: 'file:///C:/app/karu.html', origin: 'file://' }
 type Scope = Parameters<typeof installExternalSendGuard>[0]
 function fakeWindow() {
   const events = new Map<string, EventListener>()
@@ -37,13 +39,13 @@ describe('送り先の判定', () => {
   it('同じ配布元とローカル URL を通す', () => {
     for (const url of ['', '  ', '/fonts/a.ttf', '../a.wasm', '?v=1', '#page', page.origin + '/a',
       'blob:https://inside.example/123', 'data:text/plain,hello', 'about:blank']) expect(isExternalUrl(url, page)).toBe(false)
-    for (const url of ['', './neighbor.txt', 'file:///C:/app/a.txt', 'blob:null/123', 'data:text/plain,x']) expect(isExternalUrl(url, local)).toBe(false)
+    for (const pageLocation of [local, chromiumLocal]) for (const url of ['', './neighbor.txt', 'file:///C:/app/a.txt', 'blob:null/123', 'data:text/plain,x']) expect(isExternalUrl(url, pageLocation)).toBe(false)
   })
   it('別の配布元・外部アプリ・解決できない URL を止める', () => {
     for (const url of ['http://outside.example/a', 'https://outside.example/a', '//outside.example/a',
       'ws://outside.example/a', 'wss://outside.example/a', 'ftp://outside.example/a', 'mailto:secret@example.com',
       'tel:012345', 'custom-app:secret', 'javascript:alert(1)', 'https://[broken']) expect(isExternalUrl(url, page)).toBe(true)
-    for (const url of ['http://inside.example/a', 'https://inside.example/a', 'ws://inside.example/a', 'wss://inside.example/a']) expect(isExternalUrl(url, local)).toBe(true)
+    for (const pageLocation of [local, chromiumLocal]) for (const url of ['http://inside.example/a', 'https://inside.example/a', 'ws://inside.example/a', 'wss://inside.example/a', 'file://outside.example/share/a.txt']) expect(isExternalUrl(url, pageLocation)).toBe(true)
     expect(isExternalUrl('./relative', { href: 'blob:null/123', origin: 'null' })).toBe(true)
   })
 })
