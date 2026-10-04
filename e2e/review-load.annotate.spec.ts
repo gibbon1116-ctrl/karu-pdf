@@ -47,10 +47,11 @@ test('100種類・5000個の印は描画をまとめ、集計・選択・スク�
   await page.getByRole('button',{name:'編集',exact:true}).click()
   await page.getByRole('button',{name:'形 星',exact:true}).click()
   await page.getByRole('button',{name:'変更する',exact:true}).click()
-  const saveStart=Date.now();const saved=await page.evaluate(async()=>{const b=await window.__karu!.saveToBytes();return b ? [...b] : []})
-  expect(saved.length).toBeGreaterThan(0)
-  console.log(JSON.stringify({scenario:'5000 counts',openAndInteractionMs:saveStart-started,saveObservedMs:Date.now()-saveStart}))
-  await page.evaluate(b => window.__karu!.openBytes(b, '5000個保存後.pdf'), saved)
+  // Reopen inside the page: copying the multi-megabyte PDF to Node and back as number
+  // arrays took longer than the save itself.
+  const saveStart=Date.now();const saved=await page.evaluate(async()=>{const t=performance.now();const b=await window.__karu!.saveToBytes();const saveMs=performance.now()-t;if(b)await window.__karu!.openBytes(b,'5000個保存後.pdf');return {size:b?.byteLength ?? 0,saveMs:Math.round(saveMs)}})
+  expect(saved.size).toBeGreaterThan(0)
+  console.log(JSON.stringify({scenario:'5000 counts',openAndInteractionMs:saveStart-started,saveMs:saved.saveMs,saveAndReopenObservedMs:Date.now()-saveStart,bytes:saved.size}))
   await page.getByRole('tab', { name: '器具', exact: true }).click()
   await page.getByRole('button', { name: '器具0', exact: true }).click()
   await expect.poll(() => page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter(a => a.count?.version === 2).length)).toBe(5000)
