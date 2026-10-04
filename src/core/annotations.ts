@@ -1301,6 +1301,7 @@ function installTemporaryAppearances(
   doc: PDFDocument,
   tasks: AppearanceTask[],
   fontResources: FontResources,
+  checkpoint?: () => void,
 ): void {
   if (tasks.length === 0) return
   const temporaryDocument = new mupdf.PDFDocument()
@@ -1376,6 +1377,7 @@ function installTemporaryAppearances(
         sourceObject.destroy()
         temporaryAnnotation.destroy()
         temporaryPage.destroy()
+        checkpoint?.()
       }
     }
   } finally {
@@ -1393,6 +1395,7 @@ export function applyEdits(
   doc: PDFDocument,
   edits: readonly AnnotationEdit[],
   fontResources: FontResources,
+  options: { checkpoint?: () => void } = {},
 ): ApplyResult {
   const result: ApplyResult = { created: [], replacedCharacters: 0, unsupportedCharacters: [], errors: [] }
   const unsupportedCharacters = new Set<string>()
@@ -1709,11 +1712,12 @@ export function applyEdits(
       if (annotation && !keepForAppearance && !cachedAnnotations.has(annotation)) {
         annotation.destroy()
       }
+      options.checkpoint?.()
     }
   }
 
   try {
-    installTemporaryAppearances(doc, appearances, fontResources)
+    installTemporaryAppearances(doc, appearances, fontResources, options.checkpoint)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     for (const task of appearances) {
