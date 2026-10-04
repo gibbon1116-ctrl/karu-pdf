@@ -1,0 +1,1743 @@
+{
+  "timestamp": "2026-10-04T21:16:19.451Z",
+  "inputs": {
+    "before": [
+      "bench-results/eizen/review-1-2-2-vs-121-2026-10-04T21-12-21-718Z/candidate/results.json"
+    ],
+    "after": [
+      "bench-results/eizen/review-1-2-2-vs-121-2026-10-04T21-12-21-718Z/results.json"
+    ],
+    "network": [
+      "bench-results/eizen/review-1-2-2-vs-121-2026-10-04T21-12-21-718Z/candidate/results.json"
+    ]
+  },
+  "comparisons": [
+    {
+      "file": "sample-small.pdf",
+      "metric": "PDFを開く（文書操作可能まで）",
+      "unit": "ms",
+      "gated": true,
+      "before": 114.29999999701977,
+      "after": 112,
+      "deltaPct": -2.012248466386468,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          108.60000000149012,
+          118.29999999701977,
+          113.20000000298023,
+          114.29999999701977,
+          118.10000000149012
+        ],
+        "after": [
+          107.5,
+          121.40000000596046,
+          112,
+          114.80000000447035,
+          111.19999999552965
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "初表示（ファイル読込含む）",
+      "unit": "ms",
+      "gated": true,
+      "before": 217.69999999552965,
+      "after": 229.89999999850988,
+      "deltaPct": 5.604042261474862,
+      "status": "5%超過・要調査",
+      "samples": {
+        "before": [
+          208.5,
+          215.89999999850988,
+          231.29999999701977,
+          217.69999999552965,
+          241.20000000298023
+        ],
+        "after": [
+          211.39999999850988,
+          241.10000000149012,
+          229.89999999850988,
+          220.10000000149012,
+          264.79999999701977
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "鮮明表示（ファイル読込含む）",
+      "unit": "ms",
+      "gated": true,
+      "before": 264.5,
+      "after": 269.5,
+      "deltaPct": 1.8903591682419618,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          257.6000000014901,
+          280.1000000014901,
+          262.6000000014901,
+          264.5,
+          273.6000000014901
+        ],
+        "after": [
+          262,
+          272.90000000596046,
+          259.69999999552965,
+          269.5,
+          281.29999999701977
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "スクロール1500 cold フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 17,
+      "after": 17,
+      "deltaPct": 0,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          17,
+          17,
+          17,
+          17,
+          17
+        ],
+        "after": [
+          17,
+          17,
+          17.099999999999454,
+          17,
+          17
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "スクロール1500 cached フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 17,
+      "after": 17,
+      "deltaPct": 0,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          17,
+          17,
+          17,
+          17,
+          17.099999999999454
+        ],
+        "after": [
+          17,
+          17,
+          17,
+          17,
+          17
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "スクロール3000 フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 17,
+      "after": 17.100000000000364,
+      "deltaPct": 0.5882352941197766,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          17.099999999998545,
+          17,
+          17,
+          17,
+          17
+        ],
+        "after": [
+          17.100000000000364,
+          17,
+          17.19999999999891,
+          17,
+          17.100000000000364
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "ページ移動→鮮明表示",
+      "unit": "ms",
+      "gated": true,
+      "before": 17.399999998509884,
+      "after": 17.399999998509884,
+      "deltaPct": 0,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          17.399999998509884,
+          20.600000001490116,
+          17,
+          18.5,
+          17.399999998509884
+        ],
+        "after": [
+          16.700000002980232,
+          17.399999998509884,
+          20.100000001490116,
+          17.200000002980232,
+          17.5
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "400%ズーム→鮮明表示",
+      "unit": "ms",
+      "gated": true,
+      "before": 200.70000000298023,
+      "after": 200.19999999552965,
+      "deltaPct": -0.24912805552723682,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          201.59999999403954,
+          200.20000000298023,
+          200.70000000298023,
+          195.90000000596046,
+          202.89999999850988
+        ],
+        "after": [
+          200.59999999403954,
+          202.09999999403954,
+          200.19999999552965,
+          199.89999999850988,
+          200.09999999403954
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "250pxパン→鮮明表示",
+      "unit": "ms",
+      "gated": true,
+      "before": 145.59999999403954,
+      "after": 143.10000000149012,
+      "deltaPct": -1.717032961986098,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          148.29999999701977,
+          166.60000000149012,
+          137.70000000298023,
+          145.59999999403954,
+          141.60000000149012
+        ],
+        "after": [
+          139.90000000596046,
+          139.60000000149012,
+          145.5,
+          143.10000000149012,
+          144.60000000149012
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "注釈ドラッグ フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 17,
+      "after": 17,
+      "deltaPct": 0,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          17.100000000000364,
+          17,
+          17,
+          17,
+          17
+        ],
+        "after": [
+          17,
+          17,
+          17,
+          19.900000000001455,
+          17
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "文字入力 フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 13.400000001489389,
+      "after": 12.695999994040903,
+      "deltaPct": -5.253731398285344,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          12.799999995528196,
+          15.663999997021165,
+          13.260000002981542,
+          14.299999999999272,
+          13.400000001489389
+        ],
+        "after": [
+          14.62399999552872,
+          13.363999997018254,
+          12.100000002981687,
+          12.394000002979737,
+          12.695999994040903
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "PDF生成・保存処理",
+      "unit": "ms",
+      "gated": true,
+      "before": 121.20000000298023,
+      "after": 126.39999999850988,
+      "deltaPct": 4.290429039110388,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          125.79999999701977,
+          121.20000000298023,
+          127.5,
+          119.5,
+          118.70000000298023
+        ],
+        "after": [
+          116.5,
+          121.60000000149012,
+          133.19999999552965,
+          126.39999999850988,
+          133.59999999403954
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "初期取得本文量",
+      "unit": "bytes",
+      "gated": true,
+      "before": 57482971,
+      "after": 57495258,
+      "deltaPct": 0.021375026005521214,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          57482971,
+          57482971,
+          57482971,
+          57482971,
+          57482971
+        ],
+        "after": [
+          57495258,
+          57495258,
+          57495258,
+          57495258,
+          57495258
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "読込後 ブラウザprivate bytes",
+      "unit": "bytes",
+      "gated": true,
+      "before": 833884160,
+      "after": 831643648,
+      "deltaPct": -0.2686838421298243,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          810905600,
+          841375744,
+          833884160,
+          846176256,
+          832544768
+        ],
+        "after": [
+          738861056,
+          832917504,
+          831643648,
+          829456384,
+          855539712
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "読込後 メインJSヒープ（回収前・参考）",
+      "unit": "bytes",
+      "gated": false,
+      "before": 6070239,
+      "after": 6139518,
+      "deltaPct": 1.1412894945322494,
+      "status": "参考・GC時点未統制",
+      "samples": {
+        "before": [
+          6070239,
+          6069791,
+          6069527,
+          6071467,
+          6070319
+        ],
+        "after": [
+          6139474,
+          6139518,
+          6138054,
+          6140054,
+          7213965
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "操作・保存後 ブラウザprivate bytes",
+      "unit": "bytes",
+      "gated": true,
+      "before": 1023381504,
+      "after": 1019392000,
+      "deltaPct": -0.3898354606182153,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          1003646976,
+          1033302016,
+          1023381504,
+          1062309888,
+          1023246336
+        ],
+        "after": [
+          1003040768,
+          1010896896,
+          1019392000,
+          1023983616,
+          1026293760
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "文書終了後 ブラウザprivate bytes",
+      "unit": "bytes",
+      "gated": true,
+      "before": 919003136,
+      "after": 919769088,
+      "deltaPct": 0.08334596150931795,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          913440768,
+          919003136,
+          918749184,
+          963874816,
+          926294016
+        ],
+        "after": [
+          919011328,
+          932114432,
+          919769088,
+          913518592,
+          939040768
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "操作・保存後 メインJS保持ヒープ（回収後）",
+      "unit": "bytes",
+      "gated": true,
+      "before": 6387812,
+      "after": 6456152,
+      "deltaPct": 1.0698498953945368,
+      "status": "中央値5%以内",
+      "samples": {
+        "before": [
+          6392792,
+          6380572,
+          6381956,
+          6387812,
+          6393080
+        ],
+        "after": [
+          6455184,
+          6454604,
+          6470360,
+          6456152,
+          6461260
+        ]
+      }
+    }
+  ],
+  "quality": [
+    {
+      "file": "sample-small.pdf",
+      "feedbackMs": [
+        11.700000002980232,
+        2.3000000044703484,
+        10.199999995529652,
+        2.7000000029802322,
+        15.399999998509884
+      ],
+      "whiteFrames": [
+        {
+          "mode": "scroll1500Cold",
+          "before": [
+            {
+              "total": 164,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            },
+            {
+              "total": 163,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            },
+            {
+              "total": 163,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            },
+            {
+              "total": 163,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            },
+            {
+              "total": 164,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            }
+          ],
+          "after": [
+            {
+              "total": 163,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            },
+            {
+              "total": 164,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            },
+            {
+              "total": 164,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            },
+            {
+              "total": 164,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            },
+            {
+              "total": 163,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            }
+          ]
+        },
+        {
+          "mode": "scroll1500Cached",
+          "before": [
+            {
+              "total": 164,
+              "blank": 1,
+              "ratio": 0.006097560975609756,
+              "longestMs": 20
+            },
+            {
+              "total": 164,
+              "blank": 1,
+              "ratio": 0.006097560975609756,
+              "longestMs": 18.399999998509884
+            },
+            {
+              "total": 164,
+              "blank": 1,
+              "ratio": 0.006097560975609756,
+              "longestMs": 20.399999998509884
+            },
+            {
+              "total": 164,
+              "blank": 1,
+              "ratio": 0.006097560975609756,
+              "longestMs": 19.799999997019768
+            },
+            {
+              "total": 164,
+              "blank": 1,
+              "ratio": 0.006097560975609756,
+              "longestMs": 16.399999998509884
+            }
+          ],
+          "after": [
+            {
+              "total": 164,
+              "blank": 1,
+              "ratio": 0.006097560975609756,
+              "longestMs": 16.30000000447035
+            },
+            {
+              "total": 164,
+              "blank": 1,
+              "ratio": 0.006097560975609756,
+              "longestMs": 20.30000000447035
+            },
+            {
+              "total": 164,
+              "blank": 1,
+              "ratio": 0.006097560975609756,
+              "longestMs": 16.899999998509884
+            },
+            {
+              "total": 164,
+              "blank": 1,
+              "ratio": 0.006097560975609756,
+              "longestMs": 20.600000001490116
+            },
+            {
+              "total": 164,
+              "blank": 1,
+              "ratio": 0.006097560975609756,
+              "longestMs": 20.19999999552965
+            }
+          ]
+        },
+        {
+          "mode": "scroll3000",
+          "before": [
+            {
+              "total": 86,
+              "blank": 1,
+              "ratio": 0.011627906976744186,
+              "longestMs": 16.80000000447035
+            },
+            {
+              "total": 86,
+              "blank": 1,
+              "ratio": 0.011627906976744186,
+              "longestMs": 16.299999997019768
+            },
+            {
+              "total": 86,
+              "blank": 1,
+              "ratio": 0.011627906976744186,
+              "longestMs": 16.69999999552965
+            },
+            {
+              "total": 86,
+              "blank": 1,
+              "ratio": 0.011627906976744186,
+              "longestMs": 16.399999998509884
+            },
+            {
+              "total": 86,
+              "blank": 1,
+              "ratio": 0.011627906976744186,
+              "longestMs": 16.600000001490116
+            }
+          ],
+          "after": [
+            {
+              "total": 86,
+              "blank": 1,
+              "ratio": 0.011627906976744186,
+              "longestMs": 17
+            },
+            {
+              "total": 86,
+              "blank": 1,
+              "ratio": 0.011627906976744186,
+              "longestMs": 16.69999999552965
+            },
+            {
+              "total": 86,
+              "blank": 1,
+              "ratio": 0.011627906976744186,
+              "longestMs": 19.30000000447035
+            },
+            {
+              "total": 86,
+              "blank": 1,
+              "ratio": 0.011627906976744186,
+              "longestMs": 17.600000001490116
+            },
+            {
+              "total": 86,
+              "blank": 1,
+              "ratio": 0.011627906976744186,
+              "longestMs": 17.200000002980232
+            }
+          ]
+        }
+      ],
+      "memoryAfterOperations": {
+        "before": [
+          {
+            "privateBytes": 1003646976,
+            "workingSetBytes": 1231097856,
+            "processes": [
+              {
+                "Id": 7104,
+                "PrivateMemorySize64": 513241088,
+                "WorkingSet64": 510455808
+              },
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 67612672,
+                "WorkingSet64": 192425984
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8966144,
+                "WorkingSet64": 23711744
+              },
+              {
+                "Id": 29156,
+                "PrivateMemorySize64": 38244352,
+                "WorkingSet64": 87572480
+              },
+              {
+                "Id": 30016,
+                "PrivateMemorySize64": 20160512,
+                "WorkingSet64": 41144320
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8355840,
+                "WorkingSet64": 25464832
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7876608,
+                "WorkingSet64": 23130112
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 318009344,
+                "WorkingSet64": 271638528
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 21180416,
+                "WorkingSet64": 55554048
+              }
+            ]
+          },
+          {
+            "privateBytes": 1033302016,
+            "workingSetBytes": 1255747584,
+            "processes": [
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 67551232,
+                "WorkingSet64": 192933888
+              },
+              {
+                "Id": 14000,
+                "PrivateMemorySize64": 41279488,
+                "WorkingSet64": 90656768
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8863744,
+                "WorkingSet64": 23691264
+              },
+              {
+                "Id": 31096,
+                "PrivateMemorySize64": 17346560,
+                "WorkingSet64": 38334464
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8220672,
+                "WorkingSet64": 25415680
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 36012,
+                "PrivateMemorySize64": 520511488,
+                "WorkingSet64": 513875968
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 342224896,
+                "WorkingSet64": 293593088
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19582976,
+                "WorkingSet64": 54161408
+              }
+            ]
+          },
+          {
+            "privateBytes": 1023381504,
+            "workingSetBytes": 1218871296,
+            "processes": [
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 67174400,
+                "WorkingSet64": 193019904
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8871936,
+                "WorkingSet64": 23699456
+              },
+              {
+                "Id": 31644,
+                "PrivateMemorySize64": 38531072,
+                "WorkingSet64": 87945216
+              },
+              {
+                "Id": 31756,
+                "PrivateMemorySize64": 17309696,
+                "WorkingSet64": 38297600
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8245248,
+                "WorkingSet64": 25444352
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 338743296,
+                "WorkingSet64": 255528960
+              },
+              {
+                "Id": 36612,
+                "PrivateMemorySize64": 517267456,
+                "WorkingSet64": 517627904
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19517440,
+                "WorkingSet64": 54222848
+              }
+            ]
+          },
+          {
+            "privateBytes": 1062309888,
+            "workingSetBytes": 1230610432,
+            "processes": [
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 67047424,
+                "WorkingSet64": 192892928
+              },
+              {
+                "Id": 10904,
+                "PrivateMemorySize64": 38969344,
+                "WorkingSet64": 87588864
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8871936,
+                "WorkingSet64": 23703552
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8245248,
+                "WorkingSet64": 25444352
+              },
+              {
+                "Id": 34440,
+                "PrivateMemorySize64": 519999488,
+                "WorkingSet64": 510701568
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 35576,
+                "PrivateMemorySize64": 17793024,
+                "WorkingSet64": 38899712
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 374124544,
+                "WorkingSet64": 274046976
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19537920,
+                "WorkingSet64": 54247424
+              }
+            ]
+          },
+          {
+            "privateBytes": 1023246336,
+            "workingSetBytes": 1218555904,
+            "processes": [
+              {
+                "Id": 3220,
+                "PrivateMemorySize64": 518828032,
+                "WorkingSet64": 516792320
+              },
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 67297280,
+                "WorkingSet64": 193380352
+              },
+              {
+                "Id": 19148,
+                "PrivateMemorySize64": 38739968,
+                "WorkingSet64": 88125440
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8871936,
+                "WorkingSet64": 23703552
+              },
+              {
+                "Id": 26976,
+                "PrivateMemorySize64": 17321984,
+                "WorkingSet64": 38338560
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8245248,
+                "WorkingSet64": 25444352
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 336748544,
+                "WorkingSet64": 255516672
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19472384,
+                "WorkingSet64": 54169600
+              }
+            ]
+          }
+        ],
+        "after": [
+          {
+            "privateBytes": 1003040768,
+            "workingSetBytes": 1183092736,
+            "processes": [
+              {
+                "Id": 388,
+                "PrivateMemorySize64": 38006784,
+                "WorkingSet64": 87269376
+              },
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 66793472,
+                "WorkingSet64": 190795776
+              },
+              {
+                "Id": 17644,
+                "PrivateMemorySize64": 520876032,
+                "WorkingSet64": 514027520
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8990720,
+                "WorkingSet64": 23662592
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8351744,
+                "WorkingSet64": 25448448
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7876608,
+                "WorkingSet64": 23130112
+              },
+              {
+                "Id": 35916,
+                "PrivateMemorySize64": 20140032,
+                "WorkingSet64": 41140224
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 310812672,
+                "WorkingSet64": 222236672
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 21192704,
+                "WorkingSet64": 55382016
+              }
+            ]
+          },
+          {
+            "privateBytes": 1010896896,
+            "workingSetBytes": 1186283520,
+            "processes": [
+              {
+                "Id": 3340,
+                "PrivateMemorySize64": 37089280,
+                "WorkingSet64": 87617536
+              },
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 66506752,
+                "WorkingSet64": 191942656
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8863744,
+                "WorkingSet64": 23691264
+              },
+              {
+                "Id": 30880,
+                "PrivateMemorySize64": 17334272,
+                "WorkingSet64": 38326272
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8196096,
+                "WorkingSet64": 25395200
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 329850880,
+                "WorkingSet64": 228835328
+              },
+              {
+                "Id": 37796,
+                "PrivateMemorySize64": 515764224,
+                "WorkingSet64": 513232896
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19570688,
+                "WorkingSet64": 54157312
+              }
+            ]
+          },
+          {
+            "privateBytes": 1019392000,
+            "workingSetBytes": 1208606720,
+            "processes": [
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 67485696,
+                "WorkingSet64": 192937984
+              },
+              {
+                "Id": 19436,
+                "PrivateMemorySize64": 37101568,
+                "WorkingSet64": 87437312
+              },
+              {
+                "Id": 22652,
+                "PrivateMemorySize64": 17338368,
+                "WorkingSet64": 38322176
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8863744,
+                "WorkingSet64": 23691264
+              },
+              {
+                "Id": 28564,
+                "PrivateMemorySize64": 516706304,
+                "WorkingSet64": 512647168
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8216576,
+                "WorkingSet64": 25411584
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 336404480,
+                "WorkingSet64": 250912768
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19554304,
+                "WorkingSet64": 54161408
+              }
+            ]
+          },
+          {
+            "privateBytes": 1023983616,
+            "workingSetBytes": 1215533056,
+            "processes": [
+              {
+                "Id": 2556,
+                "PrivateMemorySize64": 514220032,
+                "WorkingSet64": 513847296
+              },
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 67325952,
+                "WorkingSet64": 193257472
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8867840,
+                "WorkingSet64": 23699456
+              },
+              {
+                "Id": 29004,
+                "PrivateMemorySize64": 39473152,
+                "WorkingSet64": 88432640
+              },
+              {
+                "Id": 31376,
+                "PrivateMemorySize64": 20152320,
+                "WorkingSet64": 41177088
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8196096,
+                "WorkingSet64": 25395200
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 338448384,
+                "WorkingSet64": 252354560
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19578880,
+                "WorkingSet64": 54284288
+              }
+            ]
+          },
+          {
+            "privateBytes": 1026293760,
+            "workingSetBytes": 1191354368,
+            "processes": [
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 67346432,
+                "WorkingSet64": 193454080
+              },
+              {
+                "Id": 21120,
+                "PrivateMemorySize64": 522067968,
+                "WorkingSet64": 514998272
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8871936,
+                "WorkingSet64": 23703552
+              },
+              {
+                "Id": 30848,
+                "PrivateMemorySize64": 20168704,
+                "WorkingSet64": 41148416
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8245248,
+                "WorkingSet64": 25444352
+              },
+              {
+                "Id": 32948,
+                "PrivateMemorySize64": 37859328,
+                "WorkingSet64": 88047616
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 334479360,
+                "WorkingSet64": 227241984
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19533824,
+                "WorkingSet64": 54231040
+              }
+            ]
+          }
+        ]
+      },
+      "memoryAfterDocumentClose": {
+        "before": [
+          {
+            "privateBytes": 913440768,
+            "workingSetBytes": 1151406080,
+            "processes": [
+              {
+                "Id": 7104,
+                "PrivateMemorySize64": 444854272,
+                "WorkingSet64": 443457536
+              },
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 65662976,
+                "WorkingSet64": 190447616
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8966144,
+                "WorkingSet64": 23711744
+              },
+              {
+                "Id": 29156,
+                "PrivateMemorySize64": 37621760,
+                "WorkingSet64": 86994944
+              },
+              {
+                "Id": 30016,
+                "PrivateMemorySize64": 20144128,
+                "WorkingSet64": 41127936
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8355840,
+                "WorkingSet64": 25464832
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7876608,
+                "WorkingSet64": 23130112
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 298778624,
+                "WorkingSet64": 261517312
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 21180416,
+                "WorkingSet64": 55554048
+              }
+            ]
+          },
+          {
+            "privateBytes": 919003136,
+            "workingSetBytes": 1150787584,
+            "processes": [
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 65511424,
+                "WorkingSet64": 190877696
+              },
+              {
+                "Id": 14000,
+                "PrivateMemorySize64": 40660992,
+                "WorkingSet64": 90091520
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8863744,
+                "WorkingSet64": 23691264
+              },
+              {
+                "Id": 31096,
+                "PrivateMemorySize64": 17330176,
+                "WorkingSet64": 38318080
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8220672,
+                "WorkingSet64": 25415680
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 36012,
+                "PrivateMemorySize64": 451756032,
+                "WorkingSet64": 446861312
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 299347968,
+                "WorkingSet64": 258269184
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19591168,
+                "WorkingSet64": 54177792
+              }
+            ]
+          },
+          {
+            "privateBytes": 918749184,
+            "workingSetBytes": 1125994496,
+            "processes": [
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 62099456,
+                "WorkingSet64": 188841984
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8871936,
+                "WorkingSet64": 23699456
+              },
+              {
+                "Id": 31644,
+                "PrivateMemorySize64": 37867520,
+                "WorkingSet64": 87322624
+              },
+              {
+                "Id": 31756,
+                "PrivateMemorySize64": 17293312,
+                "WorkingSet64": 38281216
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8245248,
+                "WorkingSet64": 25444352
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 308215808,
+                "WorkingSet64": 234098688
+              },
+              {
+                "Id": 36612,
+                "PrivateMemorySize64": 448999424,
+                "WorkingSet64": 451072000
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19435520,
+                "WorkingSet64": 54149120
+              }
+            ]
+          },
+          {
+            "privateBytes": 963874816,
+            "workingSetBytes": 1152344064,
+            "processes": [
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 65040384,
+                "WorkingSet64": 190881792
+              },
+              {
+                "Id": 10904,
+                "PrivateMemorySize64": 38318080,
+                "WorkingSet64": 86978560
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8871936,
+                "WorkingSet64": 23703552
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8245248,
+                "WorkingSet64": 25444352
+              },
+              {
+                "Id": 34440,
+                "PrivateMemorySize64": 449830912,
+                "WorkingSet64": 442392576
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 35576,
+                "PrivateMemorySize64": 17776640,
+                "WorkingSet64": 38883328
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 348532736,
+                "WorkingSet64": 266727424
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19537920,
+                "WorkingSet64": 54247424
+              }
+            ]
+          },
+          {
+            "privateBytes": 926294016,
+            "workingSetBytes": 1141039104,
+            "processes": [
+              {
+                "Id": 3220,
+                "PrivateMemorySize64": 450469888,
+                "WorkingSet64": 450199552
+              },
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 62205952,
+                "WorkingSet64": 189206528
+              },
+              {
+                "Id": 19148,
+                "PrivateMemorySize64": 38113280,
+                "WorkingSet64": 87535616
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8871936,
+                "WorkingSet64": 23703552
+              },
+              {
+                "Id": 26976,
+                "PrivateMemorySize64": 17309696,
+                "WorkingSet64": 38326272
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8245248,
+                "WorkingSet64": 25444352
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 313966592,
+                "WorkingSet64": 249442304
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19390464,
+                "WorkingSet64": 54095872
+              }
+            ]
+          }
+        ],
+        "after": [
+          {
+            "privateBytes": 919011328,
+            "workingSetBytes": 1123614720,
+            "processes": [
+              {
+                "Id": 388,
+                "PrivateMemorySize64": 38006784,
+                "WorkingSet64": 87273472
+              },
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 66805760,
+                "WorkingSet64": 190771200
+              },
+              {
+                "Id": 17644,
+                "PrivateMemorySize64": 452698112,
+                "WorkingSet64": 447442944
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8990720,
+                "WorkingSet64": 23662592
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8351744,
+                "WorkingSet64": 25448448
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7876608,
+                "WorkingSet64": 23130112
+              },
+              {
+                "Id": 35916,
+                "PrivateMemorySize64": 20140032,
+                "WorkingSet64": 41140224
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 294948864,
+                "WorkingSet64": 229363712
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 21192704,
+                "WorkingSet64": 55382016
+              }
+            ]
+          },
+          {
+            "privateBytes": 932114432,
+            "workingSetBytes": 1112174592,
+            "processes": [
+              {
+                "Id": 3340,
+                "PrivateMemorySize64": 36474880,
+                "WorkingSet64": 87052288
+              },
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 62533632,
+                "WorkingSet64": 188858368
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8863744,
+                "WorkingSet64": 23691264
+              },
+              {
+                "Id": 30880,
+                "PrivateMemorySize64": 17313792,
+                "WorkingSet64": 38305792
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8196096,
+                "WorkingSet64": 25395200
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 322891776,
+                "WorkingSet64": 224309248
+              },
+              {
+                "Id": 37796,
+                "PrivateMemorySize64": 448548864,
+                "WorkingSet64": 447320064
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19570688,
+                "WorkingSet64": 54157312
+              }
+            ]
+          },
+          {
+            "privateBytes": 919769088,
+            "workingSetBytes": 1114382336,
+            "processes": [
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 65458176,
+                "WorkingSet64": 190906368
+              },
+              {
+                "Id": 19436,
+                "PrivateMemorySize64": 36540416,
+                "WorkingSet64": 86925312
+              },
+              {
+                "Id": 22652,
+                "PrivateMemorySize64": 17326080,
+                "WorkingSet64": 38309888
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8863744,
+                "WorkingSet64": 23691264
+              },
+              {
+                "Id": 28564,
+                "PrivateMemorySize64": 448466944,
+                "WorkingSet64": 446046208
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8216576,
+                "WorkingSet64": 25411584
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 307621888,
+                "WorkingSet64": 225845248
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19554304,
+                "WorkingSet64": 54161408
+              }
+            ]
+          },
+          {
+            "privateBytes": 913518592,
+            "workingSetBytes": 1180905472,
+            "processes": [
+              {
+                "Id": 2556,
+                "PrivateMemorySize64": 445591552,
+                "WorkingSet64": 446865408
+              },
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 62296064,
+                "WorkingSet64": 189263872
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8867840,
+                "WorkingSet64": 23699456
+              },
+              {
+                "Id": 23644,
+                "PrivateMemorySize64": 9412608,
+                "WorkingSet64": 54546432
+              },
+              {
+                "Id": 29004,
+                "PrivateMemorySize64": 38858752,
+                "WorkingSet64": 87871488
+              },
+              {
+                "Id": 31376,
+                "PrivateMemorySize64": 20135936,
+                "WorkingSet64": 41160704
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8196096,
+                "WorkingSet64": 25395200
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 292925440,
+                "WorkingSet64": 234799104
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19513344,
+                "WorkingSet64": 54218752
+              }
+            ]
+          },
+          {
+            "privateBytes": 939040768,
+            "workingSetBytes": 1109450752,
+            "processes": [
+              {
+                "Id": 8052,
+                "PrivateMemorySize64": 65380352,
+                "WorkingSet64": 191483904
+              },
+              {
+                "Id": 21120,
+                "PrivateMemorySize64": 453550080,
+                "WorkingSet64": 448204800
+              },
+              {
+                "Id": 23216,
+                "PrivateMemorySize64": 8871936,
+                "WorkingSet64": 23703552
+              },
+              {
+                "Id": 30848,
+                "PrivateMemorySize64": 20152320,
+                "WorkingSet64": 41132032
+              },
+              {
+                "Id": 32656,
+                "PrivateMemorySize64": 8245248,
+                "WorkingSet64": 25444352
+              },
+              {
+                "Id": 32948,
+                "PrivateMemorySize64": 37249024,
+                "WorkingSet64": 87490560
+              },
+              {
+                "Id": 34848,
+                "PrivateMemorySize64": 7720960,
+                "WorkingSet64": 23085056
+              },
+              {
+                "Id": 36152,
+                "PrivateMemorySize64": 318337024,
+                "WorkingSet64": 214675456
+              },
+              {
+                "Id": 39912,
+                "PrivateMemorySize64": 19533824,
+                "WorkingSet64": 54231040
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "decision": "測定値を記録。2026-10-04の利用者指示により数十ms程度の差の採否は操作確認で判断する。5%超過だけで次工程を止めない。大きな遅延・メモリ増加・白抜け・未測定項目は別途確認。",
+  "limitations": [
+    "フレームp95は各試行のp95の中央値。",
+    "OSキャッシュと他アプリは制御していない。",
+    "定点メモリはピークではない。",
+    "保存先の上書きI/Oは未測定。ダウンロード完了時間は自動化の遅延を含むため5%判定に用いていない。"
+  ]
+}
