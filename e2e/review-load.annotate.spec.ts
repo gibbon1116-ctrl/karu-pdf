@@ -22,7 +22,8 @@ function fixture(kind: 'count'|'issue', total: number) {
   }finally{ref.destroy();doc.destroy()}
 }
 test('100種類・5000個の印は描画をまとめ、集計・選択・スクロール・保存を維持する', async ({page}) => {
-  test.setTimeout(120000)
+  // 2 minutes on a development PC; the 2-core CI runner is slower.
+  test.setTimeout(process.env.CI ? 360_000 : 120_000)
   await page.goto('/karu-pdf/?test=1&workers=3&warm=0');await page.waitForFunction(()=>!!window.__karu)
   const bytes=fixture('count',5000), started=Date.now();await page.evaluate(b=>window.__karu!.openBytes(b,'5000個.pdf'),bytes)
   await expect.poll(()=>page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count).length)).toBe(5000)
