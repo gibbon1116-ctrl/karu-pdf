@@ -21,6 +21,7 @@ const compareRoot = argument('--compare-build-dir', null)
 const referenceRoot = argument('--reference-build-dir', null)
 if (referenceRoot && !compareRoot) throw new Error('Reference requires a comparison build')
 const textExtraction = process.argv.includes('--text-extraction')
+const browserWarmup = !process.argv.includes('--no-browser-warmup')
 const fixtureNames = argument('--fixtures', 'sample-small.pdf,heavy-300p.pdf').split(',')
 const networkOnly = process.argv.includes('--network-only')
 const actionPage = Number(argument('--action-page', '-1'))
@@ -46,6 +47,8 @@ const result = {
   fixtures: [], trials: [], errors: [],
 }
 const datasets = [result]
+result.conditions.browserWarmup = browserWarmup ? 'one unrecorded open per build in its own context before timed trials' : 'none'
+result.browserWarmup = []
 const outputs = [output]
 if (compareRoot) {
   result.order = 'AB/BA alternating, fresh contexts in the same browser'
@@ -346,7 +349,38 @@ async function trial(file, run, variant = 0) {
   } finally { await context.close() }
 }
 
+async function warmBrowser(variant) {
+  const context = await browser.newContext({ viewport: result.conditions.viewport, deviceScaleFactor: 1, serviceWorkers: 'block', acceptDownloads: true })
+  try {
+    const page = await context.newPage()
+    await page.goto(`http://127.0.0.1:${4175 + variant}/karu-pdf/?test=1&workers=4&warm=0`, { waitUntil: 'networkidle' })
+    await page.evaluate(() => {
+      const state = window.__eizenOpen = { acceptedAt: null, firstMs: null, sharpMs: null }
+      document.addEventListener('change', event => {
+        if (event.target?.dataset?.testid !== 'file-input') return
+        state.acceptedAt = performance.now()
+        const watch = () => {
+          const metrics = window.__karu.getMetrics()
+          if (state.firstMs === null && metrics.open.count) state.firstMs = performance.now() - state.acceptedAt
+          if (metrics.openSharp.count) { state.sharpMs = performance.now() - state.acceptedAt; return }
+          requestAnimationFrame(watch)
+        }
+        requestAnimationFrame(watch)
+      }, { capture: true, once: true })
+    })
+    await page.getByTestId('file-input').setInputFiles(path.resolve('test-data', fixtureNames[0]))
+    await page.waitForFunction(() => window.__eizenOpen.sharpMs !== null, null, { timeout: 180_000, polling: 'raf' })
+    datasets[variant].browserWarmup.push(await page.evaluate(fixture => ({ fixture, firstMs: window.__eizenOpen.firstMs, sharpMs: window.__eizenOpen.sharpMs }), fixtureNames[0]))
+  } finally { await context.close() }
+}
+
 try {
+  if (browserWarmup) {
+    for (let variant = 0; variant < datasets.length; variant++) {
+      console.log(`[${datasets[variant].label}] browser warmup: ${fixtureNames[0]}`)
+      await warmBrowser(variant)
+    }
+  }
   for (const name of fixtureNames) {
     const file = path.resolve('test-data', name)
     const bytes = await fs.readFile(file)
