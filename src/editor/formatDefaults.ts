@@ -55,7 +55,7 @@ function format(
 }
 
 export const DEFAULT_FORMAT: FormatDefaults = {
-  count: { ...format([0, .25, 1]), symbol: 'circle', symbolSize: 8, countGroup: '照明器具' },
+  count: { ...format([0, .25, 1]), symbol: 'circle', symbolSize: 10, opacity: .8 },
   cloudSquare: format(red, 1, 10.5, 'BIZUDGothic', null, red),
   cloudPolygon: format(red, 1, 10.5, 'BIZUDGothic', null, red),
   issue: format(red),

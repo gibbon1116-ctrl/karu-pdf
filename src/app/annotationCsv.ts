@@ -1,6 +1,7 @@
 import { scaleLabel, PT_MM } from '../core/measure'
 import { issueStatusLabel, issueColor } from '../core/issues'
-import { countSummary } from '../core/counts'
+import { countFixtureId } from '../core/counts'
+import type { CountFixture } from '../core/countFixtures'
 import { SYMBOL_OPTIONS } from '../core/annotations'
 import type { EditableAnnotation } from '../editor/AnnotationStore'
 
@@ -13,7 +14,7 @@ export const CSV_KIND_LABELS: Record<CsvKind, string> = {
   issue: '指摘', count: '個数カウント', text: '文字', callout: '吹き出し', measure: '計測',
   shape: '図形（雲・線・矢印・四角・丸）', symbol: '記号', pen: 'ペン（蛍光ペン・手書き）', markup: '文字への印',
 }
-export interface CsvOptions { firstPage?: number; lastPage?: number; issueStatus?: 'all' | 'open' | 'confirmed' }
+export interface CsvOptions { firstPage?: number; lastPage?: number; issueStatus?: 'all' | 'open' | 'confirmed'; fixtures?: readonly CountFixture[] }
 export function csvKind(annotation: EditableAnnotation): CsvKind | null {
   if (annotation.legacyChange || annotation.issue?.recordKind === 'change') return null
   if (annotation.issue) return 'issue'
@@ -83,23 +84,26 @@ export function createCsv(annotations: readonly EditableAnnotation[], kinds: rea
   const header = [...ANNOTATION_CSV_HEADER]
   if (kinds.includes('issue')) header.push('状態', '分野', '回答', '修正確認', '引継ぎ元番号', '引継ぎ元文書')
   if (kinds.includes('measure')) header.push('縮尺')
-  if (kinds.includes('count')) header.push('個数の種類')
+  if (kinds.includes('count')) header.push('器具名称', '略号', '分類')
+  const fixtures = new Map(options.fixtures?.map(f => [f.id, f]))
   const rows = csvAnnotations(annotations, kinds, options).map((annotation) => {
     const [left, top, right, bottom] = annotation.rect
     const issue = annotation.issue
+    const fixture = annotation.count ? fixtures.get(countFixtureId(annotation.count)) : undefined
+    const fixtureName = fixture?.name ?? (annotation.count?.version === 1 ? annotation.count.group : '')
     const row: (string | number)[] = [
       annotation.count ? '個数カウント' : annotationKindLabel(annotation.kind),
       issue?.number ?? '',
       annotation.pageIndex + 1,
       issue?.drawingNumber ?? '',
-      issue ? annotation.text : annotation.count ? annotation.count.group : annotationBody(annotation),
+      issue ? annotation.text : annotation.count ? fixtureName : annotationBody(annotation),
       annotationColorHex(annotation),
       `${decimal(left)}, ${decimal(top)}`,
       `${decimal(right - left)}, ${decimal(bottom - top)}`,
     ]
     if (kinds.includes('issue')) row.push(issue ? issueStatusLabel(issue.status) : '', issue?.discipline ?? '', issue?.answer ?? '', issue?.verification ?? '', issue?.sourceNumber ?? '', issue?.sourceDocument ?? '')
     if (kinds.includes('measure')) row.push(annotation.measure ? scaleLabel({ ...annotation.measure, denominator: annotation.measure.mmPerPoint / PT_MM, paper: 'PDF', source: 'standard' }) : '')
-    if (kinds.includes('count')) row.push(annotation.count?.group ?? '')
+    if (kinds.includes('count')) row.push(annotation.count ? fixtureName : '', annotation.count ? fixture?.code ?? '' : '', annotation.count ? fixture?.category ?? (annotation.count.version === 1 ? 'その他' : '') : '')
     return row.map(quote).join(',')
   })
   return `\uFEFF${[header.map(quote).join(','), ...rows].join('\r\n')}\r\n`
@@ -115,7 +119,18 @@ export function createIssueCsv(annotations: readonly EditableAnnotation[]): stri
 }
 export function issueCsvFileName(pdfName: string): string { return pdfName.replace(/\.pdf$/i, '') + '_指摘一覧.csv' }
 
-export function createCountCsv(annotations: readonly EditableAnnotation[]): string {
-  return '\uFEFF' + [['種類', 'ページ', '個数'], ...countSummary(annotations).map(a => [a.group, a.pageIndex + 1, a.total])].map(row => row.map(quote).join(',')).join('\r\n') + '\r\n'
+export function createCountCsv(annotations: readonly Pick<EditableAnnotation, 'count' | 'pageIndex'>[], fixtures: readonly CountFixture[], currentPageIndex: number): string {
+  const totals = new Map<string, Map<number, number>>(), pages = new Set<number>()
+  for (const a of annotations) if (a.count) {
+    const id = countFixtureId(a.count), byPage = totals.get(id) ?? new Map<number, number>()
+    byPage.set(a.pageIndex, (byPage.get(a.pageIndex) ?? 0) + 1); totals.set(id, byPage); pages.add(a.pageIndex)
+  }
+  const columns = [...pages].sort((a, b) => a - b)
+  const header = ['分類', '略号', '器具名称', `表示中の図面（p.${currentPageIndex + 1}）`, '全図面の合計', ...columns.map(p => `p.${p + 1}`)]
+  const rows = [...fixtures].sort((a, b) => a.order - b.order).map(f => {
+    const counts = totals.get(f.id)
+    return [f.category, f.code, f.name, counts?.get(currentPageIndex) ?? 0, [...(counts?.values() ?? [])].reduce((a, b) => a + b, 0), ...columns.map(p => counts?.get(p) ?? 0)]
+  })
+  return '\uFEFF' + [header, ...rows].map(row => row.map(quote).join(',')).join('\r\n') + '\r\n'
 }
 

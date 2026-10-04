@@ -18,6 +18,8 @@ import { issueColor, issueFontSize } from '../core/issues'
 import { IssueEditor } from './IssueEditor'
 import { CLEAR_EDITOR_SELECTION } from './interaction'
 import { ToolIcon } from '../ui/ToolIcon'
+import { CountMarker, countMarkerData, countSvgPath } from './countMarkers'
+import { countFixtureId } from '../core/counts'
 
 export type EditorTool = 'select' | 'textSelect' | FormatTool
 const TEXT_SELECTION_START = 'karu-pdf:text-selection-start'
@@ -187,18 +189,20 @@ export function AnnotationLayer(props: Props) {
       props.docId, props.pageIndex, input.from, input.to, input.mode,
     ),
   ), [props.docId, props.pageIndex, props.pool])
-  const annotations = props.store.getPageAnnotations(props.pageIndex)
+  const annotations = props.store.getPageAnnotations(props.pageIndex).filter(a => props.store.isCountVisible(a.count))
   const selectedIds = new Set(props.store.selectedIds())
   const singleSelection = selectedIds.size === 1
   const touched = useMemo(() => new Set(props.store.touchedObjNums(props.pageIndex)), [version, props.pageIndex, props.store])
-  const compactCounts = annotations.filter(a => a.count && a.symbol === 'circle').length > 500
-  const countPaths = new Map<string, { d: string; stroke: string; opacity: number }>()
+  const visibleCount = annotations.filter(a => a.count).length
+  const compactCounts = visibleCount > 500
+  const countPaths = new Map<string, { outline: string[]; fills: string[]; strokes: string[]; stroke: string; opacity: number; bright: boolean; selected: boolean }>()
   if (compactCounts) for (const a of annotations) {
-    if (!a.count || a.symbol !== 'circle' || singleSelection && selectedIds.has(a.id) || a.objNum !== null && !touched.has(a.objNum) && !selectedIds.has(a.id)) continue
-    const [x0, y0, x1, y1] = a.rect, r = (x1 - x0) * .35, x = (x0 + x1) / 2, y = (y0 + y1) / 2
-    const stroke = selectedIds.has(a.id) ? '#006cff' : color(a.color), key = `${stroke}:${a.opacity}`
-    const group = countPaths.get(key) ?? { d: '', stroke, opacity: a.opacity }
-    group.d += `M${x-r},${y}a${r},${r} 0 1,0 ${r*2},0a${r},${r} 0 1,0 ${-r*2},0 `
+    const fixture = props.store.fixtureForCount(a.count)
+    if (!fixture || !a.count || singleSelection && selectedIds.has(a.id)) continue
+    const [x0, y0, x1, y1] = a.rect, data = countMarkerData(fixture.style, (x0 + x1) / 2, (y0 + y1) / 2)
+    const selected = selectedIds.has(a.id), key = JSON.stringify([fixture.style.shape, fixture.style.fill, fixture.style.color, fixture.style.size, fixture.style.opacity, selected])
+    const group = countPaths.get(key) ?? { outline: [], fills: [], strokes: [], stroke: data.color, opacity: data.opacity, bright: data.bright, selected }
+    group.outline.push(countSvgPath(data.outline)); group.fills.push(countSvgPath(data.fills)); group.strokes.push(countSvgPath(data.strokes, false))
     countPaths.set(key, group)
   }
   const editing = props.editingId ? annotations.find((annotation) => annotation.id === props.editingId) : undefined
@@ -631,17 +635,21 @@ export function AnnotationLayer(props: Props) {
       return
     }
     if (operation.mode === 'symbol') {
+      const fixture = props.tool === 'count' ? props.store.getCountFixture(props.store.selectedFixtureId) : undefined
+      if (props.tool === 'count' && !fixture) { props.onStatus('器具リストで器具を選んでください'); window.dispatchEvent(new CustomEvent('karu-pdf:open-fixtures')); return }
       const format = props.formatDefaults[props.tool === 'count' ? 'count' : 'symbol']
-      const rect = symbolRectFromDrag(operation.start, operation.latest, operation.moved, format.symbolSize)
+      const rect = props.tool === 'count' ? symbolRectFromDrag(operation.latest, operation.latest, false, fixture!.style.size) : symbolRectFromDrag(operation.start, operation.latest, operation.moved, format.symbolSize)
       if (rect[2] - rect[0] < 4) return
+      if (fixture && props.store.getPageAnnotations(props.pageIndex).some(a => a.count && countFixtureId(a.count) === fixture.id && Math.hypot((a.rect[0] + a.rect[2]) / 2 - operation.latest[0], (a.rect[1] + a.rect[3]) / 2 - operation.latest[1]) <= 3 * 72 / 25.4)) props.onStatus('近くに同じ器具の印があります（二重に数えていないか確認してください）')
       const annotation = props.store.create({
         pageIndex: props.pageIndex,
         kind: 'symbol',
-        count: props.tool === 'count' ? { version: 1, id: crypto.randomUUID(), group: format.countGroup?.trim() || 'その他機器' } : null,
+        count: fixture ? { version: 2, id: crypto.randomUUID(), fixtureId: fixture.id } : null,
+        text: fixture ? `個数: ${fixture.code} ${fixture.name}`.trim() : '',
         rect,
-        color: format.color,
-        symbol: format.symbol,
-        opacity: format.opacity,
+        color: fixture?.style.color ?? format.color,
+        symbol: fixture ? 'circle' : format.symbol,
+        opacity: fixture?.style.opacity ?? format.opacity,
       })
       props.onSelect(annotation.id)
       return
@@ -706,11 +714,12 @@ export function AnnotationLayer(props: Props) {
         {selectedIds.has(annotation.id) && <rect className="annotation-selection" x={x} y={y} width={right-x} height={bottom-y} fill="none" pointerEvents="none" />}
       </g>
     }
-    if (compactCounts && annotation.count && annotation.symbol === 'circle' && !(singleSelection && selectedIds.has(annotation.id))) return null
-    const visible = annotation.objNum === null || touched.has(annotation.objNum)
+    const fixture = props.store.fixtureForCount(annotation.count)
+    if (compactCounts && annotation.count && (fixture || annotation.symbol === 'circle') && !(singleSelection && selectedIds.has(annotation.id))) return null
+    const visible = !!fixture && !!annotation.count || annotation.objNum === null || touched.has(annotation.objNum)
     const [x0, y0, x1, y1] = annotation.rect
     const handleSize = 8 / Math.max(0.01, props.zoom * CSS_PX_PER_PT)
-    const positions: Array<{ handle: ResizeHandle; x: number; y: number }> = allResizeHandles(annotation.kind)
+    const positions: Array<{ handle: ResizeHandle; x: number; y: number }> = annotation.count ? [] : allResizeHandles(annotation.kind)
       ? [
           { handle: 'nw', x: x0, y: y0 }, { handle: 'n', x: (x0 + x1) / 2, y: y0 }, { handle: 'ne', x: x1, y: y0 },
           { handle: 'e', x: x1, y: (y0 + y1) / 2 }, { handle: 'se', x: x1, y: y1 }, { handle: 's', x: (x0 + x1) / 2, y: y1 },
@@ -761,7 +770,8 @@ export function AnnotationLayer(props: Props) {
         ) : annotation.kind === 'strikeout' ? (
           <line key={`${annotation.id}-quad-${index}`} className="annotation-text-mark-line" x1={(quad[0] + quad[4]) / 2} y1={(quad[1] + quad[5]) / 2} x2={(quad[2] + quad[6]) / 2} y2={(quad[3] + quad[7]) / 2} stroke={color(annotation.color)} />
         ) : null)}
-        {visible && annotation.kind === 'symbol' && symbolGlyph && <text
+        {visible && fixture && annotation.count && <CountMarker style={fixture.style} code={fixture.code} showCode={visibleCount <= 1000} x={(x0 + x1) / 2} y={(y0 + y1) / 2} />}
+        {visible && !fixture && annotation.kind === 'symbol' && symbolGlyph && <text
           className="annotation-symbol"
           x={(x0 + x1) / 2}
           y={(y0 + y1) / 2}
@@ -965,7 +975,18 @@ export function AnnotationLayer(props: Props) {
     >
       <rect className="annotation-surface" x="0" y="0" width={props.pageSize.width} height={props.pageSize.height} />
       {annotations.map(renderAnnotation)}
-      {[...countPaths].map(([key, group]) => <path key={key} data-testid="count-batch" d={group.d} stroke={group.stroke} strokeWidth={.6} opacity={group.opacity} fill="none" pointerEvents="stroke" />)}
+      {[...countPaths].map(([key, group]) => <g key={key} data-testid="count-batch" opacity={group.opacity} pointerEvents="none">
+        {group.bright && <path d={group.outline.join(' ')} fill="none" stroke="#404040" strokeWidth={1.8} />}
+        <path d={group.fills.join(' ')} fill={group.stroke} />
+        <path d={group.outline.join(' ') + ' ' + group.strokes.join(' ')} fill="none" stroke={group.stroke} strokeWidth={.8} strokeLinejoin="round" />
+        {group.selected && <path d={group.outline.join(' ')} fill="none" stroke="#006cff" strokeWidth={1.2} />}
+      </g>)}
+      {compactCounts && visibleCount <= 1000 && <g pointerEvents="none">{annotations.filter(a => a.count && !(singleSelection && selectedIds.has(a.id))).map(a => {
+        const f = props.store.fixtureForCount(a.count)
+        if (!f?.style.showCode || !f.code) return null
+        const data = countMarkerData(f.style, (a.rect[0] + a.rect[2]) / 2, (a.rect[1] + a.rect[3]) / 2)
+        return <text key={a.id} x={data.code.x} y={data.code.y} fontSize={data.code.size} fontFamily="KaruBIZUDGothic" fill={data.bright ? '#404040' : data.color} opacity={data.opacity}>{f.code}</text>
+      })}</g>}
       {measurement.draft}
       <path ref={draftCloudRef} style={{ display: 'none' }} pointerEvents="none" />
       <g ref={textSelectionRef} className="text-selection-quads" aria-hidden="true" />

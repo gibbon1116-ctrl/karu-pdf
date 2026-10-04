@@ -6,7 +6,8 @@ import { measureBounds, measureText, type MeasureKind, type MeasureSettings, typ
 import { History, type HistoryStep } from './history'
 import { IssueNumbers, issueOrder, parseIssue, type Issue } from '../core/issues'
 import type { CloudIntensity } from '../core/cloud'
-import type { CountMark } from '../core/counts'
+import { countFixtureId, type CountMark } from '../core/counts'
+import { nextCountStyle, serializeCountFixtures, type CountFixture } from '../core/countFixtures'
 
 export type Kind = MeasureKind | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
@@ -46,7 +47,7 @@ export interface EditableAnnotation {
 }
 
 type ScaleChange = { pageIndex: number; scale: PageScale | null }
-type HistoryState = AnnotationState[] & { scales?: ScaleChange[]; issueMaximum?: number }
+type HistoryState = AnnotationState[] & { scales?: ScaleChange[]; issueMaximum?: number; fixtures?: CountFixture[] }
 interface AnnotationState extends Omit<EditableAnnotation, 'dirty'> {}
 interface StoredAnnotation extends AnnotationState {
   deleted: boolean
@@ -190,6 +191,15 @@ function mapPoint(point: Point, from: Rect, to: Rect): Point {
 }
 
 export class AnnotationStore {
+  private fixtures: CountFixture[] = []
+  private fixtureBaseline = '[]'
+  private fixtureLoading: Promise<void> | null = null
+  fixturesReady = false
+  selectedFixtureId: string | null = null
+  private readonly hiddenFixtures = new Set<string>()
+  onlySelectedFixture = false
+  private readonly legacyCountObjects = new Set<string>()
+  private pendingFixtureSave: { editIndex: number; json: string } | null = null
   readonly issueNumbers = new IssueNumbers()
   private readonly annotations = new Map<string, StoredAnnotation>()
   private readonly baselines = new Map<string, AnnotationState>()
@@ -218,7 +228,10 @@ export class AnnotationStore {
   canUndo = (): boolean => this.history.canUndo
   canRedo = (): boolean => this.history.canRedo
 
-  reset(): void {
+  reset(preserveFixtureVisibility = false): void {
+    this.fixtures = []; this.fixtureBaseline = '[]'; this.fixtureLoading = null; this.fixturesReady = false
+    if (!preserveFixtureVisibility) { this.selectedFixtureId = null; this.hiddenFixtures.clear(); this.onlySelectedFixture = false }
+    this.legacyCountObjects.clear(); this.pendingFixtureSave = null
     this.scales.clear(); this.scaleBaselines.clear(); this.pendingScales = []
     this.annotations.clear()
     this.baselines.clear()
@@ -301,6 +314,100 @@ export class AnnotationStore {
 
   getScale(pageIndex: number): PageScale | null { const s = this.scales.get(pageIndex); return s ? { ...s } : null }
 
+  getCountFixtures(): CountFixture[] { return structuredClone(this.fixtures) }
+  hasCountMarks(): boolean { for (const a of this.annotations.values()) if (!a.deleted && a.count) return true; return false }
+  getCountFixture(id: string | null): CountFixture | undefined { return this.fixtures.find(f => f.id === id) }
+  fixtureForCount(mark: CountMark | null | undefined): CountFixture | undefined { return mark ? this.getCountFixture(countFixtureId(mark)) : undefined }
+  async ensureCountFixtures(loader: () => Promise<CountFixture[]>, loadPages: () => Promise<void>): Promise<void> {
+    if (this.fixturesReady) return
+    if (this.fixtureLoading) return this.fixtureLoading
+    const generation = this.generation
+    this.fixtureLoading = (async () => {
+      const fixtures = await loader()
+      await loadPages()
+      if (generation !== this.generation) return
+      const nextFixtures = structuredClone(fixtures), legacyIds: string[] = []
+      for (const a of this.annotations.values()) if (a.count?.version === 1 && !a.deleted) {
+        const id = countFixtureId(a.count)
+        if (!nextFixtures.some(f => f.id === id)) {
+          if (nextFixtures.length >= 1000) throw new Error('旧形式の器具を含めると1,000件を超えます。')
+          nextFixtures.push({ id, name: a.count.group, code: '', category: 'その他', style: nextCountStyle(nextFixtures), order: nextFixtures.reduce((n, f) => Math.max(n, f.order + 1), 0) })
+        }
+        legacyIds.push(a.id)
+      }
+      serializeCountFixtures(nextFixtures)
+      this.fixtures = nextFixtures
+      this.legacyCountObjects.clear(); for (const id of legacyIds) this.legacyCountObjects.add(id)
+      this.fixtureBaseline = JSON.stringify(this.fixtures)
+      this.fixturesReady = true
+      this.notify()
+    })().finally(() => { if (generation === this.generation) this.fixtureLoading = null })
+    return this.fixtureLoading
+  }
+  selectFixture(id: string | null): void { this.selectedFixtureId = id; this.pruneHiddenSelection(); this.notify() }
+  isFixtureVisible(id: string): boolean { return !this.hiddenFixtures.has(id) && (!this.onlySelectedFixture || id === this.selectedFixtureId) }
+  isCountVisible(mark: CountMark | null | undefined): boolean { return !mark || this.isFixtureVisible(countFixtureId(mark)) }
+  setFixtureVisible(ids: readonly string[], visible: boolean): void {
+    for (const id of ids) { if (visible) this.hiddenFixtures.delete(id); else this.hiddenFixtures.add(id) }
+    this.pruneHiddenSelection(); this.notify()
+  }
+  setOnlySelectedFixture(value: boolean): void { this.onlySelectedFixture = value; this.pruneHiddenSelection(); this.notify() }
+  showAllFixtures(): void { this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.notify() }
+  private pruneHiddenSelection(): void { for (const id of this.selection) if (!this.isCountVisible(this.annotations.get(id)?.count)) this.selection.delete(id) }
+  countTotals(): Map<string, Map<number, number>> {
+    const totals = new Map<string, Map<number, number>>()
+    for (const a of this.annotations.values()) if (!a.deleted && a.count) {
+      const id = countFixtureId(a.count), pages = totals.get(id) ?? new Map<number, number>()
+      pages.set(a.pageIndex, (pages.get(a.pageIndex) ?? 0) + 1); totals.set(id, pages)
+    }
+    return totals
+  }
+  visibleCountTotal(pageIndex: number): number {
+    let n = 0
+    for (const a of this.annotations.values()) if (!a.deleted && a.pageIndex === pageIndex && a.count && this.isCountVisible(a.count)) n++
+    return n
+  }
+  countOverlayObjNums(pageIndex: number): number[] {
+    if (!this.fixturesReady) return []
+    const result: number[] = []
+    for (const a of this.annotations.values()) if (!a.deleted && a.pageIndex === pageIndex && a.count && this.fixtureForCount(a.count) && a.objNum !== null) result.push(a.objNum)
+    return result
+  }
+  setCountFixtures(fixtures: CountFixture[], removeIds: readonly string[] = []): void {
+    serializeCountFixtures(fixtures)
+    const before: HistoryState = [], after: HistoryState = []
+    before.fixtures = this.getCountFixtures(); after.fixtures = structuredClone(fixtures)
+    const appearance = (f: CountFixture | undefined) => f ? JSON.stringify([f.name, f.code, f.style]) : ''
+    const changed = new Set(fixtures.filter(f => appearance(f) !== appearance(this.getCountFixture(f.id))).map(f => f.id))
+    this.fixtures = structuredClone(fixtures)
+    for (const a of this.annotations.values()) if (!a.deleted && a.count) {
+      const id = countFixtureId(a.count)
+      if (!removeIds.includes(id) && !changed.has(id)) continue
+      before.push(cloneState(a))
+      if (removeIds.includes(id)) { a.deleted = true; this.selection.delete(a.id) }
+      else { this.applyFixtureToMark(a, this.getCountFixture(id)!); after.push(cloneState(a)) }
+      this.markTouched(a); a.revision++
+    }
+    this.history.push({ before, after }); this.pruneHiddenSelection(); this.notify()
+  }
+  reassignCounts(ids: readonly string[], fixtureId: string): void {
+    const fixture = this.getCountFixture(fixtureId)
+    if (!fixture) return
+    const before: HistoryState = [], after: HistoryState = []
+    for (const id of ids) {
+      const a = this.annotations.get(id)
+      if (!a || a.deleted || !a.count) continue
+      before.push(cloneState(a)); this.applyFixtureToMark(a, fixture); this.markTouched(a); a.revision++; after.push(cloneState(a))
+    }
+    if (before.length) this.history.push({ before, after })
+    this.pruneHiddenSelection(); this.notify()
+  }
+  private applyFixtureToMark(a: StoredAnnotation, fixture: CountFixture): void {
+    const x = (a.rect[0] + a.rect[2]) / 2, y = (a.rect[1] + a.rect[3]) / 2, r = fixture.style.size / 2
+    a.count = { version: 2, id: a.count!.id, fixtureId: fixture.id }; a.rect = [x - r, y - r, x + r, y + r]
+    a.color = [...fixture.style.color]; a.opacity = fixture.style.opacity; a.text = `個数: ${fixture.code} ${fixture.name}`.trim()
+  }
+
   setScale(pageIndices: readonly number[], scale: PageScale, recalculate: boolean): void {
     const before: HistoryState = [], after: HistoryState = []
     before.scales = pageIndices.map(pageIndex => ({ pageIndex, scale: this.getScale(pageIndex) }))
@@ -343,11 +450,15 @@ export class AnnotationStore {
   }
 
   selectedIds(): string[] {
-    return [...this.selection].filter((id) => this.annotations.get(id)?.deleted === false)
+    return [...this.selection].filter((id) => this.annotations.get(id)?.deleted === false && this.isCountVisible(this.annotations.get(id)?.count))
   }
 
   primarySelection(): string | null {
     return this.selectedIds().at(-1) ?? null
+  }
+  selectedCountsOnly(): boolean {
+    const ids = this.selectedIds()
+    return ids.length > 0 && ids.every(id => !!this.annotations.get(id)?.count)
   }
 
   isSelected(id: string): boolean {
@@ -355,7 +466,7 @@ export class AnnotationStore {
   }
 
   selectOnly(id: string | null): void {
-    const next = id && this.annotations.get(id)?.deleted === false ? [id] : []
+    const next = id && this.annotations.get(id)?.deleted === false && this.isCountVisible(this.annotations.get(id)?.count) ? [id] : []
     if (this.selectedIds().length === next.length && next.every((value) => this.selection.has(value))) return
     this.selection.clear()
     for (const value of next) this.selection.add(value)
@@ -363,7 +474,7 @@ export class AnnotationStore {
   }
 
   toggleSelection(id: string): void {
-    if (this.annotations.get(id)?.deleted !== false) return
+    if (this.annotations.get(id)?.deleted !== false || !this.isCountVisible(this.annotations.get(id)?.count)) return
     if (this.selection.has(id)) this.selection.delete(id)
     else this.selection.add(id)
     this.notify()
@@ -382,7 +493,7 @@ export class AnnotationStore {
     ]
     this.selection.clear()
     for (const annotation of this.getPageAnnotations(pageIndex)) {
-      if (annotationInsideSelection(annotation, normalized)) this.selection.add(annotation.id)
+      if (this.isCountVisible(annotation.count) && annotationInsideSelection(annotation, normalized)) this.selection.add(annotation.id)
     }
     this.notify()
     return this.selectedIds()
@@ -632,7 +743,7 @@ export class AnnotationStore {
     symbol?: SymbolName
   }): void {
     this.mutate(id, (annotation) => {
-      if (values.countGroup !== undefined && annotation.count && values.countGroup.trim() && values.countGroup.length <= 80) annotation.count.group = values.countGroup.trim()
+      if (values.countGroup !== undefined && annotation.count?.version === 1 && values.countGroup.trim() && values.countGroup.length <= 80) annotation.count.group = values.countGroup.trim()
       if (values.issueStatus && annotation.issue) annotation.issue.status = values.issueStatus
       if (values.cloudIntensity !== undefined) annotation.cloudIntensity = values.cloudIntensity
       if (values.color) annotation.color = [...values.color]
@@ -812,6 +923,11 @@ export class AnnotationStore {
   }
 
   toEdits(): AnnotationEdit[] {
+    // Migration is a save operation, never a side effect of opening the PDF.
+    if (this.fixturesReady && this.isDirty()) for (const id of this.legacyCountObjects) {
+      const a = this.annotations.get(id), f = this.fixtureForCount(a?.count)
+      if (a && !a.deleted && a.count?.version === 1 && f) this.applyFixtureToMark(a, f)
+    }
     const entries = this.editEntries()
     this.pendingEdits = entries.map(({ annotation, edit }) => ({
       id: annotation.id,
@@ -822,13 +938,21 @@ export class AnnotationStore {
     }))
     const edits = entries.map(({ edit }) => edit)
     this.pendingScales = [...this.scales].filter(([i, scale]) => JSON.stringify(scale) !== JSON.stringify(this.scaleBaselines.get(i) ?? null)).map(([pageIndex, scale], i) => ({ pageIndex, scale: scale ? { ...scale } : null, editIndex: edits.length + i }))
-    return [...edits, ...this.pendingScales.map(({ pageIndex, scale }) => ({ kind: 'setPageScale' as const, pageIndex, scale }))]
+    const result: AnnotationEdit[] = [...edits, ...this.pendingScales.map(({ pageIndex, scale }) => ({ kind: 'setPageScale' as const, pageIndex, scale }))]
+    this.pendingFixtureSave = null
+    if (this.fixturesReady && (JSON.stringify(this.fixtures) !== this.fixtureBaseline || entries.some(e => e.annotation.count))) {
+      this.pendingFixtureSave = { editIndex: result.length, json: JSON.stringify(this.fixtures) }
+      result.push({ kind: 'setCountFixtures', pageIndex: 0, fixtures: this.getCountFixtures() })
+    }
+    return result
   }
 
   markApplied(result: SaveResult): void {
     const pending = this.pendingEdits
     this.pendingEdits = []
     const failed = new Set(result.errors?.map((error) => error.editIndex) ?? [])
+    if (this.pendingFixtureSave && !failed.has(this.pendingFixtureSave.editIndex)) this.fixtureBaseline = this.pendingFixtureSave.json
+    this.pendingFixtureSave = null
     for (const item of this.pendingScales) if (!failed.has(item.editIndex)) this.scaleBaselines.set(item.pageIndex, item.scale)
     this.pendingScales = []
     let createdIndex = 0
@@ -857,7 +981,7 @@ export class AnnotationStore {
   }
 
   isDirty(): boolean {
-    return this.editEntries().length > 0 || [...this.scales].some(([i, scale]) => JSON.stringify(scale) !== JSON.stringify(this.scaleBaselines.get(i) ?? null))
+    return JSON.stringify(this.fixtures) !== this.fixtureBaseline || this.editEntries().length > 0 || [...this.scales].some(([i, scale]) => JSON.stringify(scale) !== JSON.stringify(this.scaleBaselines.get(i) ?? null))
   }
 
   private mutate(id: string, change: (annotation: StoredAnnotation) => void): void {
@@ -894,6 +1018,7 @@ export class AnnotationStore {
   }
 
   private restoreMany(target: HistoryState, counterpart: HistoryState): void {
+    if (target.fixtures) this.fixtures = structuredClone(target.fixtures)
     if (target.issueMaximum !== undefined) this.issueNumbers.renumber(target.issueMaximum)
     for (const item of target.scales ?? []) this.scales.set(item.pageIndex, item.scale ? { ...item.scale } : null)
     const targetById = new Map(target.map((state) => [state.id, state]))
@@ -917,6 +1042,7 @@ export class AnnotationStore {
       this.annotations.set(id, restored)
       this.markTouched(restored)
     }
+    this.pruneHiddenSelection()
   }
 
   private isAnnotationDirty(annotation: StoredAnnotation): boolean {
@@ -1016,12 +1142,14 @@ export class AnnotationStore {
       return create ? { kind: 'createTextMarkup', ...common } : { kind: 'updateTextMarkup', objNum: savedObjNum, ...common }
     }
     if (annotation.kind === 'symbol') {
+      const fixture = this.fixtureForCount(annotation.count)
       const common = {
         pageIndex: annotation.pageIndex,
         rect: annotation.rect,
         color: annotation.color,
         symbol: annotation.symbol ?? 'check' as const,
-        count: annotation.count,
+        count: annotation.count && fixture ? { version: 2 as const, id: annotation.count.id, fixtureId: fixture.id } : annotation.count,
+        countFixture: fixture,
         opacity: annotation.opacity,
       }
       return create ? { kind: 'createSymbol', ...common } : { kind: 'updateSymbol', objNum: savedObjNum, ...common }
@@ -1052,7 +1180,7 @@ export class AnnotationStore {
     step: HistoryStep<HistoryState>,
     mapper: (state: AnnotationState) => AnnotationState,
   ): HistoryStep<HistoryState> {
-    return { before: Object.assign(step.before.map(mapper), { scales: step.before.scales, issueMaximum: step.before.issueMaximum }), after: Object.assign(step.after.map(mapper), { scales: step.after.scales, issueMaximum: step.after.issueMaximum }) }
+    return { before: Object.assign(step.before.map(mapper), { scales: step.before.scales, issueMaximum: step.before.issueMaximum, fixtures: step.before.fixtures }), after: Object.assign(step.after.map(mapper), { scales: step.after.scales, issueMaximum: step.after.issueMaximum, fixtures: step.after.fixtures }) }
   }
 
   private markTouched(annotation: AnnotationState): void {

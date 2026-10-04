@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useContext, useEffect, useRef, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { SYMBOL_OPTIONS, type RGB, type SymbolName } from '../core/annotations'
 import { ISSUE_STATUSES, issueStatusLabel } from '../core/issues'
@@ -9,6 +9,8 @@ import type { AnnotationStore, EditableAnnotation, Kind } from '../editor/Annota
 import { updateToolFormat, type FormatDefaults, type FormatTool, type ToolFormat } from '../editor/formatDefaults'
 import { getActiveTextEditorSnapshot, insertIntoActiveTextEditor, subscribeActiveTextEditor } from '../editor/TextEditor'
 import { SnippetPanel } from './SnippetPanel'
+import { FixtureUiContext } from './documentModel'
+import { CountMarker } from '../editor/countMarkers'
 
 const COLORS: Array<{ name: string; value: RGB; css: string }> = [
   { name: '赤', value: [1, 0, 0], css: '#e00000' },
@@ -78,13 +80,22 @@ function formatToolLabel(tool: FormatTool): string {
 }
 
 export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsChange }: Props) {
+  useSyncExternalStore(store.subscribe, store.getSnapshot)
+  const fixtureUi = useContext(FixtureUiContext)
   const textEditorOpen = useSyncExternalStore(
     subscribeActiveTextEditor,
     getActiveTextEditorSnapshot,
     getActiveTextEditorSnapshot,
   )
-  const activeSelection = selected
+  const activeSelection = selected ?? (store.selectedCountsOnly() ? store.get(store.primarySelection()!) ?? null : null)
   const target = activeSelection?.legacyChange ? null : activeSelection?.count ? 'count' : formatTool(activeSelection?.kind ?? (tool === 'select' ? 'text' : tool))
+  const requestedCountStore = useRef<AnnotationStore | null>(null)
+  useEffect(() => {
+    if (target === 'count' && !store.fixturesReady && requestedCountStore.current !== store) {
+      requestedCountStore.current = store
+      fixtureUi?.open()
+    }
+  }, [target, store, fixtureUi])
   const values: EditableAnnotation | ToolFormat | null = activeSelection ?? (target ? defaults[target] : null)
   const textTarget = target === 'text' || target === 'callout'
   const cloudTarget = target === 'cloudSquare' || target === 'cloudPolygon'
@@ -160,6 +171,17 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     })
   }
 
+  if (target === 'count') {
+    const fixture = activeSelection?.count ? store.fixtureForCount(activeSelection.count) : store.getCountFixture(store.selectedFixtureId)
+    return <aside className="format-panel" aria-label="書式" data-testid="format-panel">
+      <h2>個数カウント</h2>
+      {fixture ? <><p>{fixture.code} {fixture.name}</p><svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + fixture.style.size * (1 + .7 * fixture.code.length))} 50`} aria-label="印の見本"><CountMarker style={fixture.style} code={fixture.code} /></svg>
+        <button onClick={() => fixtureUi?.edit(fixture.id)}>器具を編集…</button></> : <button onClick={() => fixtureUi?.open()}>器具リストで器具を選んでください</button>}
+      {activeSelection?.count && <label>器具を変更<select aria-label="器具を変更" value={fixture?.id ?? ''} onChange={e => store.reassignCounts(store.selectedIds(), e.currentTarget.value)}>
+        {!fixture && <option value="">器具を選んでください</option>}{store.getCountFixtures().map(f => <option key={f.id} value={f.id}>{f.code} {f.name}</option>)}
+      </select></label>}
+    </aside>
+  }
   return <aside className="format-panel" aria-label="書式" data-testid="format-panel">
     <h2>{target ? `${formatToolLabel(target)}の書式` : '書式'}</h2>
     {!target && <p>道具または書き込みを選んでください。</p>}
@@ -178,18 +200,12 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
         >{item.glyph}</button>)}
       </div>
     </fieldset>}
-    {(target === 'symbol' || target === 'count') && values && <label>
+    {target === 'symbol' && values && <label>
       大きさ
       <select aria-label="記号の大きさ" value={activeSelection?.kind === 'symbol' ? Math.round(activeSelection.rect[2] - activeSelection.rect[0]) : (values as ToolFormat).symbolSize} onChange={(event) => changeSymbolSize(Number(event.currentTarget.value))}>
         {SYMBOL_SIZES.map((value) => <option key={value} value={value}>{value} pt</option>)}
       </select>
     </label>}
-    {target === 'count' && <label>種類<input aria-label="カウントの種類" maxLength={80} key={activeSelection?.id ?? 'count-default'} defaultValue={activeSelection?.count?.group ?? defaults.count.countGroup ?? '照明器具'} onBlur={event => {
-      const group = event.currentTarget.value.trim()
-      if (!group) return
-      if (activeSelection) store.update(activeSelection.id, { countGroup: group })
-      else changeDefault({ countGroup: group })
-    }} /></label>}
     {target === 'issue' && values && <>
       <label>大きさ<select aria-label="指摘の大きさ" value={activeSelection ? Math.round(activeSelection.rect[2] - activeSelection.rect[0]) : (values as ToolFormat).symbolSize} onChange={event => changeSymbolSize(Number(event.currentTarget.value))}>
         <option value="12">小（12 pt）</option><option value="16">中（16 pt）</option><option value="24">大（24 pt）</option>

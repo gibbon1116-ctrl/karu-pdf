@@ -498,3 +498,27 @@ button, input { font: inherit; }
 .csv-export-dialog fieldset { margin: 12px 0; }
 .csv-export-dialog fieldset > label { display: block; margin: 6px 0; }
 .csv-export-dialog input[type="number"] { width: 6em; margin-left: 8px; }
+/* 器具リスト: 書式は追加・編集時だけ開く。 */
+.fixture-panel { padding: 10px; }
+.fixture-count-summary { font-size: 16px; font-weight: 600; line-height: 1.6; }
+.fixture-actions, .fixture-fields { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.fixture-panel > label, .fixture-dialog form > label { display: block; margin: 8px 0; }
+.fixture-panel input[type="search"], .fixture-dialog input:not([type="checkbox"]):not([type="color"]), .fixture-dialog textarea { width: 100%; box-sizing: border-box; }
+.fixture-groups ul { margin: 0; padding: 0; list-style: none; }
+.fixture-groups li, .fixture-category { display: flex; align-items: center; gap: 3px; }
+.fixture-category { background: #eef3f9; padding: 4px 0; margin-top: 8px; }
+.fixture-category button:first-child { flex: 1; text-align: left; }
+.fixture-groups li.selected { background: #dcecff; outline: 1px solid #0068b7; }
+.fixture-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px 34px; gap: 3px; align-items: center; flex: 1; min-width: 0; text-align: left; border: 0; background: transparent; padding: 5px 2px; }
+.fixture-row-name { overflow-wrap: anywhere; }
+.fixture-swatch { width: 28px; height: 28px; flex-shrink: 0; vertical-align: middle; }
+.fixture-preview { width: 100%; height: 100px; background: white; border: 1px solid #ddd; }
+.fixture-dialog { width: min(560px, 90vw); max-height: 88vh; overflow: auto; }
+.fixture-shapes, .fixture-colors { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.fixture-shapes button { padding: 2px; background: white; }
+.fixture-shapes svg { width: 32px; height: 32px; }
+.fixture-colors { grid-template-columns: repeat(12, 1fr); }
+.fixture-colors button { height: 26px; min-width: 0; border: 1px solid #aaa; }
+.fixture-shapes button[aria-pressed="true"], .fixture-colors button[aria-pressed="true"] { outline: 2px solid #0068b7; outline-offset: 1px; }
+.fixture-presets { max-height: 50vh; overflow: auto; margin: 10px 0; }
+.fixture-presets label { display: flex; align-items: center; gap: 5px; padding: 5px; }

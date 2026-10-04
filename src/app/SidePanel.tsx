@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import type { SearchMatch } from '../core/search'
 import type { EditableAnnotation } from '../editor/AnnotationStore'
@@ -7,6 +7,7 @@ import type { DocumentSession, SidePanelTab } from './documentModel'
 import { AnnotationListPanel } from './AnnotationListPanel'
 import { SearchPanel, type SearchHighlightState } from './SearchPanel'
 import { ThumbnailPanel } from './ThumbnailPanel'
+const FixturePanel = lazy(() => import('./FixturePanel'))
 
 const WIDTH_KEY = 'karu-pdf:side-panel-width'
 const MIN_WIDTH = 220
@@ -35,6 +36,7 @@ interface Props {
 
 const tabs: Array<{ id: SidePanelTab; label: string }> = [
   { id: 'pages', label: 'ページ' }, { id: 'search', label: '検索' }, { id: 'annotations', label: '書き込み' },
+  { id: 'fixtures', label: '器具' },
 ]
 
 export function SidePanel(props: Props) {
@@ -69,6 +71,7 @@ export function SidePanel(props: Props) {
     docId={props.session.docId} pool={props.pool} focusVersion={props.focusSearchVersion}
     onHighlightsChange={props.onSearchHighlights} onNavigate={props.onSearchNavigate}
   />
+  else if (props.activeTab === 'fixtures') content = <Suspense fallback={<p>器具リストを開いています…</p>}><FixturePanel key={props.session.docId} session={props.session} pool={props.pool} /></Suspense>
   else content = <AnnotationListPanel session={props.session} pool={props.pool} onSelect={props.onSelectAnnotation} onEdit={props.onEditAnnotation} />
 
   return <aside className="side-panel" style={{ width }} aria-label="左の欄" data-testid="side-panel">

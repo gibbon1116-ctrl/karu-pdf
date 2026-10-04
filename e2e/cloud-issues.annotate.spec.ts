@@ -54,15 +54,18 @@ test('指摘の回答・分野・修正確認を入力し、4段階の状態と�
   expect(a?.id).toMatch(/^[0-9a-f-]{36}$/)
 })
 
-test('種類別カウントをクリックし、取消・種類変更・保存再読込で個数を維持する', async ({ page }) => {
+test('器具を選んでクリックし、取消・保存再読込で個数を維持する', async ({ page }) => {
   await open(page)
+  await page.getByRole('tab', { name: '器具', exact: true }).click()
+  await page.getByRole('button', { name: '見本から追加', exact: true }).click()
+  await page.getByRole('button', { name: '選んだ器具を追加', exact: true }).click()
+  await page.getByRole('button', { name: 'DL ダウンライト', exact: true }).click()
   await page.getByRole('button', { name: '計測▼' }).click()
   await page.getByRole('menuitemcheckbox', { name: '個数カウント', exact: false }).click()
   await click(page, 100, 200); await click(page, 150, 200); await click(page, 200, 200)
   await page.keyboard.press('Control+z')
-  await page.keyboard.press('Escape'); await page.getByRole('tab', { name: '書き込み', exact: true }).click()
-  await page.getByLabel('書き込みの種類').selectOption('count')
-  await expect(page.getByLabel('個数の集計')).toContainText('照明器具 p.1: 2個')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('fixture-panel')).toContainText('表示中の図面（p.1）: 2個 ／ 全図面: 2個')
   await reopen(page)
   expect(await page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter(a => a.count).length)).toBe(2)
 })

@@ -65,6 +65,7 @@ describe('DocumentSession の保存量管理', () => {
   it('古いしおりタブの保存値はページへ戻す', () => {
     expect(normalizeSidePanelTab('outline')).toBe('pages')
     expect(normalizeSidePanelTab('search')).toBe('search')
+    expect(normalizeSidePanelTab('fixtures')).toBe('fixtures')
     const target = session(1)
     ;(target as unknown as { sidePanelTab: string }).sidePanelTab = 'outline'
     expect(target.sidePanelTab).toBe('pages')

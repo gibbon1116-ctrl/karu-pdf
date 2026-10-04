@@ -450,6 +450,10 @@ export class PdfWorkerPool {
     const response = await this.request<MaxIssueNumberResponse>(this.slots[0], requestId => ({ type: 'maxIssueNumber', requestId, docId }))
     return response.maximum
   }
+  async getCountFixtures(docId: string): Promise<import('../core/countFixtures').CountFixture[]> {
+    const response = await this.request<import('../worker/protocol').CountFixturesResponse>(this.slots[0], requestId => ({ type: 'getCountFixtures', requestId, docId }))
+    return response.fixtures
+  }
 
   async pageHasText(docId: string, pageIndex: number): Promise<boolean> {
     const response = await this.request<PageHasTextResponse>(this.slots[0], (requestId) => ({

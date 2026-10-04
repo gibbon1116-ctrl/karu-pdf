@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { EditableAnnotation } from '../editor/AnnotationStore'
+import type { CountFixture } from '../core/countFixtures'
 import { CSV_KINDS, CSV_KIND_LABELS, csvAnnotations, createCsv, annotationCsvFileName, issueCsvFileName, type CsvKind, type CsvOptions } from './annotationCsv'
 
-export default function CsvExportDialog({ annotations, pdfName, pageCount, initialKinds, firstPage, lastPage, initialStatus, onExport, onClose }: {
+export default function CsvExportDialog({ annotations, fixtures, pdfName, pageCount, initialKinds, firstPage, lastPage, initialStatus, onExport, onClose }: {
+  fixtures?: readonly CountFixture[]
   annotations: readonly EditableAnnotation[]; pdfName: string; pageCount: number; initialKinds: readonly CsvKind[]
   firstPage: number; lastPage: number; initialStatus: CsvOptions['issueStatus']
   onExport(csv: string, fileName: string): Promise<void>; onClose(): void
@@ -14,7 +16,7 @@ export default function CsvExportDialog({ annotations, pdfName, pageCount, initi
   const [saving, setSaving] = useState(false), [error, setError] = useState('')
   useEffect(() => { dialog.current?.showModal() }, [])
   const validRange = Number.isInteger(start) && Number.isInteger(end) && start >= 1 && end <= pageCount && start <= end
-  const options: CsvOptions = { firstPage: start, lastPage: end, issueStatus: status }
+  const options: CsvOptions = { firstPage: start, lastPage: end, issueStatus: status, fixtures }
   const count = validRange ? csvAnnotations(annotations, kinds, options).length : 0
   const reason = !kinds.length ? '書き出す種類を選んでください。' : !validRange ? 'ページ範囲を正しく指定してください。' : !count ? '指定した種類・ページ範囲・状態に対象がありません。' : ''
   return <dialog ref={dialog} className="csv-export-dialog" aria-labelledby="csv-export-title" onCancel={onClose}>

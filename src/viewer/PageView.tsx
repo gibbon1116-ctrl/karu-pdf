@@ -134,7 +134,7 @@ export function PageView(props: Props) {
   const previewScale = usesDetail ? 2048 / Math.max(props.pageSize.width, props.pageSize.height) : renderScale
   const lowScale = 512 / Math.max(props.pageSize.width, props.pageSize.height)
   const warmScale = 256 / Math.max(props.pageSize.width, props.pageSize.height)
-  const excludedObjNums = props.readOnly ? [] : props.annotationStore.touchedObjNums(props.layout.index)
+  const excludedObjNums = props.readOnly ? [] : [...new Set([...props.annotationStore.touchedObjNums(props.layout.index), ...props.annotationStore.countOverlayObjNums(props.layout.index)])].sort((a, b) => a - b)
   const excludeKey = `:x=${excludedObjNums.join('.')}${props.renderRevision ? `:v=${props.renderRevision}` : ''}${props.renderVariant ? `:variant=${props.renderVariant}` : ''}`
   const previewKey = `${props.layout.index}:${previewScale.toFixed(6)}:full${excludeKey}`
   const lowKey = `${props.layout.index}:${lowScale.toFixed(6)}:full${excludeKey}`

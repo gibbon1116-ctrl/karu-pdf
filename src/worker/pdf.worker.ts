@@ -7,6 +7,7 @@ import { renderRegion } from '../core/render'
 import { ComparePageCache, renderComparePixels } from './compareRender'
 import { readDocumentScales } from '../core/measure'
 import { applyEdits, listAnnotations } from '../core/annotations'
+import { readCountFixtures } from '../core/countFixtures'
 import { applyEditsAtomically, applyAndSaveAtomically, pdfOperation } from '../core/editTransaction'
 import { assertEditablePdf } from '../core/pdfRestrictions'
 import { maxIssueNumber } from '../core/issues'
@@ -84,6 +85,7 @@ let sequence = 0
 let running = false
 let processedCount = 0
 type CoreRequest =
+  | import('./protocol').GetCountFixturesRequest
   | MaxIssueNumberRequest
   | OpenRequest
   | ListAnnotationsRequest
@@ -203,6 +205,7 @@ async function loadFontsForEdits(edits: readonly import('../core/annotations').A
     if (edit.kind === 'createFreeText' || edit.kind === 'updateFreeText'
       || edit.kind === 'createCallout' || edit.kind === 'updateCallout') requiredFonts.add(edit.font)
     if (edit.kind === 'createMeasure' || edit.kind === 'updateMeasure' || edit.kind === 'createIssue' || edit.kind === 'updateIssue') requiredFonts.add('BIZUDGothic')
+    if ((edit.kind === 'createSymbol' || edit.kind === 'updateSymbol') && edit.countFixture) requiredFonts.add('BIZUDGothic')
   }
   await Promise.all([...requiredFonts].map((fontName) => getFontResource(fontName)))
   if (requiredFonts.size > 0) getDingbatsResource()
@@ -352,6 +355,10 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
 
     if (entry.opened.editRestriction && ['applyEdits', 'applyAndSave', 'applyPageLayout', 'applyHeaderFooter', 'removeHeaderFooter', 'extractPages', 'splitPages', 'beginRasterize'].includes(request.type)) assertEditablePdf(document)
 
+    if (request.type === 'getCountFixtures') {
+      post({ type: 'countFixtures', requestId: request.requestId, fixtures: readCountFixtures(document) })
+      return
+    }
     if (request.type === 'listAnnotations') {
       post({
         type: 'annotationsListed',
@@ -772,6 +779,7 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     || message.type === 'applyHeaderFooter'
     || message.type === 'removeHeaderFooter'
     || message.type === 'getHeaderFooterSettings'
+    || message.type === 'getCountFixtures'
     || message.type === 'undoPageLayout'
     || message.type === 'extractPages'
     || message.type === 'splitPages'

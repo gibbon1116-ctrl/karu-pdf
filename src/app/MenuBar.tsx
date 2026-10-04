@@ -104,6 +104,7 @@ export function MenuBar(props: Props) {
       } },
       { label: '検索', shortcut: 'Ctrl+F', checked: props.showThumbnails && props.sidePanelTab === 'search', onSelect: () => props.onOpenSidePanel('search') },
       { label: '書き込みの一覧', checked: props.showThumbnails && props.sidePanelTab === 'annotations', onSelect: () => props.onOpenSidePanel('annotations') },
+      { label: '器具リスト（個数カウント）', checked: props.showThumbnails && props.sidePanelTab === 'fixtures', onSelect: () => props.onOpenSidePanel('fixtures') },
       { label: '書式パネル', checked: props.showFormat, onSelect: props.onToggleFormat },
       { label: '左右に並べて表示', shortcut: 'Ctrl+\\', checked: props.splitEnabled, disabled: !props.hasDocument || props.organizing, onSelect: props.onToggleSplit },
       { label: '2つの PDF を比較…', disabled: unavailable, onSelect: props.onCompare },

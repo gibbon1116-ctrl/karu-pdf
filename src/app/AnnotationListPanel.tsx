@@ -4,8 +4,8 @@ import type { EditableAnnotation } from '../editor/AnnotationStore'
 import type { DocumentSession } from './documentModel'
 import { ISSUE_STATUSES, issueStatusLabel, unresolvedIssue, type Issue } from '../core/issues'
 import { IssueDetails } from './IssueDetails'
-import { createCountCsv, annotationBody, annotationColorHex, annotationKindLabel, CSV_KINDS, type CsvKind } from './annotationCsv'
-import { countSummary } from '../core/counts'
+import { annotationBody, annotationColorHex, annotationKindLabel, CSV_KINDS, type CsvKind } from './annotationCsv'
+import { ensureSessionFixtures } from './documentModel'
 
 const CsvExportDialog = lazy(() => import('./CsvExportDialog'))
 type Filter = 'count' | 'issue' | 'issueOpen' | 'issueDone' | 'measure' | 'all' | 'text' | 'callout' | 'shape' | 'symbol' | 'pen' | 'markup'
@@ -126,8 +126,11 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
       const next = unresolved[(current + 1) % unresolved.length]
       setLastIssue(next.id); onSelect(next)
     }}>次の未対応指摘（ページ範囲内）</button>
-    <button type="button" className="csv-export" disabled={loading || !!error} onClick={() => setCsvOpen(true)}>CSV に書き出す…</button>
-    {csvOpen && <Suspense fallback={<p role="status">書き出し画面を読み込み中…</p>}><CsvExportDialog annotations={annotations} pdfName={session.name} pageCount={session.pageSizes.length}
+    <button type="button" className="csv-export" disabled={loading || !!error} onClick={() => {
+      if (annotations.some(a => a.count)) void ensureSessionFixtures(session, pool).then(() => setCsvOpen(true)).catch(reason => setError(String(reason)))
+      else setCsvOpen(true)
+    }}>CSV に書き出す…</button>
+    {csvOpen && <Suspense fallback={<p role="status">書き出し画面を読み込み中…</p>}><CsvExportDialog annotations={annotations} fixtures={session.annotationStore.getCountFixtures()} pdfName={session.name} pageCount={session.pageSizes.length}
       initialKinds={filter === 'all' ? CSV_KINDS : [filter.startsWith('issue') ? 'issue' : filter as CsvKind]}
       firstPage={firstPage} lastPage={lastPage} initialStatus={filter === 'issueOpen' ? 'open' : filter === 'issueDone' ? 'confirmed' : 'all'} onExport={saveCsv} onClose={() => setCsvOpen(false)} /></Suspense>}
     <button type="button" disabled={!!session.editRestriction || loading || !annotations.some(a => a.issue)} onClick={() => {
@@ -136,10 +139,6 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
     {loading && <p className="side-panel-message" role="status">書き込みを読み込み中… {progress.processed} / {progress.total} ページ</p>}
     {error && <p className="side-panel-message error-text">{error}</p>}
     {detail && <IssueDetails key={detail.id} annotation={detail} store={session.annotationStore} readOnly={!!session.editRestriction} onClose={() => setDetailId(null)} />}
-    {filter === 'count' && <div aria-label="個数の集計">
-      {countSummary(filtered).map(a => <p key={JSON.stringify([a.group, a.pageIndex])}>{a.group} p.{a.pageIndex + 1}: {a.total}個</p>)}
-      <button disabled={loading} onClick={() => void saveCsv(createCountCsv(filtered), session.name.replace(/\.pdf$/i, '') + '_個数.csv').catch(reason => setError(String(reason)))}>個数をCSVに書き出す</button>
-    </div>}
     {pageCount > 1 && <nav aria-label="書き込み一覧のページ">
       <button disabled={visiblePage === 0} onClick={() => setRowPage(visiblePage - 1)}>前の100件</button>
       <span>{visiblePage + 1} / {pageCount}（{filtered.length}件）</span>
@@ -152,7 +151,7 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
           <span className="annotation-page">p.{annotation.pageIndex + 1}</span>
           <span className="annotation-summary">
             <span className="annotation-kind">{annotation.legacyChange ? '変更記録（旧版）' : annotationKindLabel(annotation.kind)}</span>
-            <span className="annotation-body" title={annotation.legacyChange ? annotation.text : annotationBody(annotation)}>{annotation.legacyChange ? annotation.text.slice(0, 40) : annotation.count ? `個数: ${annotation.count.group}` : annotationBody(annotation).slice(0, 40)}</span>
+            <span className="annotation-body" title={annotation.legacyChange ? annotation.text : annotationBody(annotation)}>{annotation.legacyChange ? annotation.text.slice(0, 40) : annotation.count ? `個数: ${session.annotationStore.fixtureForCount(annotation.count)?.name ?? (annotation.count.version === 1 ? annotation.count.group : annotation.text)}` : annotationBody(annotation).slice(0, 40)}</span>
           </span>
           <span className="annotation-color" style={{ backgroundColor: annotationColorHex(annotation) }} aria-label={`色 ${annotationColorHex(annotation)}`} />
         </button>

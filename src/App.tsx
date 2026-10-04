@@ -24,9 +24,9 @@ import { ScaleInteractionContext } from './editor/MeasurementOverlay'
 import { scaleLabel } from './core/measure'
 import type { Point } from './core/annotations'
 import { ToolRow } from './app/ToolRow'
-import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS, type SidePanelTab } from './app/documentModel'
+import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS, FixtureUiContext, ensureSessionFixtures, type SidePanelTab } from './app/documentModel'
 import { allSessionAnnotations } from './app/AnnotationListPanel'
-import { createIssueCsv, createAnnotationCsv, createCsv } from './app/annotationCsv'
+import { createIssueCsv, createCsv } from './app/annotationCsv'
 import { StartScreen } from './app/StartScreen'
 import { ErrorBoundary } from './app/ErrorBoundary'
 import { PdfOpeningFeedback, PdfOpeningStore, type PdfOpening } from './app/PdfOpeningFeedback'
@@ -57,6 +57,8 @@ import { splitCardGroups, type OrganizeSplitMode } from './organize/organizeUtil
 import type { PageLayoutCard } from './core/pageOps'
 import { registerPwa } from './pwa'
 import './styles.css'
+
+const FixtureDialog = lazy(() => import('./app/FixtureDialog'))
 
 declare global {
   interface Window {
@@ -666,6 +668,7 @@ export default function App() {
     if (!session || !beginSave()) return null
     try {
       await viewerRef.current?.commitEditor()
+      if (session.dirty && (session.annotationStore.fixturesReady || session.annotationStore.hasCountMarks())) await ensureSessionFixtures(session, pool)
       const edits = session.annotationStore.toEdits()
       const result = await pool.applyAndSave(session.docId, edits, session.nextSaveMode())
       if (result.errors.length > 0) throw new Error(result.errors.map(item => item.message).join(' / '))
@@ -697,6 +700,7 @@ export default function App() {
         throw new Error('ファイルへの書き込みが許可されませんでした。')
       }
       await viewerRef.current?.commitEditor()
+      if (session.dirty && (session.annotationStore.fixturesReady || session.annotationStore.hasCountMarks())) await ensureSessionFixtures(session, pool)
       const edits = session.annotationStore.toEdits()
       const result = await pool.applyAndSave(session.docId, edits, session.nextSaveMode())
       if (result.errors.length > 0) throw new Error(result.errors.map(item => item.message).join(' / '))
@@ -879,6 +883,11 @@ export default function App() {
       try { await session.annotationStore.issueNumbers.initialize(() => pool.maxIssueNumber(session.docId)) } catch (reason) { showStatus(`番号を取得できませんでした: ${String(reason)}`); return }
       if (activeRef.current !== session) return
     }
+    if (next === 'count' && session) {
+      try { await ensureSessionFixtures(session, pool) } catch (reason) { showStatus(String(reason)); return }
+      if (activeRef.current !== session) return
+      window.dispatchEvent(new CustomEvent('karu-pdf:open-fixtures'))
+    }
     if (next !== 'select') session?.annotationStore.clearSelection()
     setTool(next)
   }, [pool, showStatus])
@@ -896,6 +905,12 @@ export default function App() {
     if (tab === 'search' && focusSearch) setFocusSearchVersion((value) => value + 1)
     refreshTabs()
   }, [panels, refreshTabs, updatePanels])
+  const [fixtureEdit, setFixtureEdit] = useState<{ session: DocumentSession; id: string } | null>(null)
+  useEffect(() => {
+    const open = () => openSidePanel('fixtures', false)
+    window.addEventListener('karu-pdf:open-fixtures', open)
+    return () => window.removeEventListener('karu-pdf:open-fixtures', open)
+  }, [openSidePanel])
 
   const updateFormatDefaults = useCallback((next: FormatDefaults) => {
     setFormatDefaults(next)
@@ -1418,10 +1433,10 @@ export default function App() {
       getLastRasterizeMetrics: () => lastRasterizeMetricsRef.current,
       getMenuActions: () => [...menuActionsRef.current],
       exportIssueCsv: () => { const session = activeRef.current; return session ? createIssueCsv(allSessionAnnotations(session)) : '' },
-      exportCsv: (kinds) => { const session = activeRef.current; return session ? createCsv(allSessionAnnotations(session), kinds) : '' },
+      exportCsv: (kinds) => { const session = activeRef.current; return session ? createCsv(allSessionAnnotations(session), kinds, { fixtures: session.annotationStore.getCountFixtures() }) : '' },
       exportAnnotationCsv: () => {
         const session = activeRef.current
-        return session ? createAnnotationCsv(allSessionAnnotations(session)) : ''
+        return session ? createCsv(allSessionAnnotations(session), ['issue', 'count', 'text', 'callout', 'measure', 'shape', 'symbol', 'pen', 'markup'], { fixtures: session.annotationStore.getCountFixtures() }) : ''
       },
       getHeaderFooterSettings: () => activeRef.current ? pool.getHeaderFooterSettings(activeRef.current.docId) : Promise.resolve(null),
       applyHeaderFooter: (settings, dateText = '2026年10月1日') => applyHeaderFooterSettings(settings, dateText),
@@ -1626,6 +1641,9 @@ export default function App() {
         >
           <WorkspaceFailureProbe fail={workspaceFailure}>
           <ScaleInteractionContext.Provider value={{ request: i => openScale(i, true), tracePage: scaleTracing ? scaleDialog?.pageIndex ?? null : null, complete: p => { setScalePoints(p); setScaleTracing(false) } }}>
+          <FixtureUiContext.Provider value={{ documents, select: () => void changeTool('count'), open: () => openSidePanel('fixtures', false), edit: id => {
+            void ensureSessionFixtures(active, pool).then(() => setFixtureEdit({ session: active, id })).catch(reason => showStatus(String(reason)))
+          } }}>
           <DocumentWorkspace
           onNavigate={rememberNavigation}
           key={`${active.docId}:${active.pageRevision}`}
@@ -1639,7 +1657,7 @@ export default function App() {
           activeSideTab={active.sidePanelTab}
           focusSearchVersion={focusSearchVersion}
           debug={debug}
-          onToolChange={setTool}
+          onToolChange={next => void changeTool(next)}
           onFormatDefaultsChange={updateFormatDefaults}
           onSideTabChange={(tab) => openSidePanel(tab, tab === 'search')}
           onPageChange={(next) => { setPage(next); scheduleViewPersistence() }}
@@ -1658,6 +1676,7 @@ export default function App() {
             settings: split, documents, views: rightViewsRef.current, positions: rightPositionsRef.current, onChange: updateSplit, onSwap: swapSplit,
           } : null}
           />
+          </FixtureUiContext.Provider>
           </ScaleInteractionContext.Provider>
           </WorkspaceFailureProbe>
         </ErrorBoundary>
@@ -1685,6 +1704,15 @@ export default function App() {
         }}
         onSave={(scale, all, recalculate) => { scaleDialog.session.annotationStore.setScale(scaleTargets(all), scale, recalculate); setScaleDialog(null); setScaleTracing(false); refreshTabs() }} />}
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      {fixtureEdit && fixtureEdit.session.annotationStore.getCountFixture(fixtureEdit.id) && <Suspense fallback={null}><FixtureDialog
+        key={`${fixtureEdit.session.docId}:${fixtureEdit.id}`}
+        initial={structuredClone(fixtureEdit.session.annotationStore.getCountFixture(fixtureEdit.id)!)}
+        fixtures={fixtureEdit.session.annotationStore.getCountFixtures()} editing
+        onClose={() => setFixtureEdit(null)} onSave={fixture => {
+          const store = fixtureEdit.session.annotationStore
+          store.setCountFixtures(store.getCountFixtures().map(f => f.id === fixture.id ? fixture : f)); setFixtureEdit(null)
+        }}
+      /></Suspense>}
       {compareDialog && active && <CompareDialog documents={documents} activeId={active.docId} onOpen={() => void pickFile()} onClose={() => setCompareDialog(false)} onCompare={(old, next) => {
         void (async () => {
           await viewerRef.current?.commitEditor()

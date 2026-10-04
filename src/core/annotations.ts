@@ -23,6 +23,8 @@ import { layoutText } from './textLayout'
 import { cloudArcs, cloudBounds, rectVertices, type CloudIntensity } from './cloud'
 import { parseIssue, issueColor, issueFontSize, type Issue } from './issues'
 import { parseCount, type CountMark } from './counts'
+import { writeCountFixtures, type CountFixture } from './countFixtures'
+import { countMarkerData } from '../editor/countMarkers'
 import { createMeasureDictionary, invertMatrix, measureBounds, measureLabel, measureText, pageUnitFactor, readMeasureSettings, transformMeasurePoint, writePageScale, type MeasureKind, type MeasureSettings, type PageScale } from './measure'
 
 export type Rect = [number, number, number, number]
@@ -126,8 +128,9 @@ export type AnnotationEdit =
   | { kind: 'updateInk'; objNum: number; pageIndex: number; inkList: Point[][]; color: RGB; borderWidth: number; opacity: number; inkKind?: 'highlight' | 'ink' }
   | { kind: 'createTextMarkup'; pageIndex: number; markup: 'Highlight' | 'Underline' | 'StrikeOut'; quads: Quad[]; color: RGB; opacity: number; markedText: string }
   | { kind: 'updateTextMarkup'; objNum: number; pageIndex: number; markup: 'Highlight' | 'Underline' | 'StrikeOut'; quads: Quad[]; color: RGB; opacity: number; markedText: string }
-  | { kind: 'createSymbol'; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName; opacity?: number; count?: CountMark | null }
-  | { kind: 'updateSymbol'; objNum: number; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName; opacity?: number; count?: CountMark | null }
+  | { kind: 'setCountFixtures'; pageIndex: number; fixtures: CountFixture[] }
+  | { kind: 'createSymbol'; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName; opacity?: number; count?: CountMark | null; countFixture?: CountFixture }
+  | { kind: 'updateSymbol'; objNum: number; pageIndex: number; rect: Rect; color: RGB; symbol: SymbolName; opacity?: number; count?: CountMark | null; countFixture?: CountFixture }
   | { kind: 'delete'; objNum: number; pageIndex: number }
 
 export interface ApplyError {
@@ -146,6 +149,7 @@ export interface ApplyResult {
 }
 
 interface AppearanceTask {
+  countFixture?: CountFixture
   issue?: Issue
   visibleRect?: Rect
   measurement?: { points: Point[]; kind: MeasureKind; rect: Rect; opacity: number }
@@ -353,6 +357,7 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
           const cloudIntensity: CloudIntensity | null = cloud ? Math.max(0, Math.min(2, Math.round(readNumber(be, 'I') ?? 1))) as CloudIntensity : null
           be.destroy()
           const savedIssue = type === 'Stamp' ? parseIssue(readString(object, 'KaruIssue')) : null
+          const savedCount = type === 'Stamp' ? parseCount(readString(object, 'KaruCount')) : null
           const legacyChange = savedIssue?.recordKind === 'change'
           const issue = legacyChange ? null : savedIssue
           const dimensionIntent = readName(object, 'IT')
@@ -399,10 +404,15 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             ? readCalloutLine(page, object)
             : null
           const symbol = type === 'Stamp' ? asSymbolName(readName(object, 'KaruSymbol')) : null
+          const countRect = savedCount ? readNumberArray(object, 'KaruCountRect') : null
+          const countBounds = countRect?.length === 4 && countRect.every(Number.isFinite) ? vertexBounds([
+            transformMeasurePoint([countRect[0], countRect[1]], page.getTransform()),
+            transformMeasurePoint([countRect[2], countRect[3]], page.getTransform()),
+          ]) : null
           const inkKind = type === 'Ink' ? readName(object, 'KaruInkKind') : null
           return {
             cloudIntensity, issue, legacyChange, legacyChangeData: legacyChange ? snapshotLegacyChange(doc, annotation, object) : undefined,
-            count: type === 'Stamp' ? parseCount(readString(object, 'KaruCount')) : null,
+            count: savedCount,
             measure: measurement,
             vertices: measureVertices,
             objNum: object.asIndirect(),
@@ -412,9 +422,9 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             editable: !legacyChange && editable,
             // 型定義上は全注釈に getRect() があるが、MuPDF 1.28.1 は
             // Highlight など /Rect を直接扱わない種類では例外にする。
-            rect: cloud && type === 'Square' ? cloudSquareRect(page, object) : cloud && measureVertices ? vertexBounds(measureVertices) : [...(annotation.hasRect() ? annotation.getRect() : annotation.getBounds())] as Rect,
+            rect: countBounds ?? (cloud && type === 'Square' ? cloudSquareRect(page, object) : cloud && measureVertices ? vertexBounds(measureVertices) : [...(annotation.hasRect() ? annotation.getRect() : annotation.getBounds())] as Rect),
             contents: measurement && measureVertices && readString(object, 'KaruMeasure')
-              ? measureText(measureVertices, measurement) : savedIssue || type === 'FreeText' || measureKind ? annotation.getContents() : '',
+              ? measureText(measureVertices, measurement) : savedIssue || type === 'FreeText' || measureKind || savedCount ? annotation.getContents() : '',
             fontName: type === 'FreeText' ? parsed.fontName : null,
             fontSize: type === 'FreeText' ? parsed.fontSize : measureKind ? readNumber(object, 'KaruMeasureFontSize') ?? 10.5 : null,
             textColor: type === 'FreeText' ? parsed.color : null,
@@ -953,6 +963,7 @@ function configureSymbol(
   symbol: SymbolName,
   opacity: number,
   isNew: boolean,
+  countAppearance = false,
 ): void {
   const width = rect[2] - rect[0]
   const height = rect[3] - rect[1]
@@ -971,6 +982,7 @@ function configureSymbol(
     object.destroy()
   }
 
+  if (countAppearance) return
   const displayList = new mupdf.DisplayList([0, 0, width, height])
   const device = new mupdf.DisplayListDevice(displayList)
   try {
@@ -1092,6 +1104,29 @@ function drawIssue(device: DisplayListDevice, text: InstanceType<typeof mupdf.Te
   device.fillText(text, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, color, 1)
 }
 
+function drawCountMarker(device: DisplayListDevice, text: InstanceType<typeof mupdf.Text>, task: AppearanceTask, font: FontResource, fallback?: FontResource): void {
+  const fixture = task.countFixture!, s = fixture.style, top = s.showCode && fixture.code ? s.size * .7 * 1.2 : 0
+  const data = countMarkerData(s, s.size / 2 + 1, top + s.size / 2 + 1)
+  const draw = (polygons: Point[][], fill: boolean, rgb: RGB, width: number, close = true) => {
+    const path = new mupdf.Path(), stroke = new mupdf.StrokeState({ lineWidth: width, lineJoin: 'Round', lineCap: 'Butt', miterLimit: 10 })
+    try {
+      for (const points of polygons) { if (!points.length) continue; path.moveTo(...points[0]); for (const p of points.slice(1)) path.lineTo(...p); if (close) path.closePath() }
+      if (fill) device.fillPath(path, false, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, rgb, 1)
+      else device.strokePath(path, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, rgb, 1)
+    } finally { path.destroy(); stroke.destroy() }
+  }
+  if (data.bright) draw(data.outline, false, [64 / 255, 64 / 255, 64 / 255], 1.8)
+  draw(data.fills, true, s.color, .8); draw(data.outline, false, s.color, .8); draw(data.strokes, false, s.color, .8, false)
+  if (s.showCode && fixture.code) {
+    let x = data.code.x
+    for (const char of [...fixture.code].map(c => encodeCharacter(font.font, c, fallback?.font))) {
+      text.showGlyph(char.font, [data.code.size, 0, 0, -data.code.size, x, data.code.y], char.glyph, char.unicode)
+      x += char.advance * data.code.size
+    }
+    device.fillText(text, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, data.bright ? [64 / 255, 64 / 255, 64 / 255] : s.color, 1)
+  }
+}
+
 function makeTemporaryAppearance(
   temporaryDocument: PDFDocument,
   task: AppearanceTask,
@@ -1121,8 +1156,9 @@ function makeTemporaryAppearance(
       task.boxOpacity,
       true,
     )
-    if (task.measurement || task.issue) {
-      if (task.issue) drawIssue(device, text, task, fontResource)
+    if (task.measurement || task.issue || task.countFixture) {
+      if (task.countFixture) drawCountMarker(device, text, task, fontResource, fallbackResource)
+      else if (task.issue) drawIssue(device, text, task, fontResource)
       else drawMeasurement(device, text, task, fontResource, fallbackResource)
       device.close()
       annotation.setAppearanceFromDisplayList(null, null, mupdf.Matrix.identity, displayList)
@@ -1276,10 +1312,15 @@ function installTemporaryAppearances(
   const temporaryDocument = new mupdf.PDFDocument()
   let graftMap: ReturnType<PDFDocument['newGraftMap']> | undefined
   try {
+    const countTemplates = new Map<string, number>()
     for (const task of tasks) {
+      const key = task.countFixture ? JSON.stringify([task.countFixture.style, task.countFixture.code, task.width, task.height]) : null
+      const cached = key ? countTemplates.get(key) : undefined
+      if (cached !== undefined) { task.temporaryPageIndex = cached; continue }
       const fontResource = fontResources[task.fontName]
       if (!fontResource) throw new Error(`${task.fontName} が読み込まれていません。`)
       makeTemporaryAppearance(temporaryDocument, task, fontResource, fontResources.ZapfDingbats)
+      if (key) countTemplates.set(key, task.temporaryPageIndex!)
     }
     // 元文書には subsetFonts() を呼ばない。一時文書のページ内容が参照する
     // 外観だけをサブセット化してから、外観オブジェクトを移す。
@@ -1293,6 +1334,15 @@ function installTemporaryAppearances(
       let graftedAppearance: PDFObject | undefined
       try {
         graftedAppearance = graftMap.graftObject(sourceAppearance)
+        if (task.countFixture) {
+          // Share subset fonts, but use a separate stream before applying each page position.
+          const template = graftedAppearance, content = template.readStream(), dictionary = doc.newDictionary()
+          graftedAppearance = undefined
+          try {
+            template.forEach((value, key) => { if (key !== 'Length' && key !== 'Filter' && key !== 'DecodeParms') dictionary.put(key, value) })
+            graftedAppearance = doc.addStream(content, dictionary)
+          } finally { dictionary.destroy(); content.destroy(); template.destroy() }
+        }
         const targetObject = task.annotation.getObject()
         const appearanceDictionary = doc.newDictionary()
         try {
@@ -1338,6 +1388,7 @@ export function applyEdits(
     let annotation: PDFAnnotation | null = null
     let keepForAppearance = false
     try {
+      if (edit.kind === 'setCountFixtures') { writeCountFixtures(doc, edit.fixtures); continue }
       page = doc.loadPage(edit.pageIndex)
       if (edit.kind === 'setPageScale') {
         writePageScale(doc, page, edit.scale)
@@ -1512,15 +1563,29 @@ export function applyEdits(
         } finally {
           object.destroy()
         }
-        configureSymbol(doc, annotation, edit.rect, edit.color, edit.symbol, edit.opacity ?? 1, isNew)
+        configureSymbol(doc, annotation, edit.rect, edit.color, edit.symbol, edit.opacity ?? 1, isNew, !!edit.countFixture)
         const countObject = annotation.getObject()
         try {
           if (edit.count) {
             if (!parseCount(JSON.stringify(edit.count))) throw new Error('個数カウントの種類が不正です。')
             setPdfString(doc, countObject, 'KaruCount', JSON.stringify(edit.count))
-            annotation.setContents(`個数: ${edit.count.group}`)
+            annotation.setContents(`個数: ${edit.countFixture ? `${edit.countFixture.code} ${edit.countFixture.name}`.trim() : edit.count.version === 1 ? edit.count.group : edit.count.fixtureId}`)
           } else countObject.delete('KaruCount')
         } finally { countObject.destroy() }
+        if (edit.count && edit.countFixture) {
+          const f = edit.countFixture, s = f.style, fs = s.size * .7
+          const top = s.showCode && f.code ? fs * 1.2 : 0, extra = s.showCode ? [...f.code].length * fs : 0
+          const visibleRect: Rect = [edit.rect[0] - 1, edit.rect[1] - top - 1, edit.rect[0] + s.size + extra + 1, edit.rect[1] + s.size + 1]
+          annotation.setRect(visibleRect); annotation.setColor(s.color); annotation.setOpacity(s.opacity)
+          // Clear MuPDF's pending Stamp appearance before installing the shared custom AP.
+          annotation.update()
+          const obj = annotation.getObject()
+          const inverse = invertMatrix(page.getTransform())
+          const markerBounds = vertexBounds([transformMeasurePoint([edit.rect[0], edit.rect[1]], inverse), transformMeasurePoint([edit.rect[2], edit.rect[3]], inverse)])
+          try { setVisibleRect(doc, page, obj, visibleRect); setPdfNumberArray(doc, obj, 'KaruCountRect', markerBounds) } finally { obj.destroy() }
+          appearances.push({ editIndex, page, annotation, countFixture: f, visibleRect, width: visibleRect[2] - visibleRect[0], height: visibleRect[3] - visibleRect[1], text: f.code, fontSize: fs, color: s.color, fontName: 'BIZUDGothic', textRect: [0, 0, 0, 0], backgroundColor: null, borderColor: null, borderWidth: 0, textOpacity: 1, boxOpacity: 1, calloutLine: null })
+          keepForAppearance = true
+        }
         if (isNew) result.created.push(objectNumber(annotation))
         continue
       }

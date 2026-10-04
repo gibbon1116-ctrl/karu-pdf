@@ -10,6 +10,9 @@ import type { SearchMatch, SearchOptions } from '../core/search'
 import type { Point, Rect } from '../core/annotations'
 import type { TextSelectionMode, TextSelectionResult } from '../core/textSelection'
 import type { HeaderFooterSettings } from '../app/headerFooterText'
+import type { CountFixture } from '../core/countFixtures'
+export interface GetCountFixturesRequest { type: 'getCountFixtures'; requestId: number; docId: string }
+export interface CountFixturesResponse { type: 'countFixtures'; requestId: number; fixtures: CountFixture[] }
 
 export type DeviceRect = [number, number, number, number]
 export type Priority = 0 | 1 | 2 | 3
@@ -266,6 +269,7 @@ export interface RenderRasterBandRequest {
 }
 
 export type WorkerRequest =
+  | GetCountFixturesRequest
   | RenderCompareRequest
   | ClearCompareRequest
   | MaxIssueNumberRequest
@@ -498,6 +502,7 @@ export interface ErrorResponse {
 }
 
 export type WorkerResponse =
+  | CountFixturesResponse
   | MaxIssueNumberResponse
   | ReadyResponse
   | OpenResponse

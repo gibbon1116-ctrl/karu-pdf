@@ -1,6 +1,14 @@
 import type { PageSize } from '../core/mupdfDoc'
 import type { AnnotationEdit } from '../core/annotations'
 import type { SaveMode } from '../core/save'
+import { createContext } from 'react'
+import type { PdfWorkerPool } from '../client/PdfWorkerPool'
+export const FixtureUiContext = createContext<{ documents: readonly DocumentSession[]; select(): void; edit(id: string): void; open(): void } | null>(null)
+export async function ensureSessionFixtures(session: DocumentSession, pool: PdfWorkerPool): Promise<void> {
+  await session.annotationStore.ensureCountFixtures(() => pool.getCountFixtures(session.docId), async () => {
+    for (let i = 0; i < session.pageSizes.length; i++) await session.annotationStore.ensurePageLoaded(i, () => pool.listAnnotations(session.docId, i))
+  })
+}
 import { AnnotationStore } from '../editor/AnnotationStore'
 import type { PdfFileHandle } from '../editor/fileAccess'
 import { ViewHistory } from '../viewer/ViewHistory'
@@ -17,10 +25,10 @@ export interface DocumentViewState {
   scrollTop: number
 }
 
-export type SidePanelTab = 'pages' | 'search' | 'annotations'
+export type SidePanelTab = 'pages' | 'search' | 'annotations' | 'fixtures'
 
 export function normalizeSidePanelTab(value: unknown): SidePanelTab {
-  return value === 'search' || value === 'annotations' ? value : 'pages'
+  return value === 'search' || value === 'annotations' || value === 'fixtures' ? value : 'pages'
 }
 
 export interface DocumentSessionInit {
@@ -110,7 +118,7 @@ export class DocumentSession {
 
   recordSavedRendering(edits: readonly AnnotationEdit[], errors: readonly { editIndex: number }[]): void {
     const failed = new Set(errors.map(error => error.editIndex))
-    const pages = new Set(edits.flatMap((edit, index) => !failed.has(index) && edit.kind !== 'setPageScale' ? [edit.pageIndex] : []))
+    const pages = new Set(edits.flatMap((edit, index) => !failed.has(index) && edit.kind !== 'setPageScale' && edit.kind !== 'setCountFixtures' ? [edit.pageIndex] : []))
     this.savedRevision += 1
     for (const page of pages) this.savedPageRevisions.set(page, this.savedRevision)
   }
@@ -123,7 +131,7 @@ export class DocumentSession {
     this.pageSizes = pageSizes
     this.canUndoOrganize = canUndoOrganize
     this.pageRevision += 1
-    this.annotationStore.reset()
+    this.annotationStore.reset(true)
     if (scales) this.annotationStore.loadScales(scales)
     this.view.page = Math.min(Math.max(1, this.view.page), pageSizes.length)
     this.view.scrollLeft = 0
