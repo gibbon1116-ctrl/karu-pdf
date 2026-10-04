@@ -478,6 +478,14 @@ button, input { font: inherit; }
 .tool-row .split-main, .tool-row .split-label { min-width: auto; overflow: visible; text-overflow: clip; }
 /* 道具の段が2段になったときに、下の作業領域へ重ならないよう、行の高さを中身に合わせる。 */
 .top-controls { grid-template-rows: 32px auto; }
+.desktop-prompt-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 12px; background: #eaf3fc; color: #173b60; border-bottom: 1px solid #b6cee5; font-size: 13px; }
+.desktop-prompt-banner button { padding: 4px 10px; }
+.install-app-section { max-width: 620px; margin-top: 16px; padding: 16px; border: 1px solid #ccd7e3; border-radius: 6px; background: #fff; }
+.install-app-section p { margin-bottom: 0; font-size: 14px; line-height: 1.6; }
+.install-app-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-steps-dialog li { margin: 14px 0; line-height: 1.6; }
+.desktop-address-copy { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.desktop-address-copy input { width: 180px; padding: 4px 8px; }
 .utility-dialog { width: min(680px, 90vw); max-height: 85vh; overflow: auto; border: 1px solid #cbd0d8; border-radius: 8px; padding: 20px; background: white; color: #222; }
 .utility-dialog::backdrop { background: #0005; }
 .utility-dialog h1 { margin-top: 0; font-size: 20px; }

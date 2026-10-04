@@ -3,6 +3,8 @@
 /* @fixed:end */import { useEffect, useRef, useState } from 'react'
 import { Dropdown, type DropdownItem } from '../ui/Dropdown'
 import type { SidePanelTab } from './documentModel'
+import { useInstallApp } from './InstallAppUi'
+import { promptInstall } from './installApp'
 
 interface Props {
   editRestriction?: string | null
@@ -52,11 +54,13 @@ interface Props {
   onHeaderFooter(): void
   onUndoOrganize(): void
   onHelp(): void
+  onDesktopSteps(): void
 }
 
 const separator = (): DropdownItem => ({ type: 'separator' })
 
 export function MenuBar(props: Props) {
+  const install = useInstallApp()
   const [aboutOpen, setAboutOpen] = useState(false)
   const aboutRef = useRef<HTMLDialogElement>(null)
 
@@ -122,6 +126,10 @@ export function MenuBar(props: Props) {
     { label: 'ヘルプ', items: [
       { label: '履歴の設定…', onSelect: props.onPrivacy },
       { label: '使い方', onSelect: props.onHelp },
+      ...(install.supported ? [
+        ...(!install.installed && !install.appWindow ? [{ label: 'アプリとしてインストール…', disabled: !install.canInstall, onSelect: () => { void promptInstall() } }] : []),
+        { label: 'デスクトップにアプリを置く手順…', onSelect: props.onDesktopSteps },
+      ] : []),
       { label: 'このアプリについて', onSelect: () => setAboutOpen(true) },
     ] },
   ]

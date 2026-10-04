@@ -7,6 +7,7 @@ import type { DocumentViewState } from './app/documentModel'
 import type { ViewPosition } from './viewer/viewSync'
 import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
 import { HelpDialog } from './app/HelpDialog'
+import { DesktopPromptBanner, DesktopStepsDialog, installedMessage, useInstallApp } from './app/InstallAppUi'
 import { ExternalSendAlert } from './app/ExternalSendAlert'
 import { getExternalSendRecords } from './security/externalSend'
 import { MenuBar } from './app/MenuBar'
@@ -255,6 +256,8 @@ export default function App() {
   const [saving, setSaving] = useState(false)
   const [organize, setOrganize] = useState<ActiveOrganize | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [desktopStepsOpen, setDesktopStepsOpen] = useState(false)
+  const install = useInstallApp()
   const [privacyOpen, setPrivacyOpen] = useState(false)
   const [sheetSizesOpen, setSheetSizesOpen] = useState(false)
   const [compareDialog, setCompareDialog] = useState(false)
@@ -1640,6 +1643,7 @@ export default function App() {
           onHeaderFooter={() => setHeaderFooterOpen(true)}
           onUndoOrganize={() => void undoLastOrganize()}
           onHelp={() => setHelpOpen(true)}
+          onDesktopSteps={() => setDesktopStepsOpen(true)}
         />
         <ToolRow
           readOnly={!!active?.editRestriction}
@@ -1658,6 +1662,7 @@ export default function App() {
           onFitWidth={() => viewerRef.current?.fitWidth()}
         />
         {testMode && <button type="button" className="test-error-button" data-testid="throw-workspace-error" onClick={() => setWorkspaceFailure(true)}>作業領域エラー</button>}
+        <DesktopPromptBanner onShowSteps={() => setDesktopStepsOpen(true)} />
       </div></>}
       <input
         hidden
@@ -1749,6 +1754,7 @@ export default function App() {
         />
       )}
       <footer className="status-bar">
+        {install.supported && (install.installed || install.error) && <span className="install-app-status" role="status">{install.installed ? installedMessage : install.error}</span>}
         <span>{active ? `${page} / ${active.pageSizes.length} ページ` : 'PDFを開いてください'}</span>
         {!comparison && active?.annotationStore.getScale(page - 1) && <button type="button" className="status-scale" onClick={() => openScale(page - 1)}>{scaleLabel(active.annotationStore.getScale(page - 1)!)}</button>}
         <span role="status">{runtimeError || status}</span>{/* @single:start */}<span style={{ marginLeft: 'auto', fontSize: '11px' }}>固定・閉域版（HTML）</span>{/* @single:end */}{/* @fixed:start */}<span style={{ marginLeft: 'auto', fontSize: '11px' }}>固定・閉域版</span>{/* @fixed:end */}
@@ -1763,6 +1769,7 @@ export default function App() {
         }}
         onSave={(scale, all, recalculate) => { scaleDialog.session.annotationStore.setScale(scaleTargets(all), scale, recalculate); setScaleDialog(null); setScaleTracing(false); refreshTabs() }} />}
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <DesktopStepsDialog open={desktopStepsOpen} onClose={() => setDesktopStepsOpen(false)} />
       <ExternalSendAlert />
       {fixtureEdit && fixtureEdit.session.annotationStore.getCountFixture(fixtureEdit.id) && <Suspense fallback={null}><FixtureDialog
         key={`${fixtureEdit.session.docId}:${fixtureEdit.id}`}

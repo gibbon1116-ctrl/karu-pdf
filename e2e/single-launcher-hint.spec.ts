@@ -7,6 +7,30 @@ import { chromium, expect, test } from '@playwright/test'
 const html = fs.readdirSync('dist-single').find(name => name.endsWith('.html'))!
 const url = pathToFileURL(path.resolve('dist-single', html)).href
 
+test('単一HTML版にはインストールとデスクトップ配置の案内を出さない', async ({ page }) => {
+  await page.goto(url)
+  await expect(page.getByTestId('start-screen')).toBeVisible()
+  const defaultPrevented = await page.evaluate(() => {
+    const event = Object.assign(new Event('beforeinstallprompt', { cancelable: true }), {
+      async prompt() { throw new Error('単一HTML版では呼ばない') },
+      userChoice: Promise.resolve({ outcome: 'accepted' }),
+    })
+    window.dispatchEvent(event)
+    window.dispatchEvent(new Event('appinstalled'))
+    return event.defaultPrevented
+  })
+  expect(defaultPrevented).toBe(false)
+  await expect(page.getByRole('region', { name: 'アプリのインストール' })).toHaveCount(0)
+  await expect(page.getByRole('complementary', { name: 'デスクトップへの配置' })).toHaveCount(0)
+  await expect(page.locator('.status-bar')).not.toContainText('インストールしました')
+  await expect(page.getByTestId('launcher-hint')).toBeVisible()
+  await page.getByRole('button', { name: 'ヘルプ▼' }).click()
+  await expect(page.getByRole('menuitem', { name: 'アプリとしてインストール…', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('menuitem', { name: 'デスクトップにアプリを置く手順…', exact: true })).toHaveCount(0)
+  await page.getByRole('menuitem', { name: '使い方', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'かるPDFの使い方' })).not.toContainText('edge://apps')
+})
+
 test('普通のタブでの案内は表示を記憶し、PDF を開いたら消える', async ({ page }) => {
   await page.goto(url)
   expect(await page.evaluate(() => window.toolbar.visible)).toBe(true)

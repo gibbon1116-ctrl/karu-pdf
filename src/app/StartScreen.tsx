@@ -1,4 +1,5 @@
 import type { RecentFile } from '../editor/recentStore'
+import { InstallAppSection } from './InstallAppUi'
 /* @single:start */
 import { LauncherHint } from '../single/LauncherHint'
 /* @single:end */
@@ -22,6 +23,7 @@ export function StartScreen({ recent, onOpen, onOpenRecent, onRemoveRecent, onHe
         {/* @single:start */}
         <LauncherHint />
         {/* @single:end */}
+        <InstallAppSection />
       </div>
       <section className="recent-files" aria-label="最近使ったファイル">
         <h2>最近使ったファイル</h2>

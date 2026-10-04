@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useInstallApp } from './InstallAppUi'
 
 interface Props {
   open: boolean
@@ -6,6 +7,7 @@ interface Props {
 }
 
 export function HelpDialog({ open, onClose }: Props) {
+  const install = useInstallApp()
   const dialogRef = useRef<HTMLDialogElement>(null)
 
   useEffect(() => {
@@ -94,11 +96,12 @@ export function HelpDialog({ open, onClose }: Props) {
           <p>ページ▼の「ページ番号・ヘッダー・フッター…」で、上下6か所にページ番号、総ページ数、日付、ファイル名を入れられます。内容として書き込むため提出用の書類にも使え、かるPDFで付けたものは後から付け直し・削除できます。</p>
           <p>ページを並べ替えた後に番号を振り直すときは、同じ画面で［適用］を押してください。</p>
         </section>
-        <section>
+        {install.supported && <section>
           <h2>アプリとして使う</h2>
           <p>EdgeまたはChromeのメニューから「アプリをインストール」を選びます。インストール後は、エクスプローラーのPDFの「プログラムから開く」で「かるPDF」を選べます。</p>
+          <p>アプリとしてインストールすると、専用の窓で開けます。インストール後に初めて開いたときに、Edge がデスクトップ ショートカットなどを選べる画面を出します。後からは「ヘルプ → デスクトップにアプリを置く手順…」で、Edge のアドレスバーに edge://apps と入力し、「かるPDF」の「詳細」→「デスクトップ ショートカットを作成します」を選ぶ手順を確認できます。</p>
           <p>対応ブラウザは最新版のEdgeとChromeです。初回表示後はオフラインでも使えます。</p>
-        </section>
+        </section>}
         <section>
           <h2>データの扱い</h2>
           <p>PDFはパソコンの外へ送信しません。自動保存はしないため、必要なときに保存してください。</p>
