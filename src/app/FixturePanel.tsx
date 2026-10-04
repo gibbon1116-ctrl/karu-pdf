@@ -12,6 +12,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   const version = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [search, setSearch] = useState(''), [collapsed, setCollapsed] = useState(new Set<string>()), [error, setError] = useState('')
   const [dialog, setDialog] = useState<{ initial: CountFixture; editing: boolean } | null>(null)
+  const [sampleHover, setSampleHover] = useState<{ fixture: CountFixture; left: number; top: number } | null>(null)
   const [preset, setPreset] = useState(false), [sources, setSources] = useState<Array<{ name: string; fixtures: CountFixture[] }> | null>(null), [busy, setBusy] = useState(false)
   useEffect(() => { let alive = true; void ensureSessionFixtures(session, pool).catch(e => { if (alive) setError(String(e)) }); return () => { alive = false } }, [session, pool])
   const fixtures = useMemo(() => store.getCountFixtures(), [store, version])
@@ -52,7 +53,11 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       <div className="fixture-action-row">
       <button disabled={!canEdit || fixtures.length >= 1000} onClick={() => setDialog({ editing: false, initial: { id: crypto.randomUUID(), name: '', code: '', category: selected?.category ?? 'その他', style: nextCountStyle(fixtures), order: nextOrder } })}>器具を追加</button>
       <button disabled={!canEdit} onClick={() => setPreset(true)}>見本から追加</button>
-      <button disabled={!canEdit || !selected || fixtures.length >= 1000} onClick={() => selected && setDialog({ editing: false, initial: { ...structuredClone(selected), id: crypto.randomUUID(), name: `${selected.name.slice(0, 74)} のコピー`, order: nextOrder } })}>複製</button>
+      <button disabled={!canEdit || !selected || fixtures.length >= 1000} onClick={() => {
+        if (!selected) return
+        const proposed = nextCountStyle(fixtures)
+        setDialog({ editing: false, initial: { ...structuredClone(selected), id: crypto.randomUUID(), name: `${selected.name.slice(0, 74)} のコピー`, order: nextOrder, style: { ...selected.style, shape: proposed.shape, fill: proposed.fill, color: proposed.color } } })
+      }}>複製</button>
       <button disabled={!canEdit || !selected} onClick={() => selected && setDialog({ editing: true, initial: structuredClone(selected) })}>編集</button>
       <button disabled={!canEdit || !selected} onClick={() => {
         if (!selected) return
@@ -81,20 +86,27 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     <button onClick={() => store.showAllFixtures()}>すべて表示</button>
     {error && <p role="alert">{error}</p>}
     </div>
-    <div className="fixture-groups">
-      <div className="fixture-list-heading"><span>表示</span><span>印</span><span>略号</span><span>器具名称</span><span>この図面</span><span>全図面</span></div>
+    <div className="fixture-groups" onScroll={() => setSampleHover(null)}>
+      <div className="fixture-list-heading"><span>表示</span><span>印</span><span>見本</span><span>略号</span><span>器具名称</span><span>この図面</span><span>全図面</span></div>
       {[...categories].map(([category, list]) => <section key={category}>
       <div className="fixture-category"><button aria-expanded={!collapsed.has(category)} onClick={() => setCollapsed(previous => { const next = new Set(previous); if (next.has(category)) next.delete(category); else next.add(category); return next })}>{category}（{list.length}）</button>
         <button aria-label={`${category}の表示切替`} aria-pressed={list.every(f => store.isFixtureVisible(f.id))} onClick={() => store.setFixtureVisible(fixtures.filter(f => f.category === category).map(f => f.id), !list.every(f => store.isFixtureVisible(f.id)))}><Eye visible={list.every(f => store.isFixtureVisible(f.id))} /></button>
       </div>
-      {!collapsed.has(category) && <ul>{list.map(f => <li key={f.id} className={f.id === selected?.id ? 'selected' : ''} data-fixture-id={f.id}>
+      {!collapsed.has(category) && <ul>{list.map(f => <li key={f.id} className={f.id === selected?.id ? 'selected' : ''} data-fixture-id={f.id}
+        onMouseEnter={event => {
+          if (!f.sample) return
+          const rect = event.currentTarget.getBoundingClientRect()
+          setSampleHover({ fixture: f, left: Math.max(8, Math.min(window.innerWidth - 176, rect.right + 8)), top: Math.max(8, Math.min(window.innerHeight - 176, rect.top)) })
+        }} onMouseLeave={() => setSampleHover(null)}>
         <button aria-label={`${f.code} ${f.name}の表示切替`} aria-pressed={store.isFixtureVisible(f.id)} onClick={() => store.setFixtureVisible([f.id], !store.isFixtureVisible(f.id))}><Eye visible={store.isFixtureVisible(f.id)} /></button>
         <button className="fixture-row" aria-label={`${f.code} ${f.name}`.trim()} aria-pressed={f.id === selected?.id} onClick={() => { store.selectFixture(f.id); ui?.select() }}>
           <svg className="fixture-swatch" viewBox="-14 -14 28 28" aria-hidden="true"><CountMarker style={{ ...f.style, size: 24, opacity: 1 }} showCode={false} /></svg>
+          <span className="fixture-sample-cell">{f.sample && <img className="fixture-sample-thumbnail" src={`data:image/png;base64,${f.sample.png}`} alt={`${f.name}の見本`} />}</span>
           <span className="fixture-row-code" title={f.code}>{f.code}{' '}</span><span className="fixture-row-name" title={f.name}>{f.name}</span><span className="fixture-row-count" title={`表示中の図面: ${pageTotal(f.id)}個`}>{pageTotal(f.id)}</span><span className="fixture-row-count" title={`全図面: ${total(f.id)}個`}>{total(f.id)}</span>
         </button>
       </li>)}</ul>}
     </section>)}</div>
+    {!dialog && sampleHover?.fixture.sample && <div className="fixture-sample-hover" role="tooltip" style={{ left: sampleHover.left, top: sampleHover.top }}><img src={`data:image/png;base64,${sampleHover.fixture.sample.png}`} alt={`${sampleHover.fixture.name}の見本（拡大）`} /></div>}
     <Suspense fallback={<p>画面を開いています…</p>}>
       {dialog && <FixtureDialog initial={dialog.initial} fixtures={fixtures} editing={dialog.editing} onSave={saveFixture} onClose={() => setDialog(null)} />}
       {preset && <FixturePresetDialog onAdd={addMany} onClose={() => setPreset(false)} />}

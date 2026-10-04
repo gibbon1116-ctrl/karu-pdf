@@ -516,7 +516,7 @@ button, input { font: inherit; }
 .fixture-panel-controls > label { display: block; margin: 6px 0; font-size: 12px; }
 .fixture-panel input[type="search"], .fixture-dialog input:not([type="checkbox"]):not([type="color"]), .fixture-dialog textarea { width: 100%; box-sizing: border-box; }
 .fixture-groups { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; margin-top: 6px; }
-.fixture-list-heading { position: sticky; z-index: 1; top: 0; display: grid; grid-template-columns: 22px 22px 48px minmax(0, 1fr) 34px 40px; gap: 3px; align-items: center; min-height: 24px; border-bottom: 1px solid #aaa; background: #ededed; font-size: 10px; }
+.fixture-list-heading { position: sticky; z-index: 1; top: 0; display: grid; grid-template-columns: 22px 22px 24px 48px minmax(0, 1fr) 34px 40px; gap: 3px; align-items: center; min-height: 24px; border-bottom: 1px solid #aaa; background: #ededed; font-size: 10px; }
 .fixture-list-heading > span:nth-last-child(-n+2) { text-align: right; font-size: 8.5px; white-space: nowrap; }
 .fixture-groups ul { margin: 0; padding: 0; list-style: none; }
 .fixture-groups li, .fixture-category { display: flex; align-items: center; gap: 3px; }
@@ -525,12 +525,22 @@ button, input { font: inherit; }
 .fixture-category { background: #eef3f9; padding: 4px 0; margin-top: 8px; }
 .fixture-category button:first-child { flex: 1; text-align: left; }
 .fixture-groups li.selected { background: #dcecff; outline: 1px solid #0068b7; }
-.fixture-row { display: grid; grid-template-columns: 22px 48px minmax(0, 1fr) 34px 40px; gap: 3px; align-items: center; flex: 1; min-width: 0; height: 28px; text-align: left; border: 0; background: transparent; padding: 0; font-size: 12px; }
+.fixture-row { display: grid; grid-template-columns: 22px 24px 48px minmax(0, 1fr) 34px 40px; gap: 3px; align-items: center; flex: 1; min-width: 0; height: 28px; text-align: left; border: 0; background: transparent; padding: 0; font-size: 12px; }
 .fixture-row-code, .fixture-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fixture-row-code { font-weight: 700; }
 .fixture-row-count { text-align: right; font-variant-numeric: tabular-nums; }
 .fixture-swatch { width: 28px; height: 28px; flex-shrink: 0; vertical-align: middle; }
 .fixture-row .fixture-swatch { width: 22px; height: 22px; }
+.fixture-sample-cell { display: flex; align-items: center; justify-content: center; width: 24px; height: 22px; }
+.fixture-sample-thumbnail { max-width: 24px; max-height: 20px; object-fit: contain; }
+.fixture-sample-preview { display: block; max-width: 160px; max-height: 160px; object-fit: contain; border: 1px solid #ddd; }
+.fixture-sample-hover { position: fixed; z-index: 100; pointer-events: none; background: white; padding: 6px; border: 1px solid #aaa; box-shadow: 0 2px 8px #0003; }
+.fixture-sample-hover img { display: block; width: 160px; height: 160px; object-fit: contain; }
+/* The banner sits over the drawing: let drags pass through it, except on its button. */
+.fixture-sample-instruction { position: fixed; z-index: 100; top: 100px; left: 50%; transform: translateX(-50%); max-width: calc(100vw - 32px); padding: 8px 12px; border: 1px solid #0068b7; background: #fff; box-shadow: 0 2px 8px #0003; pointer-events: none; }
+.fixture-sample-instruction button { margin-left: 10px; pointer-events: auto; }
+.annotation-layer.fixture-sample-selection { z-index: 5; cursor: crosshair; pointer-events: auto; }
+.fixture-sample-rect { fill: #0068b722; stroke: #0068b7; stroke-width: 1.5; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
 .fixture-preview { width: 100%; height: 100px; background: white; border: 1px solid #ddd; }
 .fixture-dialog { width: min(560px, 90vw); max-height: 88vh; overflow: auto; }
 .fixture-editor-dialog { width: min(860px, 95vw); max-width: 95vw; max-height: 92vh; overflow: hidden; padding: 0; border: 1px solid #888; }

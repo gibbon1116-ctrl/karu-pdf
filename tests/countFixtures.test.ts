@@ -1,9 +1,10 @@
 import { expect, it } from 'vitest'
 import mupdf from 'mupdf'
-import { COUNT_FILLS, COUNT_SHAPES, MAX_COUNT_FIXTURE_BYTES, countHex, countRgb, nextCountStyle, parseCountFixtures, readCountFixtures, serializeCountFixtures, writeCountFixtures, type CountFixture } from '../src/core/countFixtures'
+import { COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, FIXTURE_PRESETS, MAX_COUNT_FIXTURE_BYTES, MAX_COUNT_SAMPLE_BASE64, countHex, countRgb, nextCountStyle, parseCountFixtureSample, parseCountFixtures, readCountFixtures, serializeCountFixtures, writeCountFixtures, type CountFixture, type CountFixtureSample } from '../src/core/countFixtures'
 import { countMarkerData, countPdfPath, countSvgPath } from '../src/editor/countMarkers'
 import { createCountCsv } from '../src/app/annotationCsv'
-const fixture = (id = 'a'): CountFixture => ({ id, name: 'ダウンライト', code: 'DL', category: '照明器具', order: 0, style: nextCountStyle([]) })
+const defaultStyle = nextCountStyle([])
+const fixture = (id = 'a'): CountFixture => ({ id, name: 'ダウンライト', code: 'DL', category: '照明器具', order: 0, style: structuredClone(defaultStyle) })
 
 it('validates fields and rejects malformed entries, duplicate IDs, excess count and UTF-8 capacity', () => {
   const f = fixture(), raw = (items: unknown[]) => JSON.stringify({ version: 1, fixtures: items })
@@ -17,22 +18,101 @@ it('validates fields and rejects malformed entries, duplicate IDs, excess count 
   expect(parseCountFixtures(raw([...thousand, fixture('extra')]))).toEqual([])
   expect(() => serializeCountFixtures([...thousand, fixture('extra')])).toThrow()
   const multibyte = thousand.map(f => ({ ...f, name: '日'.repeat(80), code: '日'.repeat(16), category: '日'.repeat(40), memo: '日'.repeat(200) }))
-  expect(() => serializeCountFixtures(multibyte)).toThrow()
-  expect(parseCountFixtures(raw(multibyte))).toEqual([])
+  expect(new TextEncoder().encode(raw(multibyte)).length).toBeGreaterThan(1024 * 1024)
+  expect(parseCountFixtures(serializeCountFixtures(multibyte))).toHaveLength(1000)
   expect(parseCountFixtures(' '.repeat(MAX_COUNT_FIXTURE_BYTES) + raw([f]))).toEqual([])
   expect(parseCountFixtures(raw([{ ...f, memo: '日'.repeat(MAX_COUNT_FIXTURE_BYTES / 3) }]))).toEqual([])
   expect(parseCountFixtures('{')).toEqual([])
   expect(parseCountFixtures('{"version":2,"fixtures":[]}')).toEqual([])
 })
 
-it('assigns 100 different combinations with different adjacent shapes and colors', () => {
+it('assigns 100 deterministic different combinations with the minimum usage score', () => {
   const fixtures: CountFixture[] = []
   for (let i = 0; i < 100; i++) {
-    const style = nextCountStyle(fixtures), previous = fixtures.at(-1)?.style
-    if (previous) { expect(style.shape).not.toBe(previous.shape); expect(countHex(style.color)).not.toBe(countHex(previous.color)) }
+    const style = nextCountStyle(fixtures)
+    const hexes = fixtures.map(f => countHex(f.style.color))
+    const score = (shape: string, fill: string, color: string) => fixtures.reduce((n, f, j) => n + Number(f.style.shape === shape) + Number(f.style.fill === fill) + Number(hexes[j] === color), 0)
+    const used = new Set(fixtures.map(f => `${f.style.shape}:${f.style.fill}:${countHex(f.style.color)}`))
+    let minimum = Infinity
+    for (const shape of COUNT_SHAPES) for (const fill of COUNT_FILLS) for (const color of COUNT_COLORS) {
+      if (!used.has(`${shape}:${fill}:${color}`)) minimum = Math.min(minimum, score(shape, fill, color))
+    }
+    expect(score(style.shape, style.fill, countHex(style.color))).toBe(minimum)
+    expect(nextCountStyle(fixtures)).toEqual(style)
     fixtures.push({ ...fixture(String(i)), style, order: i })
   }
   expect(new Set(fixtures.map(f => JSON.stringify([f.style.shape, f.style.fill, countHex(f.style.color)]))).size).toBe(100)
+})
+
+it('prefers unused shapes in a 28-fixture list when available and unused colors/fills after 14 fixtures', () => {
+  // Reproduce the 28 preset appearances assigned by the old fixed sequence.
+  const legacy = FIXTURE_PRESETS.電気設備.map((item, i) => ({ ...fixture(String(i)), ...item, order: i, style: { ...fixture().style, shape: COUNT_SHAPES[i % 14], color: countRgb(COUNT_COLORS[(i * 7) % 24]), fill: COUNT_FILLS[Math.floor(i / 14) % 5] } }))
+  expect(legacy).toHaveLength(28)
+  // All 14 shapes were used by the legacy sequence; the new sequence must spread
+  // shapes, colors and fills while keeping every complete appearance distinct.
+  const next: CountFixture[] = []
+  for (const [i, item] of FIXTURE_PRESETS.電気設備.entries()) next.push({ ...fixture(String(i)), ...item, style: nextCountStyle(next), order: i })
+  const proposed = nextCountStyle(next)
+  expect(next.some(f => f.style.shape === proposed.shape && f.style.fill === proposed.fill && countHex(f.style.color) === countHex(proposed.color))).toBe(false)
+  const fourteen = Array.from({ length: 15 }, (_, i) => ({ ...fixture(String(i)), style: { ...fixture().style, shape: COUNT_SHAPES[i % 14] } }))
+  const afterFourteen = nextCountStyle(fourteen)
+  expect(countHex(afterFourteen.color)).not.toBe(countHex(fourteen[0].style.color))
+  expect(afterFourteen.fill).not.toBe(fourteen[0].style.fill)
+  const repeated = legacy.map((f, i) => ({ ...f, style: { ...f.style, shape: COUNT_SHAPES[i % 7] } }))
+  expect(COUNT_SHAPES.slice(7)).toContain(nextCountStyle(repeated).shape)
+})
+
+function pngSample(width = 16, height = 16): CountFixtureSample {
+  const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, width, height], true)
+  try { pixmap.clear(255); return { png: Buffer.from(pixmap.asPNG()).toString('base64'), width, height, pageIndex: 0 } } finally { pixmap.destroy() }
+}
+
+it('validates PNG signature, encoded dimensions, pixel and base64 limits without losing fixture fields', () => {
+  const sample = pngSample(), f = { ...fixture(), sample }
+  expect(parseCountFixtureSample(sample)).toEqual(sample)
+  expect(parseCountFixtureSample(pngSample(160, 160))).toBeDefined()
+  expect(parseCountFixtures(serializeCountFixtures([f]))).toEqual([f])
+  const binary = Buffer.from(sample.png, 'base64')
+  // The validation contract checks the header, not image decoding. Trailing
+  // padding lets this test isolate the exact encoded-size boundary.
+  const atLimit = { ...sample, png: Buffer.concat([binary, Buffer.alloc(MAX_COUNT_SAMPLE_BASE64 * 3 / 4 - binary.length)]).toString('base64') }
+  expect(atLimit.png.length).toBe(MAX_COUNT_SAMPLE_BASE64)
+  expect(parseCountFixtureSample(atLimit)).toBeDefined()
+  for (const invalid of [null, {}, { ...sample, width: 15 }, { ...sample, height: 161 }, { ...sample, width: 16.5 }, { ...sample, width: 32 }, { ...sample, pageIndex: -1 }, { ...sample, pageIndex: .5 }, { ...sample, png: sample.png + '?' }, { ...sample, png: 'data:image/png;base64,' + sample.png }, { ...sample, png: sample.png.slice(1) }, { ...sample, png: 'AAAA' }, { ...sample, png: atLimit.png + 'AAAA' }, { ...sample, png: Buffer.from('not a PNG image').toString('base64') }]) {
+    expect(parseCountFixtureSample(invalid)).toBeUndefined()
+    const read = parseCountFixtures(JSON.stringify({ version: 1, fixtures: [{ ...f, sample: invalid }] }))
+    expect(read).toHaveLength(1); expect(read[0].sample).toBeUndefined(); expect(read[0].name).toBe(f.name)
+    expect(() => serializeCountFixtures([{ ...f, sample: invalid as CountFixtureSample }])).toThrow()
+  }
+  const brokenSignature = Buffer.from(binary); brokenSignature[0] = 0
+  expect(parseCountFixtureSample({ ...sample, png: brokenSignature.toString('base64') })).toBeUndefined()
+  const brokenHeader = Buffer.from(binary); brokenHeader[12] = 0
+  expect(parseCountFixtureSample({ ...sample, png: brokenHeader.toString('base64') })).toBeUndefined()
+  const under = Array.from({ length: 80 }, (_, i) => ({ ...f, id: String(i), order: i, sample: atLimit }))
+  expect(parseCountFixtures(serializeCountFixtures(under))).toHaveLength(80)
+  const over = Array.from({ length: 86 }, (_, i) => ({ ...f, id: String(i), order: i, sample: atLimit }))
+  expect(() => serializeCountFixtures(over)).toThrow()
+  expect(parseCountFixtures(JSON.stringify({ version: 1, fixtures: over }))).toEqual([])
+})
+
+it('preserves sample PNGs in the PDF catalog through saving and reopening', () => {
+  const doc = new mupdf.PDFDocument(), ref = doc.addPage([0, 0, 400, 400], 0, {}, ''), f = { ...fixture(), sample: pngSample(160, 80) }
+  try {
+    doc.insertPage(-1, ref); writeCountFixtures(doc, [f])
+    const bytes = doc.saveToBuffer('compress')
+    try {
+      const reopened = new mupdf.PDFDocument(bytes.asUint8Array())
+      try { expect(readCountFixtures(reopened)).toEqual([f]) } finally { reopened.destroy() }
+    } finally { bytes.destroy() }
+  } finally { ref.destroy(); doc.destroy() }
+})
+
+it('keeps fixed-sequence tie order, then advances past the current, original and previous suggestions', () => {
+  expect(nextCountStyle([])).toEqual({ shape: 'circle', fill: 'none', color: countRgb(COUNT_COLORS[0]), size: 10, opacity: .8, showCode: true })
+  const original = fixture(), current = nextCountStyle([original]), next = nextCountStyle([original], [current, original.style])
+  expect(next).not.toEqual(original.style); expect(next).not.toEqual(current)
+  const following = nextCountStyle([original], [original.style, current, next])
+  expect(following).not.toEqual(next); expect(following).not.toEqual(current)
 })
 
 it('continues allocating unused combinations after the prescribed sequence has exhausted 840 styles', () => {

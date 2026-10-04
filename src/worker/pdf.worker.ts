@@ -4,6 +4,7 @@
 /* @fixed:end */import { DisplayListCache } from '../core/displayListCache'
 import { openDocument, type OpenedDocument } from '../core/mupdfDoc'
 import { renderRegion } from '../core/render'
+import mupdf, { type Pixmap, type DrawDevice } from 'mupdf'
 import { ComparePageCache, renderComparePixels } from './compareRender'
 import { readDocumentScales } from '../core/measure'
 import { applyEdits, listAnnotations } from '../core/annotations'
@@ -286,7 +287,7 @@ async function execute(job: QueuedRequest): Promise<void> {
   try {
     post({ type: 'started', jobId: job.jobId })
     const started = performance.now()
-    const rendered = renderRegion(
+    const rendered = job.contentsOnly ? renderFixtureRegion(entry, job) : renderRegion(
       entry.displayLists,
       job.pageIndex,
       job.renderScale,
@@ -303,6 +304,24 @@ async function execute(job: QueuedRequest): Promise<void> {
   } catch (error) {
     post({ type: 'error', jobId: job.jobId, message: error instanceof Error ? error.message : String(error) })
   }
+}
+
+// Only the requested rectangle is rasterized; annotations and widgets never run.
+// This path is used on demand and does not build another full-page DisplayList.
+function renderFixtureRegion(entry: WorkerDocument, job: RenderRequest) {
+  const rect = job.deviceRect
+  if (!rect || !Number.isFinite(job.renderScale) || job.renderScale <= 0 || !rect.every(Number.isSafeInteger)
+    || rect[2] <= rect[0] || rect[3] <= rect[1] || rect[2] - rect[0] > 160 || rect[3] - rect[1] > 160) throw new Error('見本の描画範囲が不正です。')
+  const page = entry.opened.document.loadPage(job.pageIndex)
+  let pixmap: Pixmap | undefined, device: DrawDevice | undefined
+  try {
+    pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, rect, true)
+    pixmap.clear(255)
+    device = new mupdf.DrawDevice(mupdf.Matrix.identity, pixmap)
+    page.runPageContents(device, mupdf.Matrix.scale(job.renderScale, job.renderScale))
+    device.close()
+    return { width: pixmap.getWidth(), height: pixmap.getHeight(), rgba: new Uint8ClampedArray(pixmap.getPixels()) }
+  } finally { device?.destroy(); pixmap?.destroy(); page.destroy() }
 }
 
 async function executeCoreRequest(request: CoreRequest): Promise<void> {

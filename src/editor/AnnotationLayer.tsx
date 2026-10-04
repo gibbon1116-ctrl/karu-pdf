@@ -1,7 +1,8 @@
 import { constrainLinePoint, arrowHeadSize } from '../core/lineGeometry'
-import { createContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Quad } from 'mupdf'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
+import type { CountFixtureSample } from '../core/countFixtures'
 import { nearestCalloutEdgePoint, resizeSymbolRect, SYMBOL_OPTIONS, symbolRectFromDrag, type Point, type Rect } from '../core/annotations'
 import type { PageSize } from '../core/mupdfDoc'
 import { CSS_PX_PER_PT } from '../viewer/pageLayout'
@@ -27,6 +28,12 @@ const MULTI_CLICK_MS = 500
 const MULTI_CLICK_DISTANCE = 4
 const TEXT_MARK_TOOLS = new Set<EditorTool>(['textSelect', 'textHighlight', 'underline', 'strikeout'])
 export const EditorToolChangeContext = createContext<(tool: EditorTool) => void>(() => undefined)
+export interface FixtureSampleInteraction {
+  request(): Promise<CountFixtureSample | null>
+  cancel(): void
+  selection: { docId: string; complete(pageIndex: number, rect: Rect): void } | null
+}
+export const FixtureSampleContext = createContext<FixtureSampleInteraction | null>(null)
 type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 type LineHandle = 'start' | 'end'
 
@@ -161,6 +168,7 @@ function selectionBounds(quads: readonly Quad[]): Rect | null {
 }
 
 export function AnnotationLayer(props: Props) {
+  const sampleInteraction = useContext(FixtureSampleContext)
   const version = useSyncExternalStore(props.store.subscribe, props.store.getSnapshot)
   const svgRef = useRef<SVGSVGElement>(null)
   const measurement = useMeasurementInteraction({ svg: svgRef, store: props.store, pageIndex: props.pageIndex, tool: props.tool, defaults: props.formatDefaults, select: props.onSelect })
@@ -997,6 +1005,7 @@ export function AnnotationLayer(props: Props) {
       <line ref={linePreviewRef} className="annotation-line-preview" x1="0" y1="0" x2="0" y2="0" />
       <line ref={calloutPreviewRef} className="annotation-line-preview" x1="0" y1="0" x2="0" y2="0" />
     </svg>
+    {sampleInteraction?.selection?.docId === props.docId && <FixtureSampleSelection pageSize={props.pageSize} pageIndex={props.pageIndex} complete={sampleInteraction.selection.complete} />}
     {props.tool === 'textSelect' && textSelection && selectionBounds(textSelection.quads) && <div className="text-selection-toolbar" style={{
       left: `${Math.max(0, Math.min(100, (selectionBounds(textSelection.quads)![0] / props.pageSize.width) * 100))}%`,
       top: `${Math.max(0, Math.min(100, (selectionBounds(textSelection.quads)![1] / props.pageSize.height) * 100))}%`,
@@ -1012,4 +1021,38 @@ export function AnnotationLayer(props: Props) {
       props.onSelect(removed ? null : editing.id)
     }} registerCommit={props.registerCommit} />}
   </>
+}
+
+function FixtureSampleSelection({ pageSize, pageIndex, complete }: { pageSize: PageSize; pageIndex: number; complete(pageIndex: number, rect: Rect): void }) {
+  const drag = useRef<{ pointerId: number; start: Point } | null>(null)
+  const [rect, setRect] = useState<Rect | null>(null)
+  const point = (event: React.PointerEvent<SVGSVGElement>): Point => {
+    const p = pointInPage(event.currentTarget, event)
+    return [Math.max(0, Math.min(pageSize.width, p[0])), Math.max(0, Math.min(pageSize.height, p[1]))]
+  }
+  return <svg className="annotation-layer fixture-sample-selection" data-testid={`fixture-sample-selection-${pageIndex}`} viewBox={`0 0 ${pageSize.width} ${pageSize.height}`}
+    onPointerDown={event => {
+      event.stopPropagation(); event.preventDefault()
+      if (event.button !== 0) return
+      const start = point(event)
+      drag.current = { pointerId: event.pointerId, start }; setRect(null)
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }}
+    onPointerMove={event => {
+      event.stopPropagation()
+      if (drag.current?.pointerId === event.pointerId) setRect(shapeRect(drag.current.start, point(event), false))
+    }}
+    onPointerUp={event => {
+      event.stopPropagation(); event.preventDefault()
+      if (drag.current?.pointerId !== event.pointerId) return
+      const selected = shapeRect(drag.current.start, point(event), false)
+      drag.current = null; setRect(null)
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+      complete(pageIndex, selected)
+    }}
+    onPointerCancel={() => { drag.current = null; setRect(null) }}
+    onDoubleClick={event => { event.stopPropagation(); event.preventDefault() }}>
+    <rect width={pageSize.width} height={pageSize.height} fill="transparent" />
+    {rect && <rect className="fixture-sample-rect" x={rect[0]} y={rect[1]} width={rect[2] - rect[0]} height={rect[3] - rect[1]} />}
+  </svg>
 }

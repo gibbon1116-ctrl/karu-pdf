@@ -1,10 +1,27 @@
-import { useEffect, useRef, useState } from 'react'
-import { COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, COUNT_SIZES, COUNT_OPACITIES, countHex, countRgb, sameCountAppearance, serializeCountFixtures, type CountFixture, type CountStyle } from '../core/countFixtures'
+import { useContext, useEffect, useRef, useState } from 'react'
+import { COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, COUNT_SIZES, COUNT_OPACITIES, countHex, countRgb, nextCountStyle, sameCountAppearance, serializeCountFixtures, type CountFixture, type CountStyle } from '../core/countFixtures'
+import { FixtureSampleContext } from '../editor/AnnotationLayer'
 import { CountMarker } from '../editor/countMarkers'
 
 export default function FixtureDialog({ initial, fixtures, editing, onSave, onClose }: { initial: CountFixture; fixtures: readonly CountFixture[]; editing: boolean; onSave(fixture: CountFixture): void; onClose(): void }) {
   const dialog = useRef<HTMLDialogElement>(null), [value, setValue] = useState(initial), [error, setError] = useState('')
-  useEffect(() => { dialog.current?.showModal() }, [])
+  const sampleInteraction = useContext(FixtureSampleContext)
+  const alive = useRef(false), capturing = useRef(false), suggestions = useRef<CountStyle[]>([])
+  const cancelCapture = useRef(sampleInteraction?.cancel)
+  cancelCapture.current = sampleInteraction?.cancel
+  useEffect(() => {
+    alive.current = true; dialog.current?.showModal()
+    return () => { alive.current = false; if (capturing.current) cancelCapture.current?.() }
+  }, [])
+  const capture = async () => {
+    if (!sampleInteraction || capturing.current) return
+    capturing.current = true; setError(''); dialog.current?.close()
+    try {
+      const sample = await sampleInteraction.request()
+      if (sample && alive.current) setValue(v => ({ ...v, sample }))
+    } catch (reason) { if (alive.current) setError(String(reason)) }
+    finally { capturing.current = false; if (alive.current) dialog.current?.showModal() }
+  }
   const style = (changes: Partial<CountStyle>) => setValue(v => ({ ...v, style: { ...v.style, ...changes } }))
   const collisions = fixtures.filter(f => f.id !== value.id && sameCountAppearance(f.style, value.style))
   const shapeNames = ['丸', '二重丸', '四角', '角丸四角', '三角', '逆三角', 'ひし形', '五角形', '六角形', '八角形', '星', '十字', 'バツ', '砂時計']
@@ -30,10 +47,23 @@ export default function FixtureDialog({ initial, fixtures, editing, onSave, onCl
       <label><input type="checkbox" checked={value.style.showCode} onChange={e => style({ showCode: e.currentTarget.checked })} />略号を印に表示</label>
       <label>メモ<textarea maxLength={200} value={value.memo ?? ''} onChange={e => setValue({ ...value, memo: e.currentTarget.value })} /></label>
       <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + value.style.size * (1 + .7 * value.code.length))} 50`} aria-label="印の見本"><CountMarker style={value.style} code={value.code} /></svg>
+      <div className="fixture-sample-editor">
+        {value.sample && <img className="fixture-sample-preview" src={`data:image/png;base64,${value.sample.png}`} width={value.sample.width} height={value.sample.height} alt="図面から切り取った見本" />}
+        <div className="fixture-fields"><button type="button" disabled={!sampleInteraction} onClick={() => void capture()}>図面から見本を切り取る</button>
+          <button type="button" disabled={!value.sample} onClick={() => setValue(v => ({ ...v, sample: undefined }))}>見本を外す</button></div>
+      </div>
       {!!collisions.length && <p role="status">同じ見た目の器具があります: {collisions.map(f => `${f.code} ${f.name}`.trim()).join('、')}</p>}
       {error && <p role="alert">{error}</p>}
       </div>
       <div className="fixture-dialog-appearance">
+      <button type="button" onClick={() => {
+        try {
+          const proposed = nextCountStyle(fixtures, [...suggestions.current, value.style, ...(editing ? [initial.style] : [])])
+          suggestions.current.push(value.style, proposed)
+          style({ shape: proposed.shape, fill: proposed.fill, color: proposed.color })
+          setError('')
+        } catch (reason) { setError(String(reason)) }
+      }}>別の組合せを提案</button>
       <fieldset><legend>形</legend><div className="fixture-shapes">{COUNT_SHAPES.map((shape, i) => <button type="button" key={shape} title={shapeNames[i]} aria-label={`形 ${shapeNames[i]}`} aria-pressed={value.style.shape === shape} onClick={() => style({ shape })}>
         <svg viewBox="-14 -14 28 28" aria-hidden="true"><CountMarker style={{ ...value.style, shape, fill: 'none', size: 20, opacity: 1, showCode: false }} /></svg>
       </button>)}</div></fieldset>

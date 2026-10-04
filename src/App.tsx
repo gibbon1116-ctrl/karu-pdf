@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { DocumentTabs } from './app/DocumentTabs'
 import { DocumentWorkspace } from './app/DocumentWorkspace'
 import { loadSplitSettings, saveSplitSettings, type SplitSettings } from './app/SplitView'
@@ -33,7 +33,8 @@ import { PdfOpeningFeedback, PdfOpeningStore, type PdfOpening } from './app/PdfO
 import { PdfWorkerPool, type ApplyAndSaveResult, type PageLayoutTimings, type PreparedOutputResult, type RasterizeMetrics } from './client/PdfWorkerPool'
 import type { RasterizeOptions } from './core/rasterize'
 import { BlobPdfWriteTarget, type PdfWriteTarget } from './core/pdfStreamWriter'
-import type { EditorTool } from './editor/AnnotationLayer'
+import { FixtureSampleContext, type EditorTool } from './editor/AnnotationLayer'
+import type { CountFixtureSample } from './core/countFixtures'
 import type { EditableAnnotation } from './editor/AnnotationStore'
 import { downloadPdf, pickOpenHandles, pickSaveHandle, requestWritePermission, writePdf, writePdfWithoutOverwrite, type PdfFileHandle } from './editor/fileAccess'
 import { loadFormatDefaults, saveFormatDefaults, type FormatDefaults } from './editor/formatDefaults'
@@ -236,6 +237,9 @@ export default function App() {
   const [scaleDialog, setScaleDialog] = useState<{ session: DocumentSession; pageIndex: number; required: boolean } | null>(null)
   const [scaleTracing, setScaleTracing] = useState(false)
   const [scalePoints, setScalePoints] = useState<Point[] | null>(null)
+  const [sampleCapture, setSampleCapture] = useState<{ docId: string; busy: boolean; resolve(sample: CountFixtureSample | null): void } | null>(null)
+  const sampleCaptureRef = useRef<typeof sampleCapture>(null)
+  const [sampleMessage, setSampleMessage] = useState('')
   const [tool, setTool] = useState<EditorTool>('select')
   const [formatDefaults, setFormatDefaults] = useState<FormatDefaults>(() => loadFormatDefaults())
   const [panels, setPanels] = useState(loadPanels)
@@ -337,6 +341,51 @@ export default function App() {
     window.clearTimeout(statusTimerRef.current)
     statusTimerRef.current = window.setTimeout(() => setStatus(''), 5000)
   }, [])
+
+  const finishSampleCapture = useCallback((sample: CountFixtureSample | null) => {
+    const pending = sampleCaptureRef.current
+    sampleCaptureRef.current = null; setSampleCapture(null); setSampleMessage('')
+    pending?.resolve(sample)
+  }, [])
+  const requestFixtureSample = useCallback((): Promise<CountFixtureSample | null> => {
+    const session = activeRef.current
+    if (!session || session.editRestriction || comparison || organizeRef.current) return Promise.reject(new Error('通常の図面表示で見本を切り取ってください。'))
+    finishSampleCapture(null)
+    return new Promise(resolve => {
+      const pending = { docId: session.docId, busy: false, resolve }
+      sampleCaptureRef.current = pending; setSampleCapture(pending)
+      setSampleMessage('切り取る範囲を四角で囲んでください（Esc で中止）')
+    })
+  }, [comparison, finishSampleCapture])
+  const completeFixtureSample = useCallback((pageIndex: number, rect: import('./core/annotations').Rect) => {
+    const pending = sampleCaptureRef.current
+    if (!pending || pending.busy) return
+    if (Math.min(rect[2] - rect[0], rect[3] - rect[1]) < 2 * 72 / 25.4) {
+      setSampleMessage('範囲が小さすぎます。切り取る範囲を四角で囲んでください（Esc で中止）'); return
+    }
+    pending.busy = true; setSampleMessage('見本の画像を作っています…（Esc で中止）')
+    void pool.renderFixtureSample(pending.docId, pageIndex, rect).then(sample => {
+      if (sampleCaptureRef.current === pending) finishSampleCapture(sample)
+    }).catch(reason => {
+      if (sampleCaptureRef.current !== pending) return
+      pending.busy = false; setSampleMessage(`${String(reason)} 切り取る範囲を四角で囲んでください（Esc で中止）`)
+    })
+  }, [pool, finishSampleCapture])
+  const fixtureSampleInteraction = useMemo(() => ({ request: requestFixtureSample, cancel: () => finishSampleCapture(null), selection: sampleCapture ? { docId: sampleCapture.docId, complete: completeFixtureSample } : null }), [requestFixtureSample, sampleCapture, completeFixtureSample, finishSampleCapture])
+  useEffect(() => {
+    finishSampleCapture(null)
+    return () => finishSampleCapture(null)
+  }, [active?.docId, active?.pageRevision, comparison, organize, finishSampleCapture])
+  useEffect(() => {
+    if (!sampleCapture) return
+    const keyDown = (event: KeyboardEvent) => {
+      if (event.isComposing) return
+      event.preventDefault(); event.stopImmediatePropagation()
+      if (event.key === 'Escape') finishSampleCapture(null)
+    }
+    window.addEventListener('keydown', keyDown, true)
+    return () => window.removeEventListener('keydown', keyDown, true)
+  }, [sampleCapture, finishSampleCapture])
 
   const copyAnnotations = useCallback((): boolean => {
     const session = activeRef.current
@@ -1518,7 +1567,9 @@ export default function App() {
     onSplit: (mode) => void splitAndSave(mode),
   } : null
   return (
+    <FixtureSampleContext.Provider value={fixtureSampleInteraction}>
     <main className={`app${comparison ? ' comparing' : ''}${updateReady ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { if (!comparison) void handleDrop(event).catch(reason => setError(`PDFを開けませんでした: ${String(reason)}`)) }}>
+      {sampleCapture && <div className="fixture-sample-instruction" role="status">{sampleMessage}<button type="button" onClick={() => finishSampleCapture(null)}>中止</button></div>}
       {updateReady && (
         <div className="update-banner" role="status">
           {/* @pages:start */}<span>新しい版があります。</span>{/* @pages:end */}{/* @fixed:start */}<span>管理者が配布物を更新しました。再読み込みすると新しい版に切り替わります</span>{/* @fixed:end */}
@@ -1749,5 +1800,6 @@ export default function App() {
         onClose={() => setHeaderFooterOpen(false)}
       />}
     </main>
+    </FixtureSampleContext.Provider>
   )
 }

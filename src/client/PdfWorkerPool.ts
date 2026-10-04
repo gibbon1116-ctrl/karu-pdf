@@ -1,6 +1,7 @@
 /* @single:start */import { createSingleWorker } from '../single/runtime'
 /* @single:end */import type { PageScale } from '../core/measure'
 import type { MaxIssueNumberResponse } from '../worker/protocol'
+import { parseCountFixtureSample } from '../core/countFixtures'
 import type { PageSize } from '../core/mupdfDoc'
 import type { AnnotationEdit, AnnotationInfo, ApplyError } from '../core/annotations'
 import type { FontName } from '../core/fontMetrics'
@@ -354,9 +355,32 @@ export class PdfWorkerPool {
     renderScale: number
     deviceRect: DeviceRect | null
     excludeAnnotObjNums?: number[]
+    contentsOnly?: boolean
   }): RenderTask {
     const slot = this.slotForPage(options.docId, options.pageIndex)
     return this.startRender(slot, 'render', options)
+  }
+
+  async renderFixtureSample(docId: string, pageIndex: number, rect: import('../core/annotations').Rect): Promise<import('../core/countFixtures').CountFixtureSample> {
+    const widthPt = rect[2] - rect[0], heightPt = rect[3] - rect[1]
+    if (!rect.every(Number.isFinite) || Math.min(widthPt, heightPt) < 2 * 72 / 25.4) throw new Error('範囲が小さすぎます')
+    const renderScale = 160 / Math.max(widthPt, heightPt)
+    const width = Math.max(1, Math.round(widthPt * renderScale)), height = Math.max(1, Math.round(heightPt * renderScale))
+    const x = Math.floor(rect[0] * renderScale), y = Math.floor(rect[1] * renderScale)
+    const result = await this.render({ docId, pageIndex, priority: 0, renderScale, deviceRect: [x, y, x + width, y + height], contentsOnly: true }).promise
+    if (!result.bitmap) throw new Error('見本の描画を中止しました。')
+    try {
+      const canvas = document.createElement('canvas')
+      // Pad very thin samples rather than stretching their symbols.
+      canvas.width = Math.max(16, width); canvas.height = Math.max(16, height)
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('見本の画像を作れません。')
+      context.fillStyle = '#fff'; context.fillRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(result.bitmap, Math.floor((canvas.width - width) / 2), Math.floor((canvas.height - height) / 2))
+      const sample = { png: canvas.toDataURL('image/png').split(',')[1], width: canvas.width, height: canvas.height, pageIndex }
+      if (!parseCountFixtureSample(sample)) throw new Error('見本の容量が上限（base64で48 KiB）を超えています。範囲を変えてください。')
+      return sample
+    } finally { result.bitmap.close() }
   }
 
   renderCompare(options: CompareOptions & { priority: Priority }): RenderTask {

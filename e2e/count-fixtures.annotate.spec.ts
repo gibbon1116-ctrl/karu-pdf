@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import mupdf from 'mupdf'
 import { expect, test, type Page } from '@playwright/test'
+import { readCountFixtures, type CountFixture } from '../src/core/countFixtures'
 
 function blankPdf() {
   const doc = new mupdf.PDFDocument()
@@ -26,6 +27,146 @@ async function select(page: Page, name: string) {
   await page.getByRole('button', { name, exact: true }).click()
   await expect(page.getByRole('button', { name: '個数カウント', exact: true })).toHaveAttribute('aria-pressed', 'true')
 }
+
+function samplePdf() {
+  const doc = new mupdf.PDFDocument(), ref = doc.addPage([0, 0, 400, 400], 0, {}, '0 0 0 rg 180 180 40 40 re f')
+  try {
+    doc.insertPage(-1, ref)
+    const pdfPage = doc.loadPage(0), annotation = pdfPage.createAnnotation('Square')
+    try { annotation.setRect([100, 100, 140, 140]); annotation.setColor([1, 0, 0]); annotation.setInteriorColor([1, 0, 0]); annotation.update() } finally { annotation.destroy(); pdfPage.destroy() }
+    const bytes = doc.saveToBuffer('compress')
+    try { return [...bytes.asUint8Array()] } finally { bytes.destroy() }
+  } finally { ref.destroy(); doc.destroy() }
+}
+async function dragSample(page: Page, from: [number, number], to: [number, number]) {
+  const layer = page.getByTestId('fixture-sample-selection-0')
+  await expect(layer).toBeVisible()
+  const points = await layer.evaluate((el, points) => {
+    const svg = el as SVGSVGElement, bounds = svg.getBoundingClientRect()
+    return points.map(([x, y]) => ({ x: bounds.left + x * bounds.width / svg.viewBox.baseVal.width, y: bounds.top + y * bounds.height / svg.viewBox.baseVal.height }))
+  }, [from, to])
+  await page.mouse.move(points[0].x, points[0].y); await page.mouse.down()
+  await page.mouse.move(points[1].x, points[1].y, { steps: 4 }); await page.mouse.up()
+}
+async function savedFixtures(page: Page): Promise<CountFixture[]> {
+  const saved = await page.evaluate(async () => [...(await window.__karu!.saveToBytes())!])
+  const doc = new mupdf.PDFDocument(new Uint8Array(saved))
+  try { return readCountFixtures(doc) } finally { doc.destroy() }
+}
+
+test('crops original drawing without annotations, keeps drafts on Esc, and preserves samples on save, copy and import', async ({ page }) => {
+  await open(page)
+  await page.evaluate(bytes => window.__karu!.openBytes(bytes, '見本元.pdf'), samplePdf())
+  // Show the whole page so the drag points below are inside the viewer.
+  await page.evaluate(() => window.__karu!.setZoom(1))
+  await page.getByRole('tab', { name: '器具', exact: true }).click()
+  await page.getByRole('button', { name: '器具を追加', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '器具を追加', exact: true })
+  await dialog.getByLabel('器具名称', { exact: true }).fill('記号見本')
+  await dialog.getByLabel('略号', { exact: true }).fill('S')
+  await dialog.getByRole('textbox', { name: 'メモ', exact: true }).fill('切り取り中も保持')
+  await dialog.getByRole('button', { name: '図面から見本を切り取る', exact: true }).click()
+  await expect(dialog).not.toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByLabel('器具名称', { exact: true })).toHaveValue('記号見本')
+  await expect(dialog.getByRole('textbox', { name: 'メモ', exact: true })).toHaveValue('切り取り中も保持')
+  await dialog.getByRole('button', { name: '図面から見本を切り取る', exact: true }).click()
+  await dragSample(page, [80, 80], [81, 81])
+  await expect(page.locator('.fixture-sample-instruction')).toContainText('範囲が小さすぎます')
+  await dragSample(page, [80, 80], [240, 240])
+  await expect(dialog).toBeVisible()
+  const preview = dialog.getByAltText('図面から切り取った見本', { exact: true })
+  await expect(preview).toBeVisible()
+  const pixels = await preview.evaluate(async el => {
+    const image = el as HTMLImageElement
+    await image.decode()
+    const canvas = document.createElement('canvas'); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight
+    const context = canvas.getContext('2d')!; context.drawImage(image, 0, 0)
+    const data = context.getImageData(0, 0, canvas.width, canvas.height).data
+    let black = 0, red = 0
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] < 40 && data[i + 1] < 40 && data[i + 2] < 40) black++
+      if (data[i] > 200 && data[i + 1] < 60 && data[i + 2] < 60) red++
+    }
+    return { width: canvas.width, height: canvas.height, black, red }
+  })
+  expect(pixels.width).toBe(160); expect(pixels.height).toBe(160)
+  expect(pixels.black).toBeGreaterThan(100); expect(pixels.red).toBe(0)
+  const png = await preview.getAttribute('src')
+  await dialog.getByRole('button', { name: '追加する', exact: true }).click()
+  const thumbnail = page.getByTestId('fixture-panel').getByAltText('記号見本の見本', { exact: true })
+  await expect(thumbnail).toHaveAttribute('src', png!)
+  await thumbnail.hover(); await expect(page.getByRole('tooltip').getByRole('img')).toBeVisible()
+  const original = (await savedFixtures(page))[0]
+  await page.getByRole('button', { name: '複製', exact: true }).click()
+  await expect(dialog.getByAltText('図面から切り取った見本', { exact: true })).toHaveAttribute('src', png!)
+  await dialog.getByRole('button', { name: '追加する', exact: true }).click()
+  const copy = (await savedFixtures(page)).find(f => f.id !== original.id)!
+  expect(copy.sample).toEqual(original.sample)
+  expect([copy.style.shape, copy.style.fill, copy.style.color]).not.toEqual([original.style.shape, original.style.fill, original.style.color])
+  const bytes = await page.evaluate(async () => [...(await window.__karu!.saveToBytes())!])
+  await page.evaluate(bytes => window.__karu!.openBytes(bytes, '見本保存後.pdf'), bytes)
+  await page.getByRole('tab', { name: '器具', exact: true }).click()
+  await expect(page.getByTestId('fixture-panel').getByAltText('記号見本の見本', { exact: true })).toHaveAttribute('src', png!)
+  await page.evaluate(bytes => window.__karu!.openBytes(bytes, '見本読込先.pdf'), blankPdf())
+  await page.getByRole('tab', { name: '器具', exact: true }).click()
+  await page.getByRole('button', { name: '他のPDFから読み込む', exact: true }).click()
+  await page.getByLabel('読込元PDF', { exact: true }).selectOption({ label: '見本保存後.pdf' })
+  await page.getByRole('button', { name: '選んだ器具を追加', exact: true }).click()
+  const imported = (await savedFixtures(page)).find(f => f.name === original.name)!
+  expect(imported.sample).toEqual(original.sample); expect(imported.style).toEqual(original.style)
+  await select(page, 'S 記号見本')
+  await page.getByRole('button', { name: '編集', exact: true }).click()
+  const edit = page.getByRole('dialog', { name: '器具を編集', exact: true })
+  await edit.getByRole('button', { name: '見本を外す', exact: true }).click()
+  await expect(edit.getByAltText('図面から切り取った見本', { exact: true })).toHaveCount(0)
+  await edit.getByRole('button', { name: '変更する', exact: true }).click()
+  expect((await savedFixtures(page)).find(f => f.name === original.name)?.sample).toBeUndefined()
+})
+
+test('changes suggestions repeatedly while retaining size, opacity, code display and duplication fields', async ({ page }) => {
+  await open(page)
+  await page.getByRole('button', { name: '見本から追加', exact: true }).click()
+  await page.getByRole('button', { name: '選んだ器具を追加', exact: true }).click()
+  await expect(page.getByTestId('fixture-panel').locator('li[data-fixture-id]')).toHaveCount(28)
+  await page.getByRole('button', { name: '器具を追加', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '器具を追加', exact: true })
+  await dialog.getByLabel('器具名称', { exact: true }).fill('提案試験')
+  await dialog.getByLabel('略号', { exact: true }).fill('P')
+  await dialog.getByLabel('分類', { exact: true }).fill('提案分類')
+  await dialog.getByRole('textbox', { name: 'メモ', exact: true }).fill('複製メモ')
+  await dialog.getByRole('combobox', { name: '大きさ', exact: true }).selectOption('20')
+  await dialog.getByRole('combobox', { name: '透明度', exact: true }).selectOption('0.5')
+  await dialog.getByLabel('略号を印に表示', { exact: true }).uncheck()
+  const appearances: string[] = []
+  for (let i = 0; i < 4; i++) {
+    appearances.push(await dialog.locator('button[aria-pressed="true"]').evaluateAll(buttons => buttons.map(b => b.getAttribute('aria-label')).join(':')))
+    await dialog.getByRole('button', { name: '別の組合せを提案', exact: true }).click()
+  }
+  expect(new Set(appearances).size).toBe(4)
+  await dialog.getByRole('button', { name: '追加する', exact: true }).click()
+  const all = await savedFixtures(page), original = all.find(f => f.name === '提案試験')!
+  expect(all.filter(f => f.style.shape === original.style.shape && f.style.fill === original.style.fill && String(f.style.color) === String(original.style.color))).toHaveLength(1)
+  await page.getByRole('button', { name: '複製', exact: true }).click()
+  await expect(dialog.getByLabel('略号', { exact: true })).toHaveValue('P')
+  await expect(dialog.getByLabel('分類', { exact: true })).toHaveValue('提案分類')
+  await expect(dialog.getByRole('textbox', { name: 'メモ', exact: true })).toHaveValue('複製メモ')
+  await expect(dialog.getByRole('combobox', { name: '大きさ', exact: true })).toHaveValue('20')
+  await expect(dialog.getByRole('combobox', { name: '透明度', exact: true })).toHaveValue('0.5')
+  await expect(dialog.getByLabel('略号を印に表示', { exact: true })).not.toBeChecked()
+  await dialog.getByRole('button', { name: '追加する', exact: true }).click()
+  const copy = (await savedFixtures(page)).find(f => f.name === '提案試験 のコピー')!
+  expect([copy.style.shape, copy.style.fill, copy.style.color]).not.toEqual([original.style.shape, original.style.fill, original.style.color])
+  await select(page, 'P 提案試験')
+  await page.getByRole('button', { name: '編集', exact: true }).click()
+  const edit = page.getByRole('dialog', { name: '器具を編集', exact: true })
+  await edit.getByRole('button', { name: '別の組合せを提案', exact: true }).click()
+  await edit.getByRole('button', { name: '変更する', exact: true }).click()
+  const updated = (await savedFixtures(page)).find(f => f.id === original.id)!
+  expect([updated.style.shape, updated.style.fill, updated.style.color]).not.toEqual([original.style.shape, original.style.fill, original.style.color])
+  expect(updated.style.size).toBe(20); expect(updated.style.opacity).toBe(.5); expect(updated.style.showCode).toBe(false)
+})
 
 test('fixture layout keeps counts and add actions in view at 1440x900 and restores the saved panel width', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })

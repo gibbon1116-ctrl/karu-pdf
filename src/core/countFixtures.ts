@@ -8,32 +8,63 @@ export const COUNT_OPACITIES = [1, 0.8, 0.75, 0.5, 0.25] as const
 export type CountShape = typeof COUNT_SHAPES[number]
 export type CountFill = typeof COUNT_FILLS[number]
 export interface CountStyle { shape: CountShape; fill: CountFill; color: RGB; size: number; opacity: number; showCode: boolean }
-export interface CountFixture { id: string; name: string; code: string; category: string; style: CountStyle; memo?: string; order: number }
+export interface CountFixtureSample { png: string; width: number; height: number; pageIndex: number }
+export interface CountFixture { id: string; name: string; code: string; category: string; style: CountStyle; memo?: string; order: number; sample?: CountFixtureSample }
 export const MAX_COUNT_FIXTURES = 1000
-export const MAX_COUNT_FIXTURE_BYTES = 1024 * 1024
+export const MAX_COUNT_FIXTURE_BYTES = 4 * 1024 * 1024
+export const MAX_COUNT_SAMPLE_BASE64 = 48 * 1024
+export function parseCountFixtureSample(value: unknown): CountFixtureSample | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const s = value as CountFixtureSample
+  if (typeof s.png !== 'string' || s.png.length > MAX_COUNT_SAMPLE_BASE64 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(s.png)
+    || !Number.isInteger(s.width) || s.width < 16 || s.width > 160 || !Number.isInteger(s.height) || s.height < 16 || s.height > 160
+    || !Number.isSafeInteger(s.pageIndex) || s.pageIndex < 0) return undefined
+  try {
+    const bytes = atob(s.png)
+    if (bytes.length < 33 || btoa(bytes) !== s.png || ![137, 80, 78, 71, 13, 10, 26, 10].every((b, i) => bytes.charCodeAt(i) === b)) return undefined
+    const uint32 = (offset: number) => Array.from({ length: 4 }, (_, i) => bytes.charCodeAt(offset + i)).reduce((n, b) => n * 256 + b, 0)
+    if (uint32(8) !== 13 || bytes.slice(12, 16) !== 'IHDR' || uint32(16) !== s.width || uint32(20) !== s.height) return undefined
+    return { png: s.png, width: s.width, height: s.height, pageIndex: s.pageIndex }
+  } catch { return undefined }
+}
 export const COUNT_COLORS = ['#E60012', '#FF7F00', '#FFD400', '#8FD400', '#00A040', '#00B8A9', '#00B7EB', '#0068B7', '#1D2088', '#7B2CBF', '#E4007F', '#FF66B2', '#A0522D', '#808000', '#606060', '#000000', '#FF4D4D', '#FFB347', '#FFF04D', '#66E066', '#66D9FF', '#6699FF', '#B388FF', '#FF99CC'] as const
 export function countRgb(hex: string): RGB { return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255) as RGB }
 export function countHex(rgb: RGB): string { return '#' + rgb.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('').toUpperCase() }
 export function sameCountAppearance(a: CountStyle, b: CountStyle): boolean { return a.shape === b.shape && a.fill === b.fill && countHex(a.color) === countHex(b.color) }
-export function nextCountStyle(fixtures: readonly CountFixture[]): CountStyle {
-  const key = (s: CountStyle) => `${s.shape}:${s.fill}:${countHex(s.color)}`
-  const used = new Set(fixtures.map(f => key(f.style)))
-  for (let i = 0; i < 840; i++) {
-    const style: CountStyle = { shape: COUNT_SHAPES[i % 14], color: countRgb(COUNT_COLORS[(i * 7) % 24]), fill: COUNT_FILLS[Math.floor(i / 14) % 5], size: 10, opacity: .8, showCode: true }
-    if (!used.has(key(style))) return style
+type CountCandidate = { shape: CountShape; fill: CountFill; hex: string; key: string }
+let countCandidates: CountCandidate[] | undefined
+// Every combination once, in the tie-break order. Built on first use and reused.
+function allCountCandidates(): CountCandidate[] {
+  if (countCandidates) return countCandidates
+  const list: CountCandidate[] = [], seen = new Set<string>()
+  const add = (shape: CountShape, fill: CountFill, hex: string) => {
+    const key = `${shape}:${fill}:${hex}`
+    if (!seen.has(key)) { seen.add(key); list.push({ shape, fill, hex, key }) }
   }
+  for (let i = 0; i < 840; i++) add(COUNT_SHAPES[i % 14], COUNT_FILLS[Math.floor(i / 14) % 5], COUNT_COLORS[(i * 7) % 24])
   // The prescribed sequence covers 840 combinations (shape/color parity is linked).
   // Continue with the remaining combinations so all 1,000 fixture slots are usable.
-  const previous = fixtures.at(-1)?.style
-  for (const fill of COUNT_FILLS) for (const shape of COUNT_SHAPES) for (const hex of COUNT_COLORS) {
-    const style: CountStyle = { shape, fill, color: countRgb(hex), size: 10, opacity: .8, showCode: true }
-    if (!used.has(key(style)) && (!previous || previous.shape !== shape && countHex(previous.color) !== hex)) return style
+  for (const fill of COUNT_FILLS) for (const shape of COUNT_SHAPES) for (const hex of COUNT_COLORS) add(shape, fill, hex)
+  return countCandidates = list
+}
+export function nextCountStyle(fixtures: readonly CountFixture[], excluded: readonly CountStyle[] = []): CountStyle {
+  const key = (s: CountStyle) => `${s.shape}:${s.fill}:${countHex(s.color)}`
+  const used = new Set([...fixtures.map(f => key(f.style)), ...excluded.map(key)])
+  const shapes = new Map<string, number>(), colors = new Map<string, number>(), fills = new Map<string, number>()
+  for (const { style } of fixtures) {
+    shapes.set(style.shape, (shapes.get(style.shape) ?? 0) + 1)
+    const hex = countHex(style.color)
+    colors.set(hex, (colors.get(hex) ?? 0) + 1)
+    fills.set(style.fill, (fills.get(style.fill) ?? 0) + 1)
   }
-  for (const fill of COUNT_FILLS) for (const shape of COUNT_SHAPES) for (const hex of COUNT_COLORS) {
-    const style: CountStyle = { shape, fill, color: countRgb(hex), size: 10, opacity: .8, showCode: true }
-    if (!used.has(key(style))) return style
+  let best: CountCandidate | undefined, bestScore = Infinity
+  for (const candidate of allCountCandidates()) {
+    if (used.has(candidate.key)) continue
+    const score = (shapes.get(candidate.shape) ?? 0) + (colors.get(candidate.hex) ?? 0) + (fills.get(candidate.fill) ?? 0)
+    if (score < bestScore) { best = candidate; bestScore = score; if (score === 0) break }
   }
-  throw new Error('印の組合せを割り当てられません。')
+  if (!best) throw new Error('印の組合せを割り当てられません。')
+  return { shape: best.shape, fill: best.fill, color: countRgb(best.hex), size: 10, opacity: .8, showCode: true }
 }
 export function parseCountFixtures(raw: string | null): CountFixture[] {
   try {
@@ -51,14 +82,15 @@ export function parseCountFixtures(raw: string | null): CountFixture[] {
         || !COUNT_SIZES.includes(s.size) || !COUNT_OPACITIES.includes(s.opacity) || typeof s.showCode !== 'boolean'
         || !Array.isArray(s.color) || s.color.length !== 3 || !s.color.every((v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1)) continue
       ids.add(f.id)
-      result.push({ id: f.id, name: f.name.trim(), code: f.code, category: f.category.trim(), memo: f.memo, order: f.order, style: { shape: s.shape, fill: s.fill, color: [...s.color] as RGB, size: s.size, opacity: s.opacity, showCode: s.showCode } })
+      const sample = parseCountFixtureSample(f.sample)
+      result.push({ id: f.id, name: f.name.trim(), code: f.code, category: f.category.trim(), memo: f.memo, order: f.order, ...(sample ? { sample } : {}), style: { shape: s.shape, fill: s.fill, color: [...s.color] as RGB, size: s.size, opacity: s.opacity, showCode: s.showCode } })
     }
     return result.sort((a, b) => a.order - b.order)
   } catch { return [] }
 }
 export function serializeCountFixtures(fixtures: readonly CountFixture[]): string {
   const raw = JSON.stringify({ version: 1, fixtures })
-  if (fixtures.length > MAX_COUNT_FIXTURES || new TextEncoder().encode(raw).length > MAX_COUNT_FIXTURE_BYTES || parseCountFixtures(raw).length !== fixtures.length) throw new Error('器具リストの値・件数・容量が上限を超えています。')
+  if (fixtures.length > MAX_COUNT_FIXTURES || fixtures.some(f => f.sample !== undefined && !parseCountFixtureSample(f.sample)) || new TextEncoder().encode(raw).length > MAX_COUNT_FIXTURE_BYTES || parseCountFixtures(raw).length !== fixtures.length) throw new Error('器具リストの値・件数・容量が上限を超えています。')
   return raw
 }
 export function readCountFixtures(doc: PDFDocument): CountFixture[] {

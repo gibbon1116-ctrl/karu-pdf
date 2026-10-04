@@ -44,6 +44,7 @@ export interface RenderRequest {
   renderScale: number
   deviceRect: DeviceRect | null
   excludeAnnotObjNums?: number[]
+  contentsOnly?: boolean
 }
 
 export interface CompareOptions {
