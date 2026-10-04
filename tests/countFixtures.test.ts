@@ -144,6 +144,40 @@ it('creates common SVG/PDF geometry for 14 shapes × 5 fills and bright-color ou
   expect(countMarkerData({ ...fixture().style, color: countRgb('#000000') }).bright).toBe(false)
 })
 
+it('fills double circles as a hollow ring for solid and half styles', () => {
+  const style = fixture().style, radius = style.size / 2
+  const doubleSolid = countMarkerData({ ...style, shape: 'doubleCircle', fill: 'solid' })
+  const circleSolid = countMarkerData({ ...style, shape: 'circle', fill: 'solid' })
+  const doubleHalf = countMarkerData({ ...style, shape: 'doubleCircle', fill: 'half' })
+  const signedArea = (polygon: (typeof doubleSolid.fills)[number]) => polygon.reduce((area, point, i) => {
+    const next = polygon[(i + 1) % polygon.length]
+    return area + point[0] * next[1] - next[0] * point[1]
+  }, 0) / 2
+  const windingNumber = (polygon: (typeof doubleSolid.fills)[number], point: [number, number]) => {
+    let winding = 0
+    for (let i = 0; i < polygon.length; i++) {
+      const [ax, ay] = polygon[i], [bx, by] = polygon[(i + 1) % polygon.length]
+      const isLeft = (bx - ax) * (point[1] - ay) - (point[0] - ax) * (by - ay)
+      if (ay <= point[1]) {
+        if (by > point[1] && isLeft > 0) winding++
+      } else if (by <= point[1] && isLeft < 0) winding--
+    }
+    return winding
+  }
+  const winding = (polygons: typeof doubleSolid.fills, point: [number, number]) => polygons.reduce((sum, polygon) => sum + windingNumber(polygon, point), 0)
+
+  expect(doubleSolid.fills).toHaveLength(2)
+  expect(doubleSolid.fills[0]).toEqual(doubleSolid.outline[0])
+  expect(doubleSolid.fills[1]).toEqual([...doubleSolid.outline[1]].reverse())
+  expect(signedArea(doubleSolid.fills[0]) * signedArea(doubleSolid.fills[1])).toBeLessThan(0)
+  expect(winding(doubleSolid.fills, [0, 0])).toBe(0)
+  expect(winding(doubleSolid.fills, [radius * .84, 0])).not.toBe(0)
+  expect(winding(circleSolid.fills, [0, 0])).not.toBe(0)
+  expect(winding(doubleHalf.fills, [0, 0])).toBe(0)
+  expect(winding(doubleHalf.fills, [-radius * .84, 0])).not.toBe(0)
+  expect(winding(doubleHalf.fills, [radius * .84, 0])).toBe(0)
+})
+
 it('exports page/all totals, nonempty-page columns and zero rows with BOM, CRLF and formula suppression', () => {
   const f = fixture(), zero = { ...fixture('b'), code: '@Z', name: '=ゼロ', category: '+分類', order: 1 }
   const csv = createCountCsv([{ pageIndex: 0, count: { version: 2, id: '1', fixtureId: 'a' } }, { pageIndex: 2, count: { version: 2, id: '2', fixtureId: 'a' } }, { pageIndex: 2, count: { version: 2, id: '3', fixtureId: 'a' } }], [f, zero], 2)

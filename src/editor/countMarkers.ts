@@ -30,9 +30,16 @@ function leftHalf(points: Polygon): Polygon {
 }
 export function countMarkerData(style: CountStyle, x = 0, y = 0): CountMarkerData {
   const r = style.size / 2, outer = polygon(style.shape, r), outline = [outer], fills: Polygon[] = [], strokes: Polygon[] = []
-  if (style.shape === 'doubleCircle') outline.push(regular(48, r * .68))
-  if (style.fill === 'solid') fills.push(outer)
-  if (style.fill === 'half') fills.push(leftHalf(outer))
+  const inner = style.shape === 'doubleCircle' ? regular(48, r * .68) : undefined
+  if (inner) outline.push(inner)
+  if (style.fill === 'solid') {
+    if (inner) fills.push(outer, [...inner].reverse())
+    else fills.push(outer)
+  }
+  if (style.fill === 'half') {
+    if (inner) fills.push(leftHalf(outer), leftHalf(inner).reverse())
+    else fills.push(leftHalf(outer))
+  }
   if (style.fill === 'dot') fills.push(regular(24, r * .22))
   if (style.fill === 'hatch') for (let offset = -r * 2; offset < r * 2; offset += Math.max(1.5, style.size / 5)) {
     const hits: Point[] = []
