@@ -123,7 +123,7 @@ button, input { font: inherit; }
 .split-sync { display: flex; align-items: center; gap: 3px; }
 .split-header small { flex-basis: 100%; color: #705315; }
 .side-panel { position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 220px; max-width: 480px; min-height: 0; background: #ededed; border-right: 1px solid #aaa; }
-.side-panel-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid #aaa; background: #e4e4e4; }
+.side-panel-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #aaa; background: #e4e4e4; }
 .side-panel-tabs button { min-width: 0; height: 34px; padding: 0 2px; border: 0; border-right: 1px solid #c4c4c4; background: transparent; font-size: 11px; white-space: normal; }
 .side-panel-tabs button[aria-selected="true"] { color: #064f91; background: #fff; font-weight: 700; box-shadow: inset 0 -2px #1769aa; }
 .side-panel-content { min-width: 0; min-height: 0; overflow: hidden; }
@@ -499,26 +499,67 @@ button, input { font: inherit; }
 .csv-export-dialog fieldset > label { display: block; margin: 6px 0; }
 .csv-export-dialog input[type="number"] { width: 6em; margin-left: 8px; }
 /* 器具リスト: 書式は追加・編集時だけ開く。 */
-.fixture-panel { padding: 10px; }
-.fixture-count-summary { font-size: 16px; font-weight: 600; line-height: 1.6; }
-.fixture-actions, .fixture-fields { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-.fixture-panel > label, .fixture-dialog form > label { display: block; margin: 8px 0; }
+.fixture-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; padding: 8px; }
+.fixture-panel-controls { flex: 0 0 auto; }
+.fixture-panel-controls h2 { margin: 0 0 6px; font-size: 16px; }
+.fixture-count-summary { margin: 0 0 6px; padding: 6px; border: 1px solid #b9cde2; border-radius: 4px; background: #fff; font-size: 13px; font-weight: 600; line-height: 1.5; }
+.fixture-summary-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.fixture-summary-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fixture-summary-name .fixture-swatch { width: 24px; height: 24px; }
+.fixture-summary-totals { display: block; font-size: 11px; }
+.fixture-summary-totals > span { white-space: nowrap; }
+.fixture-summary-totals strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.fixture-actions { display: grid; gap: 4px; margin: 6px 0; }
+.fixture-action-row { display: flex; flex-wrap: wrap; gap: 3px; }
+.fixture-action-row button, .fixture-panel-controls > button { padding: 2px 4px; font-size: 12px; }
+.fixture-fields { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.fixture-panel-controls > label { display: block; margin: 6px 0; font-size: 12px; }
 .fixture-panel input[type="search"], .fixture-dialog input:not([type="checkbox"]):not([type="color"]), .fixture-dialog textarea { width: 100%; box-sizing: border-box; }
+.fixture-groups { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; margin-top: 6px; }
+.fixture-list-heading { position: sticky; z-index: 1; top: 0; display: grid; grid-template-columns: 22px 22px 48px minmax(0, 1fr) 34px 40px; gap: 3px; align-items: center; min-height: 24px; border-bottom: 1px solid #aaa; background: #ededed; font-size: 10px; }
+.fixture-list-heading > span:nth-last-child(-n+2) { text-align: right; font-size: 8.5px; white-space: nowrap; }
 .fixture-groups ul { margin: 0; padding: 0; list-style: none; }
 .fixture-groups li, .fixture-category { display: flex; align-items: center; gap: 3px; }
+.fixture-groups li { height: 28px; }
+.fixture-groups li > button:first-child { display: flex; align-items: center; justify-content: center; flex: 0 0 22px; width: 22px; height: 22px; padding: 0; }
 .fixture-category { background: #eef3f9; padding: 4px 0; margin-top: 8px; }
 .fixture-category button:first-child { flex: 1; text-align: left; }
 .fixture-groups li.selected { background: #dcecff; outline: 1px solid #0068b7; }
-.fixture-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px 34px; gap: 3px; align-items: center; flex: 1; min-width: 0; text-align: left; border: 0; background: transparent; padding: 5px 2px; }
-.fixture-row-name { overflow-wrap: anywhere; }
+.fixture-row { display: grid; grid-template-columns: 22px 48px minmax(0, 1fr) 34px 40px; gap: 3px; align-items: center; flex: 1; min-width: 0; height: 28px; text-align: left; border: 0; background: transparent; padding: 0; font-size: 12px; }
+.fixture-row-code, .fixture-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fixture-row-code { font-weight: 700; }
+.fixture-row-count { text-align: right; font-variant-numeric: tabular-nums; }
 .fixture-swatch { width: 28px; height: 28px; flex-shrink: 0; vertical-align: middle; }
+.fixture-row .fixture-swatch { width: 22px; height: 22px; }
 .fixture-preview { width: 100%; height: 100px; background: white; border: 1px solid #ddd; }
 .fixture-dialog { width: min(560px, 90vw); max-height: 88vh; overflow: auto; }
+.fixture-editor-dialog { width: min(860px, 95vw); max-width: 95vw; max-height: 92vh; overflow: hidden; padding: 0; border: 1px solid #888; }
+.fixture-editor-dialog form { display: flex; flex-direction: column; max-height: calc(92vh - 2px); overflow: hidden; }
+.fixture-editor-dialog h2 { flex: 0 0 auto; margin: 0; padding: 14px 16px 10px; font-size: 18px; }
+.fixture-dialog-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; min-height: 0; overflow: auto; padding: 0 16px 12px; }
+.fixture-dialog-details, .fixture-dialog-appearance { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.fixture-dialog-details > label, .fixture-dialog-appearance label { display: block; font-size: 13px; }
+.fixture-dialog-details input:not([type="checkbox"]), .fixture-dialog-details textarea { display: block; padding: 4px 6px; }
+.fixture-dialog-details textarea { height: 64px; }
+.fixture-dialog-details .fixture-fields { margin: 0; gap: 12px; }
+.fixture-dialog-details .fixture-fields label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.fixture-dialog-details .fixture-preview { flex: 0 0 auto; height: 120px; }
+.fixture-dialog-details p { margin: 0; font-size: 13px; }
+.fixture-dialog-appearance fieldset { min-width: 0; margin: 0; padding: 8px 10px; }
+.fixture-dialog-appearance input[type="color"] { display: block; margin-top: 4px; }
+.fixture-editor-dialog .dialog-actions { display: flex; flex: 0 0 auto; justify-content: flex-end; gap: 8px; margin: 0; padding: 10px 16px; border-top: 1px solid #ccc; background: #fff; }
+.fixture-editor-dialog .dialog-actions button { padding: 5px 16px; }
 .fixture-shapes, .fixture-colors { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
 .fixture-shapes button { padding: 2px; background: white; }
 .fixture-shapes svg { width: 32px; height: 32px; }
+.fixture-dialog-appearance .fixture-shapes button { min-width: 0; }
+.fixture-dialog-appearance .fixture-shapes svg { width: 100%; max-width: 32px; }
+.fixture-fills { grid-template-columns: repeat(5, 1fr); }
 .fixture-colors { grid-template-columns: repeat(12, 1fr); }
 .fixture-colors button { height: 26px; min-width: 0; border: 1px solid #aaa; }
 .fixture-shapes button[aria-pressed="true"], .fixture-colors button[aria-pressed="true"] { outline: 2px solid #0068b7; outline-offset: 1px; }
 .fixture-presets { max-height: 50vh; overflow: auto; margin: 10px 0; }
 .fixture-presets label { display: flex; align-items: center; gap: 5px; padding: 5px; }
+@media (max-width: 639px) {
+  .fixture-dialog-body { grid-template-columns: minmax(0, 1fr); }
+}

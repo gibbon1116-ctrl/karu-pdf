@@ -41,6 +41,7 @@ const tabs: Array<{ id: SidePanelTab; label: string }> = [
 
 export function SidePanel(props: Props) {
   const [width, setWidth] = useState(initialWidth)
+  const displayedWidth = props.activeTab === 'fixtures' ? Math.max(width, 340) : width
   const widthRef = useRef(width)
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
@@ -74,14 +75,14 @@ export function SidePanel(props: Props) {
   else if (props.activeTab === 'fixtures') content = <Suspense fallback={<p>器具リストを開いています…</p>}><FixturePanel key={props.session.docId} session={props.session} pool={props.pool} /></Suspense>
   else content = <AnnotationListPanel session={props.session} pool={props.pool} onSelect={props.onSelectAnnotation} onEdit={props.onEditAnnotation} />
 
-  return <aside className="side-panel" style={{ width }} aria-label="左の欄" data-testid="side-panel">
+  return <aside className="side-panel" style={{ width: displayedWidth }} aria-label="左の欄" data-testid="side-panel">
     <div className="side-panel-tabs" role="tablist" aria-label="左の欄">
       {tabs.map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={props.activeTab === tab.id} onClick={() => props.onTabChange(tab.id)}>{tab.label}</button>)}
     </div>
     <div className="side-panel-content" role="tabpanel">{content}</div>
-    <div className="side-panel-resizer" role="separator" aria-label="左の欄の幅" aria-orientation="vertical" aria-valuemin={MIN_WIDTH} aria-valuemax={MAX_WIDTH} aria-valuenow={Math.round(width)} onPointerDown={(event) => {
+    <div className="side-panel-resizer" role="separator" aria-label="左の欄の幅" aria-orientation="vertical" aria-valuemin={MIN_WIDTH} aria-valuemax={MAX_WIDTH} aria-valuenow={Math.round(displayedWidth)} onPointerDown={(event) => {
       event.preventDefault()
-      dragRef.current = { startX: event.clientX, startWidth: width }
+      dragRef.current = { startX: event.clientX, startWidth: displayedWidth }
     }} />
   </aside>
 }

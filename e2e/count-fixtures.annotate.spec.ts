@@ -27,6 +27,50 @@ async function select(page: Page, name: string) {
   await expect(page.getByRole('button', { name: '個数カウント', exact: true })).toHaveAttribute('aria-pressed', 'true')
 }
 
+test('fixture layout keeps counts and add actions in view at 1440x900 and restores the saved panel width', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.addInitScript(() => localStorage.setItem('karu-pdf:side-panel-width', '260'))
+  await open(page)
+  const panel = page.getByTestId('side-panel')
+  expect((await panel.boundingBox())!.width).toBeGreaterThanOrEqual(340)
+  expect(await page.evaluate(() => localStorage.getItem('karu-pdf:side-panel-width'))).toBe('260')
+  await page.getByRole('tab', { name: 'ページ', exact: true }).click()
+  const originalWidth = (await panel.boundingBox())!.width
+  expect(originalWidth).toBeCloseTo(260, 0)
+  await page.getByRole('tab', { name: '器具', exact: true }).click()
+  expect((await panel.boundingBox())!.width).toBeGreaterThanOrEqual(340)
+  await page.getByRole('tab', { name: '検索', exact: true }).click()
+  expect((await panel.boundingBox())!.width).toBeCloseTo(originalWidth, 0)
+  expect(await page.evaluate(() => localStorage.getItem('karu-pdf:side-panel-width'))).toBe('260')
+  await page.getByRole('tab', { name: '器具', exact: true }).click()
+
+  await page.getByRole('button', { name: '見本から追加', exact: true }).click()
+  await page.getByLabel('見本の分野', { exact: true }).selectOption('電気設備')
+  await page.getByRole('button', { name: '選んだ器具を追加', exact: true }).click()
+  await select(page, 'DL ダウンライト')
+  await clickPoint(page, 0, 80, 90)
+  const fixturePanel = page.getByTestId('fixture-panel')
+  const row = fixturePanel.getByRole('button', { name: 'DL ダウンライト', exact: true }).locator('..')
+  expect((await row.boundingBox())!.height).toBeLessThanOrEqual(40)
+  const summary = fixturePanel.locator('.fixture-count-summary')
+  await expect(summary).toContainText('表示中の図面（p.1）: 1個 ／ 全図面: 1個')
+  await expect(summary).toBeInViewport({ ratio: 1 })
+  const groups = fixturePanel.locator('.fixture-groups')
+  expect(await groups.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
+  await groups.evaluate(el => { el.scrollTop = el.scrollHeight })
+  await expect.poll(() => groups.evaluate(el => Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop))).toBeLessThanOrEqual(1)
+  await expect(summary).toBeInViewport({ ratio: 1 })
+
+  await page.getByRole('button', { name: '器具を追加', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '器具を追加', exact: true })
+  await expect(dialog).toBeVisible()
+  // click() は対象を自動スクロールするため、操作前に画面内か確かめる。
+  await expect(dialog.getByRole('button', { name: '追加する', exact: true })).toBeInViewport({ ratio: 1 })
+  await expect(dialog.getByLabel('印の見本', { exact: true })).toBeInViewport({ ratio: 1 })
+  expect(await dialog.locator('.fixture-dialog-body').evaluate(el => el.scrollTop)).toBe(0)
+  await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
+})
+
 test('presets count across pages, visibility excludes hit testing, and quantity CSV includes zero fixtures', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: '見本から追加', exact: true }).click()
