@@ -34,14 +34,15 @@
 - 集計は書き込み一覧の「個数カウント」の絞り込みにだけ出る（`src/app/AnnotationListPanel.tsx:137-140`）。CSV は `createCountCsv`（種類・ページ・個数）。
 - 左の欄のタブは `'pages' | 'search' | 'annotations'`（`src/app/documentModel.ts:20`、`src/app/SidePanel.tsx:37`）。
 - 文書全体の設定をPDFに保存する前例: ヘッダー・フッターの設定は、カタログ（`Root`）の `KaruHeaderFooter` に JSON 文字列で保存している（`src/core/headerFooter.ts`）。
-- 種類を選んで書き出すCSV（`src/app/CsvExportDialog.tsx`、SPEC-04c で作成）に「個数カウント」の種類がある。
+- 種類を選んで書き出すCSV（`src/app/CsvExportDialog.tsx` と `src/app/annotationCsv.ts` の `createCsv`、SPEC-04c で作成）に「個数カウント」の種類があり、列「個数の種類」に `group` を出している。
+- 変更記録と本文文字の修正は削除済み（SPEC-04c、SPEC-04g）。旧版の変更記録は `legacyChange` として表示と削除だけできる。個数カウントの作り直しでは触れない。
 
 ## 対象
 
 - 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
 - 変更してよいファイル: `src/core/counts.ts`、`src/core/annotations.ts`（個数カウントの保存・読込・外観と、器具リストの保存だけ）、`src/editor/AnnotationStore.ts`、`src/editor/AnnotationLayer.tsx`、`src/editor/formatDefaults.ts`、`src/app/FormatPanel.tsx`（個数カウントの部分だけ）、`src/app/AnnotationListPanel.tsx`（個数の集計の部分だけ）、`src/app/annotationCsv.ts`、`src/app/CsvExportDialog.tsx`（個数カウントの列だけ）、`src/app/SidePanel.tsx`、`src/app/documentModel.ts`、`src/App.tsx`（器具リストのタブ・道具・保存の接続だけ）、`src/viewer/PageView.tsx`・`src/viewer/Viewer.tsx`（印の表示の絞り込みの接続だけ）、`src/worker/pdf.worker.ts`・`src/worker/protocol.ts`・`src/client/PdfWorkerPool.ts`（器具リストの読み書きの要求だけ）、`src/app/HelpDialog.tsx`、`src/styles.css`、`tests/`、`e2e/`
 - 新しく作ってよいファイル: `src/core/countFixtures.ts`（器具リストのデータ・検証・既定の形と色・見本）、`src/app/FixturePanel.tsx`（器具リストのタブ）、`src/app/FixtureDialog.tsx`（追加・編集の画面）、`src/app/FixturePresetDialog.tsx`（見本から追加）、`src/editor/countMarkers.ts`（印の図形の描き方。画面とPDFの外観で共用）、試験ファイル
-- 変更しないファイル: 上記以外。指摘・変更記録の処理（SPEC-04c の範囲）は変えない。`package.json`、`package-lock.json`、`scripts/`、`docs/`、`test-data/`、`dist*/`、`release/`、`work/`
+- 変更しないファイル: 上記以外。指摘の処理（SPEC-04c で整理済み）は変えない。`package.json`、`package-lock.json`、`scripts/`、`docs/`、`test-data/`、`dist*/`、`release/`、`work/`
 
 ## 事前確認
 
@@ -183,7 +184,7 @@
 ## 禁止事項
 
 - 元データ（`test-data/`、`bench-results/`、`dist*/`、`release/`、`work/`）を変更しないこと
-- 「対象」に挙げていないファイルを変更しないこと。指摘・変更記録の処理を変えないこと
+- 「対象」に挙げていないファイルを変更しないこと。指摘の処理を変えないこと
 - 旧形式の印を持つPDFを、利用者の操作なしに書き換えないこと
 - 通常の読込に器具リストの解析や印の描画の処理を足さないこと
 - 指示していない仕様変更・リファクタを行わないこと
