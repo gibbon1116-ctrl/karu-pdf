@@ -171,7 +171,6 @@ export interface ApplyEditsRequest {
 }
 
 export interface PrepareOutputRequest {
-  correction?: import('../core/textCorrection').TextCorrection
   type: 'prepareOutput'
   requestId: number
   docId: string

@@ -981,10 +981,6 @@ export function AnnotationLayer(props: Props) {
       top: `${Math.max(0, Math.min(100, (selectionBounds(textSelection.quads)![1] / props.pageSize.height) * 100))}%`,
     }}>
       <button type="button" onClick={copySelectedText}>コピー</button>
-      <button type="button" onClick={() => {
-        const rect = selectionBounds(textSelection.quads)
-        if (rect) document.dispatchEvent(new CustomEvent('karu-pdf:text-correction', { detail: { docId: props.docId, pageIndex: props.pageIndex, rect, originalText: textSelection.text } }))
-      }}>文字を修正…</button>
       <button type="button" onClick={() => createMarkup('textHighlight')}><ToolIcon tool="textHighlight" />ハイライト</button>
       <button type="button" onClick={() => createMarkup('underline')}><ToolIcon tool="underline" />下線</button>
       <button type="button" onClick={() => createMarkup('strikeout')}><ToolIcon tool="strikeout" />取り消し線</button>

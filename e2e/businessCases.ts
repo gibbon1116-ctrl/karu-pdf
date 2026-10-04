@@ -1,5 +1,4 @@
 import mupdf from 'mupdf'
-import { extractTextLines } from '../src/core/textExtract'
 import { expect, test, type Page } from '@playwright/test'
 
 function pdf(word = 'AAAA'): Buffer {
@@ -234,25 +233,12 @@ export function businessCases(url: string) {
     await page.getByLabel('書き込みの種類').selectOption('issueDone')
     await expect(panel.locator('.annotation-rows li')).toHaveCount(1)
   })
-  test('試用版の本文修正コピーと個数カウントを配布形態ごとに保存できる', async ({page}) => {
+  test('試用版の個数カウントを配布形態ごとに保存できる', async ({page}) => {
     await open(page,url)
-    const doc=new mupdf.PDFDocument(pdf()), nativePage=doc.loadPage(0), list=nativePage.toDisplayList(false), text=list.toStructuredText('preserve-whitespace')
-    let line: ReturnType<typeof extractTextLines>['lines'][number]
-    try {line=extractTextLines(text,nativePage.getBounds(),0).lines.find(l=>l.text.includes('SECRET AAAA'))!}
-    finally {text.destroy();list.destroy();nativePage.destroy();doc.destroy()}
-    await page.evaluate(line=>document.dispatchEvent(new CustomEvent('karu-pdf:text-correction',{detail:{docId:window.__karu!.listTabs()[0].docId,pageIndex:0,rect:line.rect,originalText:line.text}})),line!)
-    const dialog=page.getByRole('dialog',{name:'既存文字の修正'})
-    await dialog.getByLabel('修正文',{exact:true}).fill('新図面注記');await dialog.getByLabel('修正文の文字サイズ').fill('8')
-    await dialog.getByRole('button',{name:'修正したコピーを開く'}).click()
-    await expect.poll(()=>page.evaluate(()=>window.__karu!.listTabs().length)).toBe(2)
-    await expect(dialog).not.toBeVisible()
     await page.getByRole('button',{name:'計測▼',exact:true}).click();await page.getByRole('menuitemcheckbox',{name:'個数カウント',exact:true}).click()
     await expect(page.getByRole('button',{name:'個数カウント',exact:true})).toHaveAttribute('aria-pressed','true')
     const p=await point(page,80,130);await page.mouse.click(p.x,p.y)
     const saved=await page.evaluate(async()=>Array.from((await window.__karu!.saveToBytes())!))
-    const result=new mupdf.PDFDocument(new Uint8Array(saved)), savedPage=result.loadPage(0), savedList=savedPage.toDisplayList(false), savedText=savedList.toStructuredText('')
-    try {expect(savedText.asText()).toContain('新図面注記');expect(savedText.asText()).not.toContain('SECRET AAAA')}
-    finally {savedText.destroy();savedList.destroy();savedPage.destroy();result.destroy()}
     await page.evaluate(b=>window.__karu!.openBytes(b,'試用機能保存.pdf'),saved)
     await expect.poll(()=>page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count?.group==='照明器具').length)).toBe(1)
   })

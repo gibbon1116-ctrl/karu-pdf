@@ -542,9 +542,9 @@ export class PdfWorkerPool {
     }
   }
 
-  async prepareOutput(docId: string, edits: AnnotationEdit[], bake: boolean, correction?: import('../core/textCorrection').TextCorrection): Promise<PreparedOutputResult> {
+  async prepareOutput(docId: string, edits: AnnotationEdit[], bake: boolean): Promise<PreparedOutputResult> {
     const response = await this.request<OutputPreparedResponse>(this.slots[0], (requestId) => ({
-      type: 'prepareOutput', requestId, docId, edits, bake, correction,
+      type: 'prepareOutput', requestId, docId, edits, bake,
     }))
     return {
       bytes: new Uint8Array(response.bytes),

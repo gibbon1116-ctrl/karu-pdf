@@ -58,8 +58,6 @@ import type { PageLayoutCard } from './core/pageOps'
 import { registerPwa } from './pwa'
 import './styles.css'
 
-const TextCorrectionDialog = lazy(() => import('./app/TextCorrectionDialog'))
-
 declare global {
   interface Window {
     __karu?: {
@@ -250,7 +248,6 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false)
   const [privacyOpen, setPrivacyOpen] = useState(false)
   const [sheetSizesOpen, setSheetSizesOpen] = useState(false)
-  const [textCorrection, setTextCorrection] = useState<(Omit<import('./core/textCorrection').TextCorrection, 'text'|'fontSize'> & { docId: string }) | null>(null)
   const [compareDialog, setCompareDialog] = useState(false)
   const [comparison, setComparison] = useState<{ old: DocumentSession; next: DocumentSession } | null>(null)
   const [rasterizeOpen, setRasterizeOpen] = useState(false)
@@ -899,17 +896,6 @@ export default function App() {
     if (tab === 'search' && focusSearch) setFocusSearchVersion((value) => value + 1)
     refreshTabs()
   }, [panels, refreshTabs, updatePanels])
-
-  useEffect(() => {
-    const correct = (event: Event) => {
-      const input = (event as CustomEvent<NonNullable<typeof textCorrection>>).detail
-      const session = activeRef.current
-      if (!session || session.docId !== input?.docId || session.editRestriction || saving || organize || comparison) return
-      setTextCorrection(input)
-    }
-    document.addEventListener('karu-pdf:text-correction', correct)
-    return () => document.removeEventListener('karu-pdf:text-correction', correct)
-  }, [saving, organize, comparison])
 
   const updateFormatDefaults = useCallback((next: FormatDefaults) => {
     setFormatDefaults(next)
@@ -1699,13 +1685,6 @@ export default function App() {
         }}
         onSave={(scale, all, recalculate) => { scaleDialog.session.annotationStore.setScale(scaleTargets(all), scale, recalculate); setScaleDialog(null); setScaleTracing(false); refreshTabs() }} />}
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
-      {textCorrection && active?.docId === textCorrection.docId && !saving && !organize && !comparison && <ErrorBoundary resetKey={active.docId} onError={reason => { setError(String(reason)); setTextCorrection(null) }} fallback={() => <p role="alert">文字修正の画面を開けませんでした。</p>}>
-        <Suspense fallback={<p role="status">文字修正の画面を開いています…</p>}><TextCorrectionDialog input={textCorrection} session={active} pool={pool} onClose={() => setTextCorrection(null)} onComplete={async (bytes,name) => {
-          if (tabs.list().length >= MAX_OPEN_DOCUMENTS) throw new Error('タブを1つ閉じてから修正したコピーを開いてください。')
-          await openBuffer(copyToArrayBuffer(bytes),name,null,true)
-          setTextCorrection(null)
-        }} /></Suspense>
-      </ErrorBoundary>}
       {compareDialog && active && <CompareDialog documents={documents} activeId={active.docId} onOpen={() => void pickFile()} onClose={() => setCompareDialog(false)} onCompare={(old, next) => {
         void (async () => {
           await viewerRef.current?.commitEditor()
