@@ -93,7 +93,9 @@ describe('applyEdits のページ単位の注釈索引', () => {
         expect(annotations.map(item => item.rect)).toEqual(edits.map(edit => 'rect' in edit ? edit.rect : null))
       })
     } finally { doc.destroy() }
-  }, 30_000)
+  // Squares still get their appearance from MuPDF's update(), whose cost grows with the
+  // annotations on the page; 2,000 of them take about 24 s alone and more in a parallel run.
+  }, 120_000)
 
   it('ページを交互に更新しても、索引をページごと・呼出しごとに1回作る', () => {
     const doc = makeDocument(2)
