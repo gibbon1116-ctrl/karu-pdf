@@ -459,15 +459,6 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
   }
 }
 
-function findAnnotation(page: PDFPage, wantedObjectNumber: number): PDFAnnotation | null {
-  let found: PDFAnnotation | null = null
-  for (const annotation of page.getAnnotations()) {
-    if (found === null && objectNumber(annotation) === wantedObjectNumber) found = annotation
-    else annotation.destroy()
-  }
-  return found
-}
-
 function vertexBounds(points: readonly Point[]): Rect {
   return [Math.min(...points.map(p => p[0])), Math.min(...points.map(p => p[1])), Math.max(...points.map(p => p[0])), Math.max(...points.map(p => p[1]))]
 }
@@ -1382,14 +1373,39 @@ export function applyEdits(
   const result: ApplyResult = { created: [], replacedCharacters: 0, unsupportedCharacters: [], errors: [] }
   const unsupportedCharacters = new Set<string>()
   const appearances: AppearanceTask[] = []
+  const pages = new Map<number, PDFPage>()
+  const annotationIndexes = new Map<number, Map<number, PDFAnnotation>>()
+  // Keep ownership separate from the index: deleted annotations still need releasing.
+  const cachedAnnotations = new Set<PDFAnnotation>()
 
+  function lookupAnnotation(pageIndex: number, objNum: number): PDFAnnotation | null {
+    let index = annotationIndexes.get(pageIndex)
+    if (!index) {
+      const annotations = pages.get(pageIndex)!.getAnnotations()
+      // Own all handles before reading object numbers, including on a lookup failure.
+      for (const annotation of annotations) cachedAnnotations.add(annotation)
+      index = new Map<number, PDFAnnotation>()
+      for (const annotation of annotations) {
+        const number = objectNumber(annotation)
+        if (!index.has(number)) index.set(number, annotation)
+      }
+      annotationIndexes.set(pageIndex, index)
+    }
+    return index.get(objNum) ?? null
+  }
+
+  try {
   for (const [editIndex, edit] of edits.entries()) {
     let page: PDFPage | undefined
     let annotation: PDFAnnotation | null = null
     let keepForAppearance = false
     try {
       if (edit.kind === 'setCountFixtures') { writeCountFixtures(doc, edit.fixtures); continue }
-      page = doc.loadPage(edit.pageIndex)
+      page = pages.get(edit.pageIndex)
+      if (!page) {
+        page = doc.loadPage(edit.pageIndex)
+        pages.set(edit.pageIndex, page)
+      }
       if (edit.kind === 'setPageScale') {
         writePageScale(doc, page, edit.scale)
         continue
@@ -1411,7 +1427,7 @@ export function applyEdits(
       }
       if (edit.kind === 'createCloud' || edit.kind === 'updateCloud') {
         const type = edit.shape === 'square' ? 'Square' : 'Polygon'
-        annotation = edit.kind === 'createCloud' ? page.createAnnotation(type) : findAnnotation(page, edit.objNum)
+        annotation = edit.kind === 'createCloud' ? page.createAnnotation(type) : lookupAnnotation(edit.pageIndex, edit.objNum)
         if (!annotation || annotation.getType() !== type) throw new Error('雲の注釈が見つかりません。')
         configureCloud(doc, page, annotation, edit)
         if (edit.kind === 'createCloud') result.created.push(objectNumber(annotation))
@@ -1421,7 +1437,7 @@ export function applyEdits(
         if (!parseIssue(JSON.stringify(edit.issue))) throw new Error('指摘の番号または状態が不正です。')
         const width = edit.rect[2] - edit.rect[0], height = edit.rect[3] - edit.rect[1]
         if (width <= 0 || height <= 0) throw new Error('指摘の大きさが不正です。')
-        annotation = edit.kind === 'createIssue' ? page.createAnnotation('Stamp') : findAnnotation(page, edit.objNum)
+        annotation = edit.kind === 'createIssue' ? page.createAnnotation('Stamp') : lookupAnnotation(edit.pageIndex, edit.objNum)
         if (!annotation || annotation.getType() !== 'Stamp') throw new Error('指摘の注釈が見つかりません。')
         annotation.setFlags(annotation.getFlags() | 4); annotation.setRect(edit.rect)
         annotation.setColor(edit.color); annotation.setOpacity(1); annotation.setContents(edit.text)
@@ -1445,7 +1461,7 @@ export function applyEdits(
         const type = edit.measure.kind === 'distance' ? 'Line' : edit.measure.kind === 'perimeter' ? 'PolyLine' : 'Polygon'
         if (edit.vertices.length < (type === 'Polygon' ? 3 : 2) || (type === 'Line' && edit.vertices.length !== 2)
           || edit.vertices.some(p => p.some(n => !Number.isFinite(n))) || !Number.isFinite(edit.measure.mmPerPoint) || edit.measure.mmPerPoint <= 0) throw new Error('計測の点または縮尺が不正です。')
-        annotation = isNew ? page.createAnnotation(type) : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
+        annotation = isNew ? page.createAnnotation(type) : lookupAnnotation(edit.pageIndex, 'objNum' in edit ? edit.objNum : -1)
         if (!annotation || annotation.getType() !== type) throw new Error('計測の注釈が見つかりません。')
         const rect = measureBounds(edit.vertices, edit.measure.kind, edit.text, edit.fontSize)
         annotation.setFlags(annotation.getFlags() | 4)
@@ -1481,9 +1497,10 @@ export function applyEdits(
         continue
       }
       if (edit.kind === 'delete') {
-        annotation = findAnnotation(page, edit.objNum)
+        annotation = lookupAnnotation(edit.pageIndex, edit.objNum)
         if (!annotation) throw new Error(`注釈オブジェクト ${edit.objNum} が見つかりません。`)
         page.deleteAnnotation(annotation)
+        annotationIndexes.get(edit.pageIndex)!.delete(edit.objNum)
         continue
       }
 
@@ -1491,7 +1508,7 @@ export function applyEdits(
         const isNew = edit.kind === 'createSquare'
         annotation = isNew
           ? page.createAnnotation('Square')
-          : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
+          : lookupAnnotation(edit.pageIndex, 'objNum' in edit ? edit.objNum : -1)
         if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
         if (!isNew && annotation.getType() !== 'Square') throw new Error('更新対象は Square ではありません。')
         configureSquare(annotation, edit.rect, edit.color, edit.borderWidth, edit.interiorColor, edit.opacity)
@@ -1503,7 +1520,7 @@ export function applyEdits(
         const isNew = edit.kind === 'createLine'
         annotation = isNew
           ? page.createAnnotation('Line')
-          : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
+          : lookupAnnotation(edit.pageIndex, 'objNum' in edit ? edit.objNum : -1)
         if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
         if (!isNew && annotation.getType() !== 'Line') throw new Error('更新対象は Line ではありません。')
         configureLine(annotation, edit.line, edit.color, edit.borderWidth, edit.lineEnding, edit.opacity ?? 1)
@@ -1516,7 +1533,7 @@ export function applyEdits(
         const isNew = edit.kind === 'createCircle'
         annotation = isNew
           ? page.createAnnotation('Circle')
-          : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
+          : lookupAnnotation(edit.pageIndex, 'objNum' in edit ? edit.objNum : -1)
         if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
         if (!isNew && annotation.getType() !== 'Circle') throw new Error('更新対象は Circle ではありません。')
         configureCircle(annotation, edit.rect, edit.color, edit.borderWidth, edit.interiorColor, edit.opacity)
@@ -1528,7 +1545,7 @@ export function applyEdits(
         const isNew = edit.kind === 'createInk'
         annotation = isNew
           ? page.createAnnotation('Ink')
-          : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
+          : lookupAnnotation(edit.pageIndex, 'objNum' in edit ? edit.objNum : -1)
         if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
         if (!isNew && annotation.getType() !== 'Ink') throw new Error('更新対象は Ink ではありません。')
         configureInk(doc, annotation, edit.inkList, edit.color, edit.borderWidth, edit.opacity, edit.inkKind ?? (edit.opacity < 1 ? 'highlight' : 'ink'))
@@ -1540,7 +1557,7 @@ export function applyEdits(
         const isNew = edit.kind === 'createTextMarkup'
         annotation = isNew
           ? page.createAnnotation(edit.markup)
-          : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
+          : lookupAnnotation(edit.pageIndex, 'objNum' in edit ? edit.objNum : -1)
         if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
         if (!isNew && annotation.getType() !== edit.markup) throw new Error(`更新対象は ${edit.markup} ではありません。`)
         configureTextMarkup(annotation, edit.quads, edit.color, edit.opacity, edit.markedText)
@@ -1552,7 +1569,7 @@ export function applyEdits(
         const isNew = edit.kind === 'createSymbol'
         annotation = isNew
           ? page.createAnnotation('Stamp')
-          : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
+          : lookupAnnotation(edit.pageIndex, 'objNum' in edit ? edit.objNum : -1)
         if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
         if (!isNew && annotation.getType() !== 'Stamp') throw new Error('更新対象は Stamp ではありません。')
         const object = annotation.getObject()
@@ -1594,7 +1611,7 @@ export function applyEdits(
       const isNew = edit.kind === 'createFreeText' || edit.kind === 'createCallout'
       annotation = isNew
         ? page.createAnnotation('FreeText')
-        : findAnnotation(page, 'objNum' in edit ? edit.objNum : -1)
+        : lookupAnnotation(edit.pageIndex, 'objNum' in edit ? edit.objNum : -1)
       if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
       if (!isNew && annotation.getType() !== 'FreeText') throw new Error('更新対象は FreeText ではありません。')
       const borderWidth = edit.borderWidth ?? 1
@@ -1668,9 +1685,8 @@ export function applyEdits(
         message: error instanceof Error ? error.message : String(error),
       })
     } finally {
-      if (!keepForAppearance) {
-        annotation?.destroy()
-        page?.destroy()
+      if (annotation && !keepForAppearance && !cachedAnnotations.has(annotation)) {
+        annotation.destroy()
       }
     }
   }
@@ -1688,13 +1704,15 @@ export function applyEdits(
         message: `外観を作成できませんでした: ${message}`,
       })
     }
-  } finally {
-    for (const task of appearances) {
-      task.annotation.destroy()
-      task.page.destroy()
-    }
   }
 
   result.unsupportedCharacters = [...unsupportedCharacters]
   return result
+  } finally {
+    // Appearance tasks borrow cached pages/annotations. Release each handle once,
+    // after appearance installation, and always release annotations before pages.
+    for (const task of appearances) cachedAnnotations.add(task.annotation)
+    for (const annotation of cachedAnnotations) annotation.destroy()
+    for (const page of pages.values()) page.destroy()
+  }
 }
