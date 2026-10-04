@@ -1132,7 +1132,10 @@ function makeTemporaryAppearance(
   const device = new mupdf.DisplayListDevice(displayList)
   const text = new mupdf.Text()
   try {
-    configureFreeText(
+    // Count/issue templates get their entire AP from the display list below.
+    // No generated FreeText appearance (and therefore no update()) is needed.
+    if (task.countFixture || task.issue) annotation.setRect([0, 0, task.width, task.height])
+    else configureFreeText(
       temporaryDocument,
       annotation,
       [0, 0, task.width, task.height],
@@ -1302,10 +1305,12 @@ function installTemporaryAppearances(
   if (tasks.length === 0) return
   const temporaryDocument = new mupdf.PDFDocument()
   let graftMap: ReturnType<PDFDocument['newGraftMap']> | undefined
+  const stampTemplates = new Map<number, { resources: PDFObject; contents: string }>()
   try {
     const countTemplates = new Map<string, number>()
     for (const task of tasks) {
-      const key = task.countFixture ? JSON.stringify([task.countFixture.style, task.countFixture.code, task.width, task.height]) : null
+      // Round the size: e.g. 10 * .7 carries float noise that differs by position and would split templates.
+      const key = task.countFixture ? JSON.stringify([task.countFixture.style, task.countFixture.code, Math.round(task.width * 1000) / 1000, Math.round(task.height * 1000) / 1000]) : null
       const cached = key ? countTemplates.get(key) : undefined
       if (cached !== undefined) { task.temporaryPageIndex = cached; continue }
       const fontResource = fontResources[task.fontName]
@@ -1324,16 +1329,34 @@ function installTemporaryAppearances(
       const sourceAppearance = sourceObject.get('AP', 'N')
       let graftedAppearance: PDFObject | undefined
       try {
-        graftedAppearance = graftMap.graftObject(sourceAppearance)
-        if (task.countFixture) {
-          // Share subset fonts, but use a separate stream before applying each page position.
-          const template = graftedAppearance, content = template.readStream(), dictionary = doc.newDictionary()
-          graftedAppearance = undefined
+        if (task.countFixture || task.issue) {
+          let template = stampTemplates.get(task.temporaryPageIndex!)
+          if (!template) {
+            const sourceResources = sourceAppearance.get('Resources'), stream = sourceAppearance.readStream()
+            let resources: PDFObject | undefined
+            try {
+              resources = graftMap.graftObject(sourceResources)
+              // One indirect Resources dictionary per template, including subset fonts.
+              const contents = stream.asString()
+              template = { resources: resources.isIndirect() ? resources : doc.addObject(resources), contents }
+              if (resources.isIndirect()) resources = undefined // cache owns this handle
+              stampTemplates.set(task.temporaryPageIndex!, template)
+            } finally { resources?.destroy(); stream.destroy(); sourceResources.destroy() }
+          }
+          const targetObject = task.annotation.getObject(), bbox = targetObject.get('Rect')
           try {
-            template.forEach((value, key) => { if (key !== 'Length' && key !== 'Filter' && key !== 'DecodeParms') dictionary.put(key, value) })
-            graftedAppearance = doc.addStream(content, dictionary)
-          } finally { dictionary.destroy(); content.destroy(); template.destroy() }
+            // Same local y-up -> raw PDF conversion as orientVisibleAppearance.
+            // An absolute BBox and identity Matrix retain CropBox/UserUnit/rotation
+            // placement without fitting or rescaling the authored appearance.
+            const rect = task.visibleRect!, inv = invertMatrix(task.page.getTransform())
+            const origin = transformMeasurePoint([rect[0], rect[3]], inv)
+            const transform = [inv[0], inv[1], -inv[2], -inv[3], origin[0], origin[1]]
+            task.annotation.setAppearance('N', null, mupdf.Matrix.identity, bbox.asJS() as Rect,
+              template.resources, `q\n${transform.join(' ')} cm\n${template.contents}\nQ\n`)
+          } finally { bbox.destroy(); targetObject.destroy() }
+          continue
         }
+        graftedAppearance = graftMap.graftObject(sourceAppearance)
         const targetObject = task.annotation.getObject()
         const appearanceDictionary = doc.newDictionary()
         try {
@@ -1356,6 +1379,7 @@ function installTemporaryAppearances(
       }
     }
   } finally {
+    for (const template of stampTemplates.values()) template.resources.destroy()
     graftMap?.destroy()
     temporaryDocument.destroy()
   }
@@ -1441,7 +1465,6 @@ export function applyEdits(
         if (!annotation || annotation.getType() !== 'Stamp') throw new Error('指摘の注釈が見つかりません。')
         annotation.setFlags(annotation.getFlags() | 4); annotation.setRect(edit.rect)
         annotation.setColor(edit.color); annotation.setOpacity(1); annotation.setContents(edit.text)
-        annotation.update()
         const object = annotation.getObject()
         try {
           setVisibleRect(doc, page, object, edit.rect)
@@ -1594,8 +1617,6 @@ export function applyEdits(
           const top = s.showCode && f.code ? fs * 1.2 : 0, extra = s.showCode ? [...f.code].length * fs : 0
           const visibleRect: Rect = [edit.rect[0] - 1, edit.rect[1] - top - 1, edit.rect[0] + s.size + extra + 1, edit.rect[1] + s.size + 1]
           annotation.setRect(visibleRect); annotation.setColor(s.color); annotation.setOpacity(s.opacity)
-          // Clear MuPDF's pending Stamp appearance before installing the shared custom AP.
-          annotation.update()
           const obj = annotation.getObject()
           const inverse = invertMatrix(page.getTransform())
           const markerBounds = vertexBounds([transformMeasurePoint([edit.rect[0], edit.rect[1]], inverse), transformMeasurePoint([edit.rect[2], edit.rect[3]], inverse)])
