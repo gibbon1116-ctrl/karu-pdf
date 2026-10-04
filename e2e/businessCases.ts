@@ -1,6 +1,5 @@
 import mupdf from 'mupdf'
 import { extractTextLines } from '../src/core/textExtract'
-import fs from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 
 function pdf(word = 'AAAA'): Buffer {
@@ -80,28 +79,6 @@ async function mockWrites(page: Page, fail = false, injectError = false) {
 }
 
 export function businessCases(url: string) {
-  test('明示実行で図面文字をCSVに出し、配布形態にかかわらず再抽出と終了後のキャッシュを制限する', async ({ page }) => {
-    await open(page, url)
-    expect((await page.evaluate(() => window.__karu!.getWorkerStats())).extractedTextCacheBytes).toBe(0)
-    await menu(page, 'ファイル', '図面内文字を抽出…')
-    const dialog = page.getByRole('dialog', { name: '図面内文字を抽出' })
-    await dialog.getByLabel('抽出するページ').selectOption('all')
-    for (let attempt = 0; attempt < 2; attempt++) {
-      await dialog.getByRole('button', { name: '文字を抽出', exact: true }).click()
-      await expect(dialog.getByRole('link', { name: '抽出結果を保存' })).toBeVisible()
-      const download = page.waitForEvent('download')
-      await dialog.getByRole('link', { name: '抽出結果を保存' }).click()
-      const csv = await fs.readFile(await (await download).path() as string, 'utf8')
-      expect(csv.startsWith('\uFEFF')).toBe(true)
-      expect(csv.match(/SECRET AAAA/g)).toHaveLength(3)
-      expect(csv.match(/PUBLIC/g)).toHaveLength(3)
-      const bytes = (await page.evaluate(() => window.__karu!.getWorkerStats())).extractedTextCacheBytes
-      expect(bytes).toBeGreaterThan(0); expect(bytes).toBeLessThanOrEqual(4 * 1024 * 1024)
-    }
-    await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
-    for (const docId of await page.evaluate(() => window.__karu!.listTabs().map(tab => tab.docId))) await page.evaluate(docId => window.__karu!.closeTab(docId), docId)
-    await expect.poll(async () => (await page.evaluate(() => window.__karu!.getWorkerStats())).extractedTextCacheBytes).toBe(0)
-  })
   test('矢印・吹き出しの先端サイズと5度刻みを保存後も保持する', async ({ page }) => {
     await open(page, url)
     for (const [name, kind, y] of [['矢印', 'arrow', 170], ['蛍光ペン', 'highlight', 220], ['手書き', 'ink', 290]] as const) {
@@ -162,7 +139,6 @@ export function businessCases(url: string) {
     await page.keyboard.press('l')
     await expect(page.getByRole('button', { name: '選択', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await page.getByRole('button', { name: 'ファイル▼', exact: true }).click()
-    await expect(page.getByRole('menuitem', { name: /^共有・提出用に保存/ })).toBeDisabled()
     await page.keyboard.press('Escape')
     await expect(page.locator('.page-view[data-page-index="0"]')).toHaveAttribute('data-sharp', 'true')
     await page.evaluate(() => window.__karu!.setZoom(1))
@@ -296,22 +272,6 @@ export function businessCases(url: string) {
     expect(await page.evaluate(() => localStorage.getItem('karu-pdf:snippets'))).toContain('現地確認済み')
     await page.getByRole('button', { name: '登録と保存情報をすべて削除' }).click()
     expect(await page.evaluate(() => localStorage.getItem('karu-pdf:snippets'))).toBe('[]')
-  })
-  test('共有用墨消しは選んだ範囲の文字と文書情報を除去し、編集中の文書を保持する', async ({ page }) => {
-    await mockWrites(page); await open(page, url); await square(page)
-    await menu(page, 'ファイル', '共有・提出用に保存…')
-    const dialog = page.getByRole('dialog', { name: '共有・提出用に保存' })
-    await dialog.getByRole('checkbox').check(); await dialog.getByRole('button', { name: '墨消しを適用して別名保存' }).click()
-    await expect(dialog).not.toBeVisible()
-    const writes = await page.evaluate(() => (window as any).__writes as number[][])
-    expect(writes).toHaveLength(1)
-    const doc = new mupdf.PDFDocument(new Uint8Array(writes[0])), first = doc.loadPage(0), text = first.toStructuredText('')
-    try {
-      expect(text.asText()).not.toContain('SECRET'); expect(text.asText()).toContain('PUBLIC')
-      expect(doc.getTrailer().get('Info').isNull()).toBe(true)
-    } finally { text.destroy(); first.destroy(); doc.destroy() }
-    expect((await page.evaluate(() => window.__karu!.listTabs()))[0].dirty).toBe(true)
-    expect(await page.evaluate(() => window.__karu!.getEditableAnnotations(0).length)).toBe(1)
   })
   test('注釈反映エラーの応答では書き込みを行わず未保存状態を保持する', async ({ page }) => {
     await mockWrites(page, false, true); await open(page, url); await square(page)

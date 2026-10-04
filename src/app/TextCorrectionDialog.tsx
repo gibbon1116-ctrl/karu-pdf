@@ -29,7 +29,7 @@ export default function TextCorrectionDialog({ input, session, pool, onComplete,
       <button disabled={busy||!text.trim()||!!session.editRestriction} onClick={()=>{
         setBusy(true);setError('')
         void (async()=>{
-          const output=await pool.prepareOutput(session.docId,session.annotationStore.toEdits(),false,undefined,{...input,text,fontSize:size})
+          const output=await pool.prepareOutput(session.docId,session.annotationStore.toEdits(),false,{...input,text,fontSize:size})
           if(!active.current)return
           await onComplete(output.bytes,session.name.replace(/\.pdf$/i,'')+'_文字修正.pdf')
           if(active.current)onClose()

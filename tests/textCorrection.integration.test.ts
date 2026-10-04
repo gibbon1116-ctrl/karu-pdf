@@ -32,7 +32,7 @@ it('replaces Japanese native text in a separate PDF, preserves another page and 
   const source=fixture(), original=new mupdf.PDFDocument(source)
   try {
     const line=text(original).lines[0], beforePage=pixels(original,1)
-    const output=prepareDocumentOutput(source,[],{BIZUDGothic:font},false,undefined,{pageIndex:0,rect:line.rect,originalText:line.text,text:'照明器具Ｃ',fontSize:10.5})
+    const output=prepareDocumentOutput(source,[],{BIZUDGothic:font},false,{pageIndex:0,rect:line.rect,originalText:line.text,text:'照明器具Ｃ',fontSize:10.5})
     const corrected=new mupdf.PDFDocument(output.bytes)
     try {
       const lines=text(corrected).lines.map(l=>l.text)
@@ -51,10 +51,10 @@ it('rejects partial lines, rotation, clipping and oversized replacement without 
     try {
       const l=text(doc).lines[0]
       const correction={pageIndex:0,rect:l.rect,originalText:l.text,text:'照明器具Ｃ',fontSize:10.5}
-      if(rotation||clipping)expect(()=>prepareDocumentOutput(source,[],{BIZUDGothic:font},false,undefined,correction)).toThrow()
+      if(rotation||clipping)expect(()=>prepareDocumentOutput(source,[],{BIZUDGothic:font},false,correction)).toThrow()
       else {
-        expect(()=>prepareDocumentOutput(source,[],{BIZUDGothic:font},false,undefined,{...correction,originalText:'照明'})).toThrow()
-        expect(()=>prepareDocumentOutput(source,[],{BIZUDGothic:font},false,undefined,{...correction,text:'照'.repeat(200)})).toThrow()
+        expect(()=>prepareDocumentOutput(source,[],{BIZUDGothic:font},false,{...correction,originalText:'照明'})).toThrow()
+        expect(()=>prepareDocumentOutput(source,[],{BIZUDGothic:font},false,{...correction,text:'照'.repeat(200)})).toThrow()
       }
       expect(text(doc).lines).toHaveLength(2)
     }finally{doc.destroy()}

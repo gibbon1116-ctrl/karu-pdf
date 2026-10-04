@@ -20,7 +20,6 @@ const root = path.resolve(argument('--build-dir', 'dist'))
 const compareRoot = argument('--compare-build-dir', null)
 const referenceRoot = argument('--reference-build-dir', null)
 if (referenceRoot && !compareRoot) throw new Error('Reference requires a comparison build')
-const textExtraction = process.argv.includes('--text-extraction')
 const browserWarmup = !process.argv.includes('--no-browser-warmup')
 const fixtureNames = argument('--fixtures', 'sample-small.pdf,heavy-300p.pdf').split(',')
 const networkOnly = process.argv.includes('--network-only')
@@ -43,7 +42,7 @@ const result = {
   sourceSha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
   browser: browser.version(), node: process.version,
   hardware: { cpu: os.cpus()[0]?.model, cores: os.cpus().length, memoryBytes: os.totalmem(), platform: os.platform(), release: os.release() },
-  conditions: { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, workers: 4, warm: false, inputSamples, timingOrigin: 'animation-frame-aligned', saveTimingOrigin: 'animation-frame-aligned; no idle delay', readyDefinition: 'active document tab committed to DOM; session registration observed separately', actionPage, openTracing: true, harnessSha256: createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).digest('hex'), textExtraction: false, serviceWorkers: 'block', cache: 'fresh browser context per trial; OS caches uncontrolled', memory: 'owned browser process private bytes at settled checkpoints; raw JS heap preserved; retained main JS heap collected only after timed operations; not an allocation or peak guarantee' },
+  conditions: { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, workers: 4, warm: false, inputSamples, timingOrigin: 'animation-frame-aligned', saveTimingOrigin: 'animation-frame-aligned; no idle delay', readyDefinition: 'active document tab committed to DOM; session registration observed separately', actionPage, openTracing: true, harnessSha256: createHash('sha256').update(await fs.readFile(new URL(import.meta.url))).digest('hex'), serviceWorkers: 'block', cache: 'fresh browser context per trial; OS caches uncontrolled', memory: 'owned browser process private bytes at settled checkpoints; raw JS heap preserved; retained main JS heap collected only after timed operations; not an allocation or peak guarantee' },
   fixtures: [], trials: [], errors: [],
 }
 const datasets = [result]
@@ -62,7 +61,6 @@ if (referenceRoot) {
   outputs.push(path.join(output, 'reference'))
   await fs.mkdir(outputs[2], { recursive: true })
 }
-if (textExtraction) datasets[compareRoot ? 1 : 0].conditions.textExtraction = true
 const checkpoint = async () => {
   for (let variant = 0; variant < datasets.length; variant++) await fs.writeFile(path.join(outputs[variant], 'results.json'), JSON.stringify(datasets[variant], null, 2))
 }
@@ -226,15 +224,6 @@ async function trial(file, run, variant = 0) {
     row.memory.afterOpen = await processMemory()
     row.mainHeapAfterOpenBytes = await page.evaluate(() => performance.memory?.usedJSHeapSize ?? null)
     if (networkOnly) { row.errors = errors; if (errors.length) throw new Error(errors.join('; ')); return row }
-    if (datasets[variant].conditions.textExtraction) {
-      step('start text extraction')
-      await page.getByRole('button', { name: 'ファイル▼', exact: true }).click()
-      await page.getByRole('menuitem', { name: '図面内文字を抽出…', exact: true }).click()
-      const dialog = page.getByRole('dialog', { name: '図面内文字を抽出' })
-      await dialog.getByLabel('抽出するページ').selectOption('all')
-      await dialog.getByRole('button', { name: '文字を抽出', exact: true }).click()
-      row.textExtraction = { scope: 'all', started: true }
-    }
     step('scroll')
     row.scroll1500Cold = await frameAction(page, { kind: 'scroll', speed: 1500 })
     await waitSharp(page)
@@ -283,14 +272,6 @@ async function trial(file, run, variant = 0) {
     await page.keyboard.press('Control+Enter')
     await page.getByTestId('text-editor').waitFor({ state: 'hidden' })
     row.edit = await page.evaluate(() => window.__karu.getFrameStats())
-    // In the active-feature experiment, probe both sides at the same point.
-    // A candidate-only await would otherwise let pending editor work settle
-    // before its save, while the idle reference starts saving immediately.
-    if (textExtraction) row.workerStatsBeforeSave = await page.evaluate(() => window.__karu.getWorkerStats())
-    if (row.textExtraction) {
-      row.textExtraction.beforeSave = await page.locator('.text-export-dialog').innerText()
-      row.textExtraction.beforeSaveStats = row.workerStatsBeforeSave
-    }
     step('save')
     const downloadPromise = page.waitForEvent('download')
     row.save = await page.evaluate(async () => {
@@ -323,19 +304,11 @@ async function trial(file, run, variant = 0) {
     const heapMetrics = await heapCdp.send('Performance.getMetrics')
     row.mainRetainedHeapAfterOperationsBytes = heapMetrics.metrics.find(metric => metric.name === 'JSHeapUsedSize')?.value ?? null
     await heapCdp.detach()
-    if (row.textExtraction) {
-      const dialog = page.getByRole('dialog', { name: '図面内文字を抽出' })
-      row.textExtraction.afterSave = await dialog.innerText()
-      await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
-    }
-    if (textExtraction) row.memory.afterFeatureClose = await processMemory()
     step('close')
     const ids = await page.evaluate(() => window.__karu.listTabs().map(tab => tab.docId))
     for (const id of ids) await page.evaluate(id => window.__karu.closeTab(id), id)
     await page.waitForTimeout(500)
     row.memory.afterDocumentClose = await processMemory()
-    if (textExtraction) row.workerStatsAfterDocumentClose = await page.evaluate(() => window.__karu.getWorkerStats())
-    if (row.textExtraction) row.textExtraction.afterDocumentCloseStats = row.workerStatsAfterDocumentClose
     row.errors = errors
     if (errors.length) throw new Error(errors.join('; '))
     return row

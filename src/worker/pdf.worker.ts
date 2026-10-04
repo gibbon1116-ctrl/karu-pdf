@@ -48,7 +48,6 @@ import type {
   ListAnnotationsRequest,
   PageHasTextRequest,
   PageTextLinesRequest,
-  ExtractPageTextRequest,
   GetHeaderFooterSettingsRequest,
   OpenRequest,
   PrepareOutputRequest,
@@ -93,7 +92,6 @@ type CoreRequest =
   | SelectTextRequest
   | PageHasTextRequest
   | PageTextLinesRequest
-  | ExtractPageTextRequest
   | LayoutTextRequest
   | ApplyAndSaveRequest
   | ApplyEditsRequest
@@ -377,11 +375,6 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       return
     }
 
-    if (request.type === 'extractPageText') {
-      post({ type: 'pageTextExtracted', requestId: request.requestId, result: entry.textSelections.extractPage(request.pageIndex) })
-      return
-    }
-
     if (request.type === 'selectText') {
       post({
         type: 'textSelected',
@@ -528,7 +521,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       await loadFontsForEdits(request.edits)
       if (request.correction) await getFontResource('BIZUDGothic')
       const source = saveDocument(document, 'incremental').bytes
-      const output = prepareDocumentOutput(source, request.edits, fontResources, request.bake, request.safe, request.correction)
+      const output = prepareDocumentOutput(source, request.edits, fontResources, request.bake, request.correction)
       const bytes = output.bytes.buffer as ArrayBuffer
       post({
         type: 'outputPrepared', requestId: request.requestId, bytes,
@@ -724,14 +717,6 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const message = event.data
 /* @single:start */  if ((message as { type: string }).type === 'single-font-response') return
 /* @single:end */
-  if (message.type === 'cancelTextExtraction') {
-    const index = queue.findIndex(job => job.type === 'extractPageText' && job.requestId === message.requestId)
-    if (index >= 0) {
-      queue.splice(index, 1)
-      post({ type: 'error', requestId: message.requestId, message: '文字抽出を中止しました。' })
-    }
-    return
-  }
   if (message.type === 'clearCompare') {
     for (const job of activeComparisons.values()) job.cancelled = true
     for (let i = queue.length - 1; i >= 0; i--) if (queue[i].type === 'renderCompare') {
@@ -771,12 +756,6 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     const previous = activeAnnotationLists.get(message.docId)
     if (previous !== undefined) cancelledAnnotationLists.add(previous)
     activeAnnotationLists.set(message.docId, message.requestId)
-  }
-  if (message.type === 'extractPageText') {
-    queue.push({ ...message, priority: 3, sequence: sequence++ })
-    queue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence)
-    schedule()
-    return
   }
   if (
     message.type === 'listAnnotations'
@@ -842,7 +821,7 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
       queueLength: queue.length + (running ? 1 : 0),
       displayListCount: [...documents.values()].reduce((sum, entry) => sum + entry.displayLists.count, 0),
       displayListBytes: [...documents.values()].reduce((sum, entry) => sum + entry.displayLists.usedBytes, 0),
-      extractedTextCacheBytes: [...documents.values()].reduce((sum, entry) => sum + entry.textSelections.extractedCacheBytes, 0),
+      extractedTextCacheBytes: 0,
       processedCount,
     })
     return

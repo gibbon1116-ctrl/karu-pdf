@@ -24,7 +24,6 @@ import type {
   ListAnnotationsResponse,
   PageHasTextResponse,
   PageTextLinesResponse,
-  ExtractPageTextResponse,
   OpenResponse,
   PageInfoResponse,
   PageLayoutResponse,
@@ -466,25 +465,6 @@ export class PdfWorkerPool {
     return response.lines
   }
 
-  async extractPageText(docId: string, pageIndex: number, signal?: AbortSignal): Promise<import('../core/textExtract').ExtractedPageText> {
-    if (signal?.aborted) throw new DOMException('文字抽出を中止しました。', 'AbortError')
-    let id = -1
-    const promise = this.request<ExtractPageTextResponse>(this.slots[0], requestId => {
-      id = requestId
-      return { type: 'extractPageText', requestId, docId, pageIndex }
-    })
-    const cancel = () => {
-      this.slots[0].worker.postMessage({ type: 'cancelTextExtraction', requestId: id })
-      this.pendingRequests.get(id)?.reject(new DOMException('文字抽出を中止しました。', 'AbortError'))
-      this.pendingRequests.delete(id)
-    }
-    signal?.addEventListener('abort', cancel, { once: true })
-    try {
-      if (signal?.aborted) cancel()
-      return (await promise).result
-    } finally { signal?.removeEventListener('abort', cancel) }
-  }
-
   async selectText(
     docId: string,
     pageIndex: number,
@@ -562,9 +542,9 @@ export class PdfWorkerPool {
     }
   }
 
-  async prepareOutput(docId: string, edits: AnnotationEdit[], bake: boolean, safe?: import('../core/safeOutput').SafeOutputOptions, correction?: import('../core/textCorrection').TextCorrection): Promise<PreparedOutputResult> {
+  async prepareOutput(docId: string, edits: AnnotationEdit[], bake: boolean, correction?: import('../core/textCorrection').TextCorrection): Promise<PreparedOutputResult> {
     const response = await this.request<OutputPreparedResponse>(this.slots[0], (requestId) => ({
-      type: 'prepareOutput', requestId, docId, edits, bake, safe, correction,
+      type: 'prepareOutput', requestId, docId, edits, bake, correction,
     }))
     return {
       bytes: new Uint8Array(response.bytes),

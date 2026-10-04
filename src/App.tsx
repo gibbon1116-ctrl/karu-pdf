@@ -10,7 +10,6 @@ import { HelpDialog } from './app/HelpDialog'
 import { MenuBar } from './app/MenuBar'
 import { PrivacyDialog } from './app/PrivacyDialog'
 import { SheetSizeDialog } from './app/SheetSizeDialog'
-import { SafeOutputDialog } from './app/SafeOutputDialog'
 import { CompareDialog } from './app/CompareDialog'
 import { CompareView } from './app/CompareView'
 import { RasterizeDialog } from './app/RasterizeDialog'
@@ -59,7 +58,6 @@ import type { PageLayoutCard } from './core/pageOps'
 import { registerPwa } from './pwa'
 import './styles.css'
 
-const TextExportDialog = lazy(() => import('./app/TextExportDialog'))
 const TextCorrectionDialog = lazy(() => import('./app/TextCorrectionDialog'))
 
 declare global {
@@ -220,7 +218,6 @@ export default function App() {
   if (!openingStoreRef.current) openingStoreRef.current = new PdfOpeningStore()
   const openingStore = openingStoreRef.current
   const openMeasuredDocRef = useRef<string | null>(null)
-  const textExtractionAbortRef = useRef<AbortController | null>(null)
   const organizeRef = useRef<ActiveOrganize | null>(null)
   const organizeClipboardRef = useRef<{ cards: PageCard[]; sources: OrganizeSourceInfo[] } | null>(null)
   const annotationClipboardRef = useRef<{
@@ -252,8 +249,6 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false)
   const [privacyOpen, setPrivacyOpen] = useState(false)
   const [sheetSizesOpen, setSheetSizesOpen] = useState(false)
-  const [safeOutputOpen, setSafeOutputOpen] = useState(false)
-  const [textExportOpen, setTextExportOpen] = useState(false)
   const [textCorrection, setTextCorrection] = useState<(Omit<import('./core/textCorrection').TextCorrection, 'text'|'fontSize'> & { docId: string }) | null>(null)
   const [compareDialog, setCompareDialog] = useState(false)
   const [comparison, setComparison] = useState<{ old: DocumentSession; next: DocumentSession } | null>(null)
@@ -267,7 +262,6 @@ export default function App() {
   const testMode = new URLSearchParams(location.search).get('test') === '1'
 
   const beginOpening = useCallback((name: string, id = ++openingSequenceRef.current) => {
-    textExtractionAbortRef.current?.abort()
     const next: PdfOpening = { id, name, stage: 'reading', docId: null }
     openingRef.current = next
     openingStore.set(next)
@@ -293,11 +287,6 @@ export default function App() {
     finishOpeningDocument(docId)
     setError(`ページを表示できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
   }, [finishOpeningDocument])
-  const trackTextExtraction = useCallback((controller: AbortController) => {
-    textExtractionAbortRef.current?.abort()
-    textExtractionAbortRef.current = controller
-    return () => { if (textExtractionAbortRef.current === controller) textExtractionAbortRef.current = null }
-  }, [])
   const active = tabs.active
   activeRef.current = active
   organizeRef.current = organize
@@ -492,7 +481,6 @@ export default function App() {
   }, [closeOrganizeSources])
 
   const activateDocument = useCallback(async (docId: string) => {
-    textExtractionAbortRef.current?.abort()
     const current = activeRef.current
     if (current?.docId === docId) return
     if (!discardOrganize()) return
@@ -665,7 +653,6 @@ export default function App() {
       showStatus('保存中です')
       return false
     }
-    textExtractionAbortRef.current?.abort()
     savingRef.current = true
     setSaving(true)
     return true
@@ -833,31 +820,6 @@ export default function App() {
       endSave()
     }
   }, [beginSave, endSave, prepareOutput, showStatus])
-
-  const saveSafeOutput = useCallback(async (redact: boolean) => {
-    const session = activeRef.current
-    if (!session || !beginSave()) return
-    setError('')
-    try {
-      const name = session.name.replace(/\.pdf$/i, '') + '_共有用.pdf'
-      const handle = window.showSaveFilePicker ? await pickSaveHandle(name, session.handle ?? undefined) : null
-      if (handle && session.handle && (handle === session.handle || (handle.isSameEntry && await handle.isSameEntry(session.handle)))) throw new Error('元の編集文書とは別のファイルを選んでください。')
-      await viewerRef.current?.commitEditor()
-      const redactions = redact ? session.annotationStore.selectedIds().flatMap(id => {
-        const annotation = session.annotationStore.get(id)
-        return annotation?.kind === 'square' ? [{ pageIndex: annotation.pageIndex, rect: annotation.rect }] : []
-      }) : []
-      if (redact && !redactions.length) throw new Error('墨消しする四角を選択してください。')
-      const result = await pool.prepareOutput(session.docId, session.annotationStore.toEdits(), true, { redactions })
-      if (result.errors.length) throw new Error(result.errors.map(item => item.message).join(' / '))
-      if (handle) await writePdf(handle, result.bytes)
-      else downloadPdf(result.bytes, name)
-      setSafeOutputOpen(false)
-      showStatus('共有用PDFを保存しました。提出前に内容を確認してください。')
-    } catch (reason) {
-      if (!(reason instanceof DOMException && reason.name === 'AbortError')) setError(`共有用PDFを保存できませんでした: ${String(reason)}`)
-    } finally { endSave() }
-  }, [beginSave, endSave, pool, showStatus])
 
   const printDocument = useCallback(async () => {
     const session = activeRef.current
@@ -1572,8 +1534,6 @@ export default function App() {
           editRestriction={active?.editRestriction}
           onPrivacy={() => setPrivacyOpen(true)}
           onSheetSizes={() => setSheetSizesOpen(true)}
-          onExtractText={() => setTextExportOpen(true)}
-          onSafeOutput={() => setSafeOutputOpen(true)}
           canViewBack={active?.viewHistory.canBack ?? false}
           canViewForward={active?.viewHistory.canForward ?? false}
           onViewBack={() => moveViewHistory('back')}
@@ -1656,12 +1616,6 @@ export default function App() {
       }} />
       {privacyOpen && <PrivacyDialog onClose={() => setPrivacyOpen(false)} onChange={refreshRecent} />}
       {sheetSizesOpen && active && <SheetSizeDialog sizes={active.pageSizes} onClose={() => setSheetSizesOpen(false)} onPage={index => viewerRef.current?.scrollToPage(index)} />}
-      {textExportOpen && active && !saving && !organize && <ErrorBoundary resetKey={`${active.docId}:${active.pageRevision}:${active.savedRevision}`} onError={reason => { setError(`文字抽出の画面を読み込めませんでした: ${reason.message}`); setTextExportOpen(false) }} fallback={() => <p role="alert">文字抽出の画面を読み込めませんでした。</p>}>
-        <Suspense fallback={<div className="pdf-opening" role="status">文字抽出を準備しています</div>}>
-          <TextExportDialog key={`${active.docId}:${active.pageRevision}:${active.savedRevision}`} docId={active.docId} name={active.name} pageCount={active.pageSizes.length} currentPage={Math.max(0, page - 1)} pool={pool} track={trackTextExtraction} onClose={() => setTextExportOpen(false)} />
-        </Suspense>
-      </ErrorBoundary>}
-      {safeOutputOpen && active && <SafeOutputDialog error={error} busy={saving} regions={active.annotationStore.selectedIds().flatMap(id => { const annotation = active.annotationStore.get(id); return annotation?.kind === 'square' ? [{ pageIndex: annotation.pageIndex, rect: annotation.rect }] : [] })} onClose={() => setSafeOutputOpen(false)} onSave={redact => void saveSafeOutput(redact)} />}
       {error && <div className="error" role="alert">{error}</div>}
       <PdfOpeningFeedback store={openingStore} />
       {comparison ? <CompareView old={comparison.old} next={comparison.next} pool={pool} formatDefaults={formatDefaults} onClose={() => {

@@ -43,38 +43,17 @@ describe('業務利用の安全な編集・出力', () => {
       expect(doc.countPages()).toBe(1)
     } finally { doc.destroy() }
   })
-  it('通常の確定は保持し、共有用出力だけ文書情報・添付・アクションを除去する', () => {
+  it('通常の確定は文書情報・添付・アクションを保持する', () => {
     const original = fixture()
     const normal = prepareDocumentOutput(original, [], {}, true)
-    const safe = prepareDocumentOutput(original, [], {}, true, { redactions: [] })
-    for (const [bytes, expected] of [[normal.bytes, true], [safe.bytes, false]] as const) {
-      const opened = openDocument(bytes), doc = opened.document.asPDF()!
-      try {
-        expect(!doc.getTrailer().get('Info').isNull()).toBe(expected)
-        expect(!doc.getTrailer().get('Root', 'OpenAction').isNull()).toBe(expected)
-        expect(Object.keys(doc.getEmbeddedFiles()).length).toBe(expected ? 1 : 0)
-      } finally { doc.destroy() }
-    }
-  })
-  it('墨消しの文字を検索・抽出できず、枠外の文字と元の文書を保持する', () => {
-    const original = fixture()
-    const safe = prepareDocumentOutput(original, [rectangle], {}, true, { redactions: [{ pageIndex: 0, rect: [15, 35, 100, 70] }] })
-    const opened = openDocument(safe.bytes), page = opened.document.loadPage(0), text = page.toStructuredText('')
+    const opened = openDocument(normal.bytes), doc = opened.document.asPDF()!
     try {
-      expect(text.asText()).not.toContain('SECRET')
-      expect(text.asText()).toContain('PUBLIC')
-      expect(page.search('SECRET', {}).length).toBe(0)
-      const pixmap = page.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, false)
-      try {
-        const pixels = pixmap.getPixels(), offset = (50 * pixmap.getWidth() + 30) * pixmap.getNumberOfComponents()
-        expect([...pixels.slice(offset, offset + 3)]).toEqual([0, 0, 0])
-      } finally { pixmap.destroy() }
-      expect(listAnnotations(opened.document.asPDF()!, 0)).toEqual([])
-    } finally { text.destroy(); page.destroy(); opened.document.destroy() }
-    const source = openDocument(original), sourcePage = source.document.loadPage(0), sourceText = sourcePage.toStructuredText('')
-    try { expect(sourceText.asText()).toContain('SECRET') } finally { sourceText.destroy(); sourcePage.destroy(); source.document.destroy() }
+      expect(!doc.getTrailer().get('Info').isNull()).toBe(true)
+      expect(!doc.getTrailer().get('Root', 'OpenAction').isNull()).toBe(true)
+      expect(Object.keys(doc.getEmbeddedFiles())).toHaveLength(1)
+    } finally { doc.destroy() }
   })
-  it('反映エラーがあれば確定・共有用出力を作成しない', () => {
-    expect(() => prepareDocumentOutput(fixture(), [{ ...rectangle, pageIndex: 999 }], {}, true, { redactions: [] })).toThrow()
+  it('反映エラーがあれば確定出力を作成しない', () => {
+    expect(() => prepareDocumentOutput(fixture(), [{ ...rectangle, pageIndex: 999 }], {}, true)).toThrow()
   })
 })

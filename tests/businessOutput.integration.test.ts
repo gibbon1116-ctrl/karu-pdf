@@ -57,7 +57,7 @@ function redPixels(data: Uint8Array, rect: Rect) {
   return count
 }
 
-describe('図面の保存・共有と電子署名保護', () => {
+describe('図面の保存と電子署名保護', () => {
   it.each([0, 90, 180, 270])('回転%s度・CropBoxの矢印と吹き出しの24pt先端をPDFiumで描画し、再編集できる', async rotation => {
     const opened = openDocument(fixture(rotation)), doc = opened.document.asPDF()!
     try {
@@ -78,22 +78,7 @@ describe('図面の保存・共有と電子署名保護', () => {
       expect(redPixels(saveDocument(doc, 'full').bytes, [136, 167, 159, 174])).toBe(0)
     } finally { doc.destroy() }
   })
-  it.each([0, 90, 180, 270])('回転%s度・CropBoxの文字を既存Redactから墨消しし、元の文書を保つ', rotation => {
-    const source = fixture(rotation), opened = openDocument(source), doc = opened.document.asPDF()!, page = doc.loadPage(0) as InstanceType<typeof mupdf.PDFPage>
-    let bytes: Uint8Array, rect: Rect
-    try {
-      const quads = page.search('SECRET', {})[0], xs = quads.flatMap(q => [q[0], q[2], q[4], q[6]]), ys = quads.flatMap(q => [q[1], q[3], q[5], q[7]])
-      rect = [Math.min(...xs) - 4, Math.min(...ys) - 4, Math.max(...xs) + 4, Math.max(...ys) + 4]
-      const redact = page.createAnnotation('Redact'); try { redact.setRect(rect); redact.update() } finally { redact.destroy() }
-      bytes = saveDocument(doc, 'full').bytes
-    } finally { page.destroy(); doc.destroy() }
-    const safe = prepareDocumentOutput(bytes!, [], {}, true, { redactions: [] }), result = openDocument(safe.bytes), outputPage = result.document.loadPage(0), text = outputPage.toStructuredText('')
-    try { expect(text.asText()).not.toContain('SECRET'); expect(text.asText()).toContain('PUBLIC') } finally { text.destroy(); outputPage.destroy(); result.document.destroy() }
-    const image = pdfiumPixels(safe.bytes), at = Math.floor((rect![1] + rect![3]) / 2) * image.stride + Math.floor((rect![0] + rect![2]) / 2) * 4
-    expect([...image.pixels.slice(at, at + 3)]).toEqual([0, 0, 0])
-    expect(source).toEqual(fixture(rotation))
-  })
-  it('署名値があるPDFは編集・共有用出力を停止し、通常の閲覧用コピーは原本のバイトを保つ', () => {
+  it('署名値があるPDFは編集・確定出力を停止し、通常の閲覧用コピーは原本のバイトを保つ', () => {
     const doc = openDocument(fixture()).document.asPDF()!, field = doc.newDictionary(), value = doc.newDictionary(), root = doc.getTrailer().get('Root')
     let bytes: Uint8Array
     try {
@@ -102,7 +87,7 @@ describe('図面の保存・共有と電子署名保護', () => {
       expect(() => applyEditsAtomically(doc, [{ kind: 'createSquare', pageIndex: 0, rect: [0, 0, 30, 30], color: [1, 0, 0], borderWidth: 1 }], {})).toThrow('電子署名')
       bytes = saveDocument(doc, 'full').bytes
     } finally { root.destroy(); value.destroy(); field.destroy(); doc.destroy() }
-    expect(() => prepareDocumentOutput(bytes!, [], {}, true, { redactions: [] })).toThrow('電子署名')
+    expect(() => prepareDocumentOutput(bytes!, [], {}, true)).toThrow('電子署名')
     const display = openDocument(bytes!, false)
     try {
       expect(display.editRestriction).toContain('電子署名')
@@ -125,7 +110,7 @@ describe('図面の保存・共有と電子署名保護', () => {
       expect(doc.hasPermission('print')).toBe(true)
       expect(() => applyEditsAtomically(doc, [], {})).toThrow('編集権限')
     } finally { doc.destroy() }
-    expect(() => prepareDocumentOutput(bytes!, [], {}, true, { redactions: [] })).toThrow('編集権限')
+    expect(() => prepareDocumentOutput(bytes!, [], {}, true)).toThrow('編集権限')
   })
   it('JPEG EXIFの日時と方向を除去し、JPEGの復号画素を変えない', () => {
     const original = withExif(testJpeg(), 6), cleaned = stripJpegMetadata(original)
@@ -133,46 +118,5 @@ describe('図面の保存・共有と電子署名保護', () => {
     const a = new mupdf.Image(original), b = new mupdf.Image(cleaned), ap = a.toPixmap(), bp = b.toPixmap()
     try { expect(ap.getPixels()).toEqual(bp.getPixels()) } finally { ap.destroy(); bp.destroy(); a.destroy(); b.destroy() }
     expect(() => stripJpegMetadata(new Uint8Array([255, 216, 255, 225, 0, 20]))).toThrow()
-  })
-  it.each(['DCTDecode', 'composite'])('共有出力のJPEG付帯情報を除去し、画像の見た目を保つ: %s', mode => {
-    const jpeg = withExif(testJpeg(), 6), image = new mupdf.Image(jpeg), doc = new mupdf.PDFDocument()
-    let source: Uint8Array
-    try {
-      const ref = mode === 'composite'
-        ? doc.addStream(Buffer.from(jpeg).toString('hex') + '>', { Type: 'XObject', Subtype: 'Image', Width: image.getWidth(), Height: image.getHeight(), ColorSpace: 'DeviceRGB', BitsPerComponent: 8, Filter: ['ASCIIHexDecode', 'DCTDecode'] })
-        : doc.addStream(jpeg, { Type: 'XObject', Subtype: 'Image', Width: image.getWidth(), Height: image.getHeight(), ColorSpace: 'DeviceRGB', BitsPerComponent: 8, Filter: 'DCTDecode' })
-      doc.insertPage(-1, doc.addPage([0, 0, 160, 100], 0, { XObject: { Photo: ref } }, 'q 160 0 0 100 0 0 cm /Photo Do Q'))
-      source = saveDocument(doc, 'full').bytes
-    } finally { image.destroy(); doc.destroy() }
-    const safe = prepareDocumentOutput(source!, [], {}, true, { redactions: [] }), output = openDocument(safe.bytes).document.asPDF()!
-    let dateFound = false
-    try {
-      for (let index = 1; index < output.countObjects(); index++) {
-        const object = output.newIndirect(index)
-        try {
-          if (!object.isStream()) continue
-          const buffer = object.readRawStream()
-          try {
-            if (buffer.asString().includes('2026:10:02') || buffer.asString().includes(Buffer.from('2026:10:02').toString('hex'))) dateFound = true
-          } finally { buffer.destroy() }
-        } finally { object.destroy() }
-      }
-      expect(dateFound).toBe(false)
-      expect(pdfiumPixels(safe.bytes).pixels).toEqual(pdfiumPixels(source!).pixels)
-    } finally { output.destroy() }
-  })
-  it('共有用墨消しで画像全体と交差する長いベクター線を除去する', () => {
-    const doc = new mupdf.PDFDocument(), image = new mupdf.Image(testJpeg())
-    let source: Uint8Array
-    try {
-      const ref = doc.addImage(image)
-      doc.insertPage(-1, doc.addPage([0, 0, 300, 300], 0, { XObject: { Photo: ref } }, 'q 80 0 0 80 20 20 cm /Photo Do Q 0 0 1 RG 4 w 20 150 m 280 150 l S'))
-      source = saveDocument(doc, 'full').bytes
-    } finally { image.destroy(); doc.destroy() }
-    const safe = prepareDocumentOutput(source!, [], {}, true, { redactions: [{ pageIndex: 0, rect: [15, 195, 105, 285] }, { pageIndex: 0, rect: [100, 140, 120, 160] }] })
-    const output = openDocument(safe.bytes).document.asPDF()!, pageObject = output.findPage(0), resources = pageObject.get('Resources', 'XObject')
-    try { expect(resources.length).toBe(0) } finally { resources.destroy(); pageObject.destroy(); output.destroy() }
-    const imageOutput = pdfiumPixels(safe.bytes), at = 150 * imageOutput.stride + 200 * 4
-    expect([...imageOutput.pixels.slice(at, at + 3)]).toEqual([255, 255, 255])
   })
 })
