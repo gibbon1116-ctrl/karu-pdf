@@ -52,8 +52,10 @@ it('起動の見張りを App と Worker の資材読込より前に置く', () 
   const main = readFileSync('src/main.tsx', 'utf8')
   // ES modules evaluate imports in order: the guard module, which installs itself in a
   // page, is the first import, so App's modules (static or dynamic) run after it.
-  expect(main.split('\n').find(line => /^\s*(?:\/\*.*?\*\/)?\s*import\b/.test(line))).toContain("import './security/externalSend'")
-  expect(readFileSync('src/security/externalSend.ts', 'utf8')).toMatch(/typeof window !== 'undefined'[\s\S]*installExternalSendGuard\(window\)/)
+  expect(main.split('\n').find(line => /^\s*(?:\/\*.*?\*\/)?\s*import\b/.test(line))).toContain("import './security/installPageGuard'")
+  expect(readFileSync('src/security/installPageGuard.ts', 'utf8')).toMatch(/^installExternalSendGuard\(window\)$/m)
+  // The Worker bundles import only the Worker guard, so the page guard must not run from externalSend.ts.
+  expect(readFileSync('src/security/externalSend.ts', 'utf8')).not.toMatch(/installExternalSendGuard\(window\)/)
   for (const file of ['src/worker/pdf.worker.ts', 'src/worker/image.worker.ts']) {
     expect(readFileSync(file, 'utf8').split('\n')[0]).toContain("from '../security/externalSend'")
   }

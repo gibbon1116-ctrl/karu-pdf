@@ -218,7 +218,4 @@ export function installWorkerExternalSendGuard(scope: DedicatedWorkerGlobalScope
 // Evaluate before the other dependencies of the Worker entry point (WASM loaders).
 if (typeof document === 'undefined' && typeof self !== 'undefined' && 'postMessage' in self && 'location' in self) {
   installWorkerExternalSendGuard(self as unknown as DedicatedWorkerGlobalScope, 'pdf')
-} else if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  // main.tsx imports this module first, so the page is guarded before App's modules run.
-  installExternalSendGuard(window)
 }
