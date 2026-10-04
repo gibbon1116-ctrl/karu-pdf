@@ -16,6 +16,9 @@ export default defineConfig({
   expect: { timeout: 30_000 },
   fullyParallel: false,
   workers: 1,
+  // On GitHub Actions, also report failures as annotations: the job log needs
+  // a signed-in admin, but annotations can be read through the public API.
+  reporter: process.env.CI ? [['github'], ['list']] : 'list',
   use: {
     actionTimeout: 30_000,
     baseURL: 'http://127.0.0.1:4173',
