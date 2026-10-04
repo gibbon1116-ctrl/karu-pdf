@@ -197,7 +197,7 @@ export function AnnotationLayer(props: Props) {
       props.docId, props.pageIndex, input.from, input.to, input.mode,
     ),
   ), [props.docId, props.pageIndex, props.pool])
-  const annotations = props.store.getPageAnnotations(props.pageIndex).filter(a => props.store.isCountVisible(a.count))
+  const annotations = props.store.getPageAnnotations(props.pageIndex).filter(a => props.store.isShownOnDrawing(a))
   const selectedIds = new Set(props.store.selectedIds())
   const singleSelection = selectedIds.size === 1
   const touched = useMemo(() => new Set(props.store.touchedObjNums(props.pageIndex)), [version, props.pageIndex, props.store])

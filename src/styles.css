@@ -153,6 +153,15 @@ button, input { font: inherit; }
 .annotation-filters > div { display: flex; align-items: center; gap: 4px; }
 .annotation-filters > div label { flex: 1; }
 .annotation-filters input, .annotation-filters select { width: 100%; min-width: 0; height: 28px; }
+.annotation-filters > .drawing-filter-toggle { grid-template-columns: auto 1fr; }
+.annotation-filters .drawing-filter-toggle input { width: auto; height: auto; }
+.drawing-filter-hint { margin: 0; color: #666; font-size: 11px; }
+.drawing-filter-status { display: flex; align-items: center; gap: 8px; }
+.fixture-drawing-filter-warning { padding: 6px; border: 1px solid #c8a64e; background: #fff8df; font-size: 12px; }
+.fixture-drawing-filter-warning p { margin: 0 0 6px; }
+.drawing-hides-counts .fixture-list-heading > span:first-child,
+.drawing-hides-counts .fixture-category > button:last-child,
+.drawing-hides-counts .fixture-groups li > button:first-child { opacity: .45; }
 .csv-export { width: 100%; margin: 9px 0; padding: 5px; }
 .annotation-rows .annotation-row-main { display: grid; grid-template-columns: 24px 35px minmax(0, 1fr) 16px; width: 100%; align-items: center; gap: 4px; padding: 6px 3px; border: 0; border-bottom: 1px solid #d2d2d2; background: transparent; text-align: left; }
 .annotation-rows .annotation-row-main:hover { background: #dcecff; }

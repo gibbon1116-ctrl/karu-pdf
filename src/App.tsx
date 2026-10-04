@@ -39,6 +39,7 @@ import { BlobPdfWriteTarget, type PdfWriteTarget } from './core/pdfStreamWriter'
 import { FixtureSampleContext, type EditorTool } from './editor/AnnotationLayer'
 import type { CountFixtureSample } from './core/countFixtures'
 import type { EditableAnnotation } from './editor/AnnotationStore'
+import { annotationFilterLabel } from './editor/annotationFilter'
 import { downloadPdf, pickOpenHandles, pickSaveHandle, requestWritePermission, writePdf, writePdfWithoutOverwrite, type PdfFileHandle } from './editor/fileAccess'
 import { loadFormatDefaults, saveFormatDefaults, type FormatDefaults } from './editor/formatDefaults'
 import {
@@ -82,6 +83,8 @@ declare global {
       activateTab(docId: string): Promise<void>
       closeTab(docId: string): Promise<void>
       getEditableAnnotations(pageIndex: number): EditableAnnotation[]
+      getSelectedAnnotationIds(): string[]
+      getDrawingAnnotationIds(pageIndex: number): string[]
       getFrameStats(): FrameStats
       openOrganize(): Promise<void>
       organizeDraft(): OrganizeDraft | null
@@ -347,6 +350,10 @@ export default function App() {
     window.clearTimeout(statusTimerRef.current)
     statusTimerRef.current = window.setTimeout(() => setStatus(''), 5000)
   }, [])
+
+  useEffect(() => active?.annotationStore.subscribeDrawingFilterRelease(reason => {
+    showStatus(`図面の絞り込みを解除しました（${reason}）`)
+  }), [active, showStatus])
 
   const finishSampleCapture = useCallback((sample: CountFixtureSample | null) => {
     const pending = sampleCaptureRef.current
@@ -941,6 +948,7 @@ export default function App() {
     if (next === 'count' && session) {
       try { await ensureSessionFixtures(session, pool) } catch (reason) { showStatus(String(reason)); return }
       if (activeRef.current !== session) return
+      session.annotationStore.prepareCountTool()
       window.dispatchEvent(new CustomEvent('karu-pdf:open-fixtures'))
     }
     if (next !== 'select') session?.annotationStore.clearSelection()
@@ -1474,6 +1482,12 @@ export default function App() {
       activateTab: activateDocument,
       closeTab: (docId) => closeDocument(docId, false),
       getEditableAnnotations: (pageIndex) => activeRef.current?.annotationStore.getPageAnnotations(pageIndex) ?? [],
+      getSelectedAnnotationIds: () => activeRef.current?.annotationStore.selectedIds() ?? [],
+      getDrawingAnnotationIds: (pageIndex) => {
+        const store = activeRef.current?.annotationStore
+        if (!store) return []
+        return store.getPageAnnotations(pageIndex).filter(a => store.isShownOnDrawing(a)).map(a => a.id)
+      },
       getFrameStats,
       openOrganize,
       organizeDraft: () => organizeRef.current?.draft ?? null,
@@ -1756,6 +1770,10 @@ export default function App() {
       <footer className="status-bar">
         {install.supported && (install.installed || install.error) && <span className="install-app-status" role="status">{install.installed ? installedMessage : install.error}</span>}
         <span>{active ? `${page} / ${active.pageSizes.length} ページ` : 'PDFを開いてください'}</span>
+        {!comparison && active?.annotationStore.drawingFilterActive() && <span className="drawing-filter-status">
+          図面の表示: {annotationFilterLabel(active.annotationStore.annotationFilter)}だけ
+          <button type="button" onClick={() => active.annotationStore.setDrawingFollowsFilter(false)}>解除</button>
+        </span>}
         {!comparison && active?.annotationStore.getScale(page - 1) && <button type="button" className="status-scale" onClick={() => openScale(page - 1)}>{scaleLabel(active.annotationStore.getScale(page - 1)!)}</button>}
         <span role="status">{runtimeError || status}</span>{/* @single:start */}<span style={{ marginLeft: 'auto', fontSize: '11px' }}>固定・閉域版（HTML）</span>{/* @single:end */}{/* @fixed:start */}<span style={{ marginLeft: 'auto', fontSize: '11px' }}>固定・閉域版</span>{/* @fixed:end */}
       </footer>

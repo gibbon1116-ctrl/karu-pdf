@@ -4,6 +4,7 @@ import { nextCountStyle, type CountFixture } from '../core/countFixtures'
 import { CountMarker } from '../editor/countMarkers'
 import { ensureSessionFixtures, FixtureUiContext, type DocumentSession } from './documentModel'
 import { createCountCsv } from './annotationCsv'
+import { annotationFilterLabel } from '../editor/annotationFilter'
 const FixtureDialog = lazy(() => import('./FixtureDialog'))
 const FixturePresetDialog = lazy(() => import('./FixturePresetDialog'))
 
@@ -40,9 +41,13 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     if (window.showSaveFilePicker) { const handle = await window.showSaveFilePicker({ suggestedName: name }); const writable = await handle.createWritable(); await writable.write(blob); await writable.close() }
     else { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 0) }
   }
-  return <section className="fixture-panel" aria-label="器具リスト" data-testid="fixture-panel">
+  return <section className={`fixture-panel${store.drawingHidesCounts() ? ' drawing-hides-counts' : ''}`} aria-label="器具リスト" data-testid="fixture-panel">
     <div className="fixture-panel-controls">
     <h2>器具リスト</h2>
+    {store.drawingHidesCounts() && <div className="fixture-drawing-filter-warning" role="status">
+      <p>書き込みタブの絞り込み（{annotationFilterLabel(store.annotationFilter)}）で、図面に器具の印を出していません。</p>
+      <button type="button" onClick={() => store.setDrawingFollowsFilter(false)}>図面への反映をやめる</button>
+    </div>}
     {!store.fixturesReady && <p role="status">器具と個数を読み込んでいます…</p>}
     <p className="fixture-count-summary" aria-live="polite">{selected ? <>
       <span className="fixture-summary-name"><svg className="fixture-swatch" viewBox="-14 -14 28 28" aria-hidden="true"><CountMarker style={{ ...selected.style, size: 24, opacity: 1 }} showCode={false} /></svg><span title={`${selected.code} ${selected.name}`}>{selected.code} {selected.name}{'　'}</span></span>

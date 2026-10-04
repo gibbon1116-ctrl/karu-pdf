@@ -8,6 +8,9 @@ import { IssueNumbers, issueColor, issueOrder, parseIssue, type Issue } from '..
 import type { CloudIntensity } from '../core/cloud'
 import { countFixtureId, type CountMark } from '../core/counts'
 import { nextCountStyle, serializeCountFixtures, type CountFixture } from '../core/countFixtures'
+import { DEFAULT_ANNOTATION_FILTER, filterShowsCountMarks, matchesAnnotationFilter, type AnnotationFilter } from './annotationFilter'
+
+export type DrawingFilterReleaseReason = '器具の印を数えるため' | '隠れている種類の書き込みを作ったため' | '次の未対応指摘を表示するため' | '器具の印を表示するため'
 
 export type Kind = MeasureKind | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
@@ -191,6 +194,11 @@ function mapPoint(point: Point, from: Rect, to: Rect): Point {
 }
 
 export class AnnotationStore {
+  private filter: Readonly<AnnotationFilter> = DEFAULT_ANNOTATION_FILTER
+  private followsFilter = false
+  private readonly drawingFilterReleaseListeners = new Set<(reason: DrawingFilterReleaseReason) => void>()
+  get annotationFilter(): Readonly<AnnotationFilter> { return this.filter }
+  get drawingFollowsFilter(): boolean { return this.followsFilter }
   private fixtures: CountFixture[] = []
   private fixtureBaseline = '[]'
   private fixtureLoading: Promise<void> | null = null
@@ -226,12 +234,57 @@ export class AnnotationStore {
   }
 
   getSnapshot = (): number => this.version
+  subscribeDrawingFilterRelease = (listener: (reason: DrawingFilterReleaseReason) => void): (() => void) => {
+    this.drawingFilterReleaseListeners.add(listener)
+    return () => this.drawingFilterReleaseListeners.delete(listener)
+  }
+
+  setAnnotationFilter(filter: AnnotationFilter): void {
+    if (this.filter.kind === filter.kind && this.filter.discipline === filter.discipline && this.filter.status === filter.status) return
+    this.filter = Object.freeze({ ...filter })
+    this.pruneHiddenSelection(); this.notify()
+  }
+  setDrawingFollowsFilter(value: boolean): void {
+    if (this.followsFilter === value) return
+    this.followsFilter = value
+    this.pruneHiddenSelection(); this.notify()
+  }
+  releaseDrawingFilter(reason: DrawingFilterReleaseReason): void {
+    if (!this.followsFilter) return
+    this.setDrawingFollowsFilter(false)
+    for (const listener of this.drawingFilterReleaseListeners) listener(reason)
+  }
+  isShownOnDrawing(annotation: Pick<EditableAnnotation, 'legacyChange' | 'kind' | 'count' | 'issue' | 'measure'>): boolean {
+    return (!this.followsFilter || matchesAnnotationFilter(annotation, this.filter)) && this.isCountVisible(annotation.count)
+  }
+  drawingFilterActive(): boolean {
+    return this.followsFilter && (this.filter.kind !== 'all' || this.filter.discipline !== '' || this.filter.status !== '')
+  }
+  drawingHidesCounts(): boolean {
+    return this.drawingFilterActive() && !filterShowsCountMarks(this.filter)
+  }
+  drawingHiddenObjNums(pageIndex: number): number[] {
+    if (!this.drawingFilterActive()) return []
+    const result: number[] = []
+    for (const a of this.annotations.values()) if (!a.deleted && a.pageIndex === pageIndex && a.objNum !== null && !matchesAnnotationFilter(a, this.filter)) result.push(a.objNum)
+    return result
+  }
+  prepareCountTool(): void {
+    if (this.drawingHidesCounts()) this.releaseDrawingFilter('器具の印を数えるため')
+    if (this.selectedFixtureId && this.revealCountFixture(this.selectedFixtureId)) this.notify()
+  }
+  private revealCountFixture(id: string): boolean {
+    const changed = this.hiddenFixtures.delete(id)
+    if (this.onlySelectedFixture && id !== this.selectedFixtureId) { this.onlySelectedFixture = false; return true }
+    return changed
+  }
   canUndo = (): boolean => this.history.canUndo
   canRedo = (): boolean => this.history.canRedo
 
   reset(preserveFixtureVisibility = false): void {
     this.fixtures = []; this.fixtureBaseline = '[]'; this.fixtureLoading = null; this.fixturesReady = false
     if (!preserveFixtureVisibility) { this.selectedFixtureId = null; this.hiddenFixtures.clear(); this.onlySelectedFixture = false }
+    if (!preserveFixtureVisibility) { this.filter = DEFAULT_ANNOTATION_FILTER; this.followsFilter = false }
     this.legacyCountObjects.clear(); this.pendingFixtureSave = null
     this.scales.clear(); this.scaleBaselines.clear(); this.pendingScales = []
     this.annotations.clear()
@@ -349,12 +402,13 @@ export class AnnotationStore {
   isFixtureVisible(id: string): boolean { return !this.hiddenFixtures.has(id) && (!this.onlySelectedFixture || id === this.selectedFixtureId) }
   isCountVisible(mark: CountMark | null | undefined): boolean { return !mark || this.isFixtureVisible(countFixtureId(mark)) }
   setFixtureVisible(ids: readonly string[], visible: boolean): void {
+    if (visible && this.drawingHidesCounts()) this.releaseDrawingFilter('器具の印を表示するため')
     for (const id of ids) { if (visible) this.hiddenFixtures.delete(id); else this.hiddenFixtures.add(id) }
     this.pruneHiddenSelection(); this.notify()
   }
-  setOnlySelectedFixture(value: boolean): void { this.onlySelectedFixture = value; this.pruneHiddenSelection(); this.notify() }
-  showAllFixtures(): void { this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.notify() }
-  private pruneHiddenSelection(): void { for (const id of this.selection) if (!this.isCountVisible(this.annotations.get(id)?.count)) this.selection.delete(id) }
+  setOnlySelectedFixture(value: boolean): void { if (value && this.drawingHidesCounts()) this.releaseDrawingFilter('器具の印を表示するため'); this.onlySelectedFixture = value; this.pruneHiddenSelection(); this.notify() }
+  showAllFixtures(): void { if (this.drawingHidesCounts()) this.releaseDrawingFilter('器具の印を表示するため'); this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.notify() }
+  private pruneHiddenSelection(): void { for (const id of this.selection) { const a = this.annotations.get(id); if (!a || a.deleted || !this.isShownOnDrawing(a)) this.selection.delete(id) } }
   countTotals(): Map<string, Map<number, number>> {
     const totals = new Map<string, Map<number, number>>()
     for (const a of this.annotations.values()) if (!a.deleted && a.count) {
@@ -365,7 +419,7 @@ export class AnnotationStore {
   }
   visibleCountTotal(pageIndex: number): number {
     let n = 0
-    for (const a of this.annotations.values()) if (!a.deleted && a.pageIndex === pageIndex && a.count && this.isCountVisible(a.count)) n++
+    for (const a of this.annotations.values()) if (!a.deleted && a.pageIndex === pageIndex && a.count && this.isShownOnDrawing(a)) n++
     return n
   }
   countOverlayObjNums(pageIndex: number): number[] {
@@ -456,7 +510,7 @@ export class AnnotationStore {
   }
 
   selectedIds(): string[] {
-    return [...this.selection].filter((id) => this.annotations.get(id)?.deleted === false && this.isCountVisible(this.annotations.get(id)?.count))
+    return [...this.selection].filter((id) => { const a = this.annotations.get(id); return !!a && !a.deleted && this.isShownOnDrawing(a) })
   }
 
   primarySelection(): string | null {
@@ -472,7 +526,8 @@ export class AnnotationStore {
   }
 
   selectOnly(id: string | null): void {
-    const next = id && this.annotations.get(id)?.deleted === false && this.isCountVisible(this.annotations.get(id)?.count) ? [id] : []
+    const a = id ? this.annotations.get(id) : undefined
+    const next = id && a && !a.deleted && this.isShownOnDrawing(a) ? [id] : []
     if (this.selectedIds().length === next.length && next.every((value) => this.selection.has(value))) return
     this.selection.clear()
     for (const value of next) this.selection.add(value)
@@ -480,7 +535,8 @@ export class AnnotationStore {
   }
 
   toggleSelection(id: string): void {
-    if (this.annotations.get(id)?.deleted !== false || !this.isCountVisible(this.annotations.get(id)?.count)) return
+    const a = this.annotations.get(id)
+    if (!a || a.deleted || !this.isShownOnDrawing(a)) return
     if (this.selection.has(id)) this.selection.delete(id)
     else this.selection.add(id)
     this.notify()
@@ -499,7 +555,7 @@ export class AnnotationStore {
     ]
     this.selection.clear()
     for (const annotation of this.getPageAnnotations(pageIndex)) {
-      if (this.isCountVisible(annotation.count) && annotationInsideSelection(annotation, normalized)) this.selection.add(annotation.id)
+      if (this.isShownOnDrawing(annotation) && annotationInsideSelection(annotation, normalized)) this.selection.add(annotation.id)
     }
     this.notify()
     return this.selectedIds()
@@ -576,6 +632,8 @@ export class AnnotationStore {
       deleted: false,
       revision: 1,
     }
+    if (this.followsFilter && !matchesAnnotationFilter(annotation, this.filter)) this.releaseDrawingFilter('隠れている種類の書き込みを作ったため')
+    if (annotation.count) this.revealCountFixture(countFixtureId(annotation.count))
     this.annotations.set(id, annotation)
     if (annotation.issue) this.issueNumbers.observe(annotation.issue.number)
     if (input.deferHistory) this.pendingCreations.add(id)
@@ -1006,6 +1064,7 @@ export class AnnotationStore {
     this.markTouched(annotation)
     annotation.revision += 1
     this.history.push({ before: [before], after: [after] })
+    if (this.drawingFilterActive()) this.pruneHiddenSelection()
     this.notify()
   }
 
@@ -1026,6 +1085,7 @@ export class AnnotationStore {
     }
     if (before.length === 0) return
     this.history.push({ before, after })
+    if (this.drawingFilterActive()) this.pruneHiddenSelection()
     this.notify()
   }
 

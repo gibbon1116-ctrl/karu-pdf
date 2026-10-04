@@ -6,31 +6,15 @@ import { ISSUE_STATUS_CHOICES, issueStatusChoice, issueStatusLabel, unresolvedIs
 import { IssueDetails } from './IssueDetails'
 import { annotationBody, annotationColorHex, annotationKindLabel, CSV_KINDS, type CsvKind } from './annotationCsv'
 import { ensureSessionFixtures } from './documentModel'
+import { ANNOTATION_FILTER_LABELS, matchesAnnotationFilter, type AnnotationFilterKind } from '../editor/annotationFilter'
 
 const CsvExportDialog = lazy(() => import('./CsvExportDialog'))
-type Filter = 'count' | 'issue' | 'issueOpen' | 'issueDone' | 'measure' | 'all' | 'text' | 'callout' | 'shape' | 'symbol' | 'pen' | 'markup'
 
 interface Props {
   session: DocumentSession
   pool: PdfWorkerPool
   onSelect(annotation: EditableAnnotation): void
   onEdit(annotation: EditableAnnotation): void
-}
-
-function matchesFilter(annotation: EditableAnnotation, filter: Filter): boolean {
-  if (annotation.legacyChange) return filter === 'all'
-  if (filter === 'count') return !!annotation.count
-  if (filter === 'issue') return !!annotation.issue
-  if (filter === 'issueOpen') return !!annotation.issue && unresolvedIssue(annotation.issue)
-  if (filter === 'issueDone') return annotation.issue?.status === 'confirmed'
-  if (filter === 'measure') return !!annotation.measure
-  if (filter === 'all') return true
-  if (filter === 'text') return annotation.kind === 'freetext'
-  if (filter === 'callout') return annotation.kind === 'callout'
-  if (filter === 'symbol') return annotation.kind === 'symbol'
-  if (filter === 'pen') return annotation.kind === 'highlight' || annotation.kind === 'ink'
-  if (filter === 'markup') return annotation.kind === 'textHighlight' || annotation.kind === 'underline' || annotation.kind === 'strikeout'
-  return ['cloudSquare', 'cloudPolygon', 'line', 'arrow', 'square', 'circle'].includes(annotation.kind)
 }
 
 async function saveCsv(csv: string, fileName: string): Promise<void> {
@@ -56,7 +40,8 @@ export function allSessionAnnotations(session: DocumentSession): EditableAnnotat
 
 export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) {
   const annotationVersion = useSyncExternalStore(session.annotationStore.subscribe, session.annotationStore.getSnapshot)
-  const [filter, setFilter] = useState<Filter>('all')
+  const store = session.annotationStore
+  const { kind: filter, discipline, status: issueStatus } = store.annotationFilter
   const [firstPage, setFirstPage] = useState(1)
   const [lastPage, setLastPage] = useState(session.pageSizes.length)
   const [progress, setProgress] = useState({ processed: 0, total: session.pageSizes.length })
@@ -66,8 +51,6 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
   const [detailId, setDetailId] = useState<string | null>(null)
   const detailPrefix = useId()
   const detailElement = useRef<HTMLDivElement>(null)
-  const [discipline, setDiscipline] = useState('')
-  const [issueStatus, setIssueStatus] = useState('')
   const [rowPage, setRowPage] = useState(0)
   const [csvOpen, setCsvOpen] = useState(false)
   useEffect(() => setRowPage(0), [filter, firstPage, lastPage, discipline, issueStatus])
@@ -95,11 +78,9 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
     left.pageIndex - right.pageIndex || left.rect[1] - right.rect[1] || left.rect[0] - right.rect[0]
   )), [session, annotationVersion])
   const filtered = annotations.filter((annotation) => (
-    matchesFilter(annotation, filter)
+    matchesAnnotationFilter(annotation, store.annotationFilter)
     && annotation.pageIndex + 1 >= firstPage
     && annotation.pageIndex + 1 <= lastPage
-    && (annotation.legacyChange || !discipline || annotation.issue?.discipline?.includes(discipline))
-    && (annotation.legacyChange || !issueStatus || !!annotation.issue && issueStatusChoice(annotation.issue.status) === issueStatus)
   ))
   if (filter.startsWith('issue')) filtered.sort((a, b) => a.issue!.number - b.issue!.number)
   const issues = annotations.filter(annotation => annotation.issue && annotation.issue.recordKind !== 'change')
@@ -112,15 +93,16 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
 
   return <section className="annotation-list-panel" aria-label="書き込みの一覧">
     <div className="annotation-filters">
-      <label>種類<select aria-label="書き込みの種類" value={filter} onChange={(event) => setFilter(event.currentTarget.value as Filter)}>
-        <option value="all">すべて</option><option value="text">文字</option><option value="callout">吹き出し</option>
-        <option value="count">個数カウント</option><option value="issue">指摘</option><option value="issueOpen">指摘（未確認）</option><option value="issueDone">指摘（修正確認）</option><option value="measure">計測</option><option value="shape">図形</option><option value="symbol">記号</option><option value="pen">ペン</option><option value="markup">文字への印</option>
+      <label>種類<select aria-label="書き込みの種類" value={filter} onChange={(event) => store.setAnnotationFilter({ ...store.annotationFilter, kind: event.currentTarget.value as AnnotationFilterKind })}>
+        {(Object.entries(ANNOTATION_FILTER_LABELS) as Array<[AnnotationFilterKind, string]>).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}
       </select></label>
+      <label className="drawing-filter-toggle"><input type="checkbox" checked={store.drawingFollowsFilter} disabled={loading || !!error} onChange={event => store.setDrawingFollowsFilter(event.currentTarget.checked)} />図面にもこの種類だけ表示</label>
+      <p className="drawing-filter-hint">種類・分野・状態を図面にも反映します。ページ範囲は一覧だけに効きます。</p>
       <div><label>ページ<input aria-label="開始ページ" type="number" min="1" max={session.pageSizes.length} value={firstPage} onChange={(event) => setFirstPage(Number(event.currentTarget.value))} /></label><span>〜</span><label><span className="visually-hidden">終了ページ</span><input aria-label="終了ページ" type="number" min="1" max={session.pageSizes.length} value={lastPage} onChange={(event) => setLastPage(Number(event.currentTarget.value))} /></label></div>
     </div>
     {!!issues.length && <div className="annotation-filters">
-      <label>分野<input aria-label="分野で絞り込み" value={discipline} onChange={event => setDiscipline(event.currentTarget.value)} /></label>
-      <label>状態<select aria-label="状態で絞り込み" value={issueStatus} onChange={event => setIssueStatus(event.currentTarget.value)}>
+      <label>分野<input aria-label="分野で絞り込み" value={discipline} onChange={event => store.setAnnotationFilter({ ...store.annotationFilter, discipline: event.currentTarget.value })} /></label>
+      <label>状態<select aria-label="状態で絞り込み" value={issueStatus} onChange={event => store.setAnnotationFilter({ ...store.annotationFilter, status: event.currentTarget.value as '' | IssueStatusChoice })}>
         <option value="">すべて</option>{ISSUE_STATUS_CHOICES.map(status => <option key={status} value={status}>{issueStatusLabel(status)}</option>)}
       </select></label>
     </div>}
@@ -128,6 +110,7 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
     <button disabled={loading || !!error || !unresolved.length} onClick={() => {
       const current = unresolved.findIndex(annotation => annotation.id === lastIssue)
       const next = unresolved[(current + 1) % unresolved.length]
+      if (store.drawingFollowsFilter && !store.isShownOnDrawing(next)) store.releaseDrawingFilter('次の未対応指摘を表示するため')
       setLastIssue(next.id); onSelect(next)
     }}>次の未対応指摘（ページ範囲内）</button>
     <button type="button" className="csv-export" disabled={loading || !!error} onClick={() => {
