@@ -457,7 +457,7 @@ export function AnnotationLayer(props: Props) {
     const draft = draftRectRef.current
     if (!draft) return
     const rect = operation.mode === 'shape' || operation.mode === 'marquee'
-      ? shapeRect(operation.start, operation.latest, operation.creationKind === 'circle' && operation.shift)
+      ? shapeRect(operation.start, operation.latest, (operation.creationKind === 'circle' || operation.creationKind === 'square') && operation.shift)
       : operation.mode === 'symbol'
         ? symbolRectFromDrag(operation.start, operation.latest, operation.moved, props.formatDefaults[props.tool === 'count' ? 'count' : 'symbol'].symbolSize)
       : operation.mode === 'callout'
@@ -613,7 +613,7 @@ export function AnnotationLayer(props: Props) {
       return
     }
     if (operation.mode === 'shape' && operation.creationKind) {
-      const rect = shapeRect(operation.start, operation.latest, operation.creationKind === 'circle' && operation.shift)
+      const rect = shapeRect(operation.start, operation.latest, (operation.creationKind === 'circle' || operation.creationKind === 'square') && operation.shift)
       if (rect[2] - rect[0] < 4 || rect[3] - rect[1] < 4) return
       const format = props.formatDefaults[operation.creationKind as 'cloudSquare' | 'square' | 'circle']
       const annotation = props.store.create({
