@@ -696,6 +696,16 @@ export function AnnotationLayer(props: Props) {
   }, [props.tool, textQueue])
 
   const renderAnnotation = (annotation: EditableAnnotation) => {
+    if (annotation.legacyChange) {
+      const [x, y, right, bottom] = annotation.rect
+      return <g key={annotation.id} data-annotation-id={annotation.id} className="annotation-item">
+        {(annotation.objNum === null || annotation.dirty) && annotation.legacyChangeData && <image href={annotation.legacyChangeData.preview}
+          x={annotation.legacyChangeData.bounds[0]} y={annotation.legacyChangeData.bounds[1]}
+          width={annotation.legacyChangeData.bounds[2]-annotation.legacyChangeData.bounds[0]} height={annotation.legacyChangeData.bounds[3]-annotation.legacyChangeData.bounds[1]} pointerEvents="none" />}
+        <rect x={x} y={y} width={right-x} height={bottom-y} fill="transparent" pointerEvents="all" />
+        {selectedIds.has(annotation.id) && <rect className="annotation-selection" x={x} y={y} width={right-x} height={bottom-y} fill="none" pointerEvents="none" />}
+      </g>
+    }
     if (compactCounts && annotation.count && annotation.symbol === 'circle' && !(singleSelection && selectedIds.has(annotation.id))) return null
     const visible = annotation.objNum === null || touched.has(annotation.objNum)
     const [x0, y0, x1, y1] = annotation.rect
@@ -815,13 +825,12 @@ export function AnnotationLayer(props: Props) {
             return
           }
         }
-        if (props.tool === 'issue' || props.tool === 'change') {
+        if (props.tool === 'issue') {
           const creationTool = props.tool
           void props.store.issueNumbers.initialize(() => props.pool.maxIssueNumber(props.docId)).then(() => {
             if (toolRef.current !== creationTool) return
             const f = props.formatDefaults[creationTool]
-            const annotation = props.store.create({ pageIndex: props.pageIndex, kind: 'issue', rect: symbolRectFromDrag(start, start, false, f.symbolSize), color: f.color,
-              issue: props.tool === 'change' ? { number: props.store.issueNumbers.next(), status: 'open', version: 1, id: crypto.randomUUID(), recordKind: 'change' } : null })
+            const annotation = props.store.create({ pageIndex: props.pageIndex, kind: 'issue', rect: symbolRectFromDrag(start, start, false, f.symbolSize), color: f.color })
             props.store.selectOnly(annotation.id); props.onSelect(annotation.id); props.onEdit(annotation.id)
           }).catch(reason => props.onStatus(`指摘を作れませんでした: ${String(reason)}`))
           return
@@ -853,10 +862,10 @@ export function AnnotationLayer(props: Props) {
             dragRef.current = { pointerId: event.pointerId, mode: 'resize', start, latest: start, id, element: null, frame: 0, moved: false, shift: false, ctrl: false, resizeHandle, originalRect: annotation.rect, annotationKind: annotation.kind, stopMeasurement: beginDragFrameMeasurement() }
           } else if (id) {
             if (!props.store.isSelected(id)) props.store.selectOnly(id)
-            const ids = props.store.selectedIds()
+            const ids = props.store.selectedIds().filter(selectedId => !props.store.get(selectedId)?.legacyChange)
             for (const selectedId of ids) props.store.touch(selectedId)
             props.onSelect(id)
-            if (annotation && isTextMarkup(annotation.kind)) return
+            if (annotation && (annotation.legacyChange || isTextMarkup(annotation.kind))) return
             const pageIds = new Set(annotations.map((item) => item.id))
             const elements = ids.filter((selectedId) => pageIds.has(selectedId)).flatMap((selectedId) => {
               const element = svg.querySelector<SVGGElement>(`g[data-annotation-id="${selectedId}"]`)
@@ -951,7 +960,7 @@ export function AnnotationLayer(props: Props) {
         if (props.tool !== 'select') return
         const id = annotationIdFromTarget(event.target) ?? props.selectedId
         const annotation = id ? props.store.touch(id) : undefined
-        if (annotation?.kind === 'issue' || annotation?.kind === 'freetext' || annotation?.kind === 'callout') { props.onSelect(annotation.id); props.onEdit(annotation.id) }
+        if (annotation && !annotation.legacyChange && (annotation.kind === 'issue' || annotation.kind === 'freetext' || annotation.kind === 'callout')) { props.onSelect(annotation.id); props.onEdit(annotation.id) }
       }}
     >
       <rect className="annotation-surface" x="0" y="0" width={props.pageSize.width} height={props.pageSize.height} />
@@ -981,7 +990,7 @@ export function AnnotationLayer(props: Props) {
       <button type="button" onClick={() => createMarkup('strikeout')}><ToolIcon tool="strikeout" />取り消し線</button>
     </div>}
     {editing?.issue && <IssueEditor key={editing.id} annotation={editing} store={props.store} zoom={props.zoom} registerCommit={props.registerCommit} onClose={() => props.onEdit(null)} />}
-    {editing && !editing.issue && <TextEditor annotation={editing} zoom={props.zoom} pool={props.pool} store={props.store} onClose={(removed) => {
+    {editing && !editing.issue && !editing.legacyChange && <TextEditor annotation={editing} zoom={props.zoom} pool={props.pool} store={props.store} onClose={(removed) => {
       props.onEdit(null)
       props.onSelect(removed ? null : editing.id)
     }} registerCommit={props.registerCommit} />}

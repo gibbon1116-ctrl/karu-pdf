@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { EditableAnnotation } from '../src/editor/AnnotationStore'
-import { createAnnotationCsv, createIssueCsv, createChangeCsv } from '../src/app/annotationCsv'
+import { createAnnotationCsv, createIssueCsv, createCsv, csvAnnotations, csvKind, CSV_KINDS, ANNOTATION_CSV_HEADER, quote } from '../src/app/annotationCsv'
 
 function annotation(values: Partial<EditableAnnotation> = {}): EditableAnnotation {
   return {
@@ -13,20 +13,20 @@ function annotation(values: Partial<EditableAnnotation> = {}): EditableAnnotatio
 }
 
 describe('書き込み一覧 CSV', () => {
-  it('指摘と変更のCSVを区別し、変更理由と関連IDを出力する', () => {
+  it('旧版の変更記録を指摘・全種類のCSVから除外する', () => {
     const issue=annotation({kind:'issue',text:'電源を確認',issue:{number:1,status:'open',id:'issue-1'}})
     const change=annotation({kind:'issue',text:'位置を変更',issue:{number:2,status:'revised',id:'change-2',recordKind:'change',changeReason:'=設備干渉',relatedIssueId:'issue-1'}})
     expect(createIssueCsv([issue,change])).toContain('電源を確認')
     expect(createIssueCsv([issue,change])).not.toContain('位置を変更')
-    expect(createChangeCsv([issue,change])).toContain("位置を変更,'=設備干渉,issue-1,修正済")
-    expect(createChangeCsv([issue,change])).not.toContain('電源を確認')
+    expect(createAnnotationCsv([issue,change])).not.toContain('位置を変更')
+    expect(createAnnotationCsv([annotation({ legacyChange: true, kind: 'issue', text: '旧変更' })])).not.toContain('旧変更')
   })
   it.each(['=1+1', '+SUM(1)', '-1+1', '@SUM(1)', '  =1+1', '\t=1+1', '\r=1+1', '\n=1+1', '＝1+1'])('文字列 %j を数式ではなく文字として出力する', text => {
     const item = annotation({ text })
     expect(createAnnotationCsv([item])).toContain("'" + text.replace(/\r?\n/g, '\r\n'))
     const issue = annotation({ text, kind: 'issue', issue: { number: 1, status: 'open' } })
     expect(createIssueCsv([issue])).toContain("'" + text.replace(/\r?\n/g, '\r\n'))
-    expect(createIssueCsv([issue])).toContain('\r\n1,2,')
+    expect(createIssueCsv([issue])).toContain('\r\n指摘,1,2,')
   })
   it('BOM、CRLF、クォート、mm座標と大きさを出力する', () => {
     const csv = createAnnotationCsv([annotation()])
@@ -38,14 +38,14 @@ describe('書き込み一覧 CSV', () => {
     expect(csv).toContain('#FF0000')
   })
 
-  it('ページ順、上から順に番号を付ける', () => {
+  it('指摘以外の番号欄は空欄で、ページ・上・左の順に出力する', () => {
     const csv = createAnnotationCsv([
       annotation({ id: 'later', pageIndex: 1, rect: [0, 200, 10, 210], text: '後' }),
       annotation({ id: 'first', pageIndex: 0, rect: [0, 100, 10, 110], text: '先' }),
     ])
     const lines = csv.slice(1).split('\r\n')
-    expect(lines[1]).toContain('1,1,文字,先')
-    expect(lines[2]).toContain('2,2,文字,後')
+    expect(lines[1]).toContain('文字,,1,,先')
+    expect(lines[2]).toContain('文字,,2,,後')
   })
 
   it('文字への印を区別できる種類名で出力する', () => {
@@ -54,8 +54,57 @@ describe('書き込み一覧 CSV', () => {
       annotation({ kind: 'underline', text: '下線' }),
       annotation({ kind: 'strikeout', text: '取消' }),
     ])
-    expect(csv).toContain(',文字ハイライト,黄色,')
-    expect(csv).toContain(',文字に下線,下線,')
-    expect(csv).toContain(',文字に取り消し線,取消,')
+    expect(csv).toContain('文字ハイライト,,2,,黄色,')
+    expect(csv).toContain('文字に下線,,2,,下線,')
+    expect(csv).toContain('文字に取り消し線,,2,,取消,')
+  })
+
+  it('選択した種類だけの列と行を、種類順・指摘番号順で出す', () => {
+    const items = [annotation({ text: '文字' }), annotation({ kind: 'issue', text: '十二', issue: { number: 12, status: 'open', sourceNumber: 8, sourceDocument: '=旧.pdf', drawingNumber: 'E-01', discipline: '電気' } }),
+      annotation({ kind: 'issue', text: '二', issue: { number: 2, status: 'confirmed' } }), annotation({ kind: 'symbol', count: { version: 1, id: 'count', group: '照明' }, text: '' })]
+    const text = createCsv(items, ['text'])
+    expect(text.split('\r\n')[0]).toBe('\uFEFF' + ANNOTATION_CSV_HEADER.map(quote).join(','))
+    const mixed = createCsv(items, ['text', 'issue'])
+    expect(mixed.split('\r\n')[0]).toContain('状態,分野,回答,修正確認,引継ぎ元番号,引継ぎ元文書')
+    expect(mixed.split('\r\n')[0]).not.toContain('縮尺')
+    expect(mixed.split('\r\n')[0]).not.toContain('個数の種類')
+    expect(mixed).toContain("8,'=旧.pdf")
+    expect(mixed).not.toContain('№')
+    expect(mixed.indexOf('指摘,2,')).toBeLessThan(mixed.indexOf('指摘,12,'))
+    expect(mixed.indexOf('指摘,12,')).toBeLessThan(mixed.indexOf('文字,,2,'))
+    const count = createCsv(items, ['count'])
+    expect(count.split('\r\n')[0]).toContain('個数の種類')
+    expect(count.split('\r\n')[0]).not.toContain('状態')
+    expect(count).toContain('個数カウント,,2,,')
+    expect(count).toContain(',照明\r\n')
+    const measure = createCsv(items, ['measure'])
+    expect(measure.split('\r\n')[0]).toContain('縮尺')
+    expect(measure.split('\r\n')[0]).not.toContain('個数の種類')
+    expect(csvAnnotations(items, CSV_KINDS, { firstPage: 2, lastPage: 2, issueStatus: 'confirmed' }).filter(a => a.issue).map(a => a.issue!.number)).toEqual([2])
+    expect(csvAnnotations(items, ['issue'], { issueStatus: 'open' }).map(a => a.issue!.number)).toEqual([12])
+    expect(csvAnnotations(items, CSV_KINDS, { firstPage: 3 })).toEqual([])
+    expect(csvAnnotations(items, [])).toEqual([])
+  })
+
+  it('全種類を指定順にまとめ、各種類の非該当列は空欄にする', () => {
+    const items = [
+      annotation({ kind: 'underline', text: '印' }), annotation({ kind: 'ink', text: '' }), annotation({ kind: 'symbol', text: '' }),
+      annotation({ kind: 'square', text: '' }), annotation({ kind: 'distance', text: '100 mm', measure: { kind: 'distance', unit: 'mm', decimals: 0, mmPerPoint: 100*25.4/72 } }),
+      annotation({ kind: 'callout', text: '吹き出し' }), annotation({ kind: 'freetext', text: '文字' }),
+      annotation({ kind: 'symbol', text: '', count: { version: 1, id: 'count', group: '照明' } }),
+      annotation({ kind: 'issue', text: '指摘本文', issue: { number: 12, status: 'open', discipline: '電気', drawingNumber: 'E-01' } }),
+    ]
+    expect(csvAnnotations(items, CSV_KINDS).map(csvKind)).toEqual([...CSV_KINDS])
+    const csv = createCsv(items, CSV_KINDS), rows = csv.split('\r\n')
+    expect(rows[0]).toContain('引継ぎ元文書,縮尺,個数の種類')
+    expect(rows[1]).toContain('指摘,12,2,E-01,指摘本文')
+    expect(rows[1]).toMatch(/未回答,電気,,,,,,\r?$/)
+    expect(rows[2]).toMatch(/,,,,,,,照明$/)
+    expect(rows[5]).toContain('距離,,2,,100 mm,')
+    expect(rows[5]).toMatch(/,,,,,,,約 1\/100,$/)
+    expect(rows[8]).toMatch(/,,,,,,,,$/)
+    const left = annotation({ id: 'left', text: '左', pageIndex: 0, rect: [10,100,20,110] })
+    const right = annotation({ id: 'right', text: '右', pageIndex: 0, rect: [30,100,40,110] })
+    expect(csvAnnotations([right,left], ['text']).map(a => a.id)).toEqual(['left','right'])
   })
 })

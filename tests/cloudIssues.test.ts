@@ -97,8 +97,8 @@ it('issue CSV has exact columns, numeric order, escaped CRLF/commas/quotes, empt
   store.create({ kind: 'issue', pageIndex: 0, rect: [0,0,16,16], issue: { number: 2, status: 'open' }, text: '先頭' })
   store.create({ kind: 'square', pageIndex: 0, rect: [0,0,10,10] })
   const all = [0,2].flatMap(i => store.getPageAnnotations(i))
-  expect(createIssueCsv(all)).toBe('\uFEFF番号,ページ,指摘の内容,状態,回答,"位置（x, y mm）",分野,修正確認,図面番号,指摘ID,引継ぎ元ID,引継ぎ元文書\r\n2,1,先頭,未回答,,"0.00, 0.00",,,,,,\r\n12,3,"確認,""寸法""\r\n次の行",対応済（旧版）,,"25.40, 50.80",,,,,,\r\n')
-  expect(createAnnotationCsv(all)).toContain('指摘,"№ 12 確認,""寸法""\r\n次の行"')
+  expect(createIssueCsv(all)).toBe('\uFEFF種類,番号,ページ,図面番号,内容,色,"位置（x, y mm）","大きさ（幅, 高さ mm）",状態,分野,回答,修正確認,引継ぎ元番号,引継ぎ元文書\r\n指摘,2,1,,先頭,#FF0000,"0.00, 0.00","5.64, 5.64",未回答,,,,,\r\n指摘,12,3,,"確認,""寸法""\r\n次の行",#808080,"25.40, 50.80","5.64, 5.64",対応済（旧版）,,,,,\r\n')
+  expect(createAnnotationCsv(all)).toContain('指摘,12,3,,"確認,""寸法""\r\n次の行"')
   expect(issueCsvFileName('図面.PDF')).toBe('図面_指摘一覧.csv')
 })
 
@@ -115,4 +115,30 @@ it('review details survive renumber and history, copies receive another stable i
   expect(store.get(copy)?.issue?.id).not.toBe(identity)
   expect(() => store.updateIssueDetails(a.id, { answer: 'a'.repeat(8001) })).toThrow()
   expect(parseIssue('{"number":1,"status":"done"}')).toEqual({ number: 1, status: 'done' })
+})
+
+it('引継ぎは元番号を保ち、衝突だけ付け直して元番号を残す', () => {
+  const previous = new AnnotationStore(), next = new AnnotationStore()
+  const source = [12, 20].map(number => previous.create({ kind: 'issue', pageIndex: 0, rect: [20,20,36,36], issue: { number, status: 'open', id: `previous-${number}`, sourceId: `old-${number}`, sourceDocument: '旧.pdf' } }))
+  next.create({ kind: 'issue', pageIndex: 1, rect: [10,10,26,26], issue: { number: 12, status: 'confirmed' } })
+  next.create({ kind: 'issue', pageIndex: 1, rect: [50,50,66,66], issue: { number: 30, status: 'open' } })
+  const ids = next.pasteAnnotations(source, 0, { width: 600, height: 800 }, 0, { keepIssueNumbers: true })
+  expect(ids.map(id => next.get(id)?.issue)).toMatchObject([
+    { number: 31, sourceNumber: 12, sourceId: 'old-12', sourceDocument: '旧.pdf' }, { number: 20, sourceNumber: 20 },
+  ])
+  expect(ids.map(id => next.get(id)?.issue?.id)).not.toEqual(source.map(a => a.issue?.id))
+  next.undo(); expect(next.getPageAnnotations(0)).toEqual([])
+  next.redo(); expect(ids.map(id => next.get(id)?.issue?.number)).toEqual([31,20])
+  expect(next.create({ kind: 'issue', pageIndex: 0, rect: [70,70,86,86] }).issue?.number).toBe(32)
+  const retained = new AnnotationStore()
+  const [id] = retained.pasteAnnotations([source[0]], 0, { width: 600, height: 800 }, 0, { keepIssueNumbers: true })
+  expect(retained.get(id)?.issue).toMatchObject({ number: 12, sourceNumber: 12 })
+  expect(retained.create({ kind: 'issue', pageIndex: 0, rect: [50,50,66,66] }).issue?.number).toBe(13)
+})
+
+it('sourceNumber は正の安全な整数だけを読み込む', () => {
+  expect(parseIssue('{"number":3,"status":"open","sourceNumber":12}')).toEqual({ number: 3, status: 'open', sourceNumber: 12 })
+  for (const sourceNumber of [0, -1, 1.5, '12', null, Number.MAX_SAFE_INTEGER + 1]) {
+    expect(parseIssue(JSON.stringify({ number: 3, status: 'open', sourceNumber }))).toBeNull()
+  }
 })

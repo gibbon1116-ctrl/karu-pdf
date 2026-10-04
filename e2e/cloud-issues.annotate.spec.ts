@@ -1,4 +1,5 @@
 import path from 'node:path'
+import mupdf from 'mupdf'
 import { expect, test, type Page } from '@playwright/test'
 
 async function open(page: Page) {
@@ -38,6 +39,11 @@ test('指摘の回答・分野・修正確認を入力し、4段階の状態と�
   await open(page); await page.keyboard.press('n'); await place(page, 160, 200, '回路確認')
   await page.keyboard.press('Escape'); await page.getByRole('tab', { name: '書き込み', exact: true }).click()
   await page.getByRole('button', { name: '指摘 1 の詳細', exact: true }).click()
+  await expect(page.getByLabel('指摘の分野', { exact: true })).toHaveAttribute('list', 'issue-disciplines')
+  expect(await page.locator('#issue-disciplines option').evaluateAll(options => options.map(option => option.getAttribute('value')))).toEqual(['建築','構造','電気','機械','外構','その他'])
+  await expect(page.locator('.issue-details')).not.toContainText('指摘ID')
+  const identity = await page.evaluate(() => window.__karu!.getEditableAnnotations(0).find(a => a.issue)!.issue!.id!)
+  await expect(page.locator('.issue-details')).not.toContainText(identity)
   await page.getByLabel('指摘の分野', { exact: true }).fill('電気')
   await page.getByLabel('指摘の回答', { exact: true }).fill('配線を修正')
   await page.getByLabel('指摘の修正確認', { exact: true }).fill('新版で確認')
@@ -61,19 +67,91 @@ test('種類別カウントをクリックし、取消・種類変更・保存�
   expect(await page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter(a => a.count).length)).toBe(2)
 })
 
-test('変更箇所と理由・関連指摘を記録し、PDF保存と再読込で維持する', async ({ page }) => {
-  await open(page); await page.keyboard.press('n')
-  await expect(page.getByRole('button',{name:'指摘',exact:true})).toHaveAttribute('aria-pressed','true')
-  await place(page,100,200,'回路の指摘');await page.keyboard.press('Escape')
-  const relatedId=await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).find(a=>a.issue)!.issue!.id!)
-  await choose(page,'文字','変更記録');await expect(page.getByRole('button',{name:'変更記録',exact:true})).toHaveAttribute('aria-pressed','true')
-  await place(page,160,250,'回路名称を変更');await page.keyboard.press('Escape')
-  await page.getByRole('tab',{name:'書き込み',exact:true}).click();await page.getByLabel('書き込みの種類').selectOption('change')
-  await page.getByRole('button',{name:'変更 2 の詳細',exact:true}).click()
-  await page.getByLabel('変更理由',{exact:true}).fill('機器変更に伴う修正');await page.getByLabel('関連指摘を選ぶ').selectOption(relatedId)
-  await page.getByLabel('指摘 2 の状態',{exact:true}).selectOption('revised')
+test('文字メニューには変更記録がなく、旧版変更を指摘から除外して削除・Undoできる', async ({ page }) => {
+  const doc = new mupdf.PDFDocument(), ref = doc.addPage([0,0,400,400], 0, {}, '')
+  let bytes: number[]
+  try {
+    doc.insertPage(-1, ref)
+    const nativePage = doc.loadPage(0), resources = doc.newDictionary()
+    try {
+      for (const number of [1,2,3]) {
+        const a = nativePage.createAnnotation('Stamp'), object = a.getObject()
+        const data = doc.newString(JSON.stringify({ number, status: 'open', ...(number === 2 ? { recordKind: 'change' } : {}) }))
+        try {
+          a.setRect([40*number,100,40*number+16,116]); a.setContents(number === 2 ? '旧版の変更内容' : `指摘本文${number}`)
+          object.put('KaruIssue', data)
+          a.setAppearance('N', null, mupdf.Matrix.identity, [0,0,16,16], resources, '1 0 0 RG 1 w 1 1 14 14 re S')
+        } finally { data.destroy(); object.destroy(); a.destroy() }
+      }
+    } finally { resources.destroy(); nativePage.destroy() }
+    const buffer = doc.saveToBuffer('compress')
+    try { bytes = [...buffer.asUint8Array()] } finally { buffer.destroy() }
+  } finally { ref.destroy(); doc.destroy() }
+  await page.goto('/karu-pdf/?test=1&workers=3'); await page.waitForFunction(() => !!window.__karu)
+  await page.evaluate(b => window.__karu!.openBytes(b, '旧版.pdf'), bytes)
+  await expect(page.getByTestId('annotation-layer-0')).toBeVisible()
+  await page.getByRole('button',{name:'文字▼'}).click()
+  await expect(page.getByRole('menuitemcheckbox', { name: '変更記録', exact: false })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await page.getByRole('tab',{name:'書き込み',exact:true}).click()
+  await page.getByLabel('書き込みの種類').selectOption('issue')
+  await expect(page.locator('.annotation-type-icon')).toHaveText(['1','3'])
+  await expect(page.getByRole('region',{name:'書き込みの一覧'})).toContainText('未確認 2 / 指摘 2')
+  const legacy = await page.evaluate(() => window.__karu!.getEditableAnnotations(0).find(a => a.legacyChange)!)
+  expect(legacy.issue).toBeNull(); expect(legacy.dirty).toBe(false)
+  expect(await page.evaluate(() => window.__karu!.listTabs().find(tab => tab.name === '旧版.pdf')!.dirty)).toBe(false)
+  await page.getByLabel('書き込みの種類').selectOption('all')
+  const row = page.locator('.annotation-rows li').filter({ hasText: '変更記録（旧版）' })
+  await expect(row).toContainText('旧版の変更内容')
+  await row.getByRole('button').click()
+  await expect(page.getByLabel('指摘の状態', { exact: true })).toHaveCount(0)
+  await page.getByTestId('viewer').focus(); await page.keyboard.press('Delete')
+  await expect(row).toHaveCount(0)
+  await page.keyboard.press('Control+z'); await expect(row).toHaveCount(1)
+  expect(await page.evaluate(() => window.__karu!.getEditableAnnotations(0).find(a => a.legacyChange)?.dirty)).toBe(false)
+  await page.keyboard.press('n'); await place(page,160,200,'次は4')
+  expect((await issues(page)).map(a => a.number)).toEqual([1,3,4])
+  expect(await page.evaluate(() => window.__karu!.exportAnnotationCsv())).not.toContain('旧版の変更内容')
+  await page.keyboard.press('Escape'); await row.getByRole('button').click()
+  await page.getByTestId('viewer').focus(); await page.keyboard.press('Delete')
   await reopen(page)
-  expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).find(a=>a.issue?.recordKind==='change'))).toMatchObject({text:'回路名称を変更',issue:{recordKind:'change',changeReason:'機器変更に伴う修正',relatedIssueId:relatedId,status:'revised'}})
+  expect(await page.evaluate(() => window.__karu!.getEditableAnnotations(0).some(a => a.legacyChange))).toBe(false)
+})
+
+test('CSV画面で指摘と文字を選び、対象列・行・ファイル名を確認する', async ({ page }) => {
+  await open(page); await page.keyboard.press('n'); await place(page,100,200,'=確認')
+  await page.keyboard.press('Escape'); await page.keyboard.press('t'); await click(page,200,300)
+  const text = page.getByTestId('text-editor'); await expect(text).toBeVisible()
+  await text.fill('文字の本文'); await text.press('Control+Enter'); await page.keyboard.press('Escape')
+  await page.getByRole('tab',{name:'書き込み',exact:true}).click()
+  await page.getByLabel('書き込みの種類').selectOption('issue')
+  await page.evaluate(() => {
+    Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: async (options: { suggestedName: string }) => ({
+      createWritable: async () => ({ write: async (blob: Blob) => {
+        (window as unknown as { __csvExport: { csv: string; name: string } }).__csvExport = { csv: new TextDecoder('utf-8', { ignoreBOM: true }).decode(await blob.arrayBuffer()), name: options.suggestedName }
+      }, close: async () => undefined }),
+    }) })
+  })
+  await page.getByRole('button',{name:'CSV に書き出す…',exact:true}).click()
+  const dialog = page.getByRole('dialog',{name:'CSV に書き出す',exact:true})
+  await expect(dialog.getByRole('checkbox',{name:'指摘',exact:true})).toBeChecked()
+  await expect(dialog.getByRole('checkbox',{name:'文字',exact:true})).not.toBeChecked()
+  await dialog.getByRole('button',{name:'すべて外す'}).click()
+  await expect(dialog.getByRole('button',{name:'書き出す',exact:true})).toBeDisabled()
+  await expect(dialog).toContainText('書き出す種類を選んでください')
+  await dialog.getByRole('checkbox',{name:'指摘',exact:true}).check()
+  await dialog.getByRole('checkbox',{name:'文字',exact:true}).check()
+  await dialog.getByRole('button',{name:'書き出す',exact:true}).click()
+  await expect(dialog).not.toBeVisible()
+  const result = await page.evaluate(() => (window as unknown as { __csvExport: { csv: string; name: string } }).__csvExport)
+  expect(result.name).toBe('sample-small_書き込み一覧.csv')
+  expect(result.csv.charCodeAt(0)).toBe(0xFEFF)
+  const lines = result.csv.slice(1).split('\r\n')
+  expect(lines[0]).toBe('種類,番号,ページ,図面番号,内容,色,"位置（x, y mm）","大きさ（幅, 高さ mm）",状態,分野,回答,修正確認,引継ぎ元番号,引継ぎ元文書')
+  expect(lines[1]).toContain("指摘,1,1,,'=確認,")
+  expect(lines[2]).toContain('文字,,1,,文字の本文,')
+  expect(lines).toHaveLength(4)
+  expect(result.csv).toBe(await page.evaluate(() => window.__karu!.exportCsv(['issue','text'])))
 })
 
 test('雲四角をドラッグして8ハンドルで編集し、保存後にも雲の属性と座標が戻る',async({page})=>{
@@ -127,9 +205,9 @@ test('指摘一覧の番号順・状態・CSV・振り直しとUndoを実結果�
   await expect(page.locator('.annotation-type-icon')).toHaveText(['1','2','3'])
   await page.getByLabel('指摘 2 の状態',{exact:true}).selectOption('done')
   const csv=await page.evaluate(()=>window.__karu!.exportIssueCsv())
-  expect(csv.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<ID>')).toBe('\uFEFF番号,ページ,指摘の内容,状態,回答,"位置（x, y mm）",分野,修正確認,図面番号,指摘ID,引継ぎ元ID,引継ぎ元文書\r\n1,1,下の指摘,未回答,,"67.73, 103.01",,,,<ID>,,\r\n2,1,"確認,""寸法""\r\n次の行",対応済（旧版）,,"32.46, 74.79",,,,<ID>,,\r\n3,1,中の指摘,未回答,,"67.73, 85.37",,,,<ID>,,\r\n')
-  expect(await page.evaluate(()=>window.__karu!.exportAnnotationCsv())).toContain('指摘,"№ 2 確認,""寸法""')
-  page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'番号を振り直す',exact:true}).click()
+  expect(csv).toBe('\uFEFF種類,番号,ページ,図面番号,内容,色,"位置（x, y mm）","大きさ（幅, 高さ mm）",状態,分野,回答,修正確認,引継ぎ元番号,引継ぎ元文書\r\n指摘,1,1,,下の指摘,#FF0000,"67.73, 103.01","5.64, 5.64",未回答,,,,,\r\n指摘,2,1,,"確認,""寸法""\r\n次の行",#808080,"32.46, 74.79","5.64, 5.64",対応済（旧版）,,,,,\r\n指摘,3,1,,中の指摘,#FF0000,"67.73, 85.37","5.64, 5.64",未回答,,,,,\r\n')
+  expect(await page.evaluate(()=>window.__karu!.exportAnnotationCsv())).toContain('指摘,2,1,,"確認,""寸法""')
+  page.once('dialog',dialog=>{ expect(dialog.message()).toContain('振り直すと、CSVや印刷で渡した番号と合わなくなります'); void dialog.accept() });await page.getByRole('button',{name:'番号を振り直す',exact:true}).click()
   expect((await issues(page)).map(a=>[a.number,a.text])).toEqual([[3,'下の指摘'],[1,'確認,"寸法"\n次の行'],[2,'中の指摘']])
   await page.keyboard.press('Control+z');expect((await issues(page)).map(a=>a.number)).toEqual([1,2,3])
 })

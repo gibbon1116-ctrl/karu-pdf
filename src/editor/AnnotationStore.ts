@@ -1,4 +1,4 @@
-import { nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type Point, type Rect, type RGB, type SymbolName } from '../core/annotations'
+import { nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type LegacyChangeData, type Point, type Rect, type RGB, type SymbolName } from '../core/annotations'
 import type { Quad } from 'mupdf'
 import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
@@ -11,6 +11,8 @@ import type { CountMark } from '../core/counts'
 export type Kind = MeasureKind | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
 export interface EditableAnnotation {
+  legacyChange?: boolean
+  legacyChangeData?: LegacyChangeData
   count?: CountMark | null
   arrowHeadSize?: number | null
   cloudIntensity?: CloudIntensity | null
@@ -240,11 +242,13 @@ export class AnnotationStore {
     const request = load().then((annotations) => {
       if (generation !== this.generation) return
       for (const info of annotations) {
-        if (!info.editable || info.kind === 'other') continue
+        if ((!info.editable && !info.legacyChange) || info.kind === 'other') continue
         const id = `obj-${info.objNum}`
         if (this.annotations.has(id)) continue
         const kind = info.kind as Kind
         const annotation: StoredAnnotation = {
+          legacyChange: info.legacyChange,
+          legacyChangeData: info.legacyChangeData,
           issue: info.issue ? { ...info.issue } : null,
           count: info.count ? { ...info.count } : null,
           cloudIntensity: info.cloudIntensity ?? null,
@@ -387,7 +391,7 @@ export class AnnotationStore {
   copySelected(): EditableAnnotation[] {
     return this.selectedIds().flatMap((id) => {
       const annotation = this.annotations.get(id)
-      return annotation && !annotation.deleted && !isTextMarkup(annotation.kind) ? [publicAnnotation(annotation, this.isAnnotationDirty(annotation))] : []
+      return annotation && !annotation.deleted && !annotation.legacyChange && !isTextMarkup(annotation.kind) ? [publicAnnotation(annotation, this.isAnnotationDirty(annotation))] : []
     })
   }
 
@@ -466,6 +470,7 @@ export class AnnotationStore {
   touch(id: string): EditableAnnotation | undefined {
     const annotation = this.annotations.get(id)
     if (!annotation || annotation.deleted) return undefined
+    if (annotation.legacyChange) return this.get(id)
     if (annotation.objNum !== null) {
       const touched = this.touchedByPage.get(annotation.pageIndex) ?? new Set<number>()
       if (!touched.has(annotation.objNum)) {
@@ -704,8 +709,14 @@ export class AnnotationStore {
     pageIndex: number,
     pageSize: { width: number; height: number },
     offset: number,
+    options: { keepIssueNumbers?: boolean } = {},
   ): string[] {
+    source = source.filter(a => !a.legacyChange && a.issue?.recordKind !== 'change')
     if (source.length === 0) return []
+    const usedNumbers = options.keepIssueNumbers
+      ? new Set([...this.annotations.values()].filter(a => !a.deleted && a.issue && a.issue.recordKind !== 'change').map(a => a.issue!.number)) : new Set<number>()
+    // Reserve all retained numbers before allocating replacements for collisions.
+    if (options.keepIssueNumbers) for (const item of source) if (item.issue) this.issueNumbers.observe(item.issue.number)
     const sourceBounds = source.map(annotationBounds)
     const groupBounds: Rect = [
       Math.min(...sourceBounds.map((rect) => rect[0])),
@@ -716,9 +727,16 @@ export class AnnotationStore {
     const [dx, dy] = translationToFit(groupBounds, pageSize, offset)
     const created: AnnotationState[] = []
     for (const item of source) {
+      let issue: Issue | null = null
+      if (item.issue) {
+        const number = options.keepIssueNumbers && !usedNumbers.has(item.issue.number) ? item.issue.number : this.issueNumbers.next()
+        if (options.keepIssueNumbers) { usedNumbers.add(number); this.issueNumbers.observe(number) }
+        issue = { ...item.issue, number, version: 1, id: crypto.randomUUID(),
+          ...(options.keepIssueNumbers ? { sourceNumber: item.issue.number } : {}) }
+      }
       const annotation = this.create({
         count: item.count ? { ...item.count, id: crypto.randomUUID() } : null,
-        issue: item.issue ? { ...item.issue, number: this.issueNumbers.next(), version: 1, id: crypto.randomUUID() } : null,
+        issue,
         cloudIntensity: item.cloudIntensity,
         pageIndex,
         kind: item.kind,
@@ -768,7 +786,7 @@ export class AnnotationStore {
   }
 
   renumberIssues(): void {
-    const sorted = issueOrder([...this.annotations.values()].filter(a => !a.deleted && a.issue))
+    const sorted = issueOrder([...this.annotations.values()].filter(a => !a.deleted && !a.legacyChange && a.issue && a.issue.recordKind !== 'change'))
     if (!sorted.length) return
     const before: HistoryState = sorted.map(cloneState)
     before.issueMaximum = this.issueNumbers.current
@@ -787,7 +805,10 @@ export class AnnotationStore {
   }
 
   touchedObjNums(pageIndex: number): number[] {
-    return [...(this.touchedByPage.get(pageIndex) ?? [])].sort((a, b) => a - b)
+    return [...(this.touchedByPage.get(pageIndex) ?? [])].filter(objNum => {
+      const annotation = this.annotations.get(`obj-${objNum}`)
+      return !annotation?.legacyChange || annotation.deleted
+    }).sort((a, b) => a - b)
   }
 
   toEdits(): AnnotationEdit[] {
@@ -841,7 +862,7 @@ export class AnnotationStore {
 
   private mutate(id: string, change: (annotation: StoredAnnotation) => void): void {
     const annotation = this.annotations.get(id)
-    if (!annotation || annotation.deleted) return
+    if (!annotation || annotation.deleted || annotation.legacyChange) return
     const before = cloneState(annotation)
     change(annotation)
     const after = cloneState(annotation)
@@ -857,7 +878,7 @@ export class AnnotationStore {
     const after: AnnotationState[] = []
     for (const id of [...new Set(ids)]) {
       const annotation = this.annotations.get(id)
-      if (!annotation || annotation.deleted) continue
+      if (!annotation || annotation.deleted || annotation.legacyChange) continue
       const previous = cloneState(annotation)
       change(annotation)
       const next = cloneState(annotation)
@@ -922,6 +943,10 @@ export class AnnotationStore {
 
   private toEdit(annotation: StoredAnnotation, savedObjNum: number | null): AnnotationEdit {
     const create = savedObjNum === null
+    if (annotation.legacyChange) {
+      if (!annotation.legacyChangeData) throw new Error('旧版変更記録の復元データがありません。')
+      return { kind: 'createLegacyChange', pageIndex: annotation.pageIndex, data: annotation.legacyChangeData }
+    }
     if (annotation.issue) {
       const common = { pageIndex: annotation.pageIndex, rect: annotation.rect, issue: annotation.issue, text: annotation.text, color: annotation.color }
       return create ? { kind: 'createIssue', ...common } : { kind: 'updateIssue', objNum: savedObjNum, ...common }

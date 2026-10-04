@@ -13,6 +13,7 @@ export function IssueTransferDialog({ old, next, pool, mapping, onClose, onPrevi
   const [ready, setReady] = useState(false), [error, setError] = useState(''), [confirmed, setConfirmed] = useState(false)
   const [candidates, setCandidates] = useState<ReturnType<typeof transferCandidates>>([])
   const [selected, setSelected] = useState<Set<string>>(new Set()), [rowPage, setRowPage] = useState(0)
+  const [result, setResult] = useState('')
   useEffect(() => {
     dialog.current?.show()
     let active = true
@@ -39,6 +40,7 @@ export function IssueTransferDialog({ old, next, pool, mapping, onClose, onPrevi
     <p>位置合わせを適用した候補です。修正の有無は自動判定しません。内容と候補位置を確認し、引き継ぐ指摘を選んでください。</p>
     {!ready && !error && <p role="status">指摘と引継ぎ済み情報を読み込んでいます…</p>}
     {error && <p role="alert">{error}</p>}
+    {result && <p role="status">{result}</p>}
     {ready && <>
       <p>{candidates.length}件の未確認指摘 / 選択 {selected.size}件</p>
       <button onClick={() => setSelected(new Set(candidates.filter(c => !c.reason).map(c => c.source.id)))}>全候補を選択</button>
@@ -53,13 +55,16 @@ export function IssueTransferDialog({ old, next, pool, mapping, onClose, onPrevi
       {candidates.length > 50 && <div><button disabled={!rowPage} onClick={() => setRowPage(p=>p-1)}>前の50件</button>{rowPage+1} / {Math.ceil(candidates.length/50)}<button disabled={(rowPage+1)*50 >= candidates.length} onClick={() => setRowPage(p=>p+1)}>次の50件</button></div>}
       <label><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />図面番号・ページ対応・候補位置を確認しました</label>
     </>}
-    <div className="dialog-actions"><button onClick={onClose}>閉じる</button><button disabled={!ready || !confirmed || !selected.size || !!next.editRestriction} onClick={() => {
+    <div className="dialog-actions"><button onClick={onClose}>閉じる</button><button disabled={!ready || !confirmed || !selected.size || !!next.editRestriction || !!result} onClick={() => {
       try {
         // Recheck duplicates at confirmation time; another invocation may have imported them.
         const fresh = transferCandidates(old.annotationStore.getPageAnnotations(mapping.oldPage), allSessionAnnotations(next), mapping, old.pageSizes[mapping.oldPage], next.pageSizes[mapping.newPage], old.name)
         const items = fresh.filter(c => !c.reason && selected.has(c.source.id)).map(c => c.annotation)
-        next.annotationStore.pasteAnnotations(items, mapping.newPage, next.pageSizes[mapping.newPage], 0)
-        onClose()
+        const ids = next.annotationStore.pasteAnnotations(items, mapping.newPage, next.pageSizes[mapping.newPage], 0, { keepIssueNumbers: true })
+        const added = ids.map(id => next.annotationStore.get(id)!.issue!)
+        const changed = added.filter(issue => issue.number !== issue.sourceNumber)
+        setResult(`番号を保った ${added.length-changed.length}件、番号が重なったため付け直した ${changed.length}件${changed.length ? `（例: 指摘${changed[0].sourceNumber} → 指摘${changed[0].number}）` : ''}`)
+        setSelected(new Set())
       } catch (reason) { setError(String(reason)) }
     }}>選択した指摘を新版に追加</button></div>
   </dialog>

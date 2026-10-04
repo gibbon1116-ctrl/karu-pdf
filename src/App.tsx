@@ -26,7 +26,7 @@ import type { Point } from './core/annotations'
 import { ToolRow } from './app/ToolRow'
 import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS, type SidePanelTab } from './app/documentModel'
 import { allSessionAnnotations } from './app/AnnotationListPanel'
-import { createIssueCsv, createAnnotationCsv } from './app/annotationCsv'
+import { createIssueCsv, createAnnotationCsv, createCsv } from './app/annotationCsv'
 import { StartScreen } from './app/StartScreen'
 import { ErrorBoundary } from './app/ErrorBoundary'
 import { PdfOpeningFeedback, PdfOpeningStore, type PdfOpening } from './app/PdfOpeningFeedback'
@@ -93,6 +93,7 @@ declare global {
       getMenuActions(): string[]
       exportAnnotationCsv(): string
       exportIssueCsv(): string
+      exportCsv(kinds: string[]): string
       getHeaderFooterSettings(): Promise<HeaderFooterSettings | null>
       applyHeaderFooter(settings: HeaderFooterSettings, dateText?: string): Promise<PageLayoutTimings | null>
       removeHeaderFooter(): Promise<PageLayoutTimings | null>
@@ -877,7 +878,7 @@ export default function App() {
     await viewerRef.current?.commitEditor()
     const session = activeRef.current
     if (session?.editRestriction && next !== 'select') { showStatus(session.editRestriction); return }
-    if ((next === 'issue' || next === 'change') && session) {
+    if (next === 'issue' && session) {
       try { await session.annotationStore.issueNumbers.initialize(() => pool.maxIssueNumber(session.docId)) } catch (reason) { showStatus(`番号を取得できませんでした: ${String(reason)}`); return }
       if (activeRef.current !== session) return
     }
@@ -1431,6 +1432,7 @@ export default function App() {
       getLastRasterizeMetrics: () => lastRasterizeMetricsRef.current,
       getMenuActions: () => [...menuActionsRef.current],
       exportIssueCsv: () => { const session = activeRef.current; return session ? createIssueCsv(allSessionAnnotations(session)) : '' },
+      exportCsv: (kinds) => { const session = activeRef.current; return session ? createCsv(allSessionAnnotations(session), kinds) : '' },
       exportAnnotationCsv: () => {
         const session = activeRef.current
         return session ? createAnnotationCsv(allSessionAnnotations(session)) : ''

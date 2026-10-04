@@ -70,4 +70,12 @@ describe('formatDefaults', () => {
     expect(loadFormatDefaults(storage)).toEqual(DEFAULT_FORMAT)
     expect(() => saveFormatDefaults(DEFAULT_FORMAT, storage)).not.toThrow()
   })
+
+  it('保存済みのchangeを無視し、指摘の既定値は維持する', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(FORMAT_STORAGE_KEY, JSON.stringify({ change: { color: [0.55,0.1,0.7] }, issue: { ...DEFAULT_FORMAT.issue, symbolSize: 24 } }))
+    const loaded = loadFormatDefaults(storage)
+    expect('change' in loaded).toBe(false)
+    expect(loaded.issue).toEqual({ ...DEFAULT_FORMAT.issue, symbolSize: 24 })
+  })
 })

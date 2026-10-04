@@ -28,15 +28,16 @@ it('blend endpoints reproduce each page and alpha is composited on white', () =>
 })
 it('carryover excludes confirmed issues, flags outside sheets and duplicates, preserves origin and undoes the batch', () => {
   const source = new AnnotationStore(), target = new AnnotationStore()
-  source.create({ kind: 'issue', pageIndex: 0, rect: [40,50,56,66], text: '回路', issue: { number: 1, status: 'answered', id: 'one', answer: '変更します' } })
+  source.create({ kind: 'issue', pageIndex: 0, rect: [40,50,56,66], text: '回路', issue: { number: 12, status: 'answered', id: 'one', answer: '変更します' } })
   source.create({ kind: 'issue', pageIndex: 0, rect: [80,80,96,96], issue: { number: 2, status: 'confirmed' } })
   source.create({ kind: 'issue', pageIndex: 0, rect: [300,50,316,66] })
+  const legacy = { ...source.getPageAnnotations(0)[0], id: 'old-change', issue: null, legacyChange: true }
   const mapping = { oldPage: 0, newPage: 1, offset: [20,0] as [number,number], alignment: { scale: 1, rotation: 0 }, drawingNumber: 'E-01' }
   const size = { width: 200, height: 200 }
-  const candidates = transferCandidates(source.getPageAnnotations(0), [], mapping, size, size, '旧.pdf')
+  const candidates = transferCandidates([...source.getPageAnnotations(0), legacy], [], mapping, size, size, '旧.pdf')
   expect(candidates).toHaveLength(2); expect(candidates[1].reason).toBe('補正後の位置が用紙外')
-  target.pasteAnnotations([candidates[0].annotation], 1, size, 0)
-  expect(target.getPageAnnotations(1)[0]).toMatchObject({ rect: [20,50,36,66], issue: { sourceId: 'one', sourceDocument: '旧.pdf', status: 'answered', answer: '変更します' } })
+  target.pasteAnnotations([candidates[0].annotation], 1, size, 0, { keepIssueNumbers: true })
+  expect(target.getPageAnnotations(1)[0]).toMatchObject({ rect: [20,50,36,66], issue: { number: 12, sourceNumber: 12, sourceId: 'one', sourceDocument: '旧.pdf', status: 'answered', answer: '変更します' } })
   expect(transferCandidates(source.getPageAnnotations(0), target.getPageAnnotations(1), mapping, size, size, '旧.pdf')[0].reason).toBe('引継ぎ済')
   target.undo(); expect(target.getPageAnnotations(1)).toEqual([])
 })

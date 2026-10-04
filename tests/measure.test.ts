@@ -92,6 +92,6 @@ describe('縮尺と計測の履歴', () => {
     expect(store.get(copy)?.text).toBe('2,540 mm')
     expect(store.get(copy)?.measure).toEqual(settings)
     const csv = createAnnotationCsv([store.get(copy)!])
-    expect(csv).toContain('縮尺'); expect(csv).toContain('距離,"2,540 mm"'); expect(csv).toContain('約 1/100')
+    expect(csv).toContain('縮尺'); expect(csv).toContain('距離,,2,,"2,540 mm"'); expect(csv).toContain('約 1/100')
   })
 })

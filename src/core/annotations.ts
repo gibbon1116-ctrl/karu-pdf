@@ -29,6 +29,8 @@ export type Rect = [number, number, number, number]
 export type RGB = [number, number, number]
 export type Point = MuPdfPoint
 export type AnnotationColor = RGB | []
+// Session-only copy used to undo deletion, including deletion already saved to PDF.
+export interface LegacyChangeData { pdf: Uint8Array; preview: string; bounds: Rect }
 export const SYMBOL_OPTIONS = [
   { name: 'check', glyph: '✓', label: 'チェック' },
   { name: 'heavyCheck', glyph: '✔', label: '太いチェック' },
@@ -66,6 +68,8 @@ export type AnnotationKind =
   | 'other'
 
 export interface AnnotationInfo {
+  legacyChange?: boolean
+  legacyChangeData?: LegacyChangeData
   count?: CountMark | null
   arrowHeadSize?: number | null
   cloudIntensity?: CloudIntensity | null
@@ -104,6 +108,7 @@ export type AnnotationEdit =
   | { kind: 'updateCloud'; objNum: number; pageIndex: number; shape: 'square' | 'polygon'; rect: Rect; vertices: Point[] | null; color: RGB; borderWidth: number; interiorColor: RGB | null; opacity: number; cloudIntensity: CloudIntensity }
   | { kind: 'createIssue'; pageIndex: number; rect: Rect; issue: Issue; text: string; color: RGB }
   | { kind: 'updateIssue'; objNum: number; pageIndex: number; rect: Rect; issue: Issue; text: string; color: RGB }
+  | { kind: 'createLegacyChange'; pageIndex: number; data: LegacyChangeData }
   | { kind: 'setPageScale'; pageIndex: number; scale: PageScale | null }
   | { kind: 'createMeasure'; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number }
   | { kind: 'updateMeasure'; objNum: number; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number }
@@ -304,6 +309,37 @@ function annotationKind(
   return 'other'
 }
 
+const legacyChangeSnapshots = new WeakMap<PDFDocument, Map<number, LegacyChangeData>>()
+function snapshotLegacyChange(doc: PDFDocument, annotation: PDFAnnotation, object: PDFObject): LegacyChangeData {
+  let snapshots = legacyChangeSnapshots.get(doc)
+  if (!snapshots) { snapshots = new Map(); legacyChangeSnapshots.set(doc, snapshots) }
+  const cached = snapshots.get(object.asIndirect())
+  if (cached) return cached
+  const copy = new mupdf.PDFDocument(), dictionary = doc.newDictionary()
+  const pageRef = copy.addPage([0,0,1,1], 0, {}, '')
+  try {
+    // P links back to the whole source document. Copy only the annotation and its resources.
+    object.forEach((value, key) => { if (key !== 'P') dictionary.put(key, value) })
+    copy.insertPage(-1, pageRef)
+    const grafted = copy.graftObject(dictionary), reference = copy.addObject(grafted), page = copy.findPage(0)
+    try { page.put('Annots', [reference]) } finally { page.destroy(); reference.destroy(); grafted.destroy() }
+    const buffer = copy.saveToBuffer('compress')
+    let pdf: Uint8Array
+    try { pdf = new Uint8Array(buffer.asUint8Array()) } finally { buffer.destroy() }
+    const bounds = annotation.getBounds() as Rect
+    // A bounded stamp preview, never page rendering, text extraction or OCR.
+    const factor = Math.min(2, 512 / Math.max(1, bounds[2]-bounds[0], bounds[3]-bounds[1]))
+    const pixmap = annotation.toPixmap(mupdf.Matrix.scale(factor, factor), mupdf.ColorSpace.DeviceRGB, true)
+    try {
+      let binary = ''
+      for (const byte of pixmap.asPNG()) binary += String.fromCharCode(byte)
+      const data = { pdf, preview: `data:image/png;base64,${btoa(binary)}`, bounds }
+      snapshots.set(object.asIndirect(), data)
+      return data
+    } finally { pixmap.destroy() }
+  } finally { pageRef.destroy(); dictionary.destroy(); copy.destroy() }
+}
+
 export function listAnnotations(doc: PDFDocument, pageIndex: number): AnnotationInfo[] {
   const page = doc.loadPage(pageIndex)
   try {
@@ -316,7 +352,9 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
           const cloud = (type === 'Square' || type === 'Polygon') && !be.isNull() && readName(be, 'S') === 'C'
           const cloudIntensity: CloudIntensity | null = cloud ? Math.max(0, Math.min(2, Math.round(readNumber(be, 'I') ?? 1))) as CloudIntensity : null
           be.destroy()
-          const issue = type === 'Stamp' ? parseIssue(readString(object, 'KaruIssue')) : null
+          const savedIssue = type === 'Stamp' ? parseIssue(readString(object, 'KaruIssue')) : null
+          const legacyChange = savedIssue?.recordKind === 'change'
+          const issue = legacyChange ? null : savedIssue
           const dimensionIntent = readName(object, 'IT')
           const measureKind: MeasureKind | null = type === 'Line' && dimensionIntent === 'LineDimension' ? 'distance'
             : type === 'PolyLine' && dimensionIntent === 'PolyLineDimension' ? 'perimeter'
@@ -363,19 +401,20 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
           const symbol = type === 'Stamp' ? asSymbolName(readName(object, 'KaruSymbol')) : null
           const inkKind = type === 'Ink' ? readName(object, 'KaruInkKind') : null
           return {
-            cloudIntensity, issue, count: type === 'Stamp' ? parseCount(readString(object, 'KaruCount')) : null,
+            cloudIntensity, issue, legacyChange, legacyChangeData: legacyChange ? snapshotLegacyChange(doc, annotation, object) : undefined,
+            count: type === 'Stamp' ? parseCount(readString(object, 'KaruCount')) : null,
             measure: measurement,
             vertices: measureVertices,
             objNum: object.asIndirect(),
             pageIndex,
             type,
-            kind: issue ? 'issue' : cloud ? type === 'Square' ? 'cloudSquare' : 'cloudPolygon' : annotationKind(type, lineEnding, opacity, intent, symbol, inkKind),
-            editable,
+            kind: issue || legacyChange ? 'issue' : cloud ? type === 'Square' ? 'cloudSquare' : 'cloudPolygon' : annotationKind(type, lineEnding, opacity, intent, symbol, inkKind),
+            editable: !legacyChange && editable,
             // 型定義上は全注釈に getRect() があるが、MuPDF 1.28.1 は
             // Highlight など /Rect を直接扱わない種類では例外にする。
             rect: cloud && type === 'Square' ? cloudSquareRect(page, object) : cloud && measureVertices ? vertexBounds(measureVertices) : [...(annotation.hasRect() ? annotation.getRect() : annotation.getBounds())] as Rect,
             contents: measurement && measureVertices && readString(object, 'KaruMeasure')
-              ? measureText(measureVertices, measurement) : issue || type === 'FreeText' || measureKind ? annotation.getContents() : '',
+              ? measureText(measureVertices, measurement) : savedIssue || type === 'FreeText' || measureKind ? annotation.getContents() : '',
             fontName: type === 'FreeText' ? parsed.fontName : null,
             fontSize: type === 'FreeText' ? parsed.fontSize : measureKind ? readNumber(object, 'KaruMeasureFontSize') ?? 10.5 : null,
             textColor: type === 'FreeText' ? parsed.color : null,
@@ -1302,6 +1341,21 @@ export function applyEdits(
       page = doc.loadPage(edit.pageIndex)
       if (edit.kind === 'setPageScale') {
         writePageScale(doc, page, edit.scale)
+        continue
+      }
+      if (edit.kind === 'createLegacyChange') {
+        const source = new mupdf.PDFDocument(new Uint8Array(edit.data.pdf)), sourcePage = source.findPage(0)
+        const annots = sourcePage.get('Annots'), original = annots.get(0), raw = original.get('KaruIssue')
+        try {
+          if (!raw.isString() || parseIssue(raw.asString())?.recordKind !== 'change') throw new Error('旧版変更記録の復元データが不正です。')
+          annotation = page.createAnnotation('Stamp')
+          // Clear the new stamp's pending default appearance before installing the saved AP.
+          annotation.update()
+          const grafted = doc.graftObject(original), target = annotation.getObject()
+          try { grafted.forEach((value, key) => { if (key !== 'P') target.put(key, value) }) }
+          finally { target.destroy(); grafted.destroy() }
+          result.created.push(objectNumber(annotation))
+        } finally { raw.destroy(); original.destroy(); annots.destroy(); sourcePage.destroy(); source.destroy() }
         continue
       }
       if (edit.kind === 'createCloud' || edit.kind === 'updateCloud') {

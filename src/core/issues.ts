@@ -5,7 +5,7 @@ export const ISSUE_STATUSES = ['open', 'answered', 'revised', 'confirmed', 'done
 export interface Issue {
   number: number; status: typeof ISSUE_STATUSES[number]
   version?: 1; id?: string; discipline?: string; answer?: string; verification?: string; drawingNumber?: string
-  sourceId?: string; sourceDocument?: string
+  sourceId?: string; sourceDocument?: string; sourceNumber?: number
   recordKind?: 'issue' | 'change'; changeReason?: string; relatedIssueId?: string
 }
 export function parseIssue(json: string | null): Issue | null {
@@ -14,6 +14,10 @@ export function parseIssue(json: string | null): Issue | null {
     const value = JSON.parse(json) as Issue
     if (!value || !Number.isSafeInteger(value.number) || value.number <= 0 || !ISSUE_STATUSES.includes(value.status)) return null
     const result: Issue = { number: value.number, status: value.status }
+    if (value.sourceNumber !== undefined) {
+      if (!Number.isSafeInteger(value.sourceNumber) || value.sourceNumber <= 0) return null
+      result.sourceNumber = value.sourceNumber
+    }
     if (value.version !== undefined) { if (value.version !== 1) return null; result.version = 1 }
     if (value.recordKind !== undefined) { if (value.recordKind !== 'issue' && value.recordKind !== 'change') return null; result.recordKind = value.recordKind }
     for (const key of ['id', 'discipline', 'answer', 'verification', 'drawingNumber', 'sourceId', 'sourceDocument', 'changeReason', 'relatedIssueId'] as const) {
@@ -60,7 +64,7 @@ export function maxIssueNumber(doc: PDFDocument): number {
         const annotation = annots.get(j), subtype = annotation.get('Subtype'), raw = annotation.get('KaruIssue')
         try {
           const issue = subtype.asName() === 'Stamp' && raw.isString() ? parseIssue(raw.asString()) : null
-          if (issue) maximum = Math.max(maximum, issue.number)
+          if (issue && issue.recordKind !== 'change') maximum = Math.max(maximum, issue.number)
         } finally { raw.destroy(); subtype.destroy(); annotation.destroy() }
       }
     } finally { annots.destroy(); page.destroy() }

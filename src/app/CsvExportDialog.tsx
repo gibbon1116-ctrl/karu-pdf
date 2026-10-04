@@ -1,0 +1,47 @@
+import { useEffect, useRef, useState } from 'react'
+import type { EditableAnnotation } from '../editor/AnnotationStore'
+import { CSV_KINDS, CSV_KIND_LABELS, csvAnnotations, createCsv, annotationCsvFileName, issueCsvFileName, type CsvKind, type CsvOptions } from './annotationCsv'
+
+export default function CsvExportDialog({ annotations, pdfName, pageCount, initialKinds, firstPage, lastPage, initialStatus, onExport, onClose }: {
+  annotations: readonly EditableAnnotation[]; pdfName: string; pageCount: number; initialKinds: readonly CsvKind[]
+  firstPage: number; lastPage: number; initialStatus: CsvOptions['issueStatus']
+  onExport(csv: string, fileName: string): Promise<void>; onClose(): void
+}) {
+  const dialog = useRef<HTMLDialogElement>(null)
+  const [kinds, setKinds] = useState<readonly CsvKind[]>(initialKinds)
+  const [start, setStart] = useState(firstPage), [end, setEnd] = useState(lastPage)
+  const [status, setStatus] = useState(initialStatus ?? 'all')
+  const [saving, setSaving] = useState(false), [error, setError] = useState('')
+  useEffect(() => { dialog.current?.showModal() }, [])
+  const validRange = Number.isInteger(start) && Number.isInteger(end) && start >= 1 && end <= pageCount && start <= end
+  const options: CsvOptions = { firstPage: start, lastPage: end, issueStatus: status }
+  const count = validRange ? csvAnnotations(annotations, kinds, options).length : 0
+  const reason = !kinds.length ? '書き出す種類を選んでください。' : !validRange ? 'ページ範囲を正しく指定してください。' : !count ? '指定した種類・ページ範囲・状態に対象がありません。' : ''
+  return <dialog ref={dialog} className="csv-export-dialog" aria-labelledby="csv-export-title" onCancel={onClose}>
+    <h2 id="csv-export-title">CSV に書き出す</h2>
+    <fieldset><legend>書き出す種類（複数選択）</legend>
+      {CSV_KINDS.map(kind => <label key={kind}><input type="checkbox" checked={kinds.includes(kind)} onChange={event => {
+        const checked = event.currentTarget.checked
+        setKinds(current => checked ? [...current, kind] : current.filter(value => value !== kind))
+      }} />{CSV_KIND_LABELS[kind]}</label>)}
+      <button type="button" onClick={() => setKinds(CSV_KINDS)}>すべて選ぶ</button>
+      <button type="button" onClick={() => setKinds([])}>すべて外す</button>
+    </fieldset>
+    <fieldset><legend>ページ範囲</legend>
+      <label>開始ページ<input aria-label="CSVの開始ページ" type="number" min={1} max={pageCount} value={start} onChange={event => setStart(Number(event.currentTarget.value))} /></label>
+      <label>終了ページ<input aria-label="CSVの終了ページ" type="number" min={1} max={pageCount} value={end} onChange={event => setEnd(Number(event.currentTarget.value))} /></label>
+    </fieldset>
+    {kinds.includes('issue') && <label>指摘の状態<select aria-label="CSVの指摘の状態" value={status} onChange={event => setStatus(event.currentTarget.value as typeof status)}>
+      <option value="all">すべて</option><option value="open">未確認だけ</option><option value="confirmed">確認済だけ</option>
+    </select></label>}
+    <p role="status">{reason || `${count}件を書き出します。`}</p>
+    {error && <p role="alert">{error}</p>}
+    <div className="dialog-actions"><button type="button" onClick={onClose}>閉じる</button>
+      <button type="button" disabled={!!reason || saving} onClick={() => {
+        setSaving(true); setError('')
+        void onExport(createCsv(annotations, kinds, options), kinds.length === 1 && kinds[0] === 'issue' ? issueCsvFileName(pdfName) : annotationCsvFileName(pdfName))
+          .then(onClose).catch(reason => setError(String(reason))).finally(() => setSaving(false))
+      }}>書き出す</button>
+    </div>
+  </dialog>
+}

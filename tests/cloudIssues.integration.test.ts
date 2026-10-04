@@ -5,6 +5,8 @@ import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium'
 import { applyEdits, listAnnotations, type AnnotationEdit, type Point, type Rect } from '../src/core/annotations'
 import { cloudArcs, rectVertices } from '../src/core/cloud'
 import { maxIssueNumber, issueFontSize } from '../src/core/issues'
+import { AnnotationStore } from '../src/editor/AnnotationStore'
+import { createAnnotationCsv, createIssueCsv } from '../src/app/annotationCsv'
 import { createFontResource, type FontResource } from '../src/core/fontMetrics'
 import { ensureSamplePdf } from './fixtures'
 
@@ -220,6 +222,97 @@ describe('cloud and issue PDF results', () => {
       expect(applyEdits(doc,[issue(2),issue(80,'done',doc.countPages()-1)],resources()).errors).toEqual([])
       const load=vi.spyOn(doc,'loadPage').mockImplementation(()=>{throw Error('must not load a page')})
       expect(maxIssueNumber(doc)).toBe(80);expect(load).not.toHaveBeenCalled();load.mockRestore()
+    } finally { doc.destroy() }
+  })
+  it('旧版変更は指摘・番号走査・CSVから除外し、未編集の外観を保って削除とUndoだけを許す', async () => {
+    const doc = new mupdf.PDFDocument(source)
+    try {
+      const change = issue(2)
+      if (change.kind !== 'createIssue') throw Error('fixture')
+      change.issue = { number: 2, status: 'open', recordKind: 'change', changeReason: '旧版の理由' }
+      expect(applyEdits(doc, [issue(1), change, issue(3)], resources()).errors).toEqual([])
+      const saved = new mupdf.PDFDocument(bytes(doc))
+      try {
+        const annotations = listAnnotations(saved, 0), legacy = annotations.find(a => a.legacyChange)!
+        expect(annotations.filter(a => a.issue).map(a => a.issue!.number)).toEqual([1,3])
+        expect(legacy).toMatchObject({ kind: 'issue', editable: false, issue: null })
+        expect(maxIssueNumber(saved)).toBe(3)
+        const store = new AnnotationStore()
+        await store.ensurePageLoaded(0, async () => annotations)
+        expect(store.isDirty()).toBe(false); expect(store.toEdits()).toEqual([])
+        const id = `obj-${legacy.objNum}`
+        store.selectOnly(id); store.touch(id)
+        store.move(id, 10, 20); store.update(id, { color: [0,0,1] }); store.updateIssueText(id, '変えない')
+        expect(store.copySelected()).toEqual([])
+        expect(store.touchedObjNums(0)).toEqual([])
+        expect(store.isDirty()).toBe(false)
+        expect(createIssueCsv(store.getPageAnnotations(0)).split('\r\n').filter(line => line.startsWith('指摘,'))).toHaveLength(2)
+        expect(createAnnotationCsv(store.getPageAnnotations(0))).not.toContain('旧版の理由')
+        store.renumberIssues()
+        expect(store.getPageAnnotations(0).filter(a => a.issue).map(a => a.issue!.number)).toEqual([1,2])
+        expect(store.get(id)?.legacyChange).toBe(true)
+        store.undo()
+        expect(store.getPageAnnotations(0).filter(a => a.issue).map(a => a.issue!.number)).toEqual([1,3])
+        expect(store.isDirty()).toBe(false)
+        store.remove(id)
+        expect(store.toEdits()).toEqual([{ kind: 'delete', objNum: legacy.objNum, pageIndex: 0 }])
+        expect(store.touchedObjNums(0)).toContain(legacy.objNum)
+        store.undo()
+        expect(store.get(id)?.legacyChange).toBe(true)
+        expect(store.toEdits()).toEqual([])
+        expect(store.touchedObjNums(0)).not.toContain(legacy.objNum)
+        const objectBefore = saved.newIndirect(legacy.objNum)
+        const resolvedBefore = objectBefore.resolve()
+        const before = resolvedBefore.toString(); resolvedBefore.destroy(); objectBefore.destroy()
+        expect(applyEdits(saved, store.toEdits(), resources()).errors).toEqual([])
+        const objectAfter = saved.newIndirect(legacy.objNum)
+        const resolvedAfter = objectAfter.resolve()
+        expect(resolvedAfter.toString()).toBe(before); resolvedAfter.destroy(); objectAfter.destroy()
+        expect(store.create({ kind: 'issue', pageIndex: 0, rect: [20,20,36,36] }).issue?.number).toBe(4)
+        store.undo()
+        store.remove(id)
+        const deleted = applyEdits(saved, store.toEdits(), resources())
+        expect(deleted.errors).toEqual([])
+        store.markApplied(deleted)
+        expect(listAnnotations(saved, 0).some(a => a.legacyChange)).toBe(false)
+        const deletedBuffer = saved.saveToBuffer('garbage=1,compress')
+        const savedAfterDelete = new Uint8Array(deletedBuffer.asUint8Array()); deletedBuffer.destroy()
+        const reopened = new mupdf.PDFDocument(savedAfterDelete)
+        try {
+          store.undo()
+          expect(store.get(id)).toMatchObject({ legacyChange: true, objNum: null, dirty: true })
+          expect(store.toEdits().map(e => e.kind)).toEqual(['createLegacyChange'])
+          const restored = applyEdits(reopened, store.toEdits(), resources())
+          expect(restored.errors).toEqual([])
+          store.markApplied(restored)
+          const info = listAnnotations(reopened, 0).find(a => a.legacyChange)!
+          expect(info).toMatchObject({ rect: legacy.rect, contents: legacy.contents, issue: null, editable: false })
+          expect(info.legacyChangeData?.preview).toBe(legacy.legacyChangeData?.preview)
+          expect(store.isDirty()).toBe(false)
+          store.redo()
+          const redone = applyEdits(reopened, store.toEdits(), resources())
+          expect(redone.errors).toEqual([]); store.markApplied(redone)
+          expect(listAnnotations(reopened, 0).some(a => a.legacyChange)).toBe(false)
+        } finally { reopened.destroy() }
+      } finally { saved.destroy() }
+      const highChange = issue(999)
+      if (highChange.kind !== 'createIssue') throw Error('fixture')
+      highChange.issue.recordKind = 'change'
+      applyEdits(doc, [highChange], resources())
+      const load = vi.spyOn(doc, 'loadPage').mockImplementation(() => { throw Error('must not load a page') })
+      expect(maxIssueNumber(doc)).toBe(3); expect(load).not.toHaveBeenCalled(); load.mockRestore()
+    } finally { doc.destroy() }
+  })
+  it('sourceNumber をPDFに保存して読み込み、不正な保存値を拒否する', () => {
+    const doc = new mupdf.PDFDocument(source), edit = issue(31)
+    try {
+      if (edit.kind !== 'createIssue') throw Error('fixture')
+      edit.issue = { number: 31, status: 'open', sourceNumber: 12, sourceId: 'old-12', sourceDocument: '旧版.pdf' }
+      expect(applyEdits(doc, [edit], resources()).errors).toEqual([])
+      const saved = new mupdf.PDFDocument(bytes(doc))
+      try { expect(listAnnotations(saved, 0).find(a => a.issue)?.issue).toMatchObject(edit.issue) } finally { saved.destroy() }
+      edit.issue.sourceNumber = -1
+      expect(applyEdits(doc, [edit], resources()).errors).toHaveLength(1)
     } finally { doc.destroy() }
   })
   it('reads foreign clouds and updates fill, stroke, size and issue contents/status without losing original page text', () => {

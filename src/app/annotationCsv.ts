@@ -6,7 +6,37 @@ import type { EditableAnnotation } from '../editor/AnnotationStore'
 
 const PT_TO_MM = 25.4 / 72
 
-export const ANNOTATION_CSV_HEADER = ['番号', 'ページ', '種類', '本文', '色', '位置（x, y mm）', '大きさ（幅, 高さ mm）', '縮尺']
+export const ANNOTATION_CSV_HEADER = ['種類', '番号', 'ページ', '図面番号', '内容', '色', '位置（x, y mm）', '大きさ（幅, 高さ mm）']
+export const CSV_KINDS = ['issue', 'count', 'text', 'callout', 'measure', 'shape', 'symbol', 'pen', 'markup'] as const
+export type CsvKind = typeof CSV_KINDS[number]
+export const CSV_KIND_LABELS: Record<CsvKind, string> = {
+  issue: '指摘', count: '個数カウント', text: '文字', callout: '吹き出し', measure: '計測',
+  shape: '図形（雲・線・矢印・四角・丸）', symbol: '記号', pen: 'ペン（蛍光ペン・手書き）', markup: '文字への印',
+}
+export interface CsvOptions { firstPage?: number; lastPage?: number; issueStatus?: 'all' | 'open' | 'confirmed' }
+export function csvKind(annotation: EditableAnnotation): CsvKind | null {
+  if (annotation.legacyChange || annotation.issue?.recordKind === 'change') return null
+  if (annotation.issue) return 'issue'
+  if (annotation.count) return 'count'
+  if (annotation.measure) return 'measure'
+  if (annotation.kind === 'freetext') return 'text'
+  if (annotation.kind === 'callout' || annotation.kind === 'symbol') return annotation.kind
+  if (annotation.kind === 'highlight' || annotation.kind === 'ink') return 'pen'
+  if (['textHighlight', 'underline', 'strikeout'].includes(annotation.kind)) return 'markup'
+  if (['cloudSquare', 'cloudPolygon', 'line', 'arrow', 'square', 'circle'].includes(annotation.kind)) return 'shape'
+  return null
+}
+export function csvAnnotations(annotations: readonly EditableAnnotation[], kinds: readonly string[], options: CsvOptions = {}): EditableAnnotation[] {
+  return annotations.filter(a => {
+    const kind = csvKind(a)
+    return kind !== null && kinds.includes(kind)
+      && a.pageIndex + 1 >= (options.firstPage ?? 1) && a.pageIndex + 1 <= (options.lastPage ?? Infinity)
+      && (kind !== 'issue' || !options.issueStatus || options.issueStatus === 'all'
+        || (options.issueStatus === 'confirmed' ? a.issue!.status === 'confirmed' : a.issue!.status !== 'confirmed'))
+  }).sort((a, b) => CSV_KINDS.indexOf(csvKind(a)!) - CSV_KINDS.indexOf(csvKind(b)!)
+    || (a.issue && b.issue ? a.issue.number - b.issue.number : 0)
+    || a.pageIndex - b.pageIndex || a.rect[1] - b.rect[1] || a.rect[0] - b.rect[0])
+}
 
 export function annotationKindLabel(kind: EditableAnnotation['kind']): string {
   const labels: Record<EditableAnnotation['kind'], string> = {
@@ -46,37 +76,42 @@ export function quote(value: string | number): string {
 }
 
 export function createAnnotationCsv(annotations: readonly EditableAnnotation[]): string {
-  const sorted = [...annotations].sort((left, right) => (
-    left.pageIndex - right.pageIndex || left.rect[1] - right.rect[1] || left.rect[0] - right.rect[0]
-  ))
-  const rows = sorted.map((annotation, index) => {
+  return createCsv(annotations, CSV_KINDS)
+}
+
+export function createCsv(annotations: readonly EditableAnnotation[], kinds: readonly string[], options: CsvOptions = {}): string {
+  const header = [...ANNOTATION_CSV_HEADER]
+  if (kinds.includes('issue')) header.push('状態', '分野', '回答', '修正確認', '引継ぎ元番号', '引継ぎ元文書')
+  if (kinds.includes('measure')) header.push('縮尺')
+  if (kinds.includes('count')) header.push('個数の種類')
+  const rows = csvAnnotations(annotations, kinds, options).map((annotation) => {
     const [left, top, right, bottom] = annotation.rect
-    return [
-      index + 1,
+    const issue = annotation.issue
+    const row: (string | number)[] = [
+      annotation.count ? '個数カウント' : annotationKindLabel(annotation.kind),
+      issue?.number ?? '',
       annotation.pageIndex + 1,
-      annotationKindLabel(annotation.kind),
-      annotationBody(annotation),
+      issue?.drawingNumber ?? '',
+      issue ? annotation.text : annotation.count ? annotation.count.group : annotationBody(annotation),
       annotationColorHex(annotation),
       `${decimal(left)}, ${decimal(top)}`,
       `${decimal(right - left)}, ${decimal(bottom - top)}`,
-      annotation.measure ? scaleLabel({ ...annotation.measure, denominator: annotation.measure.mmPerPoint / PT_MM, paper: 'PDF', source: 'standard' }) : '',
-    ].map(quote).join(',')
+    ]
+    if (kinds.includes('issue')) row.push(issue ? issueStatusLabel(issue.status) : '', issue?.discipline ?? '', issue?.answer ?? '', issue?.verification ?? '', issue?.sourceNumber ?? '', issue?.sourceDocument ?? '')
+    if (kinds.includes('measure')) row.push(annotation.measure ? scaleLabel({ ...annotation.measure, denominator: annotation.measure.mmPerPoint / PT_MM, paper: 'PDF', source: 'standard' }) : '')
+    if (kinds.includes('count')) row.push(annotation.count?.group ?? '')
+    return row.map(quote).join(',')
   })
-  return `\uFEFF${[ANNOTATION_CSV_HEADER.map(quote).join(','), ...rows].join('\r\n')}\r\n`
+  return `\uFEFF${[header.map(quote).join(','), ...rows].join('\r\n')}\r\n`
 }
 
 export function annotationCsvFileName(pdfName: string): string {
   return `${pdfName.replace(/\.pdf$/i, '')}_書き込み一覧.csv`
 }
 
-export const ISSUE_CSV_HEADER = ['番号', 'ページ', '指摘の内容', '状態', '回答', '位置（x, y mm）', '分野', '修正確認', '図面番号', '指摘ID', '引継ぎ元ID', '引継ぎ元文書']
+export const ISSUE_CSV_HEADER = [...ANNOTATION_CSV_HEADER, '状態', '分野', '回答', '修正確認', '引継ぎ元番号', '引継ぎ元文書']
 export function createIssueCsv(annotations: readonly EditableAnnotation[]): string {
-  const rows = annotations.filter(a => a.issue && a.issue.recordKind !== 'change').sort((a, b) => a.issue!.number - b.issue!.number).map(a => [
-    a.issue!.number, a.pageIndex + 1, a.text, issueStatusLabel(a.issue!.status), a.issue!.answer ?? '',
-    `${decimal(a.rect[0])}, ${decimal(a.rect[1])}`,
-    a.issue!.discipline ?? '', a.issue!.verification ?? '', a.issue!.drawingNumber ?? '', a.issue!.id ?? '', a.issue!.sourceId ?? '', a.issue!.sourceDocument ?? '',
-  ].map(quote).join(','))
-  return '\uFEFF' + [ISSUE_CSV_HEADER.map(quote).join(','), ...rows].join('\r\n') + '\r\n'
+  return createCsv(annotations, ['issue'])
 }
 export function issueCsvFileName(pdfName: string): string { return pdfName.replace(/\.pdf$/i, '') + '_指摘一覧.csv' }
 
@@ -84,9 +119,3 @@ export function createCountCsv(annotations: readonly EditableAnnotation[]): stri
   return '\uFEFF' + [['種類', 'ページ', '個数'], ...countSummary(annotations).map(a => [a.group, a.pageIndex + 1, a.total])].map(row => row.map(quote).join(',')).join('\r\n') + '\r\n'
 }
 
-export function createChangeCsv(annotations: readonly EditableAnnotation[]): string {
-  const rows = annotations.filter(a => a.issue?.recordKind === 'change').sort((a,b) => a.issue!.number-b.issue!.number).map(a => [
-    a.issue!.number, a.pageIndex+1, a.text, a.issue!.changeReason ?? '', a.issue!.relatedIssueId ?? '', issueStatusLabel(a.issue!.status), a.issue!.drawingNumber ?? '', a.issue!.id ?? '', `${decimal(a.rect[0])}, ${decimal(a.rect[1])}`,
-  ])
-  return '\uFEFF' + [['番号', 'ページ', '変更内容', '変更理由', '関連指摘ID', '状態', '図面番号', '変更ID', '位置（x, y mm）'], ...rows].map(row => row.map(quote).join(',')).join('\r\n') + '\r\n'
-}

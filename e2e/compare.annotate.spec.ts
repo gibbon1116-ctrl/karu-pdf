@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import mupdf from 'mupdf'
 import { makeComparePdf } from '../tests/compareFixtures'
 
 async function openComparison(page: Page, shift = 0, seedIssue = false) {
@@ -18,16 +19,19 @@ async function openComparison(page: Page, shift = 0, seedIssue = false) {
   })
   await page.goto('/karu-pdf/?test=1&workers=4&warm=0')
   await page.waitForFunction(() => Boolean(window.__karu))
-  await page.evaluate(bytes => window.__karu!.openBytes(bytes, 'old.pdf'), [...makeComparePdf({ count: 3 })])
-  const oldId = await page.evaluate(() => window.__karu!.listTabs()[0].docId)
+  let oldBytes = [...makeComparePdf({ count: 3 })]
   if (seedIssue) {
-    const layer = page.getByTestId('annotation-layer-0'); await expect(layer).toBeVisible()
-    await page.keyboard.press('n')
-    await expect(page.getByRole('button', { name: '指摘', exact: true })).toHaveAttribute('aria-pressed','true')
-    const point = await layer.evaluate(el => { const b = el.getBoundingClientRect(); return { x: b.left+b.width*.4, y: b.top+b.height*.4 } })
-    await page.mouse.click(point.x,point.y)
-    await page.getByTestId('issue-editor').fill('回路名称を確認'); await page.getByTestId('issue-editor').press('Control+Enter'); await page.keyboard.press('Escape')
+    const doc = new mupdf.PDFDocument(new Uint8Array(oldBytes)), nativePage = doc.loadPage(0), a = nativePage.createAnnotation('Stamp'), object = a.getObject(), resources = doc.newDictionary()
+    const data = doc.newString(JSON.stringify({ number: 12, status: 'open', id: 'old-issue-12', version: 1 }))
+    try {
+      a.setRect([160,160,176,176]); a.setContents('回路名称を確認'); object.put('KaruIssue', data)
+      a.setAppearance('N', null, mupdf.Matrix.identity, [0,0,16,16], resources, '1 0 0 RG 1 w 1 1 14 14 re S')
+      const buffer = doc.saveToBuffer('compress')
+      try { oldBytes = [...buffer.asUint8Array()] } finally { buffer.destroy() }
+    } finally { data.destroy(); resources.destroy(); object.destroy(); a.destroy(); nativePage.destroy(); doc.destroy() }
   }
+  await page.evaluate(bytes => window.__karu!.openBytes(bytes, 'old.pdf'), oldBytes)
+  const oldId = await page.evaluate(() => window.__karu!.listTabs()[0].docId)
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, 'new.pdf'), [...makeComparePdf({ revised: true, shift, count: 4, annotation: true })])
   await page.evaluate(id => window.__karu!.activateTab(id), oldId)
   await page.getByRole('button', { name: '表示▼', exact: true }).click()
@@ -80,15 +84,17 @@ test('前回指摘は候補を確認してから追加し、再実行で重複�
   await expect(dialog.getByRole('button', { name: '選択した指摘を新版に追加' })).toBeDisabled()
   await dialog.getByLabel('図面番号・ページ対応・候補位置を確認しました').check()
   await dialog.getByRole('button', { name: '選択した指摘を新版に追加' }).click()
+  await expect(dialog).toContainText('番号を保った 1件、番号が重なったため付け直した 0件')
+  await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
   await page.getByRole('button', { name: 'この図面の指摘を引き継ぐ' }).click()
   await expect(dialog).toContainText('引継ぎ済')
   await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
   await page.getByRole('button', { name: '終わる', exact: true }).click()
   await page.evaluate(async () => { const id=window.__karu!.listTabs().find(t=>t.name==='new.pdf')!.docId; await window.__karu!.activateTab(id); const b=await window.__karu!.saveToBytes(); if(!b)throw Error('保存失敗'); await window.__karu!.openBytes(b,'引継ぎ済.pdf') })
   await page.getByRole('tab', { name: '書き込み', exact: true }).click()
-  await expect(page.locator('.annotation-type-icon')).toContainText(['1'])
+  await expect(page.locator('.annotation-type-icon')).toContainText(['12'])
   const issue = await page.evaluate(() => window.__karu!.getEditableAnnotations(1).find(a=>a.issue))
-  expect(issue).toMatchObject({ text: '回路名称を確認', issue: { sourceDocument: 'old.pdf', drawingNumber: 'E-01', status: 'open' } })
+  expect(issue).toMatchObject({ text: '回路名称を確認', issue: { number: 12, sourceNumber: 12, sourceId: 'old-issue-12', sourceDocument: 'old.pdf', drawingNumber: 'E-01', status: 'open' } })
 })
 async function raster(page: Page, pane = 'compare-old') {
   return page.getByTestId(pane).locator('.preview-canvas').evaluate(el => {
