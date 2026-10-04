@@ -1,3 +1,4 @@
+import { receiveWorkerSendNotice, type WorkerSendNotice } from '../security/externalSend'
 /* @single:start */import { createSingleWorker } from '../single/runtime'
 /* @single:end */import type { PageScale } from '../core/measure'
 import type { MaxIssueNumberResponse } from '../worker/protocol'
@@ -253,7 +254,10 @@ export class PdfWorkerPool {
       // readiness promise for open(), while avoiding an unhandled rejection.
       void ready.catch(() => undefined)
       const slot: WorkerSlot = { index, worker, documents: new Set(), queueLength: 0, ready, markReady, markFailed }
-      worker.onmessage = (event: MessageEvent<WorkerResponse>) => this.onMessage(slot, event.data)
+      worker.onmessage = (event: MessageEvent<WorkerResponse | WorkerSendNotice>) => {
+        if (receiveWorkerSendNotice(event.data)) return
+        this.onMessage(slot, event.data as WorkerResponse)
+      }
       worker.onerror = (event) => this.failWorker(slot, new Error(event.message || 'Worker でエラーが発生しました。'))
       return slot
     })

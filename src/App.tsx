@@ -7,6 +7,8 @@ import type { DocumentViewState } from './app/documentModel'
 import type { ViewPosition } from './viewer/viewSync'
 import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
 import { HelpDialog } from './app/HelpDialog'
+import { ExternalSendAlert } from './app/ExternalSendAlert'
+import { getExternalSendRecords } from './security/externalSend'
 import { MenuBar } from './app/MenuBar'
 import { PrivacyDialog } from './app/PrivacyDialog'
 import { SheetSizeDialog } from './app/SheetSizeDialog'
@@ -64,6 +66,7 @@ const FixtureDialog = lazy(() => import('./app/FixtureDialog'))
 declare global {
   interface Window {
     __karu?: {
+      getExternalSendRecords: typeof getExternalSendRecords
       getMetrics: typeof getMetrics
       setZoom(zoom: number, anchor?: { x: number; y: number }): void
       scrollToPage(index: number): void
@@ -1453,6 +1456,7 @@ export default function App() {
   useEffect(() => {
     if (new URLSearchParams(location.search).get('test') !== '1') return
     window.__karu = {
+      getExternalSendRecords,
       getMetrics,
       setZoom: (value, anchor) => viewerRef.current?.setZoom(value, anchor),
       scrollToPage: (index) => viewerRef.current?.scrollToPage(index),
@@ -1759,6 +1763,7 @@ export default function App() {
         }}
         onSave={(scale, all, recalculate) => { scaleDialog.session.annotationStore.setScale(scaleTargets(all), scale, recalculate); setScaleDialog(null); setScaleTracing(false); refreshTabs() }} />}
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <ExternalSendAlert />
       {fixtureEdit && fixtureEdit.session.annotationStore.getCountFixture(fixtureEdit.id) && <Suspense fallback={null}><FixtureDialog
         key={`${fixtureEdit.session.docId}:${fixtureEdit.id}`}
         initial={structuredClone(fixtureEdit.session.annotationStore.getCountFixture(fixtureEdit.id)!)}

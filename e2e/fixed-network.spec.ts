@@ -3,11 +3,15 @@ import path from 'node:path'
 import mupdf from 'mupdf'
 import { expect, test, type BrowserContext, type Page, type TestInfo } from '@playwright/test'
 import { CSP, SECURITY_HEADERS } from '../scripts/fixed-policy.mjs'
+import { probeServerWorkers } from './externalSendWorkerProbe'
 
 const secretName = 'FIXED_PRIVATE_DOCUMENT_93b71.pdf'
 const search = 'FIXED_SEARCH_7a902'
 const note = '固定版の機密書込 FIXED_NOTE_d6e23'
 const origin = 'http://127.0.0.1:4174', base = '/karu-pdf/'
+test('実際の PDF・画像 Worker の見張りと CSP が主画面に警告を届ける', async ({ page, context }) => {
+  await probeServerWorkers(page, context, base + '?test=1', true)
+})
 function makePdf(revised = false): Buffer {
   const doc = new mupdf.PDFDocument()
   try {
@@ -178,7 +182,7 @@ test('初回・通常再起動・オフライン起動と全編集操作', async
   await verifyTraffic(recording, testInfo)
 })
 
-test('外部 fetch・WebSocket・Beacon・画像・Worker fetch は CSP が遮断する', async ({ page, context }, testInfo) => {
+test('見張りが fetch・WebSocket・Beacon を止め、CSP が画像・任意 Worker の通信を遮断する', async ({ page, context }, testInfo) => {
   const attempts: string[] = [], failed = new Map<string, string>(), responses: string[] = [], wireAttempts: string[] = []
   // Chromium can report a CSP-blocked image as a request event with ERR_FAILED.
   // The route sits immediately before network dispatch. CSP must stop every
@@ -205,10 +209,13 @@ test('外部 fetch・WebSocket・Beacon・画像・Worker fetch は CSP が遮�
     return { outcome, violations }
   })
   expect(result.outcome.fetch).toBe('blocked'); expect(result.outcome.websocket).toBe('blocked'); expect(result.outcome.image).toBe('blocked')
-  // Beacon may return true after queueing even when CSP drops it. The violation
-  // event and lack of any actual response are the authoritative evidence.
-  expect(result.violations.filter(v => v === 'connect-src').length).toBeGreaterThanOrEqual(3)
+  expect(result.outcome.beacon).toBe(false)
+  expect(result.violations.filter(v => v === 'connect-src')).toHaveLength(0)
   expect(result.violations).toContain('img-src')
+  const alert = page.getByRole('alertdialog', { name: '外部への送信を止めました' })
+  await expect(alert).toContainText('example.com'); await expect(alert).toContainText('データは送信していません')
+  for (const kind of ['fetch', 'WebSocket', 'Beacon', 'CSP で遮断']) await expect(alert).toContainText(kind)
+  await alert.screenshot({ path: testInfo.outputPath('fixed-external-send-alert.png') })
   expect(JSON.parse(String(result.outcome.worker)).blocked).toBe(true)
   expect(JSON.parse(String(result.outcome.worker)).count).toBeGreaterThan(0)
   expect(responses).toEqual([])

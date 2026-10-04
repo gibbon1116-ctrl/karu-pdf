@@ -4,9 +4,13 @@ import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 import mupdf from 'mupdf'
 import { expect, test, type BrowserContext, type Page, type TestInfo } from '@playwright/test'
+import { probeSingleWorkers } from './externalSendWorkerProbe'
 
 const htmlFile = fs.readdirSync('dist-single').find(name => name.endsWith('.html'))!
 const url = pathToFileURL(path.resolve('dist-single', htmlFile)).href + '?test=1'
+test('埋め込まれた PDF・画像 Worker の見張りと CSP が主画面に警告を届ける', async ({ page, context }) => {
+  await probeSingleWorkers(page, context, url)
+})
 const note = '閉域の書き込み SINGLE_NOTE_37a', secret = 'SINGLE_PRIVATE_9f3.pdf', search = 'SINGLE_SEARCH_a9'
 function makePdf(revised = false) {
   const doc = new mupdf.PDFDocument()
@@ -134,7 +138,7 @@ for (const offline of [false, true]) test(`file:// 全操作と通信 ${offline 
   await operations(page, testInfo); await verifyTraffic(page, requests, testInfo)
 })
 
-test('ページと Blob Worker から外部・同じフォルダへの通信を CSP で遮断する', async ({ page, context }, testInfo) => {
+test('ページの外部送信は見張りで止め、画像・ローカル取得・任意 Blob Worker は CSP で遮断する', async ({ page, context }, testInfo) => {
   const wire: string[] = [], responses: string[] = [], failed: string[] = []
   await context.route(/^https?:\/\/example\.com\//, route => { wire.push(route.request().url()); return route.abort('blockedbyclient') })
   context.on('response', r => { if (/^https?:/.test(r.url())) responses.push(r.url()) })
@@ -169,8 +173,14 @@ test('ページと Blob Worker から外部・同じフォルダへの通信を 
     try { workerResult = await new Promise<Awaited<ReturnType<typeof attempt>>>((resolve, reject) => { const w = new Worker(blob); w.onmessage = e => { w.terminate(); resolve(e.data) }; w.onerror = e => { w.terminate(); reject(new Error(e.message)) } }) } finally { URL.revokeObjectURL(blob) }
     return { page: pageResult, worker: workerResult }
   })
-  for (const data of [result.page, result.worker]) { expect(data.outcomes.fetch).toBe('blocked'); expect(data.outcomes.localFetch).toBe('blocked'); expect(data.outcomes.websocket).toBe('blocked'); expect(data.violations.filter(v => v === 'connect-src').length).toBeGreaterThanOrEqual(3) }
-  expect(result.page.outcomes.image).toBe('blocked'); expect(result.page.violations).toContain('img-src'); expect(result.page.violations.filter(v => v === 'connect-src').length).toBeGreaterThanOrEqual(4)
+  for (const data of [result.page, result.worker]) { expect(data.outcomes.fetch).toBe('blocked'); expect(data.outcomes.localFetch).toBe('blocked'); expect(data.outcomes.websocket).toBe('blocked') }
+  expect(result.worker.violations.filter(v => v === 'connect-src').length).toBeGreaterThanOrEqual(3)
+  expect(result.page.outcomes.beacon).toBe(false)
+  expect(result.page.outcomes.image).toBe('blocked'); expect(result.page.violations).toContain('img-src'); expect(result.page.violations.filter(v => v === 'connect-src')).toHaveLength(1)
+  const alert = page.getByRole('alertdialog', { name: '外部への送信を止めました' })
+  await expect(alert).toContainText('example.com'); await expect(alert).toContainText('データは送信していません')
+  for (const kind of ['fetch', 'WebSocket', 'Beacon', 'CSP で遮断']) await expect(alert).toContainText(kind)
+  await alert.screenshot({ path: testInfo.outputPath('single-external-send-alert.png') })
   expect(result.worker.outcomes.beacon).toBe('unavailable'); expect(result.worker.outcomes.image).toBe('unavailable'); expect(wire).toEqual([]); expect(responses).toEqual([])
   await evidence(testInfo, 'single-csp-negative', { ...result, externalWireRequests: wire.length, responses, failed })
 })

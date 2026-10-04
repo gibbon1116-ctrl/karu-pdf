@@ -1,3 +1,5 @@
+// Imports run in order: this installs the external-send guard before App's modules are evaluated.
+import './security/externalSend'
 /* @pages:start */import { createRoot } from 'react-dom/client'
 import App from './App'
 import { ErrorBoundary } from './app/ErrorBoundary'

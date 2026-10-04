@@ -195,6 +195,16 @@ button, input { font: inherit; }
 .help-dialog-body kbd { padding: 1px 5px; border: 1px solid #aaa; border-radius: 3px; background: #f4f4f4; font-family: inherit; }
 .help-dialog-actions { padding: 10px 18px; border-top: 1px solid #ccc; text-align: right; }
 .help-dialog-actions button { padding: 6px 24px; }
+.external-send-dialog { width: min(560px, calc(100vw - 40px)); max-height: calc(100vh - 40px); padding: 0; border: 1px solid #888; border-radius: 7px; }
+.external-send-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+.external-send-dialog header { padding: 12px 18px; border-bottom: 1px solid #ccc; }
+.external-send-dialog h2 { margin: 0; font-size: 20px; }
+.external-send-body { padding: 12px 18px; overflow: auto; max-height: 55vh; }
+.external-send-body p { margin: 6px 0; }
+.external-send-body ul { padding-left: 20px; }
+.external-send-host { overflow-wrap: anywhere; }
+.external-send-dialog footer { display: flex; justify-content: flex-end; gap: 10px; padding: 10px 18px; border-top: 1px solid #ccc; }
+.external-send-dialog button { padding: 6px 24px; }
 .rasterize-dialog { width: min(700px, calc(100vw - 40px)); max-height: calc(100vh - 40px); padding: 0; border: 1px solid #888; border-radius: 7px; }
 .rasterize-dialog::backdrop { background: rgb(0 0 0 / 45%); }
 .rasterize-dialog > header { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid #ccc; }

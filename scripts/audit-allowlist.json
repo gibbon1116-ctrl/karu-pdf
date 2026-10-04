@@ -1,5 +1,95 @@
 [
   {
+    "file": "src/security/externalSend.ts",
+    "string": "XMLHttpRequest",
+    "reason": "外部への送信を止めるための見張り。送信はしない（型の参照4件・実行コード2件）。",
+    "maxOccurrences": 6
+  },
+  {
+    "file": "src/security/externalSend.ts",
+    "string": "WebSocket",
+    "reason": "外部への送信を止めるための見張り。送信はしない（型の参照2件・実行コード5件）。",
+    "maxOccurrences": 7
+  },
+  {
+    "file": "src/security/externalSend.ts",
+    "string": "EventSource",
+    "reason": "外部への送信を止めるための見張り。送信はしない（型の参照2件・実行コード5件）。",
+    "maxOccurrences": 7
+  },
+  {
+    "file": "src/security/externalSend.ts",
+    "string": "sendBeacon",
+    "reason": "外部への送信を止めるための見張り。送信はしない。",
+    "maxOccurrences": 3
+  },
+  {
+    "file": "dist-fixed/assets/externalSend-*.js",
+    "string": "XMLHttpRequest",
+    "reason": "外部への送信を止めるための見張り。送信はしない。型を除いた実行コード2件。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/externalSend-*.js",
+    "string": "WebSocket",
+    "reason": "外部への送信を止めるための見張り。送信はしない。型を除いた実行コード5件。",
+    "maxOccurrences": 5
+  },
+  {
+    "file": "dist-fixed/assets/externalSend-*.js",
+    "string": "EventSource",
+    "reason": "外部への送信を止めるための見張り。送信はしない。型を除いた実行コード5件。",
+    "maxOccurrences": 5
+  },
+  {
+    "file": "dist-fixed/assets/externalSend-*.js",
+    "string": "sendBeacon",
+    "reason": "外部への送信を止めるための見張り。送信はしない。",
+    "maxOccurrences": 3
+  },
+  {
+    "file": "dist-fixed/assets/index-*.js",
+    "string": "XMLHttpRequest",
+    "reason": "外部への送信を止めるための見張り。送信はしない。共有コードが起動チャンクへ配置される場合の2件。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/index-*.js",
+    "string": "WebSocket",
+    "reason": "外部への送信を止めるための見張り。送信はしない。共有コードが起動チャンクへ配置される場合の5件。",
+    "maxOccurrences": 5
+  },
+  {
+    "file": "dist-fixed/assets/index-*.js",
+    "string": "EventSource",
+    "reason": "外部への送信を止めるための見張り。送信はしない。共有コードが起動チャンクへ配置される場合の5件。",
+    "maxOccurrences": 5
+  },
+  {
+    "file": "dist-fixed/assets/index-*.js",
+    "string": "sendBeacon",
+    "reason": "外部への送信を止めるための見張り。送信はしない。共有コードが起動チャンクへ配置される場合の3件。",
+    "maxOccurrences": 3
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "WebSocket",
+    "reason": "外部への送信を止めるための見張り。送信はしない。主画面の見張りと通知の判定5件。Worker は fetch と CSP だけを見張る。",
+    "maxOccurrences": 5
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "EventSource",
+    "reason": "外部への送信を止めるための見張り。送信はしない。主画面の見張りと通知の判定5件。Worker は fetch と CSP だけを見張る。",
+    "maxOccurrences": 5
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "sendBeacon",
+    "reason": "外部への送信を止めるための見張り。送信はしない。主画面の見張り3件。",
+    "maxOccurrences": 3
+  },
+  {
     "file": "src/editor/AnnotationLayer.tsx",
     "string": "http://www.w3.org/2000/svg",
     "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
@@ -146,8 +236,8 @@
   {
     "file": "dist-single/karu-pdf-v*.html",
     "string": "XMLHttpRequest",
-    "maxOccurrences": 4,
-    "reason": "MuPDF/Emscripten の未使用の file 読み取り分岐。ページと PDF Worker は先に注入した instantiateWasm のみを使う。connect-src none が取得も遮断する。"
+    "maxOccurrences": 6,
+    "reason": "MuPDF/Emscripten の未使用の file 読み取り分岐。ページと PDF Worker は先に注入した instantiateWasm のみを使う。connect-src none が取得も遮断する。 加えて、外部への送信を止めるための見張り2件（送信はしない）。"
   },
   {
     "file": "dist-single/karu-pdf-v*.html",

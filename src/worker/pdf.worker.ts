@@ -1,3 +1,4 @@
+import { installWorkerExternalSendGuard } from '../security/externalSend'
 /* @single:start */import { requestEmbeddedFont } from '../single/workerFonts'
 /* @single:end *//// <reference lib="webworker" />
 /* @fixed:start */import { fixedAssetUrl } from '../fixed/security'
@@ -66,6 +67,7 @@ import type {
 } from './protocol'
 
 const scope = self as unknown as DedicatedWorkerGlobalScope
+installWorkerExternalSendGuard(scope, 'pdf')
 
 interface WorkerDocument {
   opened: OpenedDocument

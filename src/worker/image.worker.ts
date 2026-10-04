@@ -1,7 +1,9 @@
+import { installWorkerExternalSendGuard } from '../security/externalSend'
 import { readExif, type ExifOrientation } from '../core/exif'
 import { parsePngForPdf } from '../core/pdfStreamWriter'
 import type { ImageResult, ImageTask } from '../client/ImageWorkerClient'
 import type { ImagePdfSettings } from '../core/imagePdfLayout'
+installWorkerExternalSendGuard(self as unknown as DedicatedWorkerGlobalScope, 'image')
 
 function jpegHeader(bytes: Uint8Array) {
   for (let at = 2; at + 4 <= bytes.length;) {
