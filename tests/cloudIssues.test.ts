@@ -97,7 +97,7 @@ it('issue CSV has exact columns, numeric order, escaped CRLF/commas/quotes, empt
   store.create({ kind: 'issue', pageIndex: 0, rect: [0,0,16,16], issue: { number: 2, status: 'open' }, text: '先頭' })
   store.create({ kind: 'square', pageIndex: 0, rect: [0,0,10,10] })
   const all = [0,2].flatMap(i => store.getPageAnnotations(i))
-  expect(createIssueCsv(all)).toBe('\uFEFF種類,番号,ページ,図面番号,内容,色,"位置（x, y mm）","大きさ（幅, 高さ mm）",状態,分野,回答,修正確認,引継ぎ元番号,引継ぎ元文書\r\n指摘,2,1,,先頭,#FF0000,"0.00, 0.00","5.64, 5.64",未回答,,,,,\r\n指摘,12,3,,"確認,""寸法""\r\n次の行",#808080,"25.40, 50.80","5.64, 5.64",対応済（旧版）,,,,,\r\n')
+  expect(createIssueCsv(all)).toBe('\uFEFF種類,番号,ページ,図面番号,内容,色,"位置（x, y mm）","大きさ（幅, 高さ mm）",状態,分野,回答,修正確認,引継ぎ元番号,引継ぎ元文書\r\n指摘,2,1,,先頭,#FF0000,"0.00, 0.00","5.64, 5.64",未回答,,,,,\r\n指摘,12,3,,"確認,""寸法""\r\n次の行",#0040FF,"25.40, 50.80","5.64, 5.64",回答済み,,,,,\r\n')
   expect(createAnnotationCsv(all)).toContain('指摘,12,3,,"確認,""寸法""\r\n次の行"')
   expect(issueCsvFileName('図面.PDF')).toBe('図面_指摘一覧.csv')
 })

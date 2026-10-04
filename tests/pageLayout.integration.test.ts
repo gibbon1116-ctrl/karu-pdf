@@ -2,6 +2,8 @@ import mupdf, { type PDFDocument } from 'mupdf'
 import { describe, expect, it } from 'vitest'
 import { applyEdits, listAnnotations } from '../src/core/annotations'
 import { applyPageLayout, extractPages, getPageInfo, splitPages, type PageLayoutCard } from '../src/core/pageOps'
+import { MAX_COUNT_SAMPLE_BASE64, nextCountStyle, readCountFixtures, writeCountFixtures, type CountFixture } from '../src/core/countFixtures'
+import { saveDocument } from '../src/core/save'
 
 function makeDocument(labels: readonly string[], width = 300, height = 400): PDFDocument {
   const document = new mupdf.PDFDocument()
@@ -23,6 +25,22 @@ function cards(docId: string, count: number): PageLayoutCard[] {
     source: { kind: 'page', docId, pageIndex },
     rotation: 0,
   }))
+}
+
+function fixture(id: string, order = 0): CountFixture {
+  return { id, name: id, code: id.slice(0, 16), category: '試験', style: nextCountStyle([]), order }
+}
+
+function addCount(document: PDFDocument, pageIndex: number, fixtureId: string): void {
+  const result = applyEdits(document, [{
+    kind: 'createSymbol', pageIndex, rect: [20, 30, 30, 40], color: [1, 0, 0], symbol: 'circle',
+    count: { version: 2, id: `mark-${pageIndex}-${fixtureId}`, fixtureId },
+  }], {})
+  expect(result.errors).toEqual([])
+}
+
+function countIds(document: PDFDocument, pageIndex: number): string[] {
+  return listAnnotations(document, pageIndex).flatMap(a => a.count?.version === 2 ? [a.count.fixtureId] : [])
 }
 
 function addTextWidget(document: PDFDocument, pageIndex: number, name: string, value = `${name}-value`): void {
@@ -115,6 +133,67 @@ function wrapWidgetInParentField(document: PDFDocument, pageIndex: number): void
 }
 
 describe('pageOps', () => {
+  it('増分保存後も器具リスト・設定・標準のカタログ項目と残したページの印を保つ', () => {
+    const original = makeDocument(['Page 1', 'Page 2', 'Page 3'])
+    const fixtures = [fixture('a'), fixture('b', 1), fixture('deleted', 2)]
+    let bytes: Uint8Array
+    try {
+      writeCountFixtures(original, fixtures)
+      fixtures.forEach((f, i) => addCount(original, i, f.id))
+      const root = original.getTrailer().get('Root')
+      const lang = original.newString('ja-JP'), settings = original.newString('{"version":1,"test":"header-footer"}')
+      const metadata = original.addStream('<test>metadata</test>', { Type: 'Metadata', Subtype: 'XML' })
+      const actionPage = original.findPage(1)
+      try {
+        root.put('Lang', lang); root.put('KaruHeaderFooter', settings); root.put('KaruFutureSetting', { Enabled: true })
+        root.put('ViewerPreferences', { DisplayDocTitle: true }); root.put('PageLayout', 'TwoPageLeft')
+        root.put('PageMode', 'UseThumbs'); root.put('MarkInfo', { Marked: false }); root.put('Metadata', metadata)
+        root.put('OutputIntents', [{ Type: 'OutputIntent', S: 'GTS_PDFA1' }])
+        root.put('Extensions', { TEST: { BaseVersion: '1.7', ExtensionLevel: 1 } }); root.put('Version', '1.7')
+        root.put('PageLabels', { Nums: [0, { S: 'D' }] })
+        root.put('OpenAction', [actionPage, 'Fit'])
+        root.put('Names', { EmbeddedFiles: { Names: [] } }); root.put('StructTreeRoot', { Type: 'StructTreeRoot' }); root.put('AA', {})
+      } finally { actionPage.destroy(); metadata.destroy(); settings.destroy(); lang.destroy(); root.destroy() }
+      bytes = saveDocument(original, 'full').bytes
+    } finally { original.destroy() }
+    const document = new mupdf.PDFDocument(bytes)
+    try {
+      const before = cards('main', 3)
+      applyPageLayout('main', document, [before[1], before[0], { id: 'blank', source: { kind: 'blank', width: 300, height: 400 }, rotation: 0 }], new Map())
+      const saved = saveDocument(document, 'incremental')
+      expect(saved.mode).toBe('incremental')
+      const reopened = new mupdf.PDFDocument(saved.bytes)
+      try {
+        expect(readCountFixtures(reopened)).toEqual(fixtures)
+        expect([0, 1, 2].map(i => countIds(reopened, i))).toEqual([['b'], ['a'], []])
+        const root = reopened.getTrailer().get('Root')
+        try {
+          const checks: Record<string, unknown> = {
+            KaruHeaderFooter: '{"version":1,"test":"header-footer"}', KaruFutureSetting: { Enabled: true },
+            Lang: 'ja-JP', ViewerPreferences: { DisplayDocTitle: true }, PageLayout: 'TwoPageLeft', PageMode: 'UseThumbs',
+            MarkInfo: { Marked: false }, OutputIntents: [{ Type: 'OutputIntent', S: 'GTS_PDFA1' }],
+            Extensions: { TEST: { BaseVersion: '1.7', ExtensionLevel: 1 } }, Version: '1.7',
+          }
+          for (const [key, expected] of Object.entries(checks)) {
+            const value = root.get(key)
+            try { expect(value.asJS()).toEqual(expected) } finally { value.destroy() }
+          }
+          const metadata = root.get('Metadata'), stream = metadata.readStream()
+          try { expect(stream.asString()).toBe('<test>metadata</test>') } finally { stream.destroy(); metadata.destroy() }
+          for (const key of ['PageLabels', 'OpenAction', 'Names', 'StructTreeRoot', 'AA']) {
+            const value = root.get(key)
+            try { expect(value.isNull()).toBe(true) } finally { value.destroy() }
+          }
+        } finally { root.destroy() }
+      } finally { reopened.destroy() }
+      const restored = new mupdf.PDFDocument(bytes)
+      try {
+        expect(readCountFixtures(restored)).toEqual(fixtures)
+        expect([0, 1, 2].map(i => countIds(restored, i))).toEqual([['a'], ['b'], ['deleted']])
+      } finally { restored.destroy() }
+    } finally { document.destroy() }
+  })
+
   it('並べ替え・削除・回転・白紙・別PDFの追加を一度に適用する', () => {
     const main = makeDocument(['Page 1', 'Page 2', 'Page 3', 'Page 4'])
     const source = makeDocument(['Source 1', 'Source 2'], 200, 250)

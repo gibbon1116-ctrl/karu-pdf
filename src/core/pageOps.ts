@@ -76,6 +76,28 @@ function existingAcroForm(document: PDFDocument): PDFObject | null {
   }
 }
 
+const PRESERVED_CATALOG_KEYS = new Set([
+  'Lang', 'ViewerPreferences', 'PageLayout', 'PageMode', 'MarkInfo',
+  'Metadata', 'OutputIntents', 'Extensions', 'Version',
+])
+
+function preserveCatalog(document: PDFDocument): Map<string, PDFObject> {
+  const root = document.getTrailer().get('Root')
+  const values = new Map<string, PDFObject>()
+  try {
+    root.forEach((value, key) => {
+      if (typeof key === 'string' && (key.startsWith('Karu') || PRESERVED_CATALOG_KEYS.has(key))) values.set(key, value)
+      else value.destroy()
+    })
+    return values
+  } catch (error) {
+    values.forEach(value => value.destroy())
+    throw error
+  } finally {
+    root.destroy()
+  }
+}
+
 function topLevelField(widgetObject: PDFObject): PDFObject {
   let current = widgetObject
   for (;;) {
@@ -168,15 +190,27 @@ export function applyPageLayout(
     order.push(appended)
   }
 
-  const acroForm = existingAcroForm(target)
+  // MuPDF's rearrangePages rebuilds the catalog with only Type, Pages, Outlines,
+  // OCProperties and Dests. Put back our own data (the fixture list, header/footer
+  // settings) and the entries that do not refer to pages.
+  const catalog = preserveCatalog(target)
   try {
-    target.rearrangePages(order)
-  } catch (error) {
-    acroForm?.destroy()
-    throw error
+    const acroForm = existingAcroForm(target)
+    try {
+      target.rearrangePages(order)
+    } catch (error) {
+      acroForm?.destroy()
+      throw error
+    }
+    const root = target.getTrailer().get('Root')
+    try { catalog.forEach((value, key) => root.put(key, value)) }
+    catch (error) { acroForm?.destroy(); throw error }
+    finally { root.destroy() }
+    rebuildAcroFormFields(target, acroForm)
+    cards.forEach((card, index) => rotatePage(target, index, card.rotation))
+  } finally {
+    catalog.forEach(value => value.destroy())
   }
-  rebuildAcroFormFields(target, acroForm)
-  cards.forEach((card, index) => rotatePage(target, index, card.rotation))
 }
 
 export function extractPages(

@@ -54,6 +54,195 @@ async function savedFixtures(page: Page): Promise<CountFixture[]> {
   try { return readCountFixtures(doc) } finally { doc.destroy() }
 }
 
+for (const openTab of ['器具', '書き込み'] as const) {
+  test(`${openTab}タブを開いたまま未保存の個数を整理・保存・復元できる`, async ({ page }) => {
+    await open(page)
+    for (const [code, name] of [['A', '器具A'], ['B', '器具B']]) {
+      await page.getByRole('button', { name: '器具を追加', exact: true }).click()
+      const dialog = page.getByRole('dialog', { name: '器具を追加', exact: true })
+      await dialog.getByLabel('器具名称', { exact: true }).fill(name)
+      await dialog.getByLabel('略号', { exact: true }).fill(code)
+      await dialog.getByRole('button', { name: '追加する', exact: true }).click()
+    }
+    // Original page totals: A = [2, 1, 1], B = [1, 1, 2]. No save before organize.
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(index => window.__karu!.scrollToPage(index), i)
+      await select(page, 'A 器具A'); await clickPoint(page, i, 80, 100)
+      if (i === 0) await clickPoint(page, i, 130, 100)
+      await select(page, 'B 器具B'); await clickPoint(page, i, 200, 100)
+      if (i === 2) await clickPoint(page, i, 250, 100)
+    }
+    await page.evaluate(() => window.__karu!.scrollToPage(0))
+    await expect(page.getByTestId('fixture-panel')).toContainText('表示中の図面（p.1）: 1個 ／ 全図面: 4個')
+    await page.getByRole('button', { name: 'A 器具Aの表示切替', exact: true }).click()
+    await page.getByRole('tab', { name: openTab, exact: true }).click()
+    if (openTab === '書き込み') await expect(page.locator('.annotation-rows > li')).toHaveCount(8)
+
+    await page.evaluate(async () => {
+      await window.__karu!.openOrganize()
+      const draft = window.__karu!.organizeDraft()!, cards = draft.getCards().slice()
+      draft.move([cards[2].id], 0)
+      draft.delete([cards[1].id])
+      draft.insertBlank(2, 400, 400)
+    })
+    await page.getByRole('button', { name: '適用', exact: true }).click()
+    await expect(page.getByTestId('organize-view')).toBeHidden()
+    if (openTab === '書き込み') await expect(page.locator('.annotation-rows > li')).toHaveCount(6)
+    await page.getByRole('tab', { name: '器具', exact: true }).click()
+    const panel = page.getByTestId('fixture-panel')
+    await expect(panel.locator('li[data-fixture-id]')).toHaveCount(2)
+    await expect(page.getByRole('button', { name: 'B 器具B', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByRole('button', { name: 'A 器具Aの表示切替', exact: true })).toHaveAttribute('aria-pressed', 'false')
+    await expect(panel).toContainText('表示中の図面（p.1）: 2個 ／ 全図面: 3個')
+    await select(page, 'A 器具A')
+    await expect(panel).toContainText('表示中の図面（p.1）: 1個 ／ 全図面: 3個')
+    await page.evaluate(() => window.__karu!.scrollToPage(1))
+    await expect(panel).toContainText('表示中の図面（p.2）: 2個 ／ 全図面: 3個')
+    await page.evaluate(() => window.__karu!.scrollToPage(2))
+    await expect(panel).toContainText('表示中の図面（p.3）: 0個 ／ 全図面: 3個')
+    await page.getByRole('tab', { name: '書き込み', exact: true }).click()
+    await expect(page.locator('.annotation-rows > li')).toHaveCount(6)
+    await expect(page.locator('.annotation-rows')).toContainText('個数: 器具A')
+    await expect(page.locator('.annotation-rows')).toContainText('個数: 器具B')
+
+    const saved = await page.evaluate(async () => [...(await window.__karu!.saveToBytes())!])
+    await page.getByRole('button', { name: 'ページ▼' }).click()
+    await page.getByRole('menuitem', { name: '直前のページ操作を元に戻す', exact: true }).click()
+    await expect(page.locator('.annotation-rows > li')).toHaveCount(8)
+    await page.getByRole('tab', { name: '器具', exact: true }).click()
+    await select(page, 'A 器具A'); await expect(panel).toContainText('全図面: 4個')
+    await select(page, 'B 器具B'); await expect(panel).toContainText('全図面: 4個')
+
+    await page.evaluate(async () => window.__karu!.closeTab(window.__karu!.listTabs()[0].docId))
+    await page.evaluate(bytes => window.__karu!.openBytes(bytes, '整理を保存した図面.pdf'), saved)
+    await page.getByRole('tab', { name: '器具', exact: true }).click()
+    await expect(panel.locator('li[data-fixture-id]')).toHaveCount(2)
+    await select(page, 'A 器具A'); await expect(panel).toContainText('全図面: 3個')
+    await select(page, 'B 器具B'); await expect(panel).toContainText('全図面: 3個')
+    await page.getByRole('tab', { name: '書き込み', exact: true }).click()
+    await expect(page.locator('.annotation-rows > li')).toHaveCount(6)
+  })
+}
+
+test('器具を読み込んだ文書ではヘッダー・フッターの適用と削除の後も個数を読み直す', async ({ page }) => {
+  await open(page)
+  await page.getByRole('button', { name: '器具を追加', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '器具を追加', exact: true })
+  await dialog.getByLabel('器具名称', { exact: true }).fill('設定変更の器具')
+  await dialog.getByLabel('略号', { exact: true }).fill('T')
+  await dialog.getByRole('button', { name: '追加する', exact: true }).click()
+  await select(page, 'T 設定変更の器具'); await clickPoint(page, 0, 80, 100)
+  await page.evaluate(() => window.__karu!.scrollToPage(1))
+  await clickPoint(page, 1, 80, 100)
+  await expect(page.getByTestId('fixture-panel')).toContainText('全図面: 2個')
+  // Keep fixtures loaded while displaying the annotation tab during both resets.
+  await page.getByRole('tab', { name: '書き込み', exact: true }).click()
+  for (const action of ['適用', '削除']) {
+    await page.getByRole('button', { name: 'ページ▼' }).click()
+    await page.getByRole('menuitem', { name: 'ページ番号・ヘッダー・フッター…' }).click()
+    const headerFooter = page.getByRole('dialog', { name: 'ページ番号・ヘッダー・フッター' })
+    await expect(headerFooter).toBeVisible()
+    await headerFooter.getByRole('button', { name: action, exact: true }).click()
+    await expect(headerFooter).toBeHidden()
+    await expect(page.locator('.annotation-rows > li')).toHaveCount(2)
+    await expect(page.locator('.annotation-rows')).toContainText('個数: 設定変更の器具')
+    await page.getByRole('tab', { name: '器具', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'T 設定変更の器具', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByTestId('fixture-panel')).toContainText('全図面: 2個')
+    await page.getByRole('tab', { name: '書き込み', exact: true }).click()
+  }
+})
+
+async function dragFixtureDialog(page: Page, dx: number, dy: number) {
+  const heading = page.locator('.fixture-editor-dialog[open] .fixture-drag-handle')
+  const rect = (await heading.boundingBox())!, viewport = page.viewportSize()!
+  // The previous drag may have left only 80px of the heading on screen.
+  const x = (Math.max(0, rect.x) + Math.min(viewport.width, rect.x + rect.width)) / 2
+  const y = (Math.max(0, rect.y) + Math.min(viewport.height, rect.y + rect.height)) / 2
+  await page.mouse.move(x, y); await page.mouse.down()
+  await page.mouse.move(x + dx, y + dy, { steps: 6 }); await page.mouse.up()
+}
+
+async function expectFixtureHeadingInside(page: Page) {
+  await expect.poll(() => page.locator('.fixture-editor-dialog[open] .fixture-drag-handle').evaluate(el => {
+    const rect = el.getBoundingClientRect()
+    return {
+      top: rect.top >= -2, bottom: rect.bottom <= innerHeight + 2,
+      visibleWidth: Math.min(rect.right, innerWidth) - Math.max(rect.left, 0) >= 78,
+    }
+  })).toEqual({ top: true, bottom: true, visibleWidth: true })
+}
+
+test('見出しだけで器具画面を移動し、追加・複製・編集で位置を保ち、再読込で中央に戻す', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await open(page); await page.getByRole('button', { name: '器具を追加', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '器具を追加', exact: true })
+  const heading = dialog.getByRole('heading', { name: '器具を追加', exact: true })
+  await expect(heading).toHaveAttribute('title', 'ドラッグして移動できます')
+  await expect(heading).toHaveCSS('cursor', 'move')
+  await expect(heading.locator('span')).toHaveAttribute('aria-hidden', 'true')
+  const initial = (await dialog.boundingBox())!
+  await dragFixtureDialog(page, 120, 35)
+  const moved = (await dialog.boundingBox())!
+  expect(Math.abs(moved.x - initial.x - 120)).toBeLessThanOrEqual(2)
+  expect(Math.abs(moved.y - initial.y - 35)).toBeLessThanOrEqual(2)
+  const translation = await dialog.evaluate(el => (el as HTMLElement).style.translate)
+  const memo = dialog.getByRole('textbox', { name: 'メモ', exact: true })
+  await memo.fill('見出し以外は動かない')
+  const memoRect = (await memo.boundingBox())!
+  await page.mouse.move(memoRect.x + 12, memoRect.y + 10); await page.mouse.down()
+  await page.mouse.move(memoRect.x + 55, memoRect.y + 10); await page.mouse.up()
+  expect(await dialog.evaluate(el => (el as HTMLElement).style.translate)).toBe(translation)
+  await page.keyboard.press('Escape'); await expect(dialog).not.toBeVisible()
+  await page.getByRole('button', { name: '器具を追加', exact: true }).click()
+  const reopened = (await dialog.boundingBox())!
+  expect(Math.abs(reopened.x - moved.x)).toBeLessThanOrEqual(2)
+  expect(Math.abs(reopened.y - moved.y)).toBeLessThanOrEqual(2)
+  await dialog.getByLabel('器具名称', { exact: true }).fill('移動後の器具')
+  await dialog.getByLabel('略号', { exact: true }).fill('M')
+  await dialog.getByRole('button', { name: '追加する', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'M 移動後の器具', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '複製', exact: true }).click()
+  await expect(dialog).toBeVisible()
+  expect(await dialog.evaluate(el => (el as HTMLElement).style.translate)).toBe(translation)
+  await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
+  await page.getByRole('button', { name: '編集', exact: true }).click()
+  const edit = page.getByRole('dialog', { name: '器具を編集', exact: true })
+  await expect(edit).toBeVisible()
+  expect(await edit.evaluate(el => (el as HTMLElement).style.translate)).toBe(translation)
+  await edit.getByLabel('器具名称', { exact: true }).fill('編集後の器具')
+  await edit.getByRole('button', { name: '変更する', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'M 編集後の器具', exact: true })).toBeVisible()
+  await page.reload(); await page.waitForFunction(() => !!window.__karu)
+  await page.evaluate(bytes => window.__karu!.openBytes(bytes, '再読込.pdf'), blankPdf())
+  await page.getByRole('tab', { name: '器具', exact: true }).click()
+  await page.getByRole('button', { name: '器具を追加', exact: true }).click()
+  await expect(dialog).toBeVisible()
+  expect(await dialog.evaluate(el => (el as HTMLElement).style.translate)).toMatch(/^0px( 0px)?$/)
+  const centered = (await dialog.boundingBox())!
+  expect(Math.abs(centered.x + centered.width / 2 - 720)).toBeLessThanOrEqual(2)
+  expect(Math.abs(centered.y + centered.height / 2 - 500)).toBeLessThanOrEqual(2)
+})
+
+test('画面外へのドラッグとウインドウ縮小でも器具画面の見出しをつかめる', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await open(page); await page.getByRole('button', { name: '器具を追加', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '器具を追加', exact: true })
+  await expect(dialog).toBeVisible()
+  await dragFixtureDialog(page, 5000, 5000); await expectFixtureHeadingInside(page)
+  await page.keyboard.press('Escape')
+  await page.setViewportSize({ width: 720, height: 540 })
+  await page.getByRole('button', { name: '器具を追加', exact: true }).click()
+  await expectFixtureHeadingInside(page)
+  await dragFixtureDialog(page, -5000, -5000); await expectFixtureHeadingInside(page)
+  await page.setViewportSize({ width: 600, height: 480 }); await expectFixtureHeadingInside(page)
+  const offset = await dialog.evaluate(el => (el as HTMLElement).style.translate.split(' ').map(value => parseFloat(value)))
+  await dragFixtureDialog(page, -offset[0], -offset[1]); await expectFixtureHeadingInside(page)
+  await dialog.getByLabel('器具名称', { exact: true }).fill('画面内へ戻した器具')
+  await dialog.getByRole('button', { name: '追加する', exact: true }).click()
+  await expect(page.getByTestId('fixture-panel')).toContainText('画面内へ戻した器具')
+})
+
 test('crops original drawing without annotations, keeps drafts on Esc, and preserves samples on save, copy and import', async ({ page }) => {
   await open(page)
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '見本元.pdf'), samplePdf())
@@ -62,6 +251,9 @@ test('crops original drawing without annotations, keeps drafts on Esc, and prese
   await page.getByRole('tab', { name: '器具', exact: true }).click()
   await page.getByRole('button', { name: '器具を追加', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '器具を追加', exact: true })
+  await expect(dialog).toBeVisible()
+  await dragFixtureDialog(page, 60, 20)
+  const translation = await dialog.evaluate(el => (el as HTMLElement).style.translate)
   await dialog.getByLabel('器具名称', { exact: true }).fill('記号見本')
   await dialog.getByLabel('略号', { exact: true }).fill('S')
   await dialog.getByRole('textbox', { name: 'メモ', exact: true }).fill('切り取り中も保持')
@@ -69,6 +261,7 @@ test('crops original drawing without annotations, keeps drafts on Esc, and prese
   await expect(dialog).not.toBeVisible()
   await page.keyboard.press('Escape')
   await expect(dialog).toBeVisible()
+  expect(await dialog.evaluate(el => (el as HTMLElement).style.translate)).toBe(translation)
   await expect(dialog.getByLabel('器具名称', { exact: true })).toHaveValue('記号見本')
   await expect(dialog.getByRole('textbox', { name: 'メモ', exact: true })).toHaveValue('切り取り中も保持')
   await dialog.getByRole('button', { name: '図面から見本を切り取る', exact: true }).click()
@@ -76,6 +269,7 @@ test('crops original drawing without annotations, keeps drafts on Esc, and prese
   await expect(page.locator('.fixture-sample-instruction')).toContainText('範囲が小さすぎます')
   await dragSample(page, [80, 80], [240, 240])
   await expect(dialog).toBeVisible()
+  expect(await dialog.evaluate(el => (el as HTMLElement).style.translate)).toBe(translation)
   const preview = dialog.getByAltText('図面から切り取った見本', { exact: true })
   await expect(preview).toBeVisible()
   const pixels = await preview.evaluate(async el => {

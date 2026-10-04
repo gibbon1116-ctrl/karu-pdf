@@ -14,7 +14,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   const [dialog, setDialog] = useState<{ initial: CountFixture; editing: boolean } | null>(null)
   const [sampleHover, setSampleHover] = useState<{ fixture: CountFixture; left: number; top: number } | null>(null)
   const [preset, setPreset] = useState(false), [sources, setSources] = useState<Array<{ name: string; fixtures: CountFixture[] }> | null>(null), [busy, setBusy] = useState(false)
-  useEffect(() => { let alive = true; void ensureSessionFixtures(session, pool).catch(e => { if (alive) setError(String(e)) }); return () => { alive = false } }, [session, pool])
+  useEffect(() => { let alive = true; void ensureSessionFixtures(session, pool).catch(e => { if (alive) setError(String(e)) }); return () => { alive = false } }, [session, pool, session.pageRevision])
   const fixtures = useMemo(() => store.getCountFixtures(), [store, version])
   const totals = useMemo(() => store.countTotals(), [store, version])
   const selected = fixtures.find(f => f.id === store.selectedFixtureId), pageIndex = session.view.page - 1

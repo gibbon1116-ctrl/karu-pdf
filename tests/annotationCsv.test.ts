@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { EditableAnnotation } from '../src/editor/AnnotationStore'
+import type { Issue } from '../src/core/issues'
 import { createAnnotationCsv, createIssueCsv, createCsv, csvAnnotations, csvKind, CSV_KINDS, ANNOTATION_CSV_HEADER, quote } from '../src/app/annotationCsv'
 
 function annotation(values: Partial<EditableAnnotation> = {}): EditableAnnotation {
@@ -13,6 +14,24 @@ function annotation(values: Partial<EditableAnnotation> = {}): EditableAnnotatio
 }
 
 describe('書き込み一覧 CSV', () => {
+  it.each<[Issue['status'], string, string]>([
+    ['open', '未回答', '#FF0000'], ['answered', '回答済み', '#0040FF'],
+    ['revised', '回答済み', '#0040FF'], ['done', '回答済み', '#0040FF'], ['confirmed', '修正確認', '#808080'],
+  ])('%s の状態・色の列を共通の読み替えで出力する', (status, label, color) => {
+    const item = annotation({ kind: 'issue', text: '確認', color: [0, 1, 0], issue: { number: 1, status } })
+    for (const csv of [createIssueCsv([item]), createCsv([item], ['issue', 'text'])]) {
+      const row = csv.split('\r\n')[1]
+      expect(row).toContain(`,確認,${color},`)
+      expect(row).toMatch(new RegExp(`,${label},,,,,$`))
+    }
+    expect(item.issue!.status).toBe(status)
+  })
+  it('旧対応済・修正済は未確認に含め、修正確認だけのCSVから除く', () => {
+    const items = (['open', 'answered', 'revised', 'done', 'confirmed'] as const).map((status, index) =>
+      annotation({ kind: 'issue', issue: { number: index + 1, status } }))
+    expect(csvAnnotations(items, ['issue'], { issueStatus: 'open' }).map(a => a.issue!.status)).toEqual(['open', 'answered', 'revised', 'done'])
+    expect(csvAnnotations(items, ['issue'], { issueStatus: 'confirmed' }).map(a => a.issue!.status)).toEqual(['confirmed'])
+  })
   it('旧版の変更記録を指摘・全種類のCSVから除外する', () => {
     const issue=annotation({kind:'issue',text:'電源を確認',issue:{number:1,status:'open',id:'issue-1'}})
     const change=annotation({kind:'issue',text:'位置を変更',issue:{number:2,status:'revised',id:'change-2',recordKind:'change',changeReason:'=設備干渉',relatedIssueId:'issue-1'}})

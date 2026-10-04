@@ -2,6 +2,8 @@ import type { PDFDocument } from 'mupdf'
 import type { RGB, Rect } from './annotations'
 
 export const ISSUE_STATUSES = ['open', 'answered', 'revised', 'confirmed', 'done'] as const
+export const ISSUE_STATUS_CHOICES = ['open', 'answered', 'confirmed'] as const
+export type IssueStatusChoice = typeof ISSUE_STATUS_CHOICES[number]
 export interface Issue {
   number: number; status: typeof ISSUE_STATUSES[number]
   version?: 1; id?: string; discipline?: string; answer?: string; verification?: string; drawingNumber?: string
@@ -29,9 +31,14 @@ export function parseIssue(json: string | null): Issue | null {
     return result
   } catch { return null }
 }
-export const issueStatusLabel = (status: Issue['status']) => ({ open: '未回答', answered: '回答済', revised: '修正済', confirmed: '確認済', done: '対応済（旧版）' })[status]
+// Normalize only for presentation. Preserve legacy values until the user chooses a status.
+export const issueStatusChoice = (status: Issue['status']): IssueStatusChoice => status === 'open' || status === 'confirmed' ? status : 'answered'
+export const issueStatusLabel = (status: Issue['status']) => ({ open: '未回答', answered: '回答済み', confirmed: '修正確認' })[issueStatusChoice(status)]
 export const unresolvedIssue = (issue: Issue): boolean => issue.status !== 'confirmed'
-export const issueColor = (issue: Issue, color: RGB): RGB => issue.status === 'done' || issue.status === 'confirmed' ? [.5, .5, .5] : color
+export const issueColor = (issue: Issue, _color: RGB): RGB => {
+  const status = issueStatusChoice(issue.status)
+  return status === 'open' ? [1, 0, 0] : status === 'answered' ? [0, .25, 1] : [.5, .5, .5]
+}
 export function issueFontSize(number: number, size: number): number {
   // BIZ UD Gothic has half-em digits; leave room inside the circle for any digit count.
   return Math.min(size * .62, size * 1.1 / String(number).length)

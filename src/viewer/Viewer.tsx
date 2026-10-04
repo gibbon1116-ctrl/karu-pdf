@@ -445,7 +445,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       const priority: Priority = behind ? 2 : 1
       const size = props.pageSizes[page.index]
       const scale = 512 / Math.max(size.width, size.height)
-      const excluded = props.readOnly ? [] : [...new Set([...props.annotationStore.touchedObjNums(page.index), ...props.annotationStore.countOverlayObjNums(page.index)])].sort((a, b) => a - b)
+      const excluded = props.readOnly ? [] : [...new Set([...props.annotationStore.touchedObjNums(page.index), ...props.annotationStore.countOverlayObjNums(page.index), ...props.annotationStore.issueOverlayObjNums(page.index)])].sort((a, b) => a - b)
       const revision = props.renderRevisions?.get(page.index)
       const key = `${page.index}:${scale.toFixed(6)}:full:x=${excluded.join('.')}${revision ? `:v=${revision}` : ''}${props.renderVariant ? `:variant=${props.renderVariant}` : ''}`
       desired.set(page.index, { priority, key, excluded })
@@ -475,7 +475,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     warmReleasesRef.current = order.map((pageIndex) => {
       const size = props.pageSizes[pageIndex]
       const scale = 256 / Math.max(size.width, size.height)
-      const excluded = props.readOnly ? [] : [...new Set([...props.annotationStore.touchedObjNums(pageIndex), ...props.annotationStore.countOverlayObjNums(pageIndex)])].sort((a, b) => a - b)
+      const excluded = props.readOnly ? [] : [...new Set([...props.annotationStore.touchedObjNums(pageIndex), ...props.annotationStore.countOverlayObjNums(pageIndex), ...props.annotationStore.issueOverlayObjNums(pageIndex)])].sort((a, b) => a - b)
       const revision = props.renderRevisions?.get(pageIndex)
       const key = `warm:${pageIndex}:${scale.toFixed(6)}:full:x=${excluded.join('.')}${revision ? `:v=${revision}` : ''}`
       const params = { docId: props.docId, pageIndex, renderScale: scale, deviceRect: null, excludeAnnotObjNums: excluded }

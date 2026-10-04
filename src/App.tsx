@@ -1090,12 +1090,16 @@ export default function App() {
   }, [pool])
 
   const finishPageLayout = useCallback((session: DocumentSession, result: { pageSizes: typeof session.pageSizes; hasBackup: boolean; pageScales?: (import('./core/measure').PageScale | null)[] }) => {
+    const reloadFixtures = session.annotationStore.fixturesReady
     session.updateAfterPageLayout(result.pageSizes, result.hasBackup, result.pageScales)
     activeRef.current = session
     setPage(session.view.page)
     setZoom(session.view.zoom)
     refreshTabs()
-  }, [refreshTabs])
+    if (reloadFixtures) void ensureSessionFixtures(session, pool).catch(reason => {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    })
+  }, [refreshTabs, pool])
 
   const applyOrganize = useCallback(async (): Promise<OrganizeApplyTimings | null> => {
     const totalStarted = performance.now()

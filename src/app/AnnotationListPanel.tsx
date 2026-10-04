@@ -1,8 +1,8 @@
-import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import type { EditableAnnotation } from '../editor/AnnotationStore'
 import type { DocumentSession } from './documentModel'
-import { ISSUE_STATUSES, issueStatusLabel, unresolvedIssue, type Issue } from '../core/issues'
+import { ISSUE_STATUS_CHOICES, issueStatusChoice, issueStatusLabel, unresolvedIssue, type IssueStatusChoice } from '../core/issues'
 import { IssueDetails } from './IssueDetails'
 import { annotationBody, annotationColorHex, annotationKindLabel, CSV_KINDS, type CsvKind } from './annotationCsv'
 import { ensureSessionFixtures } from './documentModel'
@@ -22,7 +22,7 @@ function matchesFilter(annotation: EditableAnnotation, filter: Filter): boolean 
   if (filter === 'count') return !!annotation.count
   if (filter === 'issue') return !!annotation.issue
   if (filter === 'issueOpen') return !!annotation.issue && unresolvedIssue(annotation.issue)
-  if (filter === 'issueDone') return annotation.issue?.status === 'confirmed' || annotation.issue?.status === 'done'
+  if (filter === 'issueDone') return annotation.issue?.status === 'confirmed'
   if (filter === 'measure') return !!annotation.measure
   if (filter === 'all') return true
   if (filter === 'text') return annotation.kind === 'freetext'
@@ -64,6 +64,8 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
   const [error, setError] = useState('')
   const [lastIssue, setLastIssue] = useState<string | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
+  const detailPrefix = useId()
+  const detailElement = useRef<HTMLDivElement>(null)
   const [discipline, setDiscipline] = useState('')
   const [issueStatus, setIssueStatus] = useState('')
   const [rowPage, setRowPage] = useState(0)
@@ -87,7 +89,7 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
       if (active) { setLoading(false); setError(reason instanceof Error ? reason.message : String(reason)) }
     })
     return () => { active = false; task.cancel() }
-  }, [pool, session])
+  }, [pool, session, session.pageRevision])
 
   const annotations = useMemo(() => allSessionAnnotations(session).sort((left, right) => (
     left.pageIndex - right.pageIndex || left.rect[1] - right.rect[1] || left.rect[0] - right.rect[0]
@@ -97,27 +99,29 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
     && annotation.pageIndex + 1 >= firstPage
     && annotation.pageIndex + 1 <= lastPage
     && (annotation.legacyChange || !discipline || annotation.issue?.discipline?.includes(discipline))
-    && (annotation.legacyChange || !issueStatus || annotation.issue?.status === issueStatus)
+    && (annotation.legacyChange || !issueStatus || !!annotation.issue && issueStatusChoice(annotation.issue.status) === issueStatus)
   ))
   if (filter.startsWith('issue')) filtered.sort((a, b) => a.issue!.number - b.issue!.number)
   const issues = annotations.filter(annotation => annotation.issue && annotation.issue.recordKind !== 'change')
   const unresolved = issues.filter(annotation => unresolvedIssue(annotation.issue!) && annotation.pageIndex + 1 >= firstPage && annotation.pageIndex + 1 <= lastPage)
   const pageCount = Math.max(1, Math.ceil(filtered.length / 100))
   const visiblePage = Math.min(rowPage, pageCount - 1)
-  const detail = annotations.find(a => a.id === detailId && a.issue)
+  useEffect(() => {
+    detailElement.current?.scrollIntoView({ block: 'nearest' })
+  }, [detailId, visiblePage])
 
   return <section className="annotation-list-panel" aria-label="書き込みの一覧">
     <div className="annotation-filters">
       <label>種類<select aria-label="書き込みの種類" value={filter} onChange={(event) => setFilter(event.currentTarget.value as Filter)}>
         <option value="all">すべて</option><option value="text">文字</option><option value="callout">吹き出し</option>
-        <option value="count">個数カウント</option><option value="issue">指摘</option><option value="issueOpen">指摘（未確認）</option><option value="issueDone">指摘（確認済・旧対応済）</option><option value="measure">計測</option><option value="shape">図形</option><option value="symbol">記号</option><option value="pen">ペン</option><option value="markup">文字への印</option>
+        <option value="count">個数カウント</option><option value="issue">指摘</option><option value="issueOpen">指摘（未確認）</option><option value="issueDone">指摘（修正確認）</option><option value="measure">計測</option><option value="shape">図形</option><option value="symbol">記号</option><option value="pen">ペン</option><option value="markup">文字への印</option>
       </select></label>
       <div><label>ページ<input aria-label="開始ページ" type="number" min="1" max={session.pageSizes.length} value={firstPage} onChange={(event) => setFirstPage(Number(event.currentTarget.value))} /></label><span>〜</span><label><span className="visually-hidden">終了ページ</span><input aria-label="終了ページ" type="number" min="1" max={session.pageSizes.length} value={lastPage} onChange={(event) => setLastPage(Number(event.currentTarget.value))} /></label></div>
     </div>
     {!!issues.length && <div className="annotation-filters">
       <label>分野<input aria-label="分野で絞り込み" value={discipline} onChange={event => setDiscipline(event.currentTarget.value)} /></label>
       <label>状態<select aria-label="状態で絞り込み" value={issueStatus} onChange={event => setIssueStatus(event.currentTarget.value)}>
-        <option value="">すべて</option>{ISSUE_STATUSES.map(status => <option key={status} value={status}>{issueStatusLabel(status)}</option>)}
+        <option value="">すべて</option>{ISSUE_STATUS_CHOICES.map(status => <option key={status} value={status}>{issueStatusLabel(status)}</option>)}
       </select></label>
     </div>}
     <p role="status">{loading ? '指摘件数は読込中' : error ? '指摘件数は未確定' : `未確認 ${issues.filter(annotation => unresolvedIssue(annotation.issue!)).length} / 指摘 ${issues.length}`}</p>
@@ -138,7 +142,6 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
     }}>番号を振り直す</button>
     {loading && <p className="side-panel-message" role="status">書き込みを読み込み中… {progress.processed} / {progress.total} ページ</p>}
     {error && <p className="side-panel-message error-text">{error}</p>}
-    {detail && <IssueDetails key={detail.id} annotation={detail} store={session.annotationStore} readOnly={!!session.editRestriction} onClose={() => setDetailId(null)} />}
     {pageCount > 1 && <nav aria-label="書き込み一覧のページ">
       <button disabled={visiblePage === 0} onClick={() => setRowPage(visiblePage - 1)}>前の100件</button>
       <span>{visiblePage + 1} / {pageCount}（{filtered.length}件）</span>
@@ -146,7 +149,7 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
     </nav>}
     <ol className="annotation-rows" start={visiblePage * 100 + 1}>
       {filtered.slice(visiblePage * 100, (visiblePage + 1) * 100).map((annotation) => <li key={annotation.id}>
-        <button type="button" data-annotation-id={annotation.id} onClick={() => onSelect(annotation)} onDoubleClick={() => { if (annotation.issue) onEdit(annotation) }}>
+        <button type="button" className="annotation-row-main" data-annotation-id={annotation.id} onClick={() => onSelect(annotation)} onDoubleClick={() => { if (annotation.issue) onEdit(annotation) }}>
           <span className="annotation-type-icon" aria-hidden="true">{annotation.legacyChange ? '旧' : annotation.issue ? annotation.issue.number : annotationKindLabel(annotation.kind).slice(0, 1)}</span>
           <span className="annotation-page">p.{annotation.pageIndex + 1}</span>
           <span className="annotation-summary">
@@ -155,9 +158,19 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
           </span>
           <span className="annotation-color" style={{ backgroundColor: annotationColorHex(annotation) }} aria-label={`色 ${annotationColorHex(annotation)}`} />
         </button>
-        {annotation.issue && <><select disabled={!!session.editRestriction} className="issue-status" aria-label={`指摘 ${annotation.issue.number} の状態`} value={annotation.issue.status} onChange={event => session.annotationStore.updateIssueDetails(annotation.id, { status: event.currentTarget.value as Issue['status'] })}>
-          {ISSUE_STATUSES.map(status => <option key={status} value={status}>{issueStatusLabel(status)}</option>)}
-        </select><button className="issue-detail-button" onClick={() => { setDetailId(annotation.id); onSelect(annotation) }}>指摘 {annotation.issue.number} の詳細</button></>}
+        {annotation.issue && <><div className="issue-row-actions">
+          <select disabled={!!session.editRestriction} className="issue-status" data-status={issueStatusChoice(annotation.issue.status)} aria-label={`指摘 ${annotation.issue.number} の状態`} value={issueStatusChoice(annotation.issue.status)} onChange={event => session.annotationStore.updateIssueDetails(annotation.id, { status: event.currentTarget.value as IssueStatusChoice })}>
+            {ISSUE_STATUS_CHOICES.map(status => <option key={status} value={status}>{issueStatusLabel(status)}</option>)}
+          </select>
+          <button type="button" className="issue-detail-button" aria-label={`指摘 ${annotation.issue.number} の詳細を編集`} aria-expanded={detailId === annotation.id} aria-controls={`${detailPrefix}-${annotation.id}`} onClick={() => {
+            if (detailId === annotation.id) setDetailId(null)
+            else { setDetailId(annotation.id); onSelect(annotation) }
+          }}>{detailId === annotation.id ? '✎ 詳細を閉じる ▴' : '✎ 詳細を編集 ▾'}</button>
+        </div>
+          {detailId === annotation.id && <div id={`${detailPrefix}-${annotation.id}`} ref={detailElement} className="issue-row-details">
+            <IssueDetails annotation={annotation} store={session.annotationStore} readOnly={!!session.editRestriction} onClose={() => setDetailId(null)} />
+          </div>}
+        </>}
       </li>)}
     </ol>
   </section>

@@ -34,7 +34,7 @@ export default function CsvExportDialog({ annotations, fixtures, pdfName, pageCo
       <label>終了ページ<input aria-label="CSVの終了ページ" type="number" min={1} max={pageCount} value={end} onChange={event => setEnd(Number(event.currentTarget.value))} /></label>
     </fieldset>
     {kinds.includes('issue') && <label>指摘の状態<select aria-label="CSVの指摘の状態" value={status} onChange={event => setStatus(event.currentTarget.value as typeof status)}>
-      <option value="all">すべて</option><option value="open">未確認だけ</option><option value="confirmed">確認済だけ</option>
+      <option value="all">すべて</option><option value="open">未確認だけ（未回答・回答済み）</option><option value="confirmed">修正確認だけ</option>
     </select></label>}
     <p role="status">{reason || `${count}件を書き出します。`}</p>
     {error && <p role="alert">{error}</p>}

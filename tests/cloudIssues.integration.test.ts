@@ -52,7 +52,7 @@ function red(page: PDFPage, rect: Rect): number {
     return count
   } finally { pix.destroy() }
 }
-function pdfiumCount(data: Uint8Array, rect: Rect, color: 'red' | 'gray'): number {
+function pdfiumCount(data: Uint8Array, rect: Rect, color: 'red' | 'blue' | 'gray'): number {
   const runtime = pdfium.pdfium, pointer = runtime.wasmExports.malloc(data.length)
   let doc=0, page=0, bitmap=0
   try {
@@ -68,7 +68,7 @@ function pdfiumCount(data: Uint8Array, rect: Rect, color: 'red' | 'gray'): numbe
     let count=0
     for(let y=Math.floor(rect[1]*3);y<Math.min(height,Math.ceil(rect[3]*3));y++)for(let x=Math.floor(rect[0]*3);x<Math.min(width,Math.ceil(rect[2]*3));x++){
       const i=buffer+y*stride+x*4, b=heap[i],g=heap[i+1],r=heap[i+2]
-      if(color==='red' ? r>160&&g<140&&b<140 : Math.abs(r-g)<3&&Math.abs(r-b)<3&&r<180&&r>75) count++
+      if(color==='red' ? r>160&&g<140&&b<140 : color==='blue' ? b>160&&r<140&&g<140 : Math.abs(r-g)<3&&Math.abs(r-b)<3&&r<180&&r>75) count++
     }
     return count
   } finally {
@@ -194,7 +194,7 @@ describe('cloud and issue PDF results', () => {
         const data=bytes(saved)
         expect(pdfiumCount(data,[95,211,245,313],'red')).toBeGreaterThan(600)
         expect(pdfiumCount(data,[118,368,146,396],'red')).toBeGreaterThan(70)
-        expect(pdfiumCount(data,[168,368,196,396],'gray')).toBeGreaterThan(70)
+        expect(pdfiumCount(data,[168,368,196,396],'blue')).toBeGreaterThan(70)
       } finally { page.destroy();saved.destroy() }
     } finally { doc.destroy() }
   })

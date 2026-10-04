@@ -225,7 +225,7 @@ export function businessCases(url: string) {
     await expect(panel).toContainText('未確認 1 / 指摘 1')
     await page.getByLabel('書き込みの種類').selectOption('issueOpen')
     await page.getByRole('button', { name: '次の未対応指摘（ページ範囲内）' }).click()
-    await page.getByLabel('指摘 1 の状態').selectOption('done')
+    await page.getByLabel('指摘 1 の状態').selectOption('answered')
     await expect(panel).toContainText('未確認 1 / 指摘 1')
     await page.getByLabel('指摘 1 の状態').selectOption('confirmed')
     await expect(panel).toContainText('未確認 0 / 指摘 1')

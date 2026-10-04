@@ -1,17 +1,50 @@
-import { useContext, useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useRef, useState, type PointerEvent } from 'react'
 import { COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, COUNT_SIZES, COUNT_OPACITIES, countHex, countRgb, nextCountStyle, sameCountAppearance, serializeCountFixtures, type CountFixture, type CountStyle } from '../core/countFixtures'
 import { FixtureSampleContext } from '../editor/AnnotationLayer'
 import { CountMarker } from '../editor/countMarkers'
 
+// Shared across add/duplicate/edit mounts, and reset when the app reloads.
+let fixtureDialogPosition = { x: 0, y: 0 }
+
 export default function FixtureDialog({ initial, fixtures, editing, onSave, onClose }: { initial: CountFixture; fixtures: readonly CountFixture[]; editing: boolean; onSave(fixture: CountFixture): void; onClose(): void }) {
   const dialog = useRef<HTMLDialogElement>(null), [value, setValue] = useState(initial), [error, setError] = useState('')
+  const heading = useRef<HTMLHeadingElement>(null)
+  const position = useRef({ ...fixtureDialogPosition })
+  const drag = useRef<{ pointerId: number; x: number; y: number; startX: number; startY: number } | null>(null)
+  const move = (x: number, y: number) => {
+    if (!dialog.current?.open || !heading.current) return
+    const rect = heading.current.getBoundingClientRect()
+    const left = rect.left - position.current.x, right = rect.right - position.current.x
+    const top = rect.top - position.current.y, bottom = rect.bottom - position.current.y
+    const visibleWidth = Math.min(80, rect.width, window.innerWidth)
+    const minX = visibleWidth - right, maxX = window.innerWidth - visibleWidth - left
+    const minY = -top, maxY = Math.max(minY, window.innerHeight - bottom)
+    position.current = { x: Math.max(minX, Math.min(maxX, x)), y: Math.max(minY, Math.min(maxY, y)) }
+    fixtureDialogPosition = { ...position.current }
+    dialog.current.style.translate = `${position.current.x}px ${position.current.y}px`
+  }
+  const endDrag = (event: PointerEvent<HTMLHeadingElement>) => {
+    if (drag.current?.pointerId !== event.pointerId) return
+    drag.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }
   const sampleInteraction = useContext(FixtureSampleContext)
   const alive = useRef(false), capturing = useRef(false), suggestions = useRef<CountStyle[]>([])
   const cancelCapture = useRef(sampleInteraction?.cancel)
   cancelCapture.current = sampleInteraction?.cancel
   useEffect(() => {
     alive.current = true; dialog.current?.showModal()
-    return () => { alive.current = false; if (capturing.current) cancelCapture.current?.() }
+    const constrain = () => move(position.current.x, position.current.y)
+    constrain()
+    window.addEventListener('resize', constrain)
+    // Recentered layout can change when a captured sample or an error appears.
+    const observer = new ResizeObserver(constrain)
+    if (dialog.current) observer.observe(dialog.current)
+    return () => {
+      alive.current = false; drag.current = null
+      window.removeEventListener('resize', constrain); observer.disconnect()
+      if (capturing.current) cancelCapture.current?.()
+    }
   }, [])
   const capture = async () => {
     if (!sampleInteraction || capturing.current) return
@@ -20,13 +53,16 @@ export default function FixtureDialog({ initial, fixtures, editing, onSave, onCl
       const sample = await sampleInteraction.request()
       if (sample && alive.current) setValue(v => ({ ...v, sample }))
     } catch (reason) { if (alive.current) setError(String(reason)) }
-    finally { capturing.current = false; if (alive.current) dialog.current?.showModal() }
+    finally {
+      capturing.current = false
+      if (alive.current) { dialog.current?.showModal(); move(position.current.x, position.current.y) }
+    }
   }
   const style = (changes: Partial<CountStyle>) => setValue(v => ({ ...v, style: { ...v.style, ...changes } }))
   const collisions = fixtures.filter(f => f.id !== value.id && sameCountAppearance(f.style, value.style))
   const shapeNames = ['丸', '二重丸', '四角', '角丸四角', '三角', '逆三角', 'ひし形', '五角形', '六角形', '八角形', '星', '十字', 'バツ', '砂時計']
   const fillNames = ['塗りなし', '塗りつぶし', '半分塗り', '中心に点', '斜線']
-  return <dialog ref={dialog} className="fixture-dialog fixture-editor-dialog" aria-label={editing ? '器具を編集' : '器具を追加'} onCancel={onClose}>
+  return <dialog ref={dialog} className="fixture-dialog fixture-editor-dialog" style={{ translate: `${position.current.x}px ${position.current.y}px` }} aria-label={editing ? '器具を編集' : '器具を追加'} onCancel={onClose}>
     <form onSubmit={event => {
       event.preventDefault()
       try {
@@ -35,7 +71,17 @@ export default function FixtureDialog({ initial, fixtures, editing, onSave, onCl
         onSave(f)
       } catch (reason) { setError(String(reason)) }
     }}>
-      <h2>{editing ? '器具を編集' : '器具を追加'}</h2>
+      <h2 ref={heading} className="fixture-drag-handle" title="ドラッグして移動できます" onPointerDown={event => {
+        if (event.button !== 0 || !event.isPrimary) return
+        event.preventDefault()
+        event.currentTarget.setPointerCapture(event.pointerId)
+        drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, startX: position.current.x, startY: position.current.y }
+      }} onPointerMove={event => {
+        const active = drag.current
+        if (active?.pointerId === event.pointerId) move(active.startX + event.clientX - active.x, active.startY + event.clientY - active.y)
+      }} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={() => { drag.current = null }}>
+        <span aria-hidden="true">⠿</span>{editing ? '器具を編集' : '器具を追加'}
+      </h2>
       <div className="fixture-dialog-body">
       <div className="fixture-dialog-details">
       <label>器具名称<input required maxLength={80} value={value.name} onChange={e => setValue({ ...value, name: e.currentTarget.value })} /></label>

@@ -4,7 +4,7 @@ import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
 import { measureBounds, measureText, type MeasureKind, type MeasureSettings, type PageScale } from '../core/measure'
 import { History, type HistoryStep } from './history'
-import { IssueNumbers, issueOrder, parseIssue, type Issue } from '../core/issues'
+import { IssueNumbers, issueColor, issueOrder, parseIssue, type Issue } from '../core/issues'
 import type { CloudIntensity } from '../core/cloud'
 import { countFixtureId, type CountMark } from '../core/counts'
 import { nextCountStyle, serializeCountFixtures, type CountFixture } from '../core/countFixtures'
@@ -195,6 +195,7 @@ export class AnnotationStore {
   private fixtureBaseline = '[]'
   private fixtureLoading: Promise<void> | null = null
   fixturesReady = false
+  get fixturesLoading(): boolean { return this.fixtureLoading !== null }
   selectedFixtureId: string | null = null
   private readonly hiddenFixtures = new Set<string>()
   onlySelectedFixture = false
@@ -371,6 +372,11 @@ export class AnnotationStore {
     if (!this.fixturesReady) return []
     const result: number[] = []
     for (const a of this.annotations.values()) if (!a.deleted && a.pageIndex === pageIndex && a.count && this.fixtureForCount(a.count) && a.objNum !== null) result.push(a.objNum)
+    return result
+  }
+  issueOverlayObjNums(pageIndex: number): number[] {
+    const result: number[] = []
+    for (const a of this.annotations.values()) if (!a.deleted && !a.legacyChange && a.pageIndex === pageIndex && a.issue && a.issue.recordKind !== 'change' && a.objNum !== null) result.push(a.objNum)
     return result
   }
   setCountFixtures(fixtures: CountFixture[], removeIds: readonly string[] = []): void {
@@ -924,7 +930,13 @@ export class AnnotationStore {
 
   toEdits(): AnnotationEdit[] {
     // Migration is a save operation, never a side effect of opening the PDF.
-    if (this.fixturesReady && this.isDirty()) for (const id of this.legacyCountObjects) {
+    const dirty = this.isDirty()
+    if (dirty) for (const a of this.annotations.values()) {
+      if (a.deleted || a.legacyChange || !a.issue || a.issue.recordKind === 'change') continue
+      const color = issueColor(a.issue, a.color)
+      if (a.color.some((component, i) => component !== color[i])) a.color = color
+    }
+    if (this.fixturesReady && dirty) for (const id of this.legacyCountObjects) {
       const a = this.annotations.get(id), f = this.fixtureForCount(a?.count)
       if (a && !a.deleted && a.count?.version === 1 && f) this.applyFixtureToMark(a, f)
     }

@@ -724,7 +724,7 @@ export function AnnotationLayer(props: Props) {
     }
     const fixture = props.store.fixtureForCount(annotation.count)
     if (compactCounts && annotation.count && (fixture || annotation.symbol === 'circle') && !(singleSelection && selectedIds.has(annotation.id))) return null
-    const visible = !!fixture && !!annotation.count || annotation.objNum === null || touched.has(annotation.objNum)
+    const visible = !!fixture && !!annotation.count || !!annotation.issue && annotation.issue.recordKind !== 'change' || annotation.objNum === null || touched.has(annotation.objNum)
     const [x0, y0, x1, y1] = annotation.rect
     const handleSize = 8 / Math.max(0.01, props.zoom * CSS_PX_PER_PT)
     const positions: Array<{ handle: ResizeHandle; x: number; y: number }> = annotation.count ? [] : allResizeHandles(annotation.kind)
@@ -759,7 +759,6 @@ export function AnnotationLayer(props: Props) {
         {visible && annotation.issue && <g className="annotation-issue" fill={color(issueColor(annotation.issue, annotation.color))}>
           <circle cx={(x0+x1)/2} cy={(y0+y1)/2} r={(x1-x0)*.45} fill="white" stroke={color(issueColor(annotation.issue, annotation.color))} strokeWidth={(x1-x0)*.06} />
           <text x={(x0+x1)/2} y={(y0+y1)/2 + issueFontSize(annotation.issue.number, x1-x0)*.3} textAnchor="middle" fontFamily="KaruBIZUDGothic" fontSize={issueFontSize(annotation.issue.number, x1-x0)}>{annotation.issue.number}</text>
-          {annotation.issue.status === 'done' && <path d={`M${x0+(x1-x0)*.7} ${y0+(y1-y0)*.2} L${x0+(x1-x0)*.8} ${y0+(y1-y0)*.3} L${x0+(x1-x0)*.98} ${y0+(y1-y0)*.08}`} fill="none" stroke={color(issueColor(annotation.issue, annotation.color))} strokeWidth={(x1-x0)*.06} strokeLinecap="round" strokeLinejoin="round" />}
         </g>}
         {visible && annotation.measure && annotation.vertices && <MeasurementShape points={annotation.vertices} kind={annotation.measure.kind} text={annotation.text} fontSize={annotation.fontSize} color={color(annotation.color)} width={annotation.borderWidth} opacity={annotation.opacity} />}
         {visible && annotation.kind === 'square' && <rect className="annotation-square" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}

@@ -1077,13 +1077,6 @@ function drawIssue(device: DisplayListDevice, text: InstanceType<typeof mupdf.Te
     ellipse(path, size * .05, size * .05, size * .95, size * .95)
     device.fillPath(path, false, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, [1, 1, 1], 1)
     device.strokePath(path, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, color, 1)
-    if (issue.status === 'done') {
-      const check = new mupdf.Path()
-      try {
-        check.moveTo(size * .7, size * .2); check.lineTo(size * .8, size * .3); check.lineTo(size * .98, size * .08)
-        device.strokePath(check, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, color, 1)
-      } finally { check.destroy() }
-    }
   } finally { stroke.destroy(); path.destroy() }
   const encoded = [...String(issue.number)].map(c => encodeCharacter(font.font, c))
   const fs = issueFontSize(issue.number, size), width = encoded.reduce((sum, c) => sum + c.advance * fs, 0)

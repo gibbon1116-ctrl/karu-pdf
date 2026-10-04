@@ -16,7 +16,7 @@ export function IssueDetails({ annotation, store, readOnly, onClose }: {
     <label>修正確認<textarea aria-label="指摘の修正確認" rows={3} maxLength={8000} value={issue.verification ?? ''}
       onChange={event => store.updateIssueDetails(annotation.id, { verification: event.currentTarget.value })} /></label>
     <p>PDF保存で詳細も保存します。</p>
-    {issue.status === 'done' && <p>旧版の対応済です。修正の確認後に「確認済」へ変更してください。</p>}
+    {(issue.status === 'done' || issue.status === 'revised') && <p>旧版で「対応済」または「修正済」とした指摘です。修正を確認したら「修正確認」にしてください。</p>}
     {issue.sourceDocument && <p>引継ぎ元：{issue.sourceDocument}{issue.sourceNumber ? `（指摘 ${issue.sourceNumber}）` : ''}</p>}
   </fieldset><button type="button" onClick={onClose}>詳細を閉じる</button></div>
 }

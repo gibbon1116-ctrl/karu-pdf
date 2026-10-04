@@ -3,6 +3,36 @@ import { expect, test } from '@playwright/test'
 
 const sample = path.resolve('test-data/sample-small.pdf')
 
+test('ページ整理と保存・再読込の後もヘッダー・フッターの設定を保つ', async ({ page }) => {
+  await page.goto('/karu-pdf/?test=1')
+  await page.getByTestId('file-input').setInputFiles(sample)
+  await expect(page.getByTestId('annotation-layer-0')).toBeVisible()
+  await page.getByRole('button', { name: 'ページ▼' }).click()
+  await page.getByRole('menuitem', { name: 'ページ番号・ヘッダー・フッター…' }).click()
+  await expect(page.getByRole('dialog', { name: 'ページ番号・ヘッダー・フッター' })).toBeVisible()
+  await page.getByLabel('開始番号').fill('7')
+  await page.getByRole('button', { name: '適用', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'ページ番号・ヘッダー・フッター' })).toBeHidden()
+  const settings = await page.evaluate(() => window.__karu!.getHeaderFooterSettings())
+  expect(settings).not.toBeNull()
+  await page.evaluate(async () => {
+    await window.__karu!.openOrganize()
+    const draft = window.__karu!.organizeDraft()!, cards = draft.getCards().slice()
+    draft.move([cards[2].id], 0)
+    draft.delete([cards[1].id])
+  })
+  await page.getByRole('button', { name: '適用', exact: true }).click()
+  await expect(page.getByTestId('organize-view')).toBeHidden()
+  expect(await page.evaluate(() => window.__karu!.getHeaderFooterSettings())).toEqual(settings)
+  const saved = await page.evaluate(async () => Array.from((await window.__karu!.saveToBytes())!))
+  await page.evaluate(async () => window.__karu!.closeTab(window.__karu!.listTabs()[0].docId))
+  await page.evaluate(bytes => window.__karu!.openBytes(bytes, '整理後.pdf'), saved)
+  expect(await page.evaluate(() => window.__karu!.getHeaderFooterSettings())).toEqual(settings)
+  await page.getByRole('button', { name: 'ページ▼' }).click()
+  await page.getByRole('menuitem', { name: 'ページ番号・ヘッダー・フッター…' }).click()
+  await expect(page.getByLabel('開始番号')).toHaveValue('7')
+})
+
 test('ページ番号を適用し、範囲指定・元に戻す・削除ができる', async ({ page }) => {
   await page.goto('/karu-pdf/?test=1')
   await page.getByTestId('file-input').setInputFiles(sample)
