@@ -149,8 +149,10 @@ test('CSV画面で指摘と文字を選び、対象列・行・ファイル名�
   const lines = result.csv.slice(1).split('\r\n')
   expect(lines[0]).toBe('種類,番号,ページ,図面番号,内容,色,"位置（x, y mm）","大きさ（幅, 高さ mm）",状態,分野,回答,修正確認,引継ぎ元番号,引継ぎ元文書')
   expect(lines[1]).toContain("指摘,1,1,,'=確認,")
-  expect(lines[2]).toContain('文字,,1,,文字の本文,')
-  expect(lines).toHaveLength(4)
+  // sample-small.pdf already has the text annotation "Existing note" above the new one.
+  expect(lines[2]).toContain('文字,,1,,Existing note,')
+  expect(lines[3]).toContain('文字,,1,,文字の本文,')
+  expect(lines).toHaveLength(5)
   expect(result.csv).toBe(await page.evaluate(() => window.__karu!.exportCsv(['issue','text'])))
 })
 
