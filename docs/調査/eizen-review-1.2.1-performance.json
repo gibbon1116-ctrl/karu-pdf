@@ -1,0 +1,1789 @@
+{
+  "timestamp": "2026-10-04T14:23:09.714Z",
+  "inputs": {
+    "before": [
+      "bench-results/eizen/review-1-2-1-unused-2026-10-04T14-19-53-037Z/candidate/results.json"
+    ],
+    "after": [
+      "bench-results/eizen/review-1-2-1-unused-2026-10-04T14-19-53-037Z/results.json"
+    ],
+    "network": [
+      "bench-results/eizen/review-1-2-1-unused-2026-10-04T14-19-53-037Z/candidate/results.json"
+    ]
+  },
+  "comparisons": [
+    {
+      "file": "sample-small.pdf",
+      "metric": "PDFを開く（文書操作可能まで）",
+      "unit": "ms",
+      "gated": true,
+      "before": 93.45000000298023,
+      "after": 98.65000000223517,
+      "deltaPct": 5.564472979228574,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          92.80000000447035,
+          94.10000000149012
+        ],
+        "after": [
+          103.80000000447035,
+          93.5
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "初表示（ファイル読込含む）",
+      "unit": "ms",
+      "gated": true,
+      "before": 198.05000000074506,
+      "after": 204.95000000298023,
+      "deltaPct": 3.483968695889539,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          196.60000000149012,
+          199.5
+        ],
+        "after": [
+          209.60000000149012,
+          200.30000000447035
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "鮮明表示（ファイル読込含む）",
+      "unit": "ms",
+      "gated": true,
+      "before": 246.5,
+      "after": 253.15000000223517,
+      "deltaPct": 2.6977687635842518,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          244.5,
+          248.5
+        ],
+        "after": [
+          259.70000000298023,
+          246.60000000149012
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "スクロール1500 cold フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 17,
+      "after": 17.049999999999955,
+      "deltaPct": 0.29411764705855603,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          17,
+          17
+        ],
+        "after": [
+          17.09999999999991,
+          17
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "スクロール1500 cached フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 17,
+      "after": 17,
+      "deltaPct": 0,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          17,
+          17
+        ],
+        "after": [
+          17,
+          17
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "スクロール3000 フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 17,
+      "after": 17.050000000000182,
+      "deltaPct": 0.2941176470598883,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          17,
+          17
+        ],
+        "after": [
+          17.100000000000364,
+          17
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "ページ移動→鮮明表示",
+      "unit": "ms",
+      "gated": true,
+      "before": 16.600000001490116,
+      "after": 17.050000000745058,
+      "deltaPct": 2.710843368762328,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          16.700000002980232,
+          16.5
+        ],
+        "after": [
+          17.100000001490116,
+          17
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "400%ズーム→鮮明表示",
+      "unit": "ms",
+      "gated": true,
+      "before": 200.2499999962747,
+      "after": 200.70000000298023,
+      "deltaPct": 0.22471910447634524,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          200.89999999850988,
+          199.59999999403954
+        ],
+        "after": [
+          200.60000000149012,
+          200.80000000447035
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "250pxパン→鮮明表示",
+      "unit": "ms",
+      "gated": true,
+      "before": 144.95000000298023,
+      "after": 144.80000000074506,
+      "deltaPct": -0.1034839615261074,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          144.40000000596046,
+          145.5
+        ],
+        "after": [
+          141.70000000298023,
+          147.89999999850988
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "注釈ドラッグ フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 17.100000000000364,
+      "after": 17.099999999998545,
+      "deltaPct": -1.0635936575909e-11,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          17.100000000002183,
+          17.099999999998545
+        ],
+        "after": [
+          17.099999999998545,
+          17.099999999998545
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "文字入力 フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 14.399999997765917,
+      "after": 13.299999999253487,
+      "deltaPct": -7.638888879743677,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          15.799999998511339,
+          12.999999997020495
+        ],
+        "after": [
+          13.700000001488661,
+          12.899999997018313
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "PDF生成・保存処理",
+      "unit": "ms",
+      "gated": true,
+      "before": 95.85000000149012,
+      "after": 100.25000000372529,
+      "deltaPct": 4.590506001217287,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          93.70000000298023,
+          98
+        ],
+        "after": [
+          103.80000000447035,
+          96.70000000298023
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "初期取得本文量",
+      "unit": "bytes",
+      "gated": true,
+      "before": 57416557,
+      "after": 57482971,
+      "deltaPct": 0.1156704676666731,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          57416557,
+          57416557
+        ],
+        "after": [
+          57482971,
+          57482971
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "読込後 ブラウザprivate bytes",
+      "unit": "bytes",
+      "gated": true,
+      "before": 861843456,
+      "after": 792307712,
+      "deltaPct": -8.068256887710245,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          850604032,
+          873082880
+        ],
+        "after": [
+          728227840,
+          856387584
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "読込後 メインJSヒープ（回収前・参考）",
+      "unit": "bytes",
+      "gated": false,
+      "before": 5828514,
+      "after": 6070281,
+      "deltaPct": 4.148004105334557,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          5827312,
+          5829716
+        ],
+        "after": [
+          6070331,
+          6070231
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "操作・保存後 ブラウザprivate bytes",
+      "unit": "bytes",
+      "gated": true,
+      "before": 1030264832,
+      "after": 989333504,
+      "deltaPct": -3.972893835514324,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          1010302976,
+          1050226688
+        ],
+        "after": [
+          990715904,
+          987951104
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "文書終了後 ブラウザprivate bytes",
+      "unit": "bytes",
+      "gated": true,
+      "before": 943652864,
+      "after": 907573248,
+      "deltaPct": -3.8233991943884993,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          914685952,
+          972619776
+        ],
+        "after": [
+          897441792,
+          917704704
+        ]
+      }
+    },
+    {
+      "file": "sample-small.pdf",
+      "metric": "操作・保存後 メインJS保持ヒープ（回収後）",
+      "unit": "bytes",
+      "gated": true,
+      "before": 6217430,
+      "after": 6420284,
+      "deltaPct": 3.262666407181092,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          6213516,
+          6221344
+        ],
+        "after": [
+          6419280,
+          6421288
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "PDFを開く（文書操作可能まで）",
+      "unit": "ms",
+      "gated": true,
+      "before": 639.2000000029802,
+      "after": 499.75,
+      "deltaPct": -21.816332916509708,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          553.1000000014901,
+          725.3000000044703
+        ],
+        "after": [
+          479.6000000014901,
+          519.8999999985099
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "初表示（ファイル読込含む）",
+      "unit": "ms",
+      "gated": true,
+      "before": 817.8500000014901,
+      "after": 676.0000000037253,
+      "deltaPct": -17.344256281409354,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          690.7000000029802,
+          945
+        ],
+        "after": [
+          655.3000000044703,
+          696.7000000029802
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "鮮明表示（ファイル読込含む）",
+      "unit": "ms",
+      "gated": true,
+      "before": 850.4500000029802,
+      "after": 690.25,
+      "deltaPct": -18.83708624874112,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          723,
+          977.9000000059605
+        ],
+        "after": [
+          670.6000000014901,
+          709.8999999985099
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "スクロール1500 cold フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 16.800000000000182,
+      "after": 16.950000000000273,
+      "deltaPct": 0.8928571428576726,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          16.800000000000182,
+          16.800000000000182
+        ],
+        "after": [
+          17,
+          16.900000000000546
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "スクロール1500 cached フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 16.900000000000546,
+      "after": 16.950000000000273,
+      "deltaPct": 0.29585798816404996,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          17,
+          16.80000000000109
+        ],
+        "after": [
+          17,
+          16.900000000000546
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "スクロール3000 フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 17,
+      "after": 17.049999999999272,
+      "deltaPct": 0.294117647054537,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          17.099999999998545,
+          16.900000000001455
+        ],
+        "after": [
+          17,
+          17.099999999998545
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "ページ移動→鮮明表示",
+      "unit": "ms",
+      "gated": true,
+      "before": 18.050000000745058,
+      "after": 17.599999997764826,
+      "deltaPct": -2.4930748086518406,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          18.299999997019768,
+          17.80000000447035
+        ],
+        "after": [
+          17.299999997019768,
+          17.899999998509884
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "400%ズーム→鮮明表示",
+      "unit": "ms",
+      "gated": true,
+      "before": 354.5,
+      "after": 347.6499999985099,
+      "deltaPct": -1.9322990131142803,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          346.19999999552965,
+          362.80000000447035
+        ],
+        "after": [
+          348,
+          347.29999999701977
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "250pxパン→鮮明表示",
+      "unit": "ms",
+      "gated": true,
+      "before": 383.6499999985099,
+      "after": 392.19999999552965,
+      "deltaPct": 2.228593769595455,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          392.79999999701977,
+          374.5
+        ],
+        "after": [
+          391.59999999403954,
+          392.79999999701977
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "注釈ドラッグ フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 17,
+      "after": 17,
+      "deltaPct": 0,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          17,
+          17
+        ],
+        "after": [
+          17,
+          17
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "文字入力 フレームp95",
+      "unit": "ms",
+      "gated": true,
+      "before": 13.950000002236266,
+      "after": 8.69600000223545,
+      "deltaPct": -37.66308243124422,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          14.40000000298096,
+          13.500000001491571
+        ],
+        "after": [
+          13.162000001491833,
+          4.230000002979068
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "PDF生成・保存処理",
+      "unit": "ms",
+      "gated": true,
+      "before": 258.7500000037253,
+      "after": 259.3999999985099,
+      "deltaPct": 0.25120772744937625,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          261.30000000447035,
+          256.20000000298023
+        ],
+        "after": [
+          258,
+          260.79999999701977
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "初期取得本文量",
+      "unit": "bytes",
+      "gated": true,
+      "before": 57416557,
+      "after": 57482971,
+      "deltaPct": 0.1156704676666731,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          57416557,
+          57416557
+        ],
+        "after": [
+          57482971,
+          57482971
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "読込後 ブラウザprivate bytes",
+      "unit": "bytes",
+      "gated": true,
+      "before": 1994969088,
+      "after": 1999587328,
+      "deltaPct": 0.23149431376050522,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          1999716352,
+          1990221824
+        ],
+        "after": [
+          2010537984,
+          1988636672
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "読込後 メインJSヒープ（回収前・参考）",
+      "unit": "bytes",
+      "gated": false,
+      "before": 7349047,
+      "after": 7322884,
+      "deltaPct": -0.35600534327784317,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          7658987,
+          7039107
+        ],
+        "after": [
+          7328047,
+          7317721
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "操作・保存後 ブラウザprivate bytes",
+      "unit": "bytes",
+      "gated": true,
+      "before": 2027614208,
+      "after": 2025926656,
+      "deltaPct": -0.08322845605153173,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          2001838080,
+          2053390336
+        ],
+        "after": [
+          2017234944,
+          2034618368
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "文書終了後 ブラウザprivate bytes",
+      "unit": "bytes",
+      "gated": true,
+      "before": 1810739200,
+      "after": 1805637632,
+      "deltaPct": -0.28173952383645506,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          1789390848,
+          1832087552
+        ],
+        "after": [
+          1788870656,
+          1822404608
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "metric": "操作・保存後 メインJS保持ヒープ（回収後）",
+      "unit": "bytes",
+      "gated": true,
+      "before": 6657310,
+      "after": 6906070,
+      "deltaPct": 3.736644380387877,
+      "status": "測定不足",
+      "samples": {
+        "before": [
+          6687836,
+          6626784
+        ],
+        "after": [
+          6908040,
+          6904100
+        ]
+      }
+    }
+  ],
+  "quality": [
+    {
+      "file": "sample-small.pdf",
+      "feedbackMs": [
+        2,
+        2
+      ],
+      "whiteFrames": [
+        {
+          "mode": "scroll1500Cold",
+          "before": [
+            {
+              "total": 163,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            },
+            {
+              "total": 164,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            }
+          ],
+          "after": [
+            {
+              "total": 164,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            },
+            {
+              "total": 162,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            }
+          ]
+        },
+        {
+          "mode": "scroll1500Cached",
+          "before": [
+            {
+              "total": 164,
+              "blank": 1,
+              "ratio": 0.006097560975609756,
+              "longestMs": 16.599999994039536
+            },
+            {
+              "total": 164,
+              "blank": 1,
+              "ratio": 0.006097560975609756,
+              "longestMs": 17
+            }
+          ],
+          "after": [
+            {
+              "total": 164,
+              "blank": 1,
+              "ratio": 0.006097560975609756,
+              "longestMs": 17
+            },
+            {
+              "total": 164,
+              "blank": 1,
+              "ratio": 0.006097560975609756,
+              "longestMs": 16.5
+            }
+          ]
+        },
+        {
+          "mode": "scroll3000",
+          "before": [
+            {
+              "total": 86,
+              "blank": 1,
+              "ratio": 0.011627906976744186,
+              "longestMs": 16.700000002980232
+            },
+            {
+              "total": 86,
+              "blank": 1,
+              "ratio": 0.011627906976744186,
+              "longestMs": 16.899999998509884
+            }
+          ],
+          "after": [
+            {
+              "total": 86,
+              "blank": 1,
+              "ratio": 0.011627906976744186,
+              "longestMs": 16.600000001490116
+            },
+            {
+              "total": 86,
+              "blank": 1,
+              "ratio": 0.011627906976744186,
+              "longestMs": 16.80000000447035
+            }
+          ]
+        }
+      ],
+      "memoryAfterOperations": {
+        "before": [
+          {
+            "privateBytes": 1010302976,
+            "workingSetBytes": 1228001280,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 65343488,
+                "WorkingSet64": 189943808
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7905280,
+                "WorkingSet64": 23588864
+              },
+              {
+                "Id": 10852,
+                "PrivateMemorySize64": 512528384,
+                "WorkingSet64": 511926272
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 20185088,
+                "WorkingSet64": 54546432
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8400896,
+                "WorkingSet64": 25505792
+              },
+              {
+                "Id": 32800,
+                "PrivateMemorySize64": 38670336,
+                "WorkingSet64": 87814144
+              },
+              {
+                "Id": 33800,
+                "PrivateMemorySize64": 17358848,
+                "WorkingSet64": 38215680
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7790592,
+                "WorkingSet64": 23003136
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 332120064,
+                "WorkingSet64": 273457152
+              }
+            ]
+          },
+          {
+            "privateBytes": 1050226688,
+            "workingSetBytes": 1259569152,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 65974272,
+                "WorkingSet64": 191168512
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7843840,
+                "WorkingSet64": 23592960
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 19542016,
+                "WorkingSet64": 53972992
+              },
+              {
+                "Id": 28088,
+                "PrivateMemorySize64": 37322752,
+                "WorkingSet64": 88018944
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8323072,
+                "WorkingSet64": 25497600
+              },
+              {
+                "Id": 35776,
+                "PrivateMemorySize64": 20180992,
+                "WorkingSet64": 41005056
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7716864,
+                "WorkingSet64": 22999040
+              },
+              {
+                "Id": 36844,
+                "PrivateMemorySize64": 523468800,
+                "WorkingSet64": 514703360
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 359854080,
+                "WorkingSet64": 298610688
+              }
+            ]
+          }
+        ],
+        "after": [
+          {
+            "privateBytes": 990715904,
+            "workingSetBytes": 1199255552,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 68878336,
+                "WorkingSet64": 192655360
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7966720,
+                "WorkingSet64": 23576576
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 21131264,
+                "WorkingSet64": 55250944
+              },
+              {
+                "Id": 21156,
+                "PrivateMemorySize64": 513462272,
+                "WorkingSet64": 515256320
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8392704,
+                "WorkingSet64": 25468928
+              },
+              {
+                "Id": 35524,
+                "PrivateMemorySize64": 42303488,
+                "WorkingSet64": 90726400
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7852032,
+                "WorkingSet64": 23019520
+              },
+              {
+                "Id": 36652,
+                "PrivateMemorySize64": 17313792,
+                "WorkingSet64": 38191104
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 303415296,
+                "WorkingSet64": 235110400
+              }
+            ]
+          },
+          {
+            "privateBytes": 987951104,
+            "workingSetBytes": 1218170880,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 65679360,
+                "WorkingSet64": 190861312
+              },
+              {
+                "Id": 3968,
+                "PrivateMemorySize64": 38195200,
+                "WorkingSet64": 87744512
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7843840,
+                "WorkingSet64": 23597056
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 19472384,
+                "WorkingSet64": 54034432
+              },
+              {
+                "Id": 31980,
+                "PrivateMemorySize64": 20160512,
+                "WorkingSet64": 40992768
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8298496,
+                "WorkingSet64": 25473024
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7716864,
+                "WorkingSet64": 22999040
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 309137408,
+                "WorkingSet64": 255696896
+              },
+              {
+                "Id": 38112,
+                "PrivateMemorySize64": 511447040,
+                "WorkingSet64": 516771840
+              }
+            ]
+          }
+        ]
+      },
+      "memoryAfterDocumentClose": {
+        "before": [
+          {
+            "privateBytes": 914685952,
+            "workingSetBytes": 1142874112,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 64782336,
+                "WorkingSet64": 189349888
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7905280,
+                "WorkingSet64": 23588864
+              },
+              {
+                "Id": 10852,
+                "PrivateMemorySize64": 446615552,
+                "WorkingSet64": 446980096
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 20185088,
+                "WorkingSet64": 54546432
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8400896,
+                "WorkingSet64": 25505792
+              },
+              {
+                "Id": 32800,
+                "PrivateMemorySize64": 38055936,
+                "WorkingSet64": 87240704
+              },
+              {
+                "Id": 33800,
+                "PrivateMemorySize64": 17342464,
+                "WorkingSet64": 38199296
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7790592,
+                "WorkingSet64": 23003136
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 303607808,
+                "WorkingSet64": 254459904
+              }
+            ]
+          },
+          {
+            "privateBytes": 972619776,
+            "workingSetBytes": 1187008512,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 62058496,
+                "WorkingSet64": 188096512
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7843840,
+                "WorkingSet64": 23592960
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 19488768,
+                "WorkingSet64": 53923840
+              },
+              {
+                "Id": 28088,
+                "PrivateMemorySize64": 36700160,
+                "WorkingSet64": 87445504
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8323072,
+                "WorkingSet64": 25497600
+              },
+              {
+                "Id": 35776,
+                "PrivateMemorySize64": 20168704,
+                "WorkingSet64": 40992768
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7716864,
+                "WorkingSet64": 22999040
+              },
+              {
+                "Id": 36844,
+                "PrivateMemorySize64": 457932800,
+                "WorkingSet64": 450215936
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 352387072,
+                "WorkingSet64": 294244352
+              }
+            ]
+          }
+        ],
+        "after": [
+          {
+            "privateBytes": 897441792,
+            "workingSetBytes": 1128067072,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 66367488,
+                "WorkingSet64": 190136320
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7966720,
+                "WorkingSet64": 23576576
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 21131264,
+                "WorkingSet64": 55250944
+              },
+              {
+                "Id": 21156,
+                "PrivateMemorySize64": 444948480,
+                "WorkingSet64": 448499712
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8392704,
+                "WorkingSet64": 25468928
+              },
+              {
+                "Id": 35524,
+                "PrivateMemorySize64": 41652224,
+                "WorkingSet64": 90120192
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7852032,
+                "WorkingSet64": 23019520
+              },
+              {
+                "Id": 36652,
+                "PrivateMemorySize64": 17313792,
+                "WorkingSet64": 38191104
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 281817088,
+                "WorkingSet64": 233803776
+              }
+            ]
+          },
+          {
+            "privateBytes": 917704704,
+            "workingSetBytes": 1151213568,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 65110016,
+                "WorkingSet64": 190287872
+              },
+              {
+                "Id": 3968,
+                "PrivateMemorySize64": 37572608,
+                "WorkingSet64": 87175168
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7843840,
+                "WorkingSet64": 23597056
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 19472384,
+                "WorkingSet64": 54034432
+              },
+              {
+                "Id": 31980,
+                "PrivateMemorySize64": 20140032,
+                "WorkingSet64": 40972288
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8298496,
+                "WorkingSet64": 25473024
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7716864,
+                "WorkingSet64": 22999040
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 306298880,
+                "WorkingSet64": 254947328
+              },
+              {
+                "Id": 38112,
+                "PrivateMemorySize64": 445251584,
+                "WorkingSet64": 451727360
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "file": "heavy-300p.pdf",
+      "feedbackMs": [
+        2,
+        1.8999999985098839
+      ],
+      "whiteFrames": [
+        {
+          "mode": "scroll1500Cold",
+          "before": [
+            {
+              "total": 179,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            },
+            {
+              "total": 179,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            }
+          ],
+          "after": [
+            {
+              "total": 179,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            },
+            {
+              "total": 179,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            }
+          ]
+        },
+        {
+          "mode": "scroll1500Cached",
+          "before": [
+            {
+              "total": 180,
+              "blank": 1,
+              "ratio": 0.005555555555555556,
+              "longestMs": 17.299999997019768
+            },
+            {
+              "total": 180,
+              "blank": 1,
+              "ratio": 0.005555555555555556,
+              "longestMs": 17.100000001490116
+            }
+          ],
+          "after": [
+            {
+              "total": 180,
+              "blank": 1,
+              "ratio": 0.005555555555555556,
+              "longestMs": 16.299999997019768
+            },
+            {
+              "total": 180,
+              "blank": 1,
+              "ratio": 0.005555555555555556,
+              "longestMs": 16.30000000447035
+            }
+          ]
+        },
+        {
+          "mode": "scroll3000",
+          "before": [
+            {
+              "total": 180,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            },
+            {
+              "total": 180,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            }
+          ],
+          "after": [
+            {
+              "total": 180,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            },
+            {
+              "total": 180,
+              "blank": 0,
+              "ratio": 0,
+              "longestMs": 0
+            }
+          ]
+        }
+      ],
+      "memoryAfterOperations": {
+        "before": [
+          {
+            "privateBytes": 2001838080,
+            "workingSetBytes": 2114646016,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 165027840,
+                "WorkingSet64": 291274752
+              },
+              {
+                "Id": 6492,
+                "PrivateMemorySize64": 17747968,
+                "WorkingSet64": 38752256
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7852032,
+                "WorkingSet64": 23605248
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 19398656,
+                "WorkingSet64": 53940224
+              },
+              {
+                "Id": 23720,
+                "PrivateMemorySize64": 1464700928,
+                "WorkingSet64": 1412284416
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8331264,
+                "WorkingSet64": 25509888
+              },
+              {
+                "Id": 33748,
+                "PrivateMemorySize64": 39874560,
+                "WorkingSet64": 87928832
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7716864,
+                "WorkingSet64": 22999040
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 271187968,
+                "WorkingSet64": 158351360
+              }
+            ]
+          },
+          {
+            "privateBytes": 2053390336,
+            "workingSetBytes": 2121052160,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 165847040,
+                "WorkingSet64": 291078144
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7852032,
+                "WorkingSet64": 23519232
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 19406848,
+                "WorkingSet64": 53870592
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8331264,
+                "WorkingSet64": 25415680
+              },
+              {
+                "Id": 32696,
+                "PrivateMemorySize64": 1491161088,
+                "WorkingSet64": 1417232384
+              },
+              {
+                "Id": 33032,
+                "PrivateMemorySize64": 20160512,
+                "WorkingSet64": 41021440
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7716864,
+                "WorkingSet64": 22904832
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 291196928,
+                "WorkingSet64": 155111424
+              },
+              {
+                "Id": 38280,
+                "PrivateMemorySize64": 41717760,
+                "WorkingSet64": 90898432
+              }
+            ]
+          }
+        ],
+        "after": [
+          {
+            "privateBytes": 2017234944,
+            "workingSetBytes": 2123096064,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 166137856,
+                "WorkingSet64": 292036608
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7839744,
+                "WorkingSet64": 23592960
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 19484672,
+                "WorkingSet64": 54046720
+              },
+              {
+                "Id": 30976,
+                "PrivateMemorySize64": 39698432,
+                "WorkingSet64": 87977984
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8318976,
+                "WorkingSet64": 25493504
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7716864,
+                "WorkingSet64": 22999040
+              },
+              {
+                "Id": 36524,
+                "PrivateMemorySize64": 17330176,
+                "WorkingSet64": 38191104
+              },
+              {
+                "Id": 36908,
+                "PrivateMemorySize64": 1464008704,
+                "WorkingSet64": 1415970816
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 286699520,
+                "WorkingSet64": 162787328
+              }
+            ]
+          },
+          {
+            "privateBytes": 2034618368,
+            "workingSetBytes": 2106445824,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 166985728,
+                "WorkingSet64": 292909056
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7843840,
+                "WorkingSet64": 23519232
+              },
+              {
+                "Id": 7404,
+                "PrivateMemorySize64": 1488441344,
+                "WorkingSet64": 1411592192
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 19419136,
+                "WorkingSet64": 54022144
+              },
+              {
+                "Id": 26684,
+                "PrivateMemorySize64": 17350656,
+                "WorkingSet64": 38187008
+              },
+              {
+                "Id": 29176,
+                "PrivateMemorySize64": 38248448,
+                "WorkingSet64": 87527424
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8298496,
+                "WorkingSet64": 25391104
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7716864,
+                "WorkingSet64": 22908928
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 280313856,
+                "WorkingSet64": 150388736
+              }
+            ]
+          }
+        ]
+      },
+      "memoryAfterDocumentClose": {
+        "before": [
+          {
+            "privateBytes": 1789390848,
+            "workingSetBytes": 1906393088,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 164970496,
+                "WorkingSet64": 291217408
+              },
+              {
+                "Id": 6492,
+                "PrivateMemorySize64": 17735680,
+                "WorkingSet64": 38739968
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7852032,
+                "WorkingSet64": 23605248
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 19398656,
+                "WorkingSet64": 53940224
+              },
+              {
+                "Id": 23720,
+                "PrivateMemorySize64": 1255538688,
+                "WorkingSet64": 1205592064
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8331264,
+                "WorkingSet64": 25509888
+              },
+              {
+                "Id": 33748,
+                "PrivateMemorySize64": 39239680,
+                "WorkingSet64": 87347200
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7716864,
+                "WorkingSet64": 22999040
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 268607488,
+                "WorkingSet64": 157442048
+              }
+            ]
+          },
+          {
+            "privateBytes": 1832087552,
+            "workingSetBytes": 1918435328,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 166014976,
+                "WorkingSet64": 291241984
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7852032,
+                "WorkingSet64": 23519232
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 19406848,
+                "WorkingSet64": 53870592
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8331264,
+                "WorkingSet64": 25415680
+              },
+              {
+                "Id": 32696,
+                "PrivateMemorySize64": 1284374528,
+                "WorkingSet64": 1214783488
+              },
+              {
+                "Id": 33032,
+                "PrivateMemorySize64": 20148224,
+                "WorkingSet64": 41009152
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7716864,
+                "WorkingSet64": 22904832
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 277065728,
+                "WorkingSet64": 155258880
+              },
+              {
+                "Id": 38280,
+                "PrivateMemorySize64": 41177088,
+                "WorkingSet64": 90431488
+              }
+            ]
+          }
+        ],
+        "after": [
+          {
+            "privateBytes": 1788870656,
+            "workingSetBytes": 1914187776,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 166350848,
+                "WorkingSet64": 292253696
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7839744,
+                "WorkingSet64": 23592960
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 19484672,
+                "WorkingSet64": 54046720
+              },
+              {
+                "Id": 30976,
+                "PrivateMemorySize64": 39071744,
+                "WorkingSet64": 87396352
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8318976,
+                "WorkingSet64": 25493504
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7716864,
+                "WorkingSet64": 22999040
+              },
+              {
+                "Id": 36524,
+                "PrivateMemorySize64": 17313792,
+                "WorkingSet64": 38174720
+              },
+              {
+                "Id": 36908,
+                "PrivateMemorySize64": 1252134912,
+                "WorkingSet64": 1207508992
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 270639104,
+                "WorkingSet64": 162721792
+              }
+            ]
+          },
+          {
+            "privateBytes": 1822404608,
+            "workingSetBytes": 1901846528,
+            "processes": [
+              {
+                "Id": 1776,
+                "PrivateMemorySize64": 164847616,
+                "WorkingSet64": 290791424
+              },
+              {
+                "Id": 7052,
+                "PrivateMemorySize64": 7843840,
+                "WorkingSet64": 23519232
+              },
+              {
+                "Id": 7404,
+                "PrivateMemorySize64": 1284681728,
+                "WorkingSet64": 1210245120
+              },
+              {
+                "Id": 12536,
+                "PrivateMemorySize64": 19451904,
+                "WorkingSet64": 54046720
+              },
+              {
+                "Id": 26684,
+                "PrivateMemorySize64": 17330176,
+                "WorkingSet64": 38166528
+              },
+              {
+                "Id": 29176,
+                "PrivateMemorySize64": 37601280,
+                "WorkingSet64": 86917120
+              },
+              {
+                "Id": 32660,
+                "PrivateMemorySize64": 8298496,
+                "WorkingSet64": 25391104
+              },
+              {
+                "Id": 36240,
+                "PrivateMemorySize64": 7716864,
+                "WorkingSet64": 22908928
+              },
+              {
+                "Id": 37288,
+                "PrivateMemorySize64": 274632704,
+                "WorkingSet64": 149860352
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "decision": "測定値を記録。2026-10-04の利用者指示により数十ms程度の差の採否は操作確認で判断する。5%超過だけで次工程を止めない。大きな遅延・メモリ増加・白抜け・未測定項目は別途確認。",
+  "limitations": [
+    "フレームp95は各試行のp95の中央値。",
+    "OSキャッシュと他アプリは制御していない。",
+    "定点メモリはピークではない。",
+    "保存先の上書きI/Oは未測定。ダウンロード完了時間は自動化の遅延を含むため5%判定に用いていない。"
+  ]
+}
