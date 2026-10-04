@@ -30,15 +30,21 @@
     "maxOccurrences": 1
   },
   {
-    "file": "dist-fixed/assets/annotationCsv-*.js",
+    "file": "dist-fixed/assets/annotations-*.js",
     "string": "XMLHttpRequest",
-    "reason": "引継ぎ画面と一覧で共有するチャンクへ移った既存 MuPDF/Emscripten 標準ローダー。従来の App チャンクと同じ file: 読み取り分岐。固定版では内部 HTTP(S) を使う。",
+    "reason": "器具リスト等の遅延読込画面と共有する注釈処理のチャンクへ移った既存 MuPDF/Emscripten 標準ローダー（1.1.0 の annotationCsv チャンクと同じコード）。従来の App チャンクと同じ file: 読み取り分岐。固定版では内部 HTTP(S) を使う。",
     "maxOccurrences": 2
   },
   {
-    "file": "dist-fixed/assets/annotationCsv-*.js",
+    "file": "dist-fixed/assets/annotations-*.js",
     "string": "fetch(",
-    "reason": "共有チャンクへ移った MuPDF/Emscripten 標準ローダー。同梱 WASM の同一 origin GET だけで、PDF の送信先ではない。配布版の通信試験で確認する。",
+    "reason": "共有チャンクへ移った MuPDF/Emscripten 標準ローダー（1.1.0 の annotationCsv チャンクと同じコード）。同梱 WASM の同一 origin GET だけで、PDF の送信先ではない。配布版の通信試験で確認する。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/AnnotationLayer-*.js",
+    "string": "http://www.w3.org/2000/svg",
+    "reason": "SVG/XML/MathML の名前空間識別子（注釈レイヤーと計測の重ね描き）。器具リストの遅延読込画面と共有するチャンクへ移った。取得先ではない。",
     "maxOccurrences": 2
   },
   {
