@@ -1,4 +1,7 @@
-import { useContext, useEffect, useRef, useSyncExternalStore } from 'react'
+import { quantityValue } from '../core/quantity'
+import { polylineLength } from '../core/measure'
+import { quantityMethod } from '../core/countFixtures'
+import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { SYMBOL_OPTIONS, type RGB, type SymbolName } from '../core/annotations'
 import { ISSUE_STATUS_CHOICES, issueStatusChoice, issueStatusLabel, type IssueStatusChoice } from '../core/issues'
@@ -10,7 +13,7 @@ import { updateToolFormat, type FormatDefaults, type FormatTool, type ToolFormat
 import { getActiveTextEditorSnapshot, insertIntoActiveTextEditor, subscribeActiveTextEditor } from '../editor/TextEditor'
 import { SnippetPanel } from './SnippetPanel'
 import { FixtureUiContext } from './documentModel'
-import { CountMarker } from '../editor/countMarkers'
+import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 
 const COLORS: Array<{ name: string; value: RGB; css: string }> = [
   { name: '赤', value: [1, 0, 0], css: '#e00000' },
@@ -72,7 +75,7 @@ function formatTool(kind: Kind | EditorTool): FormatTool | null {
 
 function formatToolLabel(tool: FormatTool): string {
   const labels: Record<FormatTool, string> = {
-    count: '個数カウント', cloudSquare: '雲（四角）', cloudPolygon: '雲（多角形）', issue: '指摘', distance: '距離', perimeter: '連続した長さ', area: '面積', text: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角', circle: '丸',
+    count: '数量拾い', cloudSquare: '雲（四角）', cloudPolygon: '雲（多角形）', issue: '指摘', distance: '距離', perimeter: '連続した長さ', area: '面積', text: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角', circle: '丸',
     highlight: '蛍光ペン', ink: '手書き', symbol: '記号', textHighlight: '文字ハイライト',
     underline: '文字に下線', strikeout: '文字に取り消し線',
   }
@@ -87,8 +90,8 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     getActiveTextEditorSnapshot,
     getActiveTextEditorSnapshot,
   )
-  const activeSelection = selected ?? (store.selectedCountsOnly() ? store.get(store.primarySelection()!) ?? null : null)
-  const target = activeSelection?.legacyChange ? null : activeSelection?.count ? 'count' : formatTool(activeSelection?.kind ?? (tool === 'select' ? 'text' : tool))
+  const activeSelection = selected ?? (store.selectedCountsOnly() || store.selectedQuantitiesOnly() ? store.get(store.primarySelection()!) ?? null : null)
+  const target = activeSelection?.legacyChange ? null : activeSelection?.count || activeSelection?.quantity ? 'count' : formatTool(activeSelection?.kind ?? (tool === 'select' ? 'text' : tool))
   const requestedCountStore = useRef<AnnotationStore | null>(null)
   useEffect(() => {
     // A page operation reloads the fixture list itself; do not pull the panel to the fixtures tab meanwhile.
@@ -173,14 +176,20 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
   }
 
   if (target === 'count') {
-    const fixture = activeSelection?.count ? store.fixtureForCount(activeSelection.count) : store.getCountFixture(store.selectedFixtureId)
+    const quantity = activeSelection?.quantity
+    const fixture = quantity ? store.getCountFixture(quantity.itemId) : activeSelection?.count ? store.fixtureForCount(activeSelection.count) : store.getCountFixture(store.selectedFixtureId)
     return <aside className="format-panel" aria-label="書式" data-testid="format-panel">
-      <h2>個数カウント</h2>
-      {fixture ? <><p>{fixture.code} {fixture.name}</p><svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + fixture.style.size * (1 + .7 * fixture.code.length))} 50`} aria-label="印の見本"><CountMarker style={fixture.style} code={fixture.code} /></svg>
-        <button onClick={() => fixtureUi?.edit(fixture.id)}>器具を編集…</button></> : <button onClick={() => fixtureUi?.open()}>器具リストで器具を選んでください</button>}
-      {activeSelection?.count && <label>器具を変更<select aria-label="器具を変更" value={fixture?.id ?? ''} onChange={e => store.reassignCounts(store.selectedIds(), e.currentTarget.value)}>
-        {!fixture && <option value="">器具を選んでください</option>}{store.getCountFixtures().map(f => <option key={f.id} value={f.id}>{f.code} {f.name}</option>)}
+      <h2>数量拾い</h2>
+      {fixture ? <><p>{fixture.code} {fixture.name}</p>{quantityMethod(fixture) === 'click' ? <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + fixture.style.size * (1 + .7 * fixture.code.length))} 50`} aria-label="印の見本"><CountMarker style={fixture.style} code={fixture.code} /></svg> : <QuantitySwatch fixture={fixture} />}
+        <button onClick={() => fixtureUi?.edit(fixture.id)}>項目を編集…</button></> : <button onClick={() => fixtureUi?.open()}>数量拾いの一覧で項目を選んでください</button>}
+      {(activeSelection?.count || quantity) && <label>項目を変更<select aria-label="項目を変更" value={fixture?.id ?? ''} onChange={e => store.reassignCounts(store.selectedIds(), e.currentTarget.value)}>
+        {!fixture && <option value="">項目を選んでください</option>}{store.getCountFixtures().filter(f => quantityMethod(f) === (quantity?.method ?? 'click')).map(f => <option key={f.id} value={f.id}>{f.code} {f.name}</option>)}
       </select></label>}
+      {quantity && activeSelection?.measure && activeSelection.vertices && store.selectedIds().length === 1 && <>
+        <p>平面の長さ　{(polylineLength(activeSelection.vertices) * activeSelection.measure.mmPerPoint / 1000).toFixed(2)} m</p>
+        {quantity.method === 'polyline' && <QuantityAddInput key={activeSelection.id} value={quantity.addM ?? 0} commit={n => store.updateQuantityAdd(activeSelection.id, n)} />}
+        <p>この拾い　{quantityValue(activeSelection.vertices, activeSelection.measure.mmPerPoint, quantity).toFixed(2)} {quantity.method === 'polyline' ? 'm' : quantity.method === 'polygon' || quantity.method === 'lengthHeight' ? 'm²' : 'm³'}</p>
+      </>}
     </aside>
   }
   return <aside className="format-panel" aria-label="書式" data-testid="format-panel">
@@ -297,4 +306,15 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     </fieldset>}
     {target && <p className="format-target">{activeSelection ? '選択中の書き込み' : '次に作る書き込み'}</p>}
   </aside>
+}
+
+function QuantityAddInput({ value, commit }: { value: number; commit(value: number): void }) {
+  const [draft, setDraft] = useState(value.toFixed(2))
+  useEffect(() => setDraft(value.toFixed(2)), [value])
+  const save = () => {
+    const n = Number(draft)
+    if (draft.trim() && Number.isFinite(n) && n >= 0 && n <= 1000 && /^\d+(?:\.\d{0,2})?$/.test(draft)) { commit(n); setDraft(n.toFixed(2)) }
+    else setDraft(value.toFixed(2))
+  }
+  return <label>立上り・立下りの加算<span className="quantity-input-unit"><input aria-label="立上り・立下りの加算" type="number" min="0" max="1000" step="0.01" value={draft} onChange={e => setDraft(e.currentTarget.value)} onBlur={save} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() } }} />m</span></label>
 }

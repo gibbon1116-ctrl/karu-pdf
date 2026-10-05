@@ -1,3 +1,5 @@
+import { quantityLine } from '../core/countFixtures'
+import { quantityDashes } from '../core/quantity'
 import { createElement } from 'react'
 import type { Point } from '../core/annotations'
 import { countHex, type CountStyle } from '../core/countFixtures'
@@ -63,4 +65,9 @@ export function CountMarker({ style, code = '', x = 0, y = 0, showCode = true }:
     createElement('path', { d: countSvgPath(d.fills), fill: d.color }),
     createElement('path', { d: outline + ' ' + countSvgPath(d.strokes, false), fill: 'none', stroke: d.color, strokeWidth: .8, strokeLinejoin: 'round' }),
     style.showCode && showCode && code && createElement('text', { x: d.code.x, y: d.code.y, fontSize: d.code.size, fill: d.bright ? '#404040' : d.color, fontFamily: 'KaruBIZUDGothic, sans-serif' }, code))
+}
+
+export function QuantitySwatch({ fixture }: { fixture: import('../core/countFixtures').CountFixture }) {
+  const line = quantityLine(fixture)
+  return createElement('svg', { className: 'fixture-swatch', width: 24, height: 24, viewBox: '0 0 24 24', 'aria-hidden': true }, createElement('path', { d: 'M1 12H23', fill: 'none', stroke: countHex(fixture.style.color), strokeWidth: line.width, strokeDasharray: quantityDashes(line.dash, line.width).join(' '), opacity: fixture.style.opacity }))
 }

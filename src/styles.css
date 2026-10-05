@@ -609,3 +609,8 @@ button, input { font: inherit; }
 @media (max-width: 639px) {
   .fixture-dialog-body { grid-template-columns: minmax(0, 1fr); }
 }
+
+.fixture-row-unit { margin-left: .35em; font-size: .8em; color: #666; }
+.quantity-preview { display: flex; align-items: center; gap: 8px; }
+.quantity-input-unit { display: flex; align-items: center; gap: 6px; }
+.quantity-input-unit input { flex: 1; min-width: 0; }

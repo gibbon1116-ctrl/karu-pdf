@@ -75,7 +75,7 @@ function batchEdits(doc: PDFDocument): AnnotationEdit[] {
   const marks = Array.from({ length: pageCount }, (_, pageIndex) => listAnnotations(doc, pageIndex))
   const updates = marks.map(pageMarks => pageMarks.slice(1))
   return Array.from({ length: 300 }, (_, i): AnnotationEdit => {
-    if (i === 0) return { kind: 'setCountFixtures', pageIndex: 0, fixtures: [{ ...fixture(), name: '変更した器具' }] }
+    if (i === 0) return { kind: 'setCountFixtures', pageIndex: 0, fixtures: [{ ...fixture(), name: '変更した項目' }] }
     if (i === 1) return { kind: 'delete', pageIndex: 0, objNum: marks[0][0].objNum }
     if (i === 2) return { ...legacyMark(300, pageCount), pageIndex: 1,
       count: { version: 2, id: 'created', fixtureId: fixture().id } }

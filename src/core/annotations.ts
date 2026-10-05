@@ -1,3 +1,5 @@
+import { parseQuantityMark, quantityPoints, quantityDashes, type QuantityMark } from './quantity'
+import { QUANTITY_DASHES, type QuantityLineStyle } from './countFixtures'
 import { arrowHeadSize } from './lineGeometry'
 import mupdf, {
   type PDFAnnotation,
@@ -72,6 +74,8 @@ export type AnnotationKind =
 export interface AnnotationInfo {
   legacyChange?: boolean
   legacyChangeData?: LegacyChangeData
+  quantity?: QuantityMark | null
+  quantityDash?: QuantityLineStyle['dash']
   count?: CountMark | null
   arrowHeadSize?: number | null
   cloudIntensity?: CloudIntensity | null
@@ -112,8 +116,8 @@ export type AnnotationEdit =
   | { kind: 'updateIssue'; objNum: number; pageIndex: number; rect: Rect; issue: Issue; text: string; color: RGB }
   | { kind: 'createLegacyChange'; pageIndex: number; data: LegacyChangeData }
   | { kind: 'setPageScale'; pageIndex: number; scale: PageScale | null }
-  | { kind: 'createMeasure'; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number }
-  | { kind: 'updateMeasure'; objNum: number; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number }
+  | { kind: 'createMeasure'; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number; quantity?: QuantityMark | null; quantityDash?: QuantityLineStyle['dash'] }
+  | { kind: 'updateMeasure'; objNum: number; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number; quantity?: QuantityMark | null; quantityDash?: QuantityLineStyle['dash'] }
   | { kind: 'createFreeText'; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number; textOpacity?: number; boxOpacity?: number }
   | { kind: 'updateFreeText'; objNum: number; pageIndex: number; rect: Rect; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number; textOpacity?: number; boxOpacity?: number }
   | { kind: 'createCallout'; pageIndex: number; rect: Rect; point: Point; text: string; fontSize: number; color: RGB; font: FontName; backgroundColor?: RGB | null; borderColor?: RGB | null; borderWidth?: number; textOpacity?: number; boxOpacity?: number; arrowHeadSize?: number | null }
@@ -152,7 +156,7 @@ interface AppearanceTask {
   countFixture?: CountFixture
   issue?: Issue
   visibleRect?: Rect
-  measurement?: { points: Point[]; kind: MeasureKind; rect: Rect; opacity: number }
+  measurement?: { points: Point[]; kind: MeasureKind; rect: Rect; opacity: number; dash?: QuantityLineStyle['dash'] }
   editIndex: number
   page: PDFPage
   annotation: PDFAnnotation
@@ -365,6 +369,10 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             : type === 'PolyLine' && dimensionIntent === 'PolyLineDimension' ? 'perimeter'
             : type === 'Polygon' && dimensionIntent === 'PolygonDimension' ? 'area' : null
           const measurement = measureKind ? readMeasureSettings(object, measureKind, pageUnitFactor(page)) : null
+          const parsedQuantity = parseQuantityMark(readString(object, 'KaruQuantity'))
+          const quantity = parsedQuantity && measurement && (quantityPoints(parsedQuantity.method) === 'polygon' ? measureKind === 'area' : measureKind === 'perimeter') ? parsedQuantity : null
+          const savedDash = quantity ? readString(object, 'KaruQuantityDash') : null
+          const quantityDash = quantity ? QUANTITY_DASHES.includes(savedDash as QuantityLineStyle['dash']) ? savedDash as QuantityLineStyle['dash'] : 'solid' : undefined
           const measureVertices = measureKind === 'distance' ? annotation.getLine() as Point[] : measureKind || (cloud && type === 'Polygon') ? annotation.getVertices() : null
           const da = readString(object, 'DA')
           const parsed = da === null
@@ -412,7 +420,7 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
           const inkKind = type === 'Ink' ? readName(object, 'KaruInkKind') : null
           return {
             cloudIntensity, issue, legacyChange, legacyChangeData: legacyChange ? snapshotLegacyChange(doc, annotation, object) : undefined,
-            count: savedCount,
+            count: savedCount, quantity, quantityDash,
             measure: measurement,
             vertices: measureVertices,
             objNum: object.asIndirect(),
@@ -423,7 +431,7 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             // 型定義上は全注釈に getRect() があるが、MuPDF 1.28.1 は
             // Highlight など /Rect を直接扱わない種類では例外にする。
             rect: countBounds ?? (cloud && type === 'Square' ? cloudSquareRect(page, object) : cloud && measureVertices ? vertexBounds(measureVertices) : [...(annotation.hasRect() ? annotation.getRect() : annotation.getBounds())] as Rect),
-            contents: measurement && measureVertices && readString(object, 'KaruMeasure')
+            contents: !quantity && measurement && measureVertices && readString(object, 'KaruMeasure')
               ? measureText(measureVertices, measurement) : savedIssue || type === 'FreeText' || measureKind || savedCount ? annotation.getContents() : '',
             fontName: type === 'FreeText' ? parsed.fontName : null,
             fontSize: type === 'FreeText' ? parsed.fontSize : measureKind ? readNumber(object, 'KaruMeasureFontSize') ?? 10.5 : null,
@@ -1024,7 +1032,7 @@ function referenceAppearanceFromPage(doc: PDFDocument, page: PDFPage, annotation
 function drawMeasurement(device: DisplayListDevice, text: InstanceType<typeof mupdf.Text>, task: AppearanceTask, font: FontResource, fallback?: FontResource): void {
   const measurement = task.measurement!
   const points = measurement.points
-  const path = new mupdf.Path(), stroke = new mupdf.StrokeState({ lineWidth: task.borderWidth, lineJoin: 'Round', lineCap: 'Butt', miterLimit: 10 })
+  const path = new mupdf.Path(), stroke = new mupdf.StrokeState({ lineWidth: task.borderWidth, lineJoin: 'Round', lineCap: 'Butt', miterLimit: 10, dashes: quantityDashes(measurement.dash, task.borderWidth) })
   try {
     path.moveTo(...points[0])
     for (const point of points.slice(1)) path.lineTo(...point)
@@ -1323,6 +1331,16 @@ function installTemporaryAppearances(
       const sourceAppearance = sourceObject.get('AP', 'N')
       let graftedAppearance: PDFObject | undefined
       try {
+        const dashes = task.measurement ? quantityDashes(task.measurement.dash, task.borderWidth) : []
+        if (dashes.length) {
+          // MuPDF 1.28.1 accepts StrokeState.dashes but returns a zero dash length.
+          // Retain the shared measurement appearance and repair only its dash operator.
+          const stream = sourceAppearance.readStream()
+          try {
+            const contents = stream.asString()
+            if (!/\[\s*[\d.]+[\d.\s]*\]\s+[\d.]+\s+d\b/.test(contents)) sourceAppearance.writeStream(`[${dashes.join(' ')}] 0 d\n${contents.replace(/\[\s*\]\s+[\d.]+\s+d\b/g, '')}`)
+          } finally { stream.destroy() }
+        }
         if (task.countFixture || task.issue) {
           let template = stampTemplates.get(task.temporaryPageIndex!)
           if (!template) {
@@ -1502,6 +1520,13 @@ export function applyEdits(
           object.put('Measure', measure)
           setPdfString(doc, object, 'KaruMeasure', JSON.stringify(edit.measure))
           setPdfNumber(doc, object, 'KaruMeasureFontSize', edit.fontSize)
+          if (edit.quantity) {
+            const mark = parseQuantityMark(JSON.stringify(edit.quantity))
+            if (!mark || (quantityPoints(mark.method) === 'polygon' ? type !== 'Polygon' : type !== 'PolyLine')) throw new Error('数量拾いの値が不正です。')
+            setPdfString(doc, object, 'KaruQuantity', JSON.stringify(mark))
+            if (edit.quantityDash && edit.quantityDash !== 'solid') setPdfString(doc, object, 'KaruQuantityDash', edit.quantityDash)
+            else object.delete('KaruQuantityDash')
+          } else { object.delete('KaruQuantity'); object.delete('KaruQuantityDash') }
           if (isNew) setPdfString(doc, object, 'NM', newAnnotationName())
           object.delete('T')
         } finally { measure.destroy(); object.destroy() }
@@ -1511,7 +1536,7 @@ export function applyEdits(
         appearances.push({ editIndex, page, annotation, width: rect[2] - rect[0], height: rect[3] - rect[1], text: edit.text, fontSize: edit.fontSize,
           color: edit.color, fontName: 'BIZUDGothic', textRect: [0, 0, rect[2] - rect[0], rect[3] - rect[1]], backgroundColor: null, borderColor: null,
           borderWidth: edit.borderWidth, textOpacity: 1, boxOpacity: 1, calloutLine: null,
-          measurement: { points: edit.vertices.map(p => [p[0] - rect[0], p[1] - rect[1]]), kind: edit.measure.kind, rect, opacity: edit.opacity } })
+          measurement: { dash: edit.quantityDash, points: edit.vertices.map(p => [p[0] - rect[0], p[1] - rect[1]]), kind: edit.measure.kind, rect, opacity: edit.opacity } })
         keepForAppearance = true
         continue
       }
@@ -1603,7 +1628,7 @@ export function applyEdits(
         const countObject = annotation.getObject()
         try {
           if (edit.count) {
-            if (!parseCount(JSON.stringify(edit.count))) throw new Error('個数カウントの種類が不正です。')
+            if (!parseCount(JSON.stringify(edit.count))) throw new Error('数量拾いの種類が不正です。')
             setPdfString(doc, countObject, 'KaruCount', JSON.stringify(edit.count))
             annotation.setContents(`個数: ${edit.countFixture ? `${edit.countFixture.code} ${edit.countFixture.name}`.trim() : edit.count.version === 1 ? edit.count.group : edit.count.fixtureId}`)
           } else countObject.delete('KaruCount')

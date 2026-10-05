@@ -34,3 +34,9 @@ describe('ToolRowの最後に使った道具', () => {
     expect(() => saveLastTool('shape', 'circle', storage)).not.toThrow()
   })
 })
+
+it('migrates a saved count measurement tool to distance', () => {
+ const storage = new MemoryStorage()
+ storage.setItem(LAST_TOOLS_STORAGE_KEY, JSON.stringify({ measure: 'count' }))
+ expect(loadLastTools(storage).measure).toBe('distance')
+})

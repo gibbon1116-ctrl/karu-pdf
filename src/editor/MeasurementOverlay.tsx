@@ -1,3 +1,5 @@
+import { quantityLabel, quantityDashes, type QuantityMark } from '../core/quantity'
+import { quantityMethod, quantityLine, type CountFixture, type QuantityLineStyle } from '../core/countFixtures'
 import { createContext, useContext, useEffect, useRef, type RefObject } from 'react'
 import type { Point } from '../core/annotations'
 import { cloudPath, type CloudIntensity } from '../core/cloud'
@@ -14,8 +16,8 @@ export const ScaleInteractionContext = createContext<{
 export const isMeasureTool = (tool: string): tool is MeasureKind => tool === 'distance' || tool === 'perimeter' || tool === 'area'
 const cssColor = (c: readonly number[]) => `rgb(${c.map(n => n * 255).join(' ')})`
 
-export function MeasurementShape({ points, kind, text, fontSize, color, width, opacity }: {
-  points: Point[]; kind: MeasureKind; text: string; fontSize: number; color: string; width: number; opacity: number
+export function MeasurementShape({ points, kind, text, fontSize, color, width, opacity, dash }: {
+  points: Point[]; kind: MeasureKind; text: string; fontSize: number; color: string; width: number; opacity: number; dash?: QuantityLineStyle['dash']
 }) {
   const label = measureLabel(points, kind, fontSize)
   const coords = points.map(p => p.join(',')).join(' ')
@@ -25,8 +27,8 @@ export function MeasurementShape({ points, kind, text, fontSize, color, width, o
     ticks = points.map(p => `M${p[0] - dx},${p[1] - dy}L${p[0] + dx},${p[1] + dy}`).join(' ')
   }
   return <g opacity={opacity} className="measurement-shape">
-    {kind === 'area' ? <><polygon points={coords} fill={color} fillOpacity=".15" /><polygon points={coords} fill="none" stroke={color} strokeWidth={width} /></> : <polyline points={coords} fill="none" stroke={color} strokeWidth={width} />}
-    {ticks && <path d={ticks} fill="none" stroke={color} strokeWidth={width} />}
+    {kind === 'area' ? <><polygon points={coords} fill={color} fillOpacity=".15" /><polygon points={coords} fill="none" stroke={color} strokeWidth={width} strokeDasharray={quantityDashes(dash, width).join(' ')} /></> : <polyline points={coords} fill="none" stroke={color} strokeWidth={width} strokeDasharray={quantityDashes(dash, width).join(' ')} />}
+    {ticks && <path d={ticks} fill="none" stroke={color} strokeWidth={width} strokeDasharray={quantityDashes(dash, width).join(' ')} />}
     <text className="measurement-label" x={label.anchor[0]} y={label.anchor[1] + fontSize * .3} transform={`rotate(${label.angle * 180 / Math.PI} ${label.anchor.join(' ')})`} textAnchor="middle" fontSize={fontSize} fill={color} stroke="white" strokeWidth="3" paintOrder="stroke" strokeLinejoin="round">{text}</text>
   </g>
 }
@@ -37,6 +39,7 @@ interface Props {
   pageIndex: number
   tool: EditorTool
   defaults: FormatDefaults
+  quantityItem?: CountFixture
   select(id: string | null): void
 }
 export function useMeasurementInteraction(props: Props) {
@@ -49,7 +52,15 @@ export function useMeasurementInteraction(props: Props) {
   const frame = useRef(0)
   const tracing = scaleInteraction.tracePage === props.pageIndex
   const cloud = props.tool === 'cloudPolygon'
-  const enabled = tracing || cloud || isMeasureTool(props.tool)
+  const quantityItem = props.tool === 'count' && props.quantityItem && quantityMethod(props.quantityItem) === 'polyline' ? props.quantityItem : undefined
+  const quantityMark = (id = 'draft'): QuantityMark => ({ version: 1, id, itemId: quantityItem!.id, method: 'polyline', ...(quantityItem?.defaults?.addM ? { addM: quantityItem.defaults.addM } : {}) })
+  const constrain = (start: Point, end: Point, shift: boolean): Point => {
+    if (!shift || !(quantityItem || vertex.current?.original.quantity)) return constrainMeasurePoint(start, end, shift)
+    const dx = end[0] - start[0], dy = end[1] - start[1], length = Math.hypot(dx, dy), step = Math.PI / 4
+    const angle = Math.round(Math.atan2(dy, dx) / step) * step
+    return [start[0] + Math.cos(angle) * length, start[1] + Math.sin(angle) * length]
+  }
+  const enabled = tracing || cloud || !!quantityItem || isMeasureTool(props.tool)
   const clear = () => {
     if (!frame.current && !points.current.length && !cursor.current && !down.current && !vertex.current && !draftRef.current?.firstChild) return
     if (frame.current) cancelAnimationFrame(frame.current)
@@ -58,7 +69,7 @@ export function useMeasurementInteraction(props: Props) {
     frame.current = 0; points.current = []; cursor.current = null; down.current = null
     draftRef.current?.replaceChildren()
   }
-  const draw = (p: Point[], text: string, kind: MeasureKind, color: string, size: number, width: number, floating: boolean, intensity?: CloudIntensity, fill?: string) => {
+  const draw = (p: Point[], text: string, kind: MeasureKind, color: string, size: number, width: number, floating: boolean, intensity?: CloudIntensity, fill?: string, dash?: QuantityLineStyle['dash'], opacity?: number) => {
     const group = draftRef.current
     if (!group || !p.length) return
     // Fixed, tiny SVG draft. No React state, scene queries or Worker requests.
@@ -72,7 +83,8 @@ export function useMeasurementInteraction(props: Props) {
     if (intensity !== undefined) {
       path.setAttribute('d', cloudPath(p, intensity, width)); path.setAttribute('fill', fill ?? 'none'); path.setAttribute('stroke', color); path.setAttribute('stroke-width', String(width)); label.textContent = ''; return
     }
-    group.removeAttribute('opacity')
+    if (opacity !== undefined) group.setAttribute('opacity', String(opacity)); else group.removeAttribute('opacity')
+    path.setAttribute('stroke-dasharray', quantityDashes(dash, width).join(' '))
     path.setAttribute('points', [...p, ...(kind === 'area' ? [p[0]] : [])].map(p => p.join(',')).join(' '))
     path.setAttribute('fill', kind === 'area' ? color : 'none'); path.setAttribute('fill-opacity', '.15')
     path.setAttribute('stroke', color); path.setAttribute('stroke-width', String(width))
@@ -89,15 +101,19 @@ export function useMeasurementInteraction(props: Props) {
     if (vertex.current) {
       const v = vertex.current, a = v.original
       if (a.kind === 'cloudPolygon') draw(v.points, '', 'area', cssColor(a.color), a.fontSize, a.borderWidth, false, a.cloudIntensity ?? 1, a.interiorColor ? cssColor(a.interiorColor) : undefined)
-      else draw(v.points, measureText(v.points, a.measure!), a.measure!.kind, cssColor(a.color), a.fontSize, a.borderWidth, false)
+      else draw(v.points, props.store.quantityText(a, v.points), a.measure!.kind, cssColor(a.color), a.fontSize, a.borderWidth, false, undefined, undefined, a.quantityDash, a.opacity)
       return
     }
     if (!points.current.length) { draftRef.current?.replaceChildren(); return }
-    const kind = tracing ? 'distance' : cloud ? 'area' : isMeasureTool(props.tool) ? props.tool : 'distance'
+    const kind = tracing ? 'distance' : cloud ? 'area' : quantityItem ? 'perimeter' : isMeasureTool(props.tool) ? props.tool : 'distance'
     const p = cursor.current ? [...points.current, cursor.current] : points.current
     const scale = props.store.getScale(props.pageIndex)
     const f = props.defaults[cloud ? 'cloudPolygon' : kind]
     if (cloud) { draw(p, '', 'area', cssColor(f.color), f.fontSize, f.borderWidth, true, f.cloudIntensity, f.fillColor ? cssColor(f.fillColor) : undefined); return }
+    if (quantityItem && scale && !tracing) {
+      const line = quantityLine(quantityItem)
+      draw(p, quantityLabel(p, scale.mmPerPoint, quantityMark(), quantityItem.code, quantityItem.style.showCode), 'perimeter', cssColor(quantityItem.style.color), quantityItem.style.size, line.width, true, undefined, undefined, line.dash, quantityItem.style.opacity); return
+    }
     draw(p, tracing ? 'なぞって合わせる' : scale ? measureText(p, { ...scale, kind }) : '', kind, cssColor(f.color), f.fontSize, f.borderWidth, true)
   }
   const schedule = () => { if (!frame.current) frame.current = requestAnimationFrame(redraw) }
@@ -111,16 +127,18 @@ export function useMeasurementInteraction(props: Props) {
       const a = props.store.create({ pageIndex: props.pageIndex, kind: 'cloudPolygon', rect, vertices: p, color: f.color, borderWidth: f.borderWidth, opacity: f.opacity, interiorColor: f.fillColor, cloudIntensity: f.cloudIntensity })
       clear(); props.store.selectOnly(a.id); props.select(a.id); return
     }
-    if (!isMeasureTool(props.tool) || p.length < (props.tool === 'area' ? 3 : 2)) return
+    const kind = quantityItem ? 'perimeter' : isMeasureTool(props.tool) ? props.tool : null
+    if (!kind || p.length < (kind === 'area' ? 3 : 2)) return
     const scale = props.store.getScale(props.pageIndex)
     if (!scale) return
-    const f = props.defaults[props.tool], measure = { ...scale, kind: props.tool }
-    const text = measureText(p, measure)
-    const a = props.store.create({ pageIndex: props.pageIndex, kind: props.tool, vertices: p, measure, text,
-      rect: measureBounds(p, props.tool, text, f.fontSize), color: f.color, fontSize: f.fontSize, borderWidth: f.borderWidth, opacity: f.opacity })
+    const f = quantityItem ? { color: quantityItem.style.color, fontSize: quantityItem.style.size, borderWidth: quantityLine(quantityItem).width, opacity: quantityItem.style.opacity } : props.defaults[kind], measure = { ...scale, kind }
+    const quantity = quantityItem ? quantityMark(crypto.randomUUID()) : null
+    const text = quantity ? quantityLabel(p, scale.mmPerPoint, quantity, quantityItem!.code, quantityItem!.style.showCode) : measureText(p, measure)
+    const a = props.store.create({ pageIndex: props.pageIndex, kind, quantity, quantityDash: quantityItem ? quantityLine(quantityItem).dash : undefined, vertices: p, measure, text,
+      rect: measureBounds(p, kind, text, f.fontSize), color: f.color, fontSize: f.fontSize, borderWidth: f.borderWidth, opacity: f.opacity })
     clear(); props.store.selectOnly(a.id); props.select(a.id)
   }
-  useEffect(() => { clear(); return clear }, [props.tool, props.pageIndex, tracing])
+  useEffect(() => { clear(); return clear }, [props.tool, props.pageIndex, tracing, props.quantityItem?.id])
   useEffect(() => {
     if (!enabled) return
     const onKey = (event: KeyboardEvent) => {
@@ -153,7 +171,7 @@ export function useMeasurementInteraction(props: Props) {
     window.dispatchEvent(new CustomEvent('karu-pdf:measurement-start', { detail: props.pageIndex }))
     const hadPoints = points.current.length > 0
     const previous = points.current.at(-1)
-    const next = previous ? constrainMeasurePoint(previous, p, event.shiftKey) : p
+    const next = previous ? constrain(previous, p, event.shiftKey) : p
     if (tracing || props.tool === 'distance') {
       if (!hadPoints) points.current.push(next)
     } else if (!previous || Math.hypot(next[0] - previous[0], next[1] - previous[1]) > .01) points.current.push(next)
@@ -165,16 +183,16 @@ export function useMeasurementInteraction(props: Props) {
     if (vertex.current) {
       const v = vertex.current
       const previous = v.points[v.index === 0 ? v.points.length - 1 : v.index - 1]
-      v.points[v.index] = constrainMeasurePoint(previous, p, event.shiftKey); schedule(); return true
+      v.points[v.index] = constrain(previous, p, event.shiftKey); schedule(); return true
     }
     if (!enabled) return false
-    if (points.current.length) { cursor.current = constrainMeasurePoint(points.current.at(-1)!, p, event.shiftKey); schedule() }
+    if (points.current.length) { cursor.current = constrain(points.current.at(-1)!, p, event.shiftKey); schedule() }
     return true
   }
   const pointerUp = (event: React.PointerEvent, p: Point): boolean => {
     if (vertex.current) {
       const v = vertex.current
-      v.points[v.index] = constrainMeasurePoint(v.points[v.index === 0 ? v.points.length - 1 : v.index - 1], p, event.shiftKey)
+      v.points[v.index] = constrain(v.points[v.index === 0 ? v.points.length - 1 : v.index - 1], p, event.shiftKey)
       clear(); props.store.updateMeasureVertices(v.id, v.points)
       if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
       return true
@@ -184,7 +202,7 @@ export function useMeasurementInteraction(props: Props) {
     down.current = null
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     if ((tracing || props.tool === 'distance') && (d.hadPoints || Math.hypot(p[0] - d.start[0], p[1] - d.start[1]) > 1)) {
-      const end = constrainMeasurePoint(points.current[0], p, event.shiftKey)
+      const end = constrain(points.current[0], p, event.shiftKey)
       if (Math.hypot(end[0] - points.current[0][0], end[1] - points.current[0][1]) > .01) { points.current.push(end); commit() }
     }
     return true

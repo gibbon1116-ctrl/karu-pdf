@@ -133,7 +133,7 @@ function wrapWidgetInParentField(document: PDFDocument, pageIndex: number): void
 }
 
 describe('pageOps', () => {
-  it('増分保存後も器具リスト・設定・標準のカタログ項目と残したページの印を保つ', () => {
+  it('増分保存後も数量拾い・設定・標準のカタログ項目と残したページの印を保つ', () => {
     const original = makeDocument(['Page 1', 'Page 2', 'Page 3'])
     const fixtures = [fixture('a'), fixture('b', 1), fixture('deleted', 2)]
     let bytes: Uint8Array

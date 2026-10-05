@@ -13,7 +13,7 @@ function drawingPdf(): number[] {
         const x = i % 2 === 0 ? 40 : 100, y = i < 2 ? 40 : 110
         const value = doc.newString(JSON.stringify(i < 2
           ? { version: 1, id: `issue-${i}`, number: i + 1, status: i === 0 ? 'open' : 'answered', discipline: '電気' }
-          : { version: 1, id: `count-${i}`, group: i === 2 ? '器具A' : '器具B' }))
+          : { version: 1, id: `count-${i}`, group: i === 2 ? '項目A' : '項目B' }))
         const symbol = doc.newName('circle')
         try {
           a.setRect([x, y, x + 20, y + 20]); a.setColor([0, 0, 1]); a.setContents(`mark ${i}`)
@@ -71,7 +71,7 @@ async function follow(page: Page, kind = 'issue', status = '') {
   await page.getByLabel('図面にもこの種類だけ表示').check()
 }
 
-test('一覧に連動した図面表示・選択・解除・保存と器具の表示を維持する', async ({ page }) => {
+test('一覧に連動した図面表示・選択・解除・保存と項目の表示を維持する', async ({ page }) => {
   await open(page)
   const layer = page.getByTestId('annotation-layer-0'), toggle = page.getByLabel('図面にもこの種類だけ表示'), footer = page.locator('.status-bar')
   const annotations = await page.evaluate(() => window.__karu!.getEditableAnnotations(0))
@@ -94,27 +94,27 @@ test('一覧に連動した図面表示・選択・解除・保存と器具の�
   const from = await point(page, 20, 20), to = await point(page, 310, 260)
   await page.mouse.move(from.x, from.y); await page.mouse.down(); await page.mouse.move(to.x, to.y, { steps: 6 }); await page.mouse.up()
   expect(await page.evaluate(() => window.__karu!.getSelectedAnnotationIds())).toEqual([openIssue.id])
-  await page.getByRole('tab', { name: '器具', exact: true }).click()
-  await expect(page.getByTestId('fixture-panel')).toContainText('書き込みタブの絞り込み（指摘・未回答）で、図面に器具の印を出していません。')
+  await page.getByRole('tab', { name: '数量', exact: true }).click()
+  await expect(page.getByTestId('fixture-panel')).toContainText('書き込みタブの絞り込み（指摘・未回答）で、図面に数量拾いの印を出していません。')
   await expect(page.getByRole('button', { name: '図面への反映をやめる', exact: true })).toBeVisible()
   await page.getByRole('tab', { name: '書き込み', exact: true }).click()
   await expect(page.getByLabel('書き込みの種類')).toHaveValue('issue')
   await expect(page.getByLabel('状態で絞り込み')).toHaveValue('open'); await expect(toggle).toBeChecked()
-  await page.getByRole('tab', { name: '器具', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click()
   await page.getByRole('button', { name: '図面への反映をやめる', exact: true }).click()
   for (const a of counts) await expect(layer.locator(`g[data-annotation-id="${a.id}"]`)).toHaveCount(1)
   await expect(footer.locator('.drawing-filter-status')).toHaveCount(0)
   await page.getByRole('tab', { name: '書き込み', exact: true }).click(); await expect(toggle).not.toBeChecked()
 
   await follow(page)
-  await page.getByRole('tab', { name: '器具', exact: true }).click()
-  await page.getByRole('button', { name: '器具A', exact: true }).click()
-  await expect(page.getByRole('button', { name: '個数カウント', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await expect(footer).toContainText('図面の絞り込みを解除しました（器具の印を数えるため）')
+  await page.getByRole('tab', { name: '数量', exact: true }).click()
+  await page.getByRole('button', { name: '項目A', exact: true }).click()
+  await expect(page.getByRole('button', { name: '数量拾い', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(footer).toContainText('図面の絞り込みを解除しました（数量拾いの印を数えるため）')
   await page.getByRole('tab', { name: '書き込み', exact: true }).click(); await expect(toggle).not.toBeChecked()
 
   await follow(page, 'count')
-  await expect(page.getByLabel('書き込みの種類').locator('option:checked')).toHaveText('個数カウント（器具の印）')
+  await expect(page.getByLabel('書き込みの種類').locator('option:checked')).toHaveText('数量拾い')
   await page.getByRole('button', { name: '次の未対応指摘（ページ範囲内）', exact: true }).click()
   await expect(toggle).not.toBeChecked()
   await expect(footer).toContainText('図面の絞り込みを解除しました（次の未対応指摘を表示するため）')
@@ -149,11 +149,11 @@ test('一覧に連動した図面表示・選択・解除・保存と器具の�
   expect(reopened.filter(a => a.issue)).toHaveLength(2); expect(reopened.filter(a => a.count)).toHaveLength(2)
   expect(reopened.filter(a => a.kind === 'square')).toHaveLength(1); expect(reopened.filter(a => a.kind === 'freetext')).toHaveLength(2)
 
-  await page.getByRole('tab', { name: '器具', exact: true }).click()
-  const fixtureA = page.getByTestId('fixture-panel').locator('li[data-fixture-id]').filter({ has: page.getByRole('button', { name: '器具A', exact: true }) })
+  await page.getByRole('tab', { name: '数量', exact: true }).click()
+  const fixtureA = page.getByTestId('fixture-panel').locator('li[data-fixture-id]').filter({ has: page.getByRole('button', { name: '項目A', exact: true }) })
   await fixtureA.getByRole('button', { name: /の表示切替$/ }).click()
   await expect(fixtureA.getByRole('button', { name: /の表示切替$/ })).toHaveAttribute('aria-pressed', 'false')
-  await page.getByRole('button', { name: '器具A', exact: true }).click()
+  await page.getByRole('button', { name: '項目A', exact: true }).click()
   await expect(fixtureA.getByRole('button', { name: /の表示切替$/ })).toHaveAttribute('aria-pressed', 'true')
   await click(page, 200, 320)
   await expect.poll(() => page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter(a => a.count).length)).toBe(3)
@@ -167,22 +167,22 @@ test('一覧に連動した図面表示・選択・解除・保存と器具の�
   await expect(page.getByRole('alertdialog')).toBeHidden()
 })
 
-test('器具・分類の表示、すべて表示、選択中だけ表示で反映を解除する', async ({ page }) => {
+test('項目・分類の表示、すべて表示、選択中だけ表示で反映を解除する', async ({ page }) => {
   await open(page)
-  await page.getByRole('tab', { name: '器具', exact: true }).click()
-  const fixtureA = page.getByTestId('fixture-panel').locator('li[data-fixture-id]').filter({ has: page.getByRole('button', { name: '器具A', exact: true }) })
+  await page.getByRole('tab', { name: '数量', exact: true }).click()
+  const fixtureA = page.getByTestId('fixture-panel').locator('li[data-fixture-id]').filter({ has: page.getByRole('button', { name: '項目A', exact: true }) })
   await expect(fixtureA).toBeVisible()
-  for (const action of ['器具', '分類', 'すべて', '選択中'] as const) {
+  for (const action of ['項目', '分類', 'すべて', '選択中'] as const) {
     await follow(page)
-    await page.getByRole('tab', { name: '器具', exact: true }).click()
-    if (action === '器具' || action === '分類') {
-      const eye = action === '器具' ? fixtureA.getByRole('button', { name: /の表示切替$/ }) : page.getByRole('button', { name: 'その他の表示切替', exact: true })
+    await page.getByRole('tab', { name: '数量', exact: true }).click()
+    if (action === '項目' || action === '分類') {
+      const eye = action === '項目' ? fixtureA.getByRole('button', { name: /の表示切替$/ }) : page.getByRole('button', { name: 'その他の表示切替', exact: true })
       await eye.click() // Hide; the drawing filter should remain active.
       await expect(page.getByRole('button', { name: '図面への反映をやめる', exact: true })).toBeVisible()
       await eye.click() // Show; now release the drawing filter.
     } else if (action === 'すべて') await page.getByRole('button', { name: 'すべて表示', exact: true }).click()
-    else await page.getByLabel('選択中の器具だけ表示', { exact: true }).check()
-    await expect(page.locator('.status-bar')).toContainText('図面の絞り込みを解除しました（器具の印を表示するため）')
+    else await page.getByLabel('選択中の項目だけ表示', { exact: true }).check()
+    await expect(page.locator('.status-bar')).toContainText('図面の絞り込みを解除しました（数量拾いの印を表示するため）')
     await page.getByRole('tab', { name: '書き込み', exact: true }).click()
     await expect(page.getByLabel('図面にもこの種類だけ表示')).not.toBeChecked()
   }

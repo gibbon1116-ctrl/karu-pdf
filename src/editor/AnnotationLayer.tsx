@@ -1,3 +1,4 @@
+import { quantityMethod } from '../core/countFixtures'
 import { constrainLinePoint, arrowHeadSize } from '../core/lineGeometry'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Quad } from 'mupdf'
@@ -171,7 +172,7 @@ export function AnnotationLayer(props: Props) {
   const sampleInteraction = useContext(FixtureSampleContext)
   const version = useSyncExternalStore(props.store.subscribe, props.store.getSnapshot)
   const svgRef = useRef<SVGSVGElement>(null)
-  const measurement = useMeasurementInteraction({ svg: svgRef, store: props.store, pageIndex: props.pageIndex, tool: props.tool, defaults: props.formatDefaults, select: props.onSelect })
+  const measurement = useMeasurementInteraction({ svg: svgRef, store: props.store, pageIndex: props.pageIndex, tool: props.tool, quantityItem: props.store.getCountFixture(props.store.selectedFixtureId), defaults: props.formatDefaults, select: props.onSelect })
   const draftCloudRef = useRef<SVGPathElement>(null)
   const draftRectRef = useRef<SVGRectElement>(null)
   const draftLineRef = useRef<SVGLineElement>(null)
@@ -644,11 +645,12 @@ export function AnnotationLayer(props: Props) {
     }
     if (operation.mode === 'symbol') {
       const fixture = props.tool === 'count' ? props.store.getCountFixture(props.store.selectedFixtureId) : undefined
-      if (props.tool === 'count' && !fixture) { props.onStatus('器具リストで器具を選んでください'); window.dispatchEvent(new CustomEvent('karu-pdf:open-fixtures')); return }
+      if (fixture && quantityMethod(fixture) !== 'click') { props.onStatus('この種別の拾いは、まだ使えません'); return }
+      if (props.tool === 'count' && !fixture) { props.onStatus('数量拾いの一覧で項目を選んでください'); window.dispatchEvent(new CustomEvent('karu-pdf:open-fixtures')); return }
       const format = props.formatDefaults[props.tool === 'count' ? 'count' : 'symbol']
       const rect = props.tool === 'count' ? symbolRectFromDrag(operation.latest, operation.latest, false, fixture!.style.size) : symbolRectFromDrag(operation.start, operation.latest, operation.moved, format.symbolSize)
       if (rect[2] - rect[0] < 4) return
-      if (fixture && props.store.getPageAnnotations(props.pageIndex).some(a => a.count && countFixtureId(a.count) === fixture.id && Math.hypot((a.rect[0] + a.rect[2]) / 2 - operation.latest[0], (a.rect[1] + a.rect[3]) / 2 - operation.latest[1]) <= 3 * 72 / 25.4)) props.onStatus('近くに同じ器具の印があります（二重に数えていないか確認してください）')
+      if (fixture && props.store.getPageAnnotations(props.pageIndex).some(a => a.count && countFixtureId(a.count) === fixture.id && Math.hypot((a.rect[0] + a.rect[2]) / 2 - operation.latest[0], (a.rect[1] + a.rect[3]) / 2 - operation.latest[1]) <= 3 * 72 / 25.4)) props.onStatus('近くに同じ数量拾いの印があります（二重に数えていないか確認してください）')
       const annotation = props.store.create({
         pageIndex: props.pageIndex,
         kind: 'symbol',
@@ -724,7 +726,7 @@ export function AnnotationLayer(props: Props) {
     }
     const fixture = props.store.fixtureForCount(annotation.count)
     if (compactCounts && annotation.count && (fixture || annotation.symbol === 'circle') && !(singleSelection && selectedIds.has(annotation.id))) return null
-    const visible = !!fixture && !!annotation.count || !!annotation.issue && annotation.issue.recordKind !== 'change' || annotation.objNum === null || touched.has(annotation.objNum)
+    const visible = !!fixture && !!annotation.count || !!annotation.quantity && props.store.fixturesReady && !!props.store.getCountFixture(annotation.quantity.itemId) || !!annotation.issue && annotation.issue.recordKind !== 'change' || annotation.objNum === null || touched.has(annotation.objNum)
     const [x0, y0, x1, y1] = annotation.rect
     const handleSize = 8 / Math.max(0.01, props.zoom * CSS_PX_PER_PT)
     const positions: Array<{ handle: ResizeHandle; x: number; y: number }> = annotation.count ? [] : allResizeHandles(annotation.kind)
@@ -760,7 +762,7 @@ export function AnnotationLayer(props: Props) {
           <circle cx={(x0+x1)/2} cy={(y0+y1)/2} r={(x1-x0)*.45} fill="white" stroke={color(issueColor(annotation.issue, annotation.color))} strokeWidth={(x1-x0)*.06} />
           <text x={(x0+x1)/2} y={(y0+y1)/2 + issueFontSize(annotation.issue.number, x1-x0)*.3} textAnchor="middle" fontFamily="KaruBIZUDGothic" fontSize={issueFontSize(annotation.issue.number, x1-x0)}>{annotation.issue.number}</text>
         </g>}
-        {visible && annotation.measure && annotation.vertices && <MeasurementShape points={annotation.vertices} kind={annotation.measure.kind} text={annotation.text} fontSize={annotation.fontSize} color={color(annotation.color)} width={annotation.borderWidth} opacity={annotation.opacity} />}
+        {visible && annotation.measure && annotation.vertices && <MeasurementShape points={annotation.vertices} kind={annotation.measure.kind} text={annotation.quantity ? props.store.quantityText(annotation) : annotation.text} fontSize={annotation.fontSize} color={color(annotation.color)} width={annotation.borderWidth} opacity={annotation.opacity} dash={annotation.quantityDash} />}
         {visible && annotation.kind === 'square' && <rect className="annotation-square" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && annotation.kind === 'circle' && <ellipse className="annotation-shape" cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} rx={(x1 - x0) / 2} ry={(y1 - y0) / 2} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && line && <>
@@ -831,6 +833,11 @@ export function AnnotationLayer(props: Props) {
         const start = pointInPage(svg, event)
         const id = annotationIdFromTarget(event.target) ?? (compactCounts && props.tool === 'select'
           ? annotations.findLast(a => a.count && start[0] >= a.rect[0] && start[0] <= a.rect[2] && start[1] >= a.rect[1] && start[1] <= a.rect[3])?.id ?? null : null)
+        if (props.tool === 'count') {
+          const item = props.store.getCountFixture(props.store.selectedFixtureId)
+          if (item && !['click', 'polyline'].includes(quantityMethod(item))) { props.onStatus('この種別の拾いは、まだ使えません'); return }
+          props.store.prepareCountTool()
+        }
         if (measurement.pointerDown(event, start)) return
         if (props.tool === 'text' || props.tool === 'callout') {
           const annotation = id ? props.store.get(id) : undefined

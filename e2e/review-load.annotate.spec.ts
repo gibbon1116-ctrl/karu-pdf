@@ -8,7 +8,7 @@ function fixture(kind: 'count'|'issue', total: number) {
     try {
       for(let i=0;i<total;i++) {
         const a=page.createAnnotation('Stamp'),obj=a.getObject(),x=15+(i%100)*3.5,y=20+Math.floor(i/100)*5
-        const data=doc.newString(JSON.stringify(kind==='count'?{version:1,id:`count-${i}`,group:`器具${i % 100}`}:{version:1,id:`issue-${i}`,number:i+1,status:'open'}))
+        const data=doc.newString(JSON.stringify(kind==='count'?{version:1,id:`count-${i}`,group:`項目${i % 100}`}:{version:1,id:`issue-${i}`,number:i+1,status:'open'}))
         const name=doc.newName('circle')
         try {
           a.setRect([x,y,x+8,y+8]);a.setColor([0,0,1])
@@ -27,8 +27,8 @@ test('100種類・5000個の印は描画をまとめ、集計・選択・スク�
   await page.goto('/karu-pdf/?test=1&workers=3&warm=0');await page.waitForFunction(()=>!!window.__karu)
   const bytes=fixture('count',5000), started=Date.now();await page.evaluate(b=>window.__karu!.openBytes(b,'5000個.pdf'),bytes)
   await expect.poll(()=>page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count).length)).toBe(5000)
-  await page.getByRole('tab',{name:'器具',exact:true}).click()
-  await page.getByRole('button',{name:'器具0',exact:true}).click()
+  await page.getByRole('tab',{name:'数量',exact:true}).click()
+  await page.getByRole('button',{name:'項目0',exact:true}).click()
   await expect(page.getByTestId('fixture-panel')).toContainText('全図面: 50個')
   await expect(page.getByTestId('fixture-panel')).toContainText('印が多いため略号の表示を省略しています')
   await page.getByRole('button',{name:'選択',exact:true}).click()
@@ -43,8 +43,8 @@ test('100種類・5000個の印は描画をまとめ、集計・選択・スク�
   await expect(page.locator('.annotation-rows > li')).toHaveCount(100)
   await page.getByTestId('viewer').evaluate(el=>{el.scrollTop+=100})
   // A legacy fixture exercises migration and rebuilding all 5,000 appearances.
-  await page.getByRole('tab',{name:'器具',exact:true}).click()
-  await page.getByRole('button',{name:'器具0',exact:true}).click()
+  await page.getByRole('tab',{name:'数量',exact:true}).click()
+  await page.getByRole('button',{name:'項目0',exact:true}).click()
   await page.getByRole('button',{name:'編集',exact:true}).click()
   await page.getByRole('button',{name:'形 星',exact:true}).click()
   await page.getByRole('button',{name:'変更する',exact:true}).click()
@@ -53,8 +53,8 @@ test('100種類・5000個の印は描画をまとめ、集計・選択・スク�
   const saveStart=Date.now();const saved=await page.evaluate(async()=>{const t=performance.now();const b=await window.__karu!.saveToBytes();const saveMs=performance.now()-t;if(b)await window.__karu!.openBytes(b,'5000個保存後.pdf');return {size:b?.byteLength ?? 0,saveMs:Math.round(saveMs)}})
   expect(saved.size).toBeGreaterThan(0)
   console.log(JSON.stringify({scenario:'5000 counts',openAndInteractionMs:saveStart-started,saveMs:saved.saveMs,saveAndReopenObservedMs:Date.now()-saveStart,bytes:saved.size}))
-  await page.getByRole('tab', { name: '器具', exact: true }).click()
-  await page.getByRole('button', { name: '器具0', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click()
+  await page.getByRole('button', { name: '項目0', exact: true }).click()
   await expect.poll(() => page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter(a => a.count?.version === 2).length)).toBe(5000)
   await expect(page.getByTestId('fixture-panel')).toContainText('全図面: 50個')
 })

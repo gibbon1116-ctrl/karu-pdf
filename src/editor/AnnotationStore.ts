@@ -1,3 +1,5 @@
+import { quantityLabel, quantityValue, type QuantityMark } from '../core/quantity'
+import { quantityKind, quantityMethod, quantityLine, type QuantityLineStyle } from '../core/countFixtures'
 import { nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type LegacyChangeData, type Point, type Rect, type RGB, type SymbolName } from '../core/annotations'
 import type { Quad } from 'mupdf'
 import type { FontName } from '../core/fontMetrics'
@@ -10,13 +12,15 @@ import { countFixtureId, type CountMark } from '../core/counts'
 import { nextCountStyle, serializeCountFixtures, type CountFixture } from '../core/countFixtures'
 import { DEFAULT_ANNOTATION_FILTER, filterShowsCountMarks, matchesAnnotationFilter, type AnnotationFilter } from './annotationFilter'
 
-export type DrawingFilterReleaseReason = '器具の印を数えるため' | '隠れている種類の書き込みを作ったため' | '次の未対応指摘を表示するため' | '器具の印を表示するため'
+export type DrawingFilterReleaseReason = '数量拾いの印を数えるため' | '隠れている種類の書き込みを作ったため' | '次の未対応指摘を表示するため' | '数量拾いの印を表示するため'
 
 export type Kind = MeasureKind | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
 export interface EditableAnnotation {
   legacyChange?: boolean
   legacyChangeData?: LegacyChangeData
+  quantity?: QuantityMark | null
+  quantityDash?: QuantityLineStyle['dash']
   count?: CountMark | null
   arrowHeadSize?: number | null
   cloudIntensity?: CloudIntensity | null
@@ -81,6 +85,7 @@ function clonePoints(points: readonly Point[]): Point[] {
 function cloneState(annotation: AnnotationState): AnnotationState {
   return {
     ...annotation,
+    quantity: annotation.quantity ? { ...annotation.quantity } : null,
     count: annotation.count ? { ...annotation.count } : null,
     issue: annotation.issue ? { ...annotation.issue } : null,
     measure: annotation.measure ? { ...annotation.measure } : null,
@@ -114,7 +119,7 @@ function publicAnnotation(annotation: StoredAnnotation, dirty: boolean): Editabl
 
 function persistedState(state: AnnotationState): unknown {
   return {
-    issue: state.issue, count: state.count, cloudIntensity: state.cloudIntensity,
+    quantity: state.quantity, quantityDash: state.quantityDash, issue: state.issue, count: state.count, cloudIntensity: state.cloudIntensity,
     measure: state.measure, vertices: state.vertices,
     pageIndex: state.pageIndex,
     kind: state.kind,
@@ -254,8 +259,8 @@ export class AnnotationStore {
     this.setDrawingFollowsFilter(false)
     for (const listener of this.drawingFilterReleaseListeners) listener(reason)
   }
-  isShownOnDrawing(annotation: Pick<EditableAnnotation, 'legacyChange' | 'kind' | 'count' | 'issue' | 'measure'>): boolean {
-    return (!this.followsFilter || matchesAnnotationFilter(annotation, this.filter)) && this.isCountVisible(annotation.count)
+  isShownOnDrawing(annotation: Pick<EditableAnnotation, 'legacyChange' | 'kind' | 'count' | 'quantity' | 'issue' | 'measure'>): boolean {
+    return (!this.followsFilter || matchesAnnotationFilter(annotation, this.filter)) && this.isCountVisible(annotation.count, annotation.quantity)
   }
   drawingFilterActive(): boolean {
     return this.followsFilter && (this.filter.kind !== 'all' || this.filter.discipline !== '' || this.filter.status !== '')
@@ -270,7 +275,7 @@ export class AnnotationStore {
     return result
   }
   prepareCountTool(): void {
-    if (this.drawingHidesCounts()) this.releaseDrawingFilter('器具の印を数えるため')
+    if (this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を数えるため')
     if (this.selectedFixtureId && this.revealCountFixture(this.selectedFixtureId)) this.notify()
   }
   private revealCountFixture(id: string): boolean {
@@ -317,6 +322,7 @@ export class AnnotationStore {
           legacyChange: info.legacyChange,
           legacyChangeData: info.legacyChangeData,
           issue: info.issue ? { ...info.issue } : null,
+          quantity: info.quantity ? { ...info.quantity } : null, quantityDash: info.quantityDash,
           count: info.count ? { ...info.count } : null,
           cloudIntensity: info.cloudIntensity ?? null,
           id,
@@ -369,7 +375,7 @@ export class AnnotationStore {
   getScale(pageIndex: number): PageScale | null { const s = this.scales.get(pageIndex); return s ? { ...s } : null }
 
   getCountFixtures(): CountFixture[] { return structuredClone(this.fixtures) }
-  hasCountMarks(): boolean { for (const a of this.annotations.values()) if (!a.deleted && a.count) return true; return false }
+  hasCountMarks(): boolean { for (const a of this.annotations.values()) if (!a.deleted && (a.count || a.quantity)) return true; return false }
   getCountFixture(id: string | null): CountFixture | undefined { return this.fixtures.find(f => f.id === id) }
   fixtureForCount(mark: CountMark | null | undefined): CountFixture | undefined { return mark ? this.getCountFixture(countFixtureId(mark)) : undefined }
   async ensureCountFixtures(loader: () => Promise<CountFixture[]>, loadPages: () => Promise<void>): Promise<void> {
@@ -384,7 +390,7 @@ export class AnnotationStore {
       for (const a of this.annotations.values()) if (a.count?.version === 1 && !a.deleted) {
         const id = countFixtureId(a.count)
         if (!nextFixtures.some(f => f.id === id)) {
-          if (nextFixtures.length >= 1000) throw new Error('旧形式の器具を含めると1,000件を超えます。')
+          if (nextFixtures.length >= 1000) throw new Error('旧形式の項目を含めると1,000件を超えます。')
           nextFixtures.push({ id, name: a.count.group, code: '', category: 'その他', style: nextCountStyle(nextFixtures), order: nextFixtures.reduce((n, f) => Math.max(n, f.order + 1), 0) })
         }
         legacyIds.push(a.id)
@@ -400,20 +406,20 @@ export class AnnotationStore {
   }
   selectFixture(id: string | null): void { this.selectedFixtureId = id; this.pruneHiddenSelection(); this.notify() }
   isFixtureVisible(id: string): boolean { return !this.hiddenFixtures.has(id) && (!this.onlySelectedFixture || id === this.selectedFixtureId) }
-  isCountVisible(mark: CountMark | null | undefined): boolean { return !mark || this.isFixtureVisible(countFixtureId(mark)) }
+  isCountVisible(mark: CountMark | null | undefined, quantity?: QuantityMark | null): boolean { return quantity ? this.isFixtureVisible(quantity.itemId) : !mark || this.isFixtureVisible(countFixtureId(mark)) }
   setFixtureVisible(ids: readonly string[], visible: boolean): void {
-    if (visible && this.drawingHidesCounts()) this.releaseDrawingFilter('器具の印を表示するため')
+    if (visible && this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため')
     for (const id of ids) { if (visible) this.hiddenFixtures.delete(id); else this.hiddenFixtures.add(id) }
     this.pruneHiddenSelection(); this.notify()
   }
-  setOnlySelectedFixture(value: boolean): void { if (value && this.drawingHidesCounts()) this.releaseDrawingFilter('器具の印を表示するため'); this.onlySelectedFixture = value; this.pruneHiddenSelection(); this.notify() }
-  showAllFixtures(): void { if (this.drawingHidesCounts()) this.releaseDrawingFilter('器具の印を表示するため'); this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.notify() }
+  setOnlySelectedFixture(value: boolean): void { if (value && this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため'); this.onlySelectedFixture = value; this.pruneHiddenSelection(); this.notify() }
+  showAllFixtures(): void { if (this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため'); this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.notify() }
   private pruneHiddenSelection(): void { for (const id of this.selection) { const a = this.annotations.get(id); if (!a || a.deleted || !this.isShownOnDrawing(a)) this.selection.delete(id) } }
   countTotals(): Map<string, Map<number, number>> {
     const totals = new Map<string, Map<number, number>>()
-    for (const a of this.annotations.values()) if (!a.deleted && a.count) {
-      const id = countFixtureId(a.count), pages = totals.get(id) ?? new Map<number, number>()
-      pages.set(a.pageIndex, (pages.get(a.pageIndex) ?? 0) + 1); totals.set(id, pages)
+    for (const a of this.annotations.values()) if (!a.deleted && (a.count || a.quantity)) {
+      const id = a.quantity?.itemId ?? countFixtureId(a.count!), pages = totals.get(id) ?? new Map<number, number>()
+      pages.set(a.pageIndex, (pages.get(a.pageIndex) ?? 0) + (a.quantity && a.vertices && a.measure ? quantityValue(a.vertices, a.measure.mmPerPoint, a.quantity) : 1)); totals.set(id, pages)
     }
     return totals
   }
@@ -425,7 +431,7 @@ export class AnnotationStore {
   countOverlayObjNums(pageIndex: number): number[] {
     if (!this.fixturesReady) return []
     const result: number[] = []
-    for (const a of this.annotations.values()) if (!a.deleted && a.pageIndex === pageIndex && a.count && this.fixtureForCount(a.count) && a.objNum !== null) result.push(a.objNum)
+    for (const a of this.annotations.values()) if (!a.deleted && a.pageIndex === pageIndex && (a.count && this.fixtureForCount(a.count) || a.quantity && this.getCountFixture(a.quantity.itemId)) && a.objNum !== null) result.push(a.objNum)
     return result
   }
   issueOverlayObjNums(pageIndex: number): number[] {
@@ -437,15 +443,15 @@ export class AnnotationStore {
     serializeCountFixtures(fixtures)
     const before: HistoryState = [], after: HistoryState = []
     before.fixtures = this.getCountFixtures(); after.fixtures = structuredClone(fixtures)
-    const appearance = (f: CountFixture | undefined) => f ? JSON.stringify([f.name, f.code, f.style]) : ''
+    const appearance = (f: CountFixture | undefined) => f ? JSON.stringify([f.name, f.code, f.style, f.line]) : ''
     const changed = new Set(fixtures.filter(f => appearance(f) !== appearance(this.getCountFixture(f.id))).map(f => f.id))
     this.fixtures = structuredClone(fixtures)
-    for (const a of this.annotations.values()) if (!a.deleted && a.count) {
-      const id = countFixtureId(a.count)
+    for (const a of this.annotations.values()) if (!a.deleted && (a.count || a.quantity)) {
+      const id = a.quantity?.itemId ?? countFixtureId(a.count!)
       if (!removeIds.includes(id) && !changed.has(id)) continue
       before.push(cloneState(a))
       if (removeIds.includes(id)) { a.deleted = true; this.selection.delete(a.id) }
-      else { this.applyFixtureToMark(a, this.getCountFixture(id)!); after.push(cloneState(a)) }
+      else { if (a.quantity) this.applyFixtureToQuantity(a, this.getCountFixture(id)!); else this.applyFixtureToMark(a, this.getCountFixture(id)!); after.push(cloneState(a)) }
       this.markTouched(a); a.revision++
     }
     this.history.push({ before, after }); this.pruneHiddenSelection(); this.notify()
@@ -456,11 +462,40 @@ export class AnnotationStore {
     const before: HistoryState = [], after: HistoryState = []
     for (const id of ids) {
       const a = this.annotations.get(id)
-      if (!a || a.deleted || !a.count) continue
-      before.push(cloneState(a)); this.applyFixtureToMark(a, fixture); this.markTouched(a); a.revision++; after.push(cloneState(a))
+      if (!a || a.deleted || !(a.count && quantityKind(fixture) === 'count' || a.quantity && quantityMethod(fixture) === a.quantity.method)) continue
+      before.push(cloneState(a)); if (a.quantity) this.applyFixtureToQuantity(a, fixture); else this.applyFixtureToMark(a, fixture); this.markTouched(a); a.revision++; after.push(cloneState(a))
     }
     if (before.length) this.history.push({ before, after })
     this.pruneHiddenSelection(); this.notify()
+  }
+  quantityText(a: Pick<EditableAnnotation, 'quantity' | 'vertices' | 'measure' | 'text'>, points = a.vertices): string {
+    if (!points || !a.measure) return a.text
+    if (!a.quantity) return measureText(points, a.measure)
+    const f = this.getCountFixture(a.quantity.itemId)
+    if (!f) return a.text
+    return quantityLabel(points, a.measure.mmPerPoint, a.quantity, f.code, f.style.showCode)
+  }
+  private applyFixtureToQuantity(a: StoredAnnotation, fixture: CountFixture): void {
+    a.quantity = { ...a.quantity!, itemId: fixture.id }
+    a.color = [...fixture.style.color]; a.opacity = fixture.style.opacity; a.fontSize = fixture.style.size
+    a.borderWidth = quantityLine(fixture).width; a.quantityDash = quantityLine(fixture).dash
+    a.text = this.quantityText(a); if (a.vertices && a.measure) a.rect = measureBounds(a.vertices, a.measure.kind, a.text, a.fontSize)
+  }
+  updateQuantityAdd(id: string, addM: number): void {
+    if (!Number.isFinite(addM) || addM < 0 || addM > 1000 || Math.abs(addM * 100 - Math.round(addM * 100)) > 1e-8) return
+    const current = this.get(id)
+    if (!current?.quantity || current.quantity.method !== 'polyline' || (current.quantity.addM ?? 0) === addM) return
+    this.mutate(id, a => {
+      a.quantity = { ...a.quantity! }; delete a.quantity.addM; if (addM) a.quantity.addM = addM
+      a.text = this.quantityText(a); a.rect = measureBounds(a.vertices!, a.measure!.kind, a.text, a.fontSize)
+    })
+  }
+  fixtureMarkCount(id: string): number {
+    return [...this.annotations.values()].filter(a => !a.deleted && (a.quantity?.itemId === id || a.count && countFixtureId(a.count) === id)).length
+  }
+  selectedQuantitiesOnly(): boolean {
+    const annotations = this.selectedIds().map(id => this.annotations.get(id)!)
+    return annotations.length > 0 && annotations.every(a => !!a.quantity)
   }
   private applyFixtureToMark(a: StoredAnnotation, fixture: CountFixture): void {
     const x = (a.rect[0] + a.rect[2]) / 2, y = (a.rect[1] + a.rect[3]) / 2, r = fixture.style.size / 2
@@ -478,7 +513,7 @@ export class AnnotationStore {
       for (const a of this.annotations.values()) {
         if (a.deleted || a.pageIndex !== pageIndex || !a.measure || !a.vertices) continue
         before.push(cloneState(a)); a.measure = { ...a.measure, mmPerPoint: scale.mmPerPoint, unit: scale.unit, decimals: scale.decimals }
-        a.text = measureText(a.vertices, a.measure); a.rect = measureBounds(a.vertices, a.measure.kind, a.text, a.fontSize)
+        a.text = this.quantityText(a); a.rect = measureBounds(a.vertices, a.measure.kind, a.text, a.fontSize)
         this.markTouched(a); a.revision++; after.push(cloneState(a))
       }
     }
@@ -491,7 +526,7 @@ export class AnnotationStore {
         a.vertices = clonePoints(points); a.rect = bounds(points); return
       }
       if (!a.measure) return
-      a.vertices = points.map(p => [...p] as Point); a.text = measureText(points, a.measure)
+      a.vertices = points.map(p => [...p] as Point); a.text = this.quantityText(a, points)
       a.rect = measureBounds(points, a.measure.kind, a.text, a.fontSize)
     })
   }
@@ -569,6 +604,8 @@ export class AnnotationStore {
   }
 
   create(input: {
+    quantity?: QuantityMark | null
+    quantityDash?: QuantityLineStyle['dash']
     count?: CountMark | null
     issue?: Issue | null
     cloudIntensity?: CloudIntensity | null
@@ -598,6 +635,7 @@ export class AnnotationStore {
   }): EditableAnnotation {
     const id = `new-${this.nextNewId++}`
     const annotation: StoredAnnotation = {
+      quantity: input.quantity ? { ...input.quantity } : null, quantityDash: input.quantityDash,
       count: input.count ? { ...input.count } : null,
       issue: input.kind === 'issue' ? input.issue ? { ...input.issue } : { number: this.issueNumbers.next(), status: 'open', version: 1, id: crypto.randomUUID() } : null,
       cloudIntensity: input.cloudIntensity ?? (input.kind === 'cloudSquare' || input.kind === 'cloudPolygon' ? 1 : null),
@@ -633,6 +671,7 @@ export class AnnotationStore {
       revision: 1,
     }
     if (this.followsFilter && !matchesAnnotationFilter(annotation, this.filter)) this.releaseDrawingFilter('隠れている種類の書き込みを作ったため')
+    if (annotation.quantity) this.revealCountFixture(annotation.quantity.itemId)
     if (annotation.count) this.revealCountFixture(countFixtureId(annotation.count))
     this.annotations.set(id, annotation)
     if (annotation.issue) this.issueNumbers.observe(annotation.issue.number)
@@ -733,7 +772,7 @@ export class AnnotationStore {
       const previous = annotation.rect
       if (annotation.vertices && annotation.measure) {
         annotation.vertices = annotation.vertices.map(p => mapPoint(p, previous, rect))
-        annotation.text = measureText(annotation.vertices, annotation.measure)
+        annotation.text = this.quantityText(annotation)
       }
       if (annotation.line) annotation.line = annotation.line.map((point) => mapPoint(point, previous, rect)) as [Point, Point]
       if (annotation.inkList) annotation.inkList = annotation.inkList.map((stroke) => stroke.map((point) => mapPoint(point, previous, rect)))
@@ -910,12 +949,14 @@ export class AnnotationStore {
           ...(options.keepIssueNumbers ? { sourceNumber: item.issue.number } : {}) }
       }
       const annotation = this.create({
+        quantity: item.quantity ? { ...item.quantity, id: crypto.randomUUID() } : null,
         count: item.count ? { ...item.count, id: crypto.randomUUID() } : null,
         issue,
         cloudIntensity: item.cloudIntensity,
         pageIndex,
         kind: item.kind,
         rect: [item.rect[0] + dx, item.rect[1] + dy, item.rect[2] + dx, item.rect[3] + dy],
+        quantityDash: item.quantityDash,
         measure: item.measure,
         vertices: item.vertices?.map(p => [p[0] + dx, p[1] + dy]) ?? null,
         text: item.text,
@@ -1155,7 +1196,7 @@ export class AnnotationStore {
       return create ? { kind: 'createCloud', ...common } : { kind: 'updateCloud', objNum: savedObjNum, ...common }
     }
     if (annotation.measure && annotation.vertices) {
-      const common = { pageIndex: annotation.pageIndex, vertices: annotation.vertices, measure: annotation.measure, text: annotation.text, color: annotation.color, borderWidth: annotation.borderWidth, fontSize: annotation.fontSize, opacity: annotation.opacity }
+      const common = { quantity: annotation.quantity, quantityDash: annotation.quantityDash, pageIndex: annotation.pageIndex, vertices: annotation.vertices, measure: annotation.measure, text: annotation.text, color: annotation.color, borderWidth: annotation.borderWidth, fontSize: annotation.fontSize, opacity: annotation.opacity }
       return create ? { kind: 'createMeasure', ...common } : { kind: 'updateMeasure', objNum: savedObjNum, ...common }
     }
     if (annotation.kind === 'freetext' || annotation.kind === 'callout') {

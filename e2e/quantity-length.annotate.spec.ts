@@ -1,0 +1,121 @@
+import { expect, test, type Page } from '@playwright/test'
+import mupdf from 'mupdf'
+
+function blankPdf() {
+  const doc = new mupdf.PDFDocument(), ref = doc.addPage([0, 0, 500, 500], 0, {}, '')
+  try {
+    doc.insertPage(-1, ref)
+    const b = doc.saveToBuffer('compress')
+    try { return [...b.asUint8Array()] } finally { b.destroy() }
+  } finally { ref.destroy(); doc.destroy() }
+}
+async function point(page: Page, x: number, y: number) {
+  return page.getByTestId('annotation-layer-0').evaluate((el, p) => {
+    const svg = el as SVGSVGElement, box = svg.getBoundingClientRect()
+    return { x: box.left + p.x * box.width / svg.viewBox.baseVal.width, y: box.top + p.y * box.height / svg.viewBox.baseVal.height }
+  }, { x, y })
+}
+async function click(page: Page, x: number, y: number) { const p = await point(page, x, y); await page.mouse.click(p.x, p.y) }
+async function open(page: Page) {
+  await page.goto('/karu-pdf/?test=1&workers=2&warm=0')
+  await page.waitForFunction(() => !!window.__karu)
+  await page.evaluate(bytes => window.__karu!.openBytes(bytes, '数量試験.pdf'), blankPdf())
+  await page.evaluate(() => window.__karu!.setZoom(1))
+  await expect(page.getByTestId('annotation-layer-0')).toBeVisible()
+}
+async function addCable(page: Page) {
+  await page.getByRole('button', { name: '数量拾い', exact: true }).click()
+  await expect(page.getByRole('tab', { name: '数量', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('fixture-panel').getByRole('heading', { name: '数量拾い' })).toBeVisible()
+  await page.getByRole('button', { name: '見本から追加', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '見本から追加' })
+  await expect(dialog.getByText('電線・ケーブル／CV ケーブル（CV）（長さ・m）', { exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
+  await page.getByRole('button', { name: 'CV ケーブル（CV）', exact: true }).click()
+}
+const value = (page: Page) => page.getByRole('button', { name: 'CV ケーブル（CV）', exact: true }).locator('.fixture-row-count').first()
+const label = (page: Page) => page.locator('.measurement-shape .measurement-label')
+
+test('length pickup: scale, addition, Undo, vertices, visibility, CSV, save and Q', async ({ page }) => {
+  await open(page)
+  await page.getByRole('button', { name: '計測▼', exact: true }).click()
+  await expect(page.getByRole('menuitemcheckbox', { name: /個数カウント|数量拾い/ })).toHaveCount(0)
+  await expect(page.getByRole('menuitemcheckbox', { name: /^距離/ })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await addCable(page)
+  await click(page, 100, 220)
+  const scale = page.getByRole('dialog', { name: '縮尺の設定（1 ページ）' })
+  await expect(scale).toBeVisible()
+  await scale.getByLabel('縮尺の分母').fill('100')
+  await scale.getByRole('button', { name: '決定', exact: true }).click()
+  await click(page, 100, 220); await click(page, 172, 220); await page.keyboard.press('Enter')
+  await expect(value(page)).toHaveText('2.54')
+  await expect(label(page)).toHaveText('CV 2.54 m')
+  const add = page.getByTestId('format-panel').getByLabel('立上り・立下りの加算', { exact: true })
+  await add.fill('3'); await add.press('Enter')
+  await expect(label(page)).toHaveText('CV 2.54+3.00=5.54 m')
+  await expect(value(page)).toHaveText('5.54')
+  await page.keyboard.press('Control+z')
+  await expect(value(page)).toHaveText('2.54')
+  await expect(label(page)).toHaveText('CV 2.54 m')
+  await page.getByRole('button', { name: '選択', exact: true }).click()
+  await click(page, 136, 220)
+  const handle = page.getByTestId('measure-handle-1'), box = await handle.boundingBox(), target = await point(page, 244, 220)
+  expect(box).not.toBeNull()
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2); await page.mouse.down()
+  await page.mouse.move(target.x, target.y, { steps: 5 }); await page.mouse.up()
+  await expect(label(page)).toHaveText('CV 5.08 m')
+  await expect(value(page)).toHaveText('5.08')
+  await page.getByRole('button', { name: 'CV ケーブル（CV）の表示切替', exact: true }).click()
+  await expect(label(page)).toHaveCount(0)
+  await page.getByRole('button', { name: 'CV ケーブル（CV）の表示切替', exact: true }).click()
+  await expect(label(page)).toHaveText('CV 5.08 m')
+  await page.evaluate(() => { Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined }) })
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: '数量をCSVに書き出す', exact: true }).click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe('数量試験_数量.csv')
+  const stream = await download.createReadStream(), chunks: Buffer[] = []
+  for await (const chunk of stream!) chunks.push(chunk)
+  expect(Buffer.concat(chunks).toString('utf8')).toContain('電線・ケーブル,CV,ケーブル（CV）,長さ,m,5.08,5.08,5.08')
+  await download.delete()
+  const saved = await page.evaluate(async () => [...(await window.__karu!.saveToBytes())!])
+  await page.evaluate(bytes => window.__karu!.openBytes(bytes, '再読込.pdf'), saved)
+  await page.getByRole('tab', { name: '数量', exact: true }).click()
+  await expect(value(page)).toHaveText('5.08')
+  await expect(label(page)).toHaveText('CV 5.08 m')
+  await page.getByRole('tab', { name: '書き込み', exact: true }).click()
+  const kinds = page.getByLabel('書き込みの種類', { exact: true })
+  await kinds.selectOption('count')
+  await expect(page.locator('.annotation-kind')).toHaveText('数量拾い（長さ）')
+  await expect(page.locator('.annotation-body')).toHaveText('CV 5.08 m')
+  await page.getByLabel('図面にもこの種類だけ表示', { exact: true }).check()
+  await kinds.selectOption('measure'); await expect(label(page)).toHaveCount(0)
+  await kinds.selectOption('count'); await expect(label(page)).toHaveText('CV 5.08 m')
+  await kinds.selectOption('symbol'); await expect(label(page)).toHaveText('CV 5.08 m')
+  await page.getByRole('button', { name: '選択', exact: true }).click(); await page.keyboard.press('q')
+  await expect(page.getByRole('button', { name: '数量拾い', exact: true })).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('length item controls and immutable kind after pickup', async ({ page }) => {
+  await open(page); await addCable(page)
+  await page.getByTestId('fixture-panel').getByRole('button', { name: '編集', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '項目を編集', exact: true })
+  await expect(dialog.getByRole('radio', { name: '長さ', exact: true })).toBeChecked()
+  await expect(dialog.getByRole('group', { name: '形', exact: true })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: '図面から見本を切り取る' })).toHaveCount(0)
+  await dialog.getByRole('button', { name: '破線', exact: true }).click()
+  await dialog.getByLabel('線の太さ', { exact: true }).selectOption('2')
+  await dialog.getByLabel('立上り・立下りの加算（新しく拾うときの初期値）').fill('3')
+  await dialog.getByRole('button', { name: '変更する' }).click()
+  await click(page, 100, 220)
+  const scale = page.getByRole('dialog', { name: '縮尺の設定（1 ページ）' })
+  await scale.getByLabel('縮尺の分母').fill('100'); await scale.getByRole('button', { name: '決定', exact: true }).click()
+  await click(page, 100, 220); await click(page, 172, 220); await page.keyboard.press('Enter')
+  await expect(label(page)).toHaveText('CV 2.54+3.00=5.54 m')
+  await expect(page.locator('.measurement-shape polyline')).toHaveAttribute('stroke-dasharray', '12 6')
+  await page.getByTestId('format-panel').getByRole('button', { name: '項目を編集…' }).click()
+  await expect(dialog.getByRole('radio', { name: '個数', exact: true })).toBeDisabled()
+  await expect(dialog.getByText('拾いがあるため種別は変えられません')).toBeVisible()
+  await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
+})

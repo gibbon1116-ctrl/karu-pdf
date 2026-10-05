@@ -36,7 +36,7 @@ interface Props {
 
 const tabs: Array<{ id: SidePanelTab; label: string }> = [
   { id: 'pages', label: 'ページ' }, { id: 'search', label: '検索' }, { id: 'annotations', label: '書き込み' },
-  { id: 'fixtures', label: '器具' },
+  { id: 'fixtures', label: '数量' },
 ]
 
 export function SidePanel(props: Props) {
@@ -72,7 +72,7 @@ export function SidePanel(props: Props) {
     docId={props.session.docId} pool={props.pool} focusVersion={props.focusSearchVersion}
     onHighlightsChange={props.onSearchHighlights} onNavigate={props.onSearchNavigate}
   />
-  else if (props.activeTab === 'fixtures') content = <Suspense fallback={<p>器具リストを開いています…</p>}><FixturePanel key={props.session.docId} session={props.session} pool={props.pool} /></Suspense>
+  else if (props.activeTab === 'fixtures') content = <Suspense fallback={<p>数量拾いを開いています…</p>}><FixturePanel key={props.session.docId} session={props.session} pool={props.pool} /></Suspense>
   else content = <AnnotationListPanel session={props.session} pool={props.pool} onSelect={props.onSelectAnnotation} onEdit={props.onEditAnnotation} />
 
   return <aside className="side-panel" style={{ width: displayedWidth }} aria-label="左の欄" data-testid="side-panel">

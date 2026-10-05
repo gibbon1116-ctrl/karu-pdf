@@ -1,3 +1,5 @@
+import { createCountCsv } from '../src/app/annotationCsv'
+import { nextCountStyle, type CountFixture } from '../src/core/countFixtures'
 import { describe, expect, it } from 'vitest'
 import type { EditableAnnotation } from '../src/editor/AnnotationStore'
 import type { Issue } from '../src/core/issues'
@@ -92,9 +94,9 @@ describe('書き込み一覧 CSV', () => {
     expect(mixed.indexOf('指摘,2,')).toBeLessThan(mixed.indexOf('指摘,12,'))
     expect(mixed.indexOf('指摘,12,')).toBeLessThan(mixed.indexOf('文字,,2,'))
     const count = createCsv(items, ['count'])
-    expect(count.split('\r\n')[0]).toContain('器具名称,略号,分類')
+    expect(count.split('\r\n')[0]).toContain('名称,略号,分類')
     expect(count.split('\r\n')[0]).not.toContain('状態')
-    expect(count).toContain('個数カウント,,2,,')
+    expect(count).toContain('数量拾い,,2,,')
     expect(count).toContain(',照明,,その他\r\n')
     const measure = createCsv(items, ['measure'])
     expect(measure.split('\r\n')[0]).toContain('縮尺')
@@ -115,7 +117,7 @@ describe('書き込み一覧 CSV', () => {
     ]
     expect(csvAnnotations(items, CSV_KINDS).map(csvKind)).toEqual([...CSV_KINDS])
     const csv = createCsv(items, CSV_KINDS), rows = csv.split('\r\n')
-    expect(rows[0]).toContain('引継ぎ元文書,縮尺,器具名称,略号,分類')
+    expect(rows[0]).toContain('引継ぎ元文書,縮尺,名称,略号,分類')
     expect(rows[1]).toContain('指摘,12,2,E-01,指摘本文')
     expect(rows[1]).toMatch(/未回答,電気,,,,,,,,\r?$/)
     expect(rows[2]).toMatch(/,,,,,,,照明,,その他$/)
@@ -126,4 +128,17 @@ describe('書き込み一覧 CSV', () => {
     const right = annotation({ id: 'right', text: '右', pageIndex: 0, rect: [30,100,40,110] })
     expect(csvAnnotations([right,left], ['text']).map(a => a.id)).toEqual(['left','right'])
   })
+})
+
+it('exports mixed counts and length quantities with units, fixed decimals and scale', () => {
+ const fixtures: CountFixture[] = [{ id: 'dl', code: 'DL', name: '照明', category: '電気', order: 0, style: nextCountStyle([]) }, { id: 'cv', code: 'CV', name: 'ケーブル（CV）', category: '電線・ケーブル', order: 1, style: nextCountStyle([]), kind: 'length' }]
+ const q = annotation({ kind: 'perimeter', pageIndex: 0, text: 'CV 2.54+3.00=5.54 m', quantity: { version: 1, id: 'q', itemId: 'cv', method: 'polyline', addM: 3 }, vertices: [[0,0],[72,0]], measure: { kind: 'perimeter', mmPerPoint: 25.4/72*100, unit: 'mm', decimals: null } })
+ const c = annotation({ kind: 'symbol', pageIndex: 0, count: { version: 2, id: 'c', fixtureId: 'dl' } })
+ const csv = createCountCsv([c,q], fixtures, 0)
+ expect(csv).toContain('分類,略号,名称,種別,単位,表示中の図面（p.1）,全図面の合計,p.1')
+ expect(csv).toContain('電気,DL,照明,個数,個,1,1,1')
+ expect(csv).toContain('電線・ケーブル,CV,ケーブル（CV）,長さ,m,5.54,5.54,5.54')
+ expect(csvAnnotations([q], ['measure'])).toHaveLength(0)
+ expect(createCsv([q], ['count'], { fixtures })).toContain('数量拾い（長さ）,,1,,CV 2.54+3.00=5.54 m')
+ expect(createCsv([q], ['count'], { fixtures })).toContain('約 1/100,ケーブル（CV）,CV,電線・ケーブル')
 })

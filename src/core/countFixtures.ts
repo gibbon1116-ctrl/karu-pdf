@@ -9,7 +9,22 @@ export type CountShape = typeof COUNT_SHAPES[number]
 export type CountFill = typeof COUNT_FILLS[number]
 export interface CountStyle { shape: CountShape; fill: CountFill; color: RGB; size: number; opacity: number; showCode: boolean }
 export interface CountFixtureSample { png: string; width: number; height: number; pageIndex: number }
-export interface CountFixture { id: string; name: string; code: string; category: string; style: CountStyle; memo?: string; order: number; sample?: CountFixtureSample }
+export interface CountFixture { kind?: QuantityKind; method?: QuantityMethod; defaults?: QuantityDefaults; line?: QuantityLineStyle; id: string; name: string; code: string; category: string; style: CountStyle; memo?: string; order: number; sample?: CountFixtureSample }
+export type QuantityKind = 'count' | 'length' | 'area' | 'volume'
+export type QuantityMethod = 'click' | 'polyline' | 'polygon' | 'lengthHeight' | 'polygonDepth' | 'lengthWidthDepth'
+export const QUANTITY_METHODS: Record<QuantityKind, readonly QuantityMethod[]> = { count: ['click'], length: ['polyline'], area: ['polygon', 'lengthHeight'], volume: ['polygonDepth', 'lengthWidthDepth'] }
+export const QUANTITY_UNITS: Record<QuantityKind, string> = { count: '個', length: 'm', area: 'm²', volume: 'm³' }
+export const QUANTITY_LINE_WIDTHS = [0.5, 1, 1.5, 2, 3, 4] as const
+export const QUANTITY_DASHES = ['solid', 'dashed', 'dashDot', 'dotted'] as const
+export interface QuantityDefaults { addM?: number; heightM?: number; widthM?: number; depthM?: number }
+export interface QuantityLineStyle { width: typeof QUANTITY_LINE_WIDTHS[number]; dash: typeof QUANTITY_DASHES[number] }
+export function quantityKind(f: CountFixture): QuantityKind { return f.kind ?? 'count' }
+export function quantityMethod(f: CountFixture): QuantityMethod { return f.method ?? QUANTITY_METHODS[quantityKind(f)][0] }
+export function quantityLine(f: CountFixture): QuantityLineStyle { return f.line ?? { width: 1.5, dash: 'solid' } }
+export function sameFixtureAppearance(a: CountFixture, b: CountFixture): boolean {
+  if (quantityKind(a) !== quantityKind(b)) return false
+  return quantityKind(a) === 'count' ? sameCountAppearance(a.style, b.style) : countHex(a.style.color) === countHex(b.style.color) && quantityLine(a).width === quantityLine(b).width && quantityLine(a).dash === quantityLine(b).dash
+}
 export const MAX_COUNT_FIXTURES = 1000
 export const MAX_COUNT_FIXTURE_BYTES = 4 * 1024 * 1024
 export const MAX_COUNT_SAMPLE_BASE64 = 48 * 1024
@@ -81,16 +96,20 @@ export function parseCountFixtures(raw: string | null): CountFixture[] {
         || !Number.isSafeInteger(f.order) || f.order < 0 || !s || !COUNT_SHAPES.includes(s.shape) || !COUNT_FILLS.includes(s.fill)
         || !COUNT_SIZES.includes(s.size) || !COUNT_OPACITIES.includes(s.opacity) || typeof s.showCode !== 'boolean'
         || !Array.isArray(s.color) || s.color.length !== 3 || !s.color.every((v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1)) continue
+      const kind = f.kind === undefined ? 'count' : f.kind
+      if (!Object.hasOwn(QUANTITY_METHODS, kind) || (f.method !== undefined && !QUANTITY_METHODS[kind as QuantityKind].includes(f.method))
+        || (f.defaults !== undefined && (!f.defaults || typeof f.defaults !== 'object' || Array.isArray(f.defaults) || Object.entries(f.defaults).some(([k, v]) => !['addM', 'heightM', 'widthM', 'depthM'].includes(k) || typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1000)))
+        || (f.line !== undefined && (!f.line || !QUANTITY_LINE_WIDTHS.includes(f.line.width) || !QUANTITY_DASHES.includes(f.line.dash)))) continue
       ids.add(f.id)
       const sample = parseCountFixtureSample(f.sample)
-      result.push({ id: f.id, name: f.name.trim(), code: f.code, category: f.category.trim(), memo: f.memo, order: f.order, ...(sample ? { sample } : {}), style: { shape: s.shape, fill: s.fill, color: [...s.color] as RGB, size: s.size, opacity: s.opacity, showCode: s.showCode } })
+      result.push({ ...(f.kind !== undefined ? { kind: f.kind } : {}), ...(f.method !== undefined ? { method: f.method } : {}), ...(f.defaults !== undefined ? { defaults: { ...f.defaults } } : {}), ...(f.line !== undefined ? { line: { ...f.line } } : {}), id: f.id, name: f.name.trim(), code: f.code, category: f.category.trim(), memo: f.memo, order: f.order, ...(sample ? { sample } : {}), style: { shape: s.shape, fill: s.fill, color: [...s.color] as RGB, size: s.size, opacity: s.opacity, showCode: s.showCode } })
     }
     return result.sort((a, b) => a.order - b.order)
   } catch { return [] }
 }
 export function serializeCountFixtures(fixtures: readonly CountFixture[]): string {
-  const raw = JSON.stringify({ version: 1, fixtures })
-  if (fixtures.length > MAX_COUNT_FIXTURES || fixtures.some(f => f.sample !== undefined && !parseCountFixtureSample(f.sample)) || new TextEncoder().encode(raw).length > MAX_COUNT_FIXTURE_BYTES || parseCountFixtures(raw).length !== fixtures.length) throw new Error('器具リストの値・件数・容量が上限を超えています。')
+  const raw = JSON.stringify({ version: 1, fixtures: fixtures.map(f => f.kind === 'count' && f.method === undefined && f.defaults === undefined && f.line === undefined ? { ...f, kind: undefined } : f) })
+  if (fixtures.length > MAX_COUNT_FIXTURES || fixtures.some(f => f.sample !== undefined && !parseCountFixtureSample(f.sample)) || new TextEncoder().encode(raw).length > MAX_COUNT_FIXTURE_BYTES || parseCountFixtures(raw).length !== fixtures.length) throw new Error('数量拾いの値・件数・容量が上限を超えています。')
   return raw
 }
 export function readCountFixtures(doc: PDFDocument): CountFixture[] {
@@ -101,7 +120,8 @@ export function writeCountFixtures(doc: PDFDocument, fixtures: readonly CountFix
   const raw = serializeCountFixtures(fixtures), root = doc.getTrailer().get('Root'), value = doc.newString(raw)
   try { root.put('KaruCountFixtures', value) } finally { value.destroy(); root.destroy() }
 }
-export const FIXTURE_PRESETS: Record<string, Array<{ category: string; code: string; name: string }>> = {}
+export interface FixturePreset { category: string; code: string; name: string; kind?: QuantityKind; method?: QuantityMethod; defaults?: QuantityDefaults }
+export const FIXTURE_PRESETS: Record<string, FixturePreset[]> = {}
 const presets: Record<string, Record<string, string[]>> = {
   電気設備: {
     照明器具: ['DL ダウンライト', 'BL ベースライト（直付）', 'BE ベースライト（埋込）', 'BR ブラケット', 'PD ペンダント', 'SP スポットライト', 'EM 非常用照明', 'GA 誘導灯（避難口）', 'GB 誘導灯（通路）', 'OL 外灯'],
@@ -113,3 +133,9 @@ const presets: Record<string, Record<string, string[]>> = {
   建築: { 建具: ['DS 片開き戸', 'DD 両開き戸', 'DSL 引戸', 'WS 引違い窓', 'WF FIX窓', 'SHT シャッター'], '内装・備品': ['INS 点検口', 'HR 手すり', 'WB ホワイトボード', 'LK ロッカー', 'SB 下足箱', 'SG サイン'] },
 }
 for (const [field, categories] of Object.entries(presets)) FIXTURE_PRESETS[field] = Object.entries(categories).flatMap(([category, items]) => items.map(item => ({ category, code: item.slice(0, item.indexOf(' ')), name: item.slice(item.indexOf(' ') + 1) })))
+
+const lengthPresets: Record<string, Record<string, string[]>> = {
+  電気設備: { '電線・ケーブル': ['CV ケーブル（CV）', 'CVT ケーブル（CVT）', 'EM-CE ケーブル（EM-CE）', 'EM-EEF ケーブル（EM-EEF）', 'VVF ケーブル（VVF）', 'IV 電線（IV）'], 電線管: ['E 薄鋼電線管（E）', 'G 厚鋼電線管（G）', 'PF 合成樹脂製可とう電線管（PF）', 'CD 合成樹脂製可とう電線管（CD）', 'VE 硬質ビニル電線管（VE）', 'FEP 波付硬質合成樹脂管（FEP）'], ケーブルラック: ['CR ケーブルラック'] },
+  機械設備: { ダクト: ['SD 角ダクト', 'RD 丸ダクト（スパイラル）'], 配管: ['SGP 配管用炭素鋼鋼管', 'VP 硬質ポリ塩化ビニル管', 'RP 冷媒管', 'DP ドレン管'] },
+}
+for (const [field, categories] of Object.entries(lengthPresets)) FIXTURE_PRESETS[field].push(...Object.entries(categories).flatMap(([category, items]) => items.map(item => ({ category, code: item.slice(0, item.indexOf(' ')), name: item.slice(item.indexOf(' ') + 1), kind: 'length' as const, method: 'polyline' as const }))))

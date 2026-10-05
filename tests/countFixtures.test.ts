@@ -46,12 +46,12 @@ it('assigns 100 deterministic different combinations with the minimum usage scor
 
 it('prefers unused shapes in a 28-fixture list when available and unused colors/fills after 14 fixtures', () => {
   // Reproduce the 28 preset appearances assigned by the old fixed sequence.
-  const legacy = FIXTURE_PRESETS.電気設備.map((item, i) => ({ ...fixture(String(i)), ...item, order: i, style: { ...fixture().style, shape: COUNT_SHAPES[i % 14], color: countRgb(COUNT_COLORS[(i * 7) % 24]), fill: COUNT_FILLS[Math.floor(i / 14) % 5] } }))
+  const legacy = FIXTURE_PRESETS.電気設備.filter(f => !f.kind).map((item, i) => ({ ...fixture(String(i)), ...item, order: i, style: { ...fixture().style, shape: COUNT_SHAPES[i % 14], color: countRgb(COUNT_COLORS[(i * 7) % 24]), fill: COUNT_FILLS[Math.floor(i / 14) % 5] } }))
   expect(legacy).toHaveLength(28)
   // All 14 shapes were used by the legacy sequence; the new sequence must spread
   // shapes, colors and fills while keeping every complete appearance distinct.
   const next: CountFixture[] = []
-  for (const [i, item] of FIXTURE_PRESETS.電気設備.entries()) next.push({ ...fixture(String(i)), ...item, style: nextCountStyle(next), order: i })
+  for (const [i, item] of FIXTURE_PRESETS.電気設備.filter(f => !f.kind).entries()) next.push({ ...fixture(String(i)), ...item, style: nextCountStyle(next), order: i })
   const proposed = nextCountStyle(next)
   expect(next.some(f => f.style.shape === proposed.shape && f.style.fill === proposed.fill && countHex(f.style.color) === countHex(proposed.color))).toBe(false)
   const fourteen = Array.from({ length: 15 }, (_, i) => ({ ...fixture(String(i)), style: { ...fixture().style, shape: COUNT_SHAPES[i % 14] } }))
@@ -181,5 +181,17 @@ it('fills double circles as a hollow ring for solid and half styles', () => {
 it('exports page/all totals, nonempty-page columns and zero rows with BOM, CRLF and formula suppression', () => {
   const f = fixture(), zero = { ...fixture('b'), code: '@Z', name: '=ゼロ', category: '+分類', order: 1 }
   const csv = createCountCsv([{ pageIndex: 0, count: { version: 2, id: '1', fixtureId: 'a' } }, { pageIndex: 2, count: { version: 2, id: '2', fixtureId: 'a' } }, { pageIndex: 2, count: { version: 2, id: '3', fixtureId: 'a' } }], [f, zero], 2)
-  expect(csv).toBe("\uFEFF分類,略号,器具名称,表示中の図面（p.3）,全図面の合計,p.1,p.3\r\n照明器具,DL,ダウンライト,2,3,1,2\r\n'+分類,'@Z,'=ゼロ,0,0,0,0\r\n")
+  expect(csv).toBe("\uFEFF分類,略号,名称,種別,単位,表示中の図面（p.3）,全図面の合計,p.1,p.3\r\n照明器具,DL,ダウンライト,個数,個,2,3,1,2\r\n'+分類,'@Z,'=ゼロ,個数,個,0,0,0,0\r\n")
+})
+
+it('round-trips quantity fields and rejects entire invalid items', () => {
+ const f = { ...fixture(), kind: 'length' as const, method: 'polyline' as const, defaults: { addM: 3 }, line: { width: 1.5 as const, dash: 'dashDot' as const } }
+ expect(parseCountFixtures(serializeCountFixtures([f]))).toEqual([f])
+ expect(serializeCountFixtures([{ ...fixture(), kind: 'count' }])).toBe(serializeCountFixtures([fixture()]))
+ for (const change of [{ kind: 'unknown' }, { kind: null }, { method: 'polygon' }, { defaults: { addM: -1 } }, { defaults: { heightM: 1001 } }, { defaults: { depthM: null } }, { line: { width: 5, dash: 'solid' } }, { line: { width: 1.5, dash: 'unknown' } }]) {
+  expect(parseCountFixtures(JSON.stringify({ version: 1, fixtures: [{ ...f, ...change }] }))).toEqual([])
+ }
+ expect(FIXTURE_PRESETS.電気設備.filter(f => f.kind === 'length')).toHaveLength(13)
+ expect(FIXTURE_PRESETS.機械設備.filter(f => f.kind === 'length')).toHaveLength(6)
+ expect(FIXTURE_PRESETS.電気設備.find(f => f.code === 'CV')).toMatchObject({ name: 'ケーブル（CV）', method: 'polyline', kind: 'length' })
 })

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { FIXTURE_PRESETS, type CountFixture } from '../core/countFixtures'
-import { CountMarker } from '../editor/countMarkers'
-type Preset = { name: string; code: string; category: string }
+import { FIXTURE_PRESETS, QUANTITY_UNITS, type FixturePreset, type CountFixture } from '../core/countFixtures'
+import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
+type Preset = FixturePreset
 const isFixture = (item: Preset | CountFixture): item is CountFixture => 'style' in item
 export default function FixturePresetDialog({ sources, onAdd, onClose }: { sources?: Array<{ name: string; fixtures: CountFixture[] }>; onAdd(items: Array<Preset | CountFixture>): void; onClose(): void }) {
   const dialog = useRef<HTMLDialogElement>(null), [field, setField] = useState(sources ? '0' : '電気設備'), [unchecked, setUnchecked] = useState(new Set<number>()), [error, setError] = useState('')
@@ -12,13 +12,13 @@ export default function FixturePresetDialog({ sources, onAdd, onClose }: { sourc
     <label>{sources ? 'PDF' : '分野'}<select aria-label={sources ? '読込元PDF' : '見本の分野'} value={field} onChange={e => { setField(e.currentTarget.value); setUnchecked(new Set()); setError('') }}>
       {sources ? sources.map((s, i) => <option key={i} value={i}>{s.name}</option>) : Object.keys(FIXTURE_PRESETS).map(s => <option key={s}>{s}</option>)}
     </select></label>
-    {!items?.length && <p>器具リストを持つPDFがありません。</p>}
+    {!items?.length && <p>数量拾いを持つPDFがありません。</p>}
     <div className="fixture-presets">{items?.map((f, i) => <label key={i}><input type="checkbox" checked={!unchecked.has(i)} onChange={e => { const checked = e.currentTarget.checked; setUnchecked(previous => { const next = new Set(previous); if (checked) next.delete(i); else next.add(i); return next }) }} />
-      {isFixture(f) && <svg className="fixture-swatch" viewBox="-16 -16 32 32" aria-hidden="true"><CountMarker style={f.style} showCode={false} /></svg>}{f.category}／{f.code} {f.name}
+      {isFixture(f) && (!f.kind || f.kind === 'count') && <svg className="fixture-swatch" viewBox="-16 -16 32 32" aria-hidden="true"><CountMarker style={f.style} showCode={false} /></svg>}{isFixture(f) && f.kind && f.kind !== 'count' && <QuantitySwatch fixture={f} />}{f.category}／{f.code} {f.name}{f.kind && f.kind !== 'count' ? `（${{ length: '長さ', area: '面積', volume: '体積' }[f.kind]}・${QUANTITY_UNITS[f.kind]}）` : ''}
     </label>)}</div>
     {error && <p role="alert">{error}</p>}
     <div className="dialog-actions"><button onClick={onClose}>閉じる</button><button disabled={!items?.some((_, i) => !unchecked.has(i))} onClick={() => {
       try { onAdd(items.filter((_, i) => !unchecked.has(i))); onClose() } catch (reason) { setError(String(reason)) }
-    }}>選んだ器具を追加</button></div>
+    }}>選んだ項目を追加</button></div>
   </dialog>
 }

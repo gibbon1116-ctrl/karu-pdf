@@ -1446,6 +1446,7 @@ export default function App() {
       else if (key === 's') void changeTool('symbol')
       else if (key === 'c') void changeTool('callout')
       else if (key === 'n') void changeTool('issue')
+      else if (key === 'q') void changeTool('count')
       else if (key === 'k') void changeTool('distance')
       else if (key === 'm') void changeTool('textSelect')
     }
@@ -1783,6 +1784,8 @@ export default function App() {
         countMeasurements={async all => {
           const session = scaleDialog.session, indices = scaleTargets(all)
           for (const i of indices) await session.annotationStore.ensurePageLoaded(i, () => pool.listAnnotations(session.docId, i))
+          // Quantity labels carry the item code, so recalculation needs the item list.
+          if (indices.some(i => session.annotationStore.getPageAnnotations(i).some(a => a.quantity))) await ensureSessionFixtures(session, pool)
           return indices.reduce((n, i) => n + session.annotationStore.getPageAnnotations(i).filter(a => a.measure).length, 0)
         }}
         onSave={(scale, all, recalculate) => { scaleDialog.session.annotationStore.setScale(scaleTargets(all), scale, recalculate); setScaleDialog(null); setScaleTracing(false); refreshTabs() }} />}
@@ -1792,7 +1795,7 @@ export default function App() {
       {fixtureEdit && fixtureEdit.session.annotationStore.getCountFixture(fixtureEdit.id) && <Suspense fallback={null}><FixtureDialog
         key={`${fixtureEdit.session.docId}:${fixtureEdit.id}`}
         initial={structuredClone(fixtureEdit.session.annotationStore.getCountFixture(fixtureEdit.id)!)}
-        fixtures={fixtureEdit.session.annotationStore.getCountFixtures()} editing
+        fixtures={fixtureEdit.session.annotationStore.getCountFixtures()} editing hasMarks={fixtureEdit.session.annotationStore.fixtureMarkCount(fixtureEdit.id) > 0}
         onClose={() => setFixtureEdit(null)} onSave={fixture => {
           const store = fixtureEdit.session.annotationStore
           store.setCountFixtures(store.getCountFixtures().map(f => f.id === fixture.id ? fixture : f)); setFixtureEdit(null)

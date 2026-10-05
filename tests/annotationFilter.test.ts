@@ -1,3 +1,4 @@
+import { filterShowsCountMarks } from '../src/editor/annotationFilter'
 import { describe, expect, it, vi } from 'vitest'
 import type { AnnotationInfo } from '../src/core/annotations'
 import { countFixtureId } from '../src/core/counts'
@@ -20,7 +21,7 @@ function info(objNum: number, kind: AnnotationInfo['kind'], extra: Partial<Annot
 }
 
 describe('matchesAnnotationFilter', () => {
-  it('全種類を今までの一覧と同じに判定する（器具の印は「個数カウント」と「記号」の両方に入る）', () => {
+  it('全種類を今までの一覧と同じに判定する（数量拾いの印は「数量拾い」と「記号」の両方に入る）', () => {
     const store = new AnnotationStore()
     const entries: Array<[EditableAnnotation, AnnotationFilterKind[]]> = [
       [create(store), ['text']], [create(store, 'callout'), ['callout']],
@@ -58,14 +59,14 @@ describe('matchesAnnotationFilter', () => {
   })
 
   it('種類と分野と状態の表示名を共有する', () => {
-    expect(annotationFilterLabel(filter('count'))).toBe('個数カウント（器具の印）')
+    expect(annotationFilterLabel(filter('count'))).toBe('数量拾い')
     expect(annotationFilterLabel(filter('issueOpen', { status: 'open' }))).toBe('指摘（未確認）・未回答')
     expect(annotationFilterLabel(filter('issue', { discipline: '電気' }))).toBe('指摘・分野「電気」')
   })
 })
 
 describe('図面への反映', () => {
-  it('反映・目のボタン・選択中の器具だけ表示を組み合わせる', () => {
+  it('反映・目のボタン・選択中の項目だけ表示を組み合わせる', () => {
     const store = new AnnotationStore(), a = count(store, 'A'), b = count(store, 'B'), text = create(store)
     store.selectFixture('A')
     for (const follows of [false, true]) for (const hidden of [false, true]) for (const only of [false, true]) {
@@ -82,7 +83,7 @@ describe('図面への反映', () => {
     }
   })
 
-  it('「すべて」と反映オフは非稼働、分野・状態は器具の印を隠す', () => {
+  it('「すべて」と反映オフは非稼働、分野・状態は数量拾いの印を隠す', () => {
     const store = new AnnotationStore()
     for (const kind of Object.keys(ANNOTATION_FILTER_LABELS) as AnnotationFilterKind[]) for (const discipline of ['', '電気']) for (const status of ['', 'open'] as const) for (const follows of [false, true]) {
       store.setAnnotationFilter(filter(kind, { discipline, status })); store.setDrawingFollowsFilter(follows)
@@ -94,7 +95,7 @@ describe('図面への反映', () => {
 
   it('絞り込みで隠す保存済みの番号だけをページごとに返す', async () => {
     const store = new AnnotationStore()
-    await store.ensurePageLoaded(0, async () => [info(11, 'freetext'), info(12, 'issue', { issue: { number: 1, status: 'open' } }), info(13, 'symbol', { count: { version: 1, id: 'c', group: '器具' } })])
+    await store.ensurePageLoaded(0, async () => [info(11, 'freetext'), info(12, 'issue', { issue: { number: 1, status: 'open' } }), info(13, 'symbol', { count: { version: 1, id: 'c', group: '項目' } })])
     await store.ensurePageLoaded(1, async () => [info(21, 'square', { pageIndex: 1 })])
     create(store); store.remove('obj-13')
     store.setAnnotationFilter(filter('issue'))
@@ -135,13 +136,13 @@ describe('図面への反映', () => {
     expect(released).toHaveBeenCalledTimes(1)
   })
 
-  it('隠した器具の新しい印を見えるようにし、別器具なら限定表示も解除する', () => {
+  it('隠した項目の新しい印を見えるようにし、別項目なら限定表示も解除する', () => {
     const store = new AnnotationStore()
     store.selectFixture('A'); store.setOnlySelectedFixture(true); store.setFixtureVisible(['B'], false)
     const b = count(store, 'B')
     expect(store.onlySelectedFixture).toBe(false); expect(store.isShownOnDrawing(b)).toBe(true)
     store.selectOnly(b.id); expect(store.selectedIds()).toEqual([b.id])
-    const legacy = { version: 1, id: 'legacy', group: '旧器具' } as const
+    const legacy = { version: 1, id: 'legacy', group: '旧項目' } as const
     store.setFixtureVisible([countFixtureId(legacy)], false)
     expect(store.isShownOnDrawing(create(store, 'symbol', { count: legacy }))).toBe(true)
   })
@@ -162,7 +163,7 @@ describe('図面への反映', () => {
     }
   })
 
-  it('カウント道具は絞り込みを解除して選択中の隠した器具だけ戻す', () => {
+  it('カウント道具は絞り込みを解除して選択中の隠した項目だけ戻す', () => {
     const store = new AnnotationStore(), a = count(store, 'A'), b = count(store, 'B'), released = vi.fn()
     store.subscribeDrawingFilterRelease(released)
     store.selectFixture('A'); store.setFixtureVisible(['A', 'B'], false)
@@ -170,7 +171,7 @@ describe('図面への反映', () => {
     expect(store.drawingFollowsFilter).toBe(false)
     expect(store.isShownOnDrawing(a)).toBe(true); expect(store.isShownOnDrawing(b)).toBe(false)
     expect(released).toHaveBeenCalledTimes(1)
-    expect(released).toHaveBeenCalledWith('器具の印を数えるため')
+    expect(released).toHaveBeenCalledWith('数量拾いの印を数えるため')
     store.setAnnotationFilter(filter('count')); store.setDrawingFollowsFilter(true); store.prepareCountTool()
     expect(store.drawingFollowsFilter).toBe(true)
   })
@@ -184,11 +185,11 @@ describe('図面への反映', () => {
       action(store)
       expect(store.drawingFollowsFilter).toBe(false)
       expect(released).toHaveBeenCalledTimes(1)
-      expect(released).toHaveBeenCalledWith('器具の印を表示するため')
+      expect(released).toHaveBeenCalledWith('数量拾いの印を表示するため')
     }
   })
 
-  it('器具の印が隠れていないときは、表示の操作で反映を解除しない', () => {
+  it('数量拾いの印が隠れていないときは、表示の操作で反映を解除しない', () => {
     for (const kind of ['all', 'count', 'symbol'] as const) {
       for (const action of [(s: AnnotationStore) => s.setFixtureVisible(['A'], true), (s: AnnotationStore) => s.showAllFixtures(), (s: AnnotationStore) => s.setOnlySelectedFixture(true)]) {
         const store = new AnnotationStore(), released = vi.fn()
@@ -221,4 +222,11 @@ describe('図面への反映', () => {
     store.setDrawingFollowsFilter(true); store.reset()
     expect(store.annotationFilter).toEqual(DEFAULT_ANNOTATION_FILTER); expect(store.drawingFollowsFilter).toBe(false)
   })
+})
+
+it('classifies quantity marks with counts and excludes them from measurements', () => {
+ const q = { kind: 'perimeter' as const, quantity: { version: 1 as const, id: 'q', itemId: 'cv', method: 'polyline' as const }, measure: { kind: 'perimeter' as const, mmPerPoint: 1, unit: 'mm' as const, decimals: null } }
+ for (const k of Object.keys(ANNOTATION_FILTER_LABELS) as AnnotationFilterKind[]) expect(matchesAnnotationFilter(q, filter(k))).toBe(filterShowsCountMarks(filter(k)))
+ expect(matchesAnnotationFilter(q, filter('count'))).toBe(true)
+ expect(matchesAnnotationFilter(q, filter('measure'))).toBe(false)
 })

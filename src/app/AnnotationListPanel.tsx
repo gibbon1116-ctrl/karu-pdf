@@ -1,3 +1,4 @@
+import { quantityAnnotationLabel } from './annotationCsv'
 import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import type { EditableAnnotation } from '../editor/AnnotationStore'
@@ -114,7 +115,7 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
       setLastIssue(next.id); onSelect(next)
     }}>次の未対応指摘（ページ範囲内）</button>
     <button type="button" className="csv-export" disabled={loading || !!error} onClick={() => {
-      if (annotations.some(a => a.count)) void ensureSessionFixtures(session, pool).then(() => setCsvOpen(true)).catch(reason => setError(String(reason)))
+      if (annotations.some(a => a.count || a.quantity)) void ensureSessionFixtures(session, pool).then(() => setCsvOpen(true)).catch(reason => setError(String(reason)))
       else setCsvOpen(true)
     }}>CSV に書き出す…</button>
     {csvOpen && <Suspense fallback={<p role="status">書き出し画面を読み込み中…</p>}><CsvExportDialog annotations={annotations} fixtures={session.annotationStore.getCountFixtures()} pdfName={session.name} pageCount={session.pageSizes.length}
@@ -136,7 +137,7 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
           <span className="annotation-type-icon" aria-hidden="true">{annotation.legacyChange ? '旧' : annotation.issue ? annotation.issue.number : annotationKindLabel(annotation.kind).slice(0, 1)}</span>
           <span className="annotation-page">p.{annotation.pageIndex + 1}</span>
           <span className="annotation-summary">
-            <span className="annotation-kind">{annotation.legacyChange ? '変更記録（旧版）' : annotationKindLabel(annotation.kind)}</span>
+            <span className="annotation-kind">{annotation.legacyChange ? '変更記録（旧版）' : annotation.quantity ? quantityAnnotationLabel(annotation) : annotation.count ? '数量拾い' : annotationKindLabel(annotation.kind)}</span>
             <span className="annotation-body" title={annotation.legacyChange ? annotation.text : annotationBody(annotation)}>{annotation.legacyChange ? annotation.text.slice(0, 40) : annotation.count ? `個数: ${session.annotationStore.fixtureForCount(annotation.count)?.name ?? (annotation.count.version === 1 ? annotation.count.group : annotation.text)}` : annotationBody(annotation).slice(0, 40)}</span>
           </span>
           <span className="annotation-color" style={{ backgroundColor: annotationColorHex(annotation) }} aria-label={`色 ${annotationColorHex(annotation)}`} />

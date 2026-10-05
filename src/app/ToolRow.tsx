@@ -28,7 +28,6 @@ const groups: Record<SplitToolGroup, Array<{ tool: EditorTool; label: string; de
     { tool: 'ink', label: '手書き', description: '細い線で自由に書く（Shift で5°刻み、Ctrl で好きな角度の直線）', shortcut: 'P' },
   ],
   measure: [
-    { tool: 'count', label: '個数カウント', description: '種類別にクリックして個数を数える', shortcut: '' },
     { tool: 'distance', label: '距離', description: '2点の間の長さを測る', shortcut: 'K' },
     { tool: 'perimeter', label: '連続した長さ', description: '折れ線の長さの合計を測る', shortcut: '' },
     { tool: 'area', label: '面積', description: '囲んだ範囲の面積を測る', shortcut: '' },
@@ -142,6 +141,7 @@ export function ToolRow(props: Props) {
     {splitButton('pen', 'ペン')}
     {splitButton('mark', '文字に印')}
     {splitButton('measure', '計測')}
+    <button type="button" className={props.tool === 'count' ? 'active' : ''} title="数量拾い: 一覧で選んだ項目の個数・長さ・面積・体積を拾う（Q）" aria-pressed={props.tool === 'count'} disabled={!props.hasDocument || props.readOnly} onClick={() => props.onToolChange('count')}><ToolIcon tool="count" />数量拾い</button>
     <button type="button" className={props.tool === 'symbol' ? 'active' : ''} title="記号: 記号を置く" aria-pressed={props.tool === 'symbol'} disabled={!props.hasDocument || props.readOnly} onClick={() => props.onToolChange('symbol')}><ToolIcon tool="symbol" />記号</button>
     <span className="tool-row-separator" />
     <button type="button" className="icon-button" title="元に戻す" aria-label="元に戻す" disabled={!props.canUndo} onClick={props.onUndo}>↶ 戻す</button>
