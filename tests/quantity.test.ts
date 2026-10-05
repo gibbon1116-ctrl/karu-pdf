@@ -7,6 +7,13 @@ import { nextCountStyle, type CountFixture } from '../src/core/countFixtures'
 const mark = (method: QuantityMark['method'], values = {}): QuantityMark => ({ version: 1, id: 'mark', itemId: 'cv', method, ...values })
 const square: Point[] = [[0, 0], [4, 0], [4, 3], [0, 3]]
 describe('quantity calculations and parsing', () => {
+  it('shows unknown dimensions in previews without guessing a result', () => {
+    const line: Point[] = [[0, 0], [24, 0]]
+    expect(quantityLabel(line, 1000, mark('lengthHeight'), '外部足場', true)).toBe('外部足場 24.00×H?=? m²')
+    expect(quantityLabel(square, 1000, mark('polygonDepth'), '根切り', true)).toBe('根切り 12.00×D?=? m³')
+    expect(quantityLabel(line, 1000, mark('lengthWidthDepth', { widthM: .6 }), '', false)).toBe('24.00×W0.60×D?=? m³')
+    expect(quantityLabel(line, 1000, mark('lengthHeight', { heightM: 0 }), '', false)).toBe('24.00×H0.00=0.00 m²')
+  })
   it('uses scale without rounding, including additions and every non-click method', () => {
     const p: Point[] = [[0, 0], [72, 0]], scale = 25.4 / 72 * 100
     expect(quantityValue(p, scale, mark('polyline'))).toBeCloseTo(2.54)

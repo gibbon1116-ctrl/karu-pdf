@@ -834,8 +834,6 @@ export function AnnotationLayer(props: Props) {
         const id = annotationIdFromTarget(event.target) ?? (compactCounts && props.tool === 'select'
           ? annotations.findLast(a => a.count && start[0] >= a.rect[0] && start[0] <= a.rect[2] && start[1] >= a.rect[1] && start[1] <= a.rect[3])?.id ?? null : null)
         if (props.tool === 'count') {
-          const item = props.store.getCountFixture(props.store.selectedFixtureId)
-          if (item && !['click', 'polyline'].includes(quantityMethod(item))) { props.onStatus('この種別の拾いは、まだ使えません'); return }
           props.store.prepareCountTool()
         }
         if (measurement.pointerDown(event, start)) return
@@ -1011,6 +1009,7 @@ export function AnnotationLayer(props: Props) {
       <line ref={linePreviewRef} className="annotation-line-preview" x1="0" y1="0" x2="0" y2="0" />
       <line ref={calloutPreviewRef} className="annotation-line-preview" x1="0" y1="0" x2="0" y2="0" />
     </svg>
+    {measurement.dialog}
     {sampleInteraction?.selection?.docId === props.docId && <FixtureSampleSelection pageSize={props.pageSize} pageIndex={props.pageIndex} complete={sampleInteraction.selection.complete} />}
     {props.tool === 'textSelect' && textSelection && selectionBounds(textSelection.quads) && <div className="text-selection-toolbar" style={{
       left: `${Math.max(0, Math.min(100, (selectionBounds(textSelection.quads)![0] / props.pageSize.width) * 100))}%`,

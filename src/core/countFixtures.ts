@@ -23,7 +23,7 @@ export function quantityMethod(f: CountFixture): QuantityMethod { return f.metho
 export function quantityLine(f: CountFixture): QuantityLineStyle { return f.line ?? { width: 1.5, dash: 'solid' } }
 export function sameFixtureAppearance(a: CountFixture, b: CountFixture): boolean {
   if (quantityKind(a) !== quantityKind(b)) return false
-  return quantityKind(a) === 'count' ? sameCountAppearance(a.style, b.style) : countHex(a.style.color) === countHex(b.style.color) && quantityLine(a).width === quantityLine(b).width && quantityLine(a).dash === quantityLine(b).dash
+  return quantityKind(a) === 'count' ? sameCountAppearance(a.style, b.style) : quantityMethod(a) === quantityMethod(b) && countHex(a.style.color) === countHex(b.style.color) && quantityLine(a).width === quantityLine(b).width && quantityLine(a).dash === quantityLine(b).dash
 }
 export const MAX_COUNT_FIXTURES = 1000
 export const MAX_COUNT_FIXTURE_BYTES = 4 * 1024 * 1024
@@ -139,3 +139,17 @@ const lengthPresets: Record<string, Record<string, string[]>> = {
   機械設備: { ダクト: ['SD 角ダクト', 'RD 丸ダクト（スパイラル）'], 配管: ['SGP 配管用炭素鋼鋼管', 'VP 硬質ポリ塩化ビニル管', 'RP 冷媒管', 'DP ドレン管'] },
 }
 for (const [field, categories] of Object.entries(lengthPresets)) FIXTURE_PRESETS[field].push(...Object.entries(categories).flatMap(([category, items]) => items.map(item => ({ category, code: item.slice(0, item.indexOf(' ')), name: item.slice(item.indexOf(' ') + 1), kind: 'length' as const, method: 'polyline' as const }))))
+
+const areaVolumePresets: Record<string, FixturePreset[]> = {
+  '仮設・土工': [
+    { category: '仮設', code: '外部足場', name: '外部足場（長さ×高さ）', kind: 'area', method: 'lengthHeight' },
+    { category: '仮設', code: '内部足場', name: '内部足場（囲む）', kind: 'area', method: 'polygon' },
+    { category: '仮設', code: '養生', name: '養生（囲む）', kind: 'area', method: 'polygon' },
+    { category: '土工', code: '根切り', name: '根切り（囲む×深さ）', kind: 'volume', method: 'polygonDepth' },
+    { category: '土工', code: '床掘り', name: '床掘り（囲む×深さ）', kind: 'volume', method: 'polygonDepth' },
+    { category: '土工', code: '溝掘削', name: 'ケーブル・配管の溝掘削（長さ×幅×深さ）', kind: 'volume', method: 'lengthWidthDepth', defaults: { widthM: .6, depthM: .8 } },
+    { category: '撤去', code: '床撤去', name: '床仕上げの撤去（囲む）', kind: 'area', method: 'polygon' },
+    { category: '撤去', code: '天井撤去', name: '天井の撤去（囲む）', kind: 'area', method: 'polygon' },
+  ],
+}
+for (const [field, items] of Object.entries(areaVolumePresets)) FIXTURE_PRESETS[field] = [...(FIXTURE_PRESETS[field] ?? []), ...items]

@@ -14,7 +14,7 @@ afterAll(() => font.font.destroy())
 const fixture: CountFixture = { id: 'cv', kind: 'length', method: 'polyline', defaults: { addM: 3 }, line: { width: 2, dash: 'dashed' }, name: 'ケーブル（CV）', code: 'CV', category: '電線・ケーブル', order: 0, style: { ...nextCountStyle([]), size: 12 } }
 const points: Point[] = [[100, 220], [365.03937007874015, 220]]
 const measure = { kind: 'perimeter' as const, unit: 'mm' as const, decimals: null, mmPerPoint: 25.4 / 72 * 100 }
-function edit(addM?: number): AnnotationEdit {
+function edit(addM?: number): Extract<AnnotationEdit, { kind: 'createMeasure' }> {
   const quantity: QuantityMark = { version: 1, id: addM ? 'plus' : 'plan', itemId: 'cv', method: 'polyline', ...(addM ? { addM } : {}) }
   return { kind: 'createMeasure', pageIndex: 0, vertices: points, measure, quantity, quantityDash: 'dashed', text: quantityLabel(points, measure.mmPerPoint, quantity, 'CV', true), color: fixture.style.color, fontSize: 12, borderWidth: 2, opacity: .8 }
 }
@@ -94,4 +94,78 @@ it('falls back to ordinary measurement for malformed quantity metadata', () => {
     expect(listAnnotations(doc, 0)[0].quantity).toBeNull()
     expect(listAnnotations(doc, 0)[0].measure?.kind).toBe('perimeter')
   } finally { doc.destroy() }
+})
+
+const areaVolumeCases: Array<{ method: QuantityMark['method']; values: Partial<QuantityMark>; text: string }> = [
+ { method: 'polygon', values: {}, text: 'Q 6.45 m²' },
+ { method: 'lengthHeight', values: { heightM: 3.5 }, text: 'Q 2.54×H3.50=8.89 m²' },
+ { method: 'polygonDepth', values: { depthM: 1.2 }, text: 'Q 6.45×D1.20=7.74 m³' },
+ { method: 'lengthWidthDepth', values: { widthM: .6, depthM: .8 }, text: 'Q 2.54×W0.60×D0.80=1.22 m³' },
+]
+function areaVolumeFixture(c: typeof areaVolumeCases[number], i: number): CountFixture {
+ return { ...fixture, id: c.method, code: 'Q', kind: c.method === 'polygon' || c.method === 'lengthHeight' ? 'area' : 'volume', method: c.method, defaults: undefined, order: i }
+}
+function areaVolumeEdit(c: typeof areaVolumeCases[number]): AnnotationEdit {
+ const polygon = c.method === 'polygon' || c.method === 'polygonDepth'
+ const vertices: Point[] = polygon ? [[100,220],[172,220],[172,292],[100,292]] : [[100,220],[172,220]]
+ const quantity: QuantityMark = { version: 1, id: c.method, itemId: c.method, method: c.method, ...c.values }
+ return { ...edit(), kind: 'createMeasure', vertices, quantity, measure: { ...measure, kind: polygon ? 'area' : 'perimeter' }, text: c.text }
+}
+it('round-trips all four area/volume methods, vertices, dimensions, intent and filled/dashed text appearances', () => {
+ const doc = blank()
+ try {
+  const fixtures = areaVolumeCases.map(areaVolumeFixture)
+  expect(applyEdits(doc, [{ kind: 'setCountFixtures', pageIndex: 0, fixtures }, ...areaVolumeCases.map(areaVolumeEdit)], { BIZUDGothic: font }).errors).toEqual([])
+  const saved = reopen(doc)
+  try {
+   expect(readCountFixtures(saved)).toEqual(fixtures)
+   const infos = listAnnotations(saved, 0)
+   expect(infos.map(a => a.contents)).toEqual(areaVolumeCases.map(c => c.text))
+   const page = saved.loadPage(0), annotations = page.getAnnotations()
+   try {
+    annotations.forEach((a, i) => {
+     const c = areaVolumeCases[i], expected = areaVolumeEdit(c)
+     const polygon = c.method === 'polygon' || c.method === 'polygonDepth'
+     expect(a.getType()).toBe(polygon ? 'Polygon' : 'PolyLine')
+     expect(infos[i].vertices).toEqual('vertices' in expected ? expected.vertices : [])
+     expect(infos[i].quantity).toMatchObject({ method: c.method, ...c.values })
+     expect(infos[i].measure?.kind).toBe(polygon ? 'area' : 'perimeter')
+     expect(infos[i].quantityDash).toBe('dashed')
+     const object = a.getObject(), intent = object.get('IT'), raw = object.get('KaruQuantity'), ap = object.get('AP','N'), stream = ap.readStream()
+     try {
+      expect(intent.asName()).toBe(polygon ? 'PolygonDimension' : 'PolyLineDimension')
+      expect(JSON.parse(raw.asString())).toMatchObject({ method: c.method, ...c.values })
+      expect(stream.asString()).toMatch(/\[\s*12\s+6\s*\]\s+0\s+d\b/)
+      expect(stream.asString().match(/\bf\b/g)).toHaveLength(polygon ? 2 : 1)
+     } finally { stream.destroy(); ap.destroy(); raw.destroy(); intent.destroy(); object.destroy() }
+     const display = a.toDisplayList(), text = display.toStructuredText('preserve-whitespace')
+     try { let contents = ''; text.walk({ onChar: char => { contents += char } }); expect(contents).toBe(c.text) } finally { text.destroy(); display.destroy() }
+    })
+   } finally { annotations.forEach(a => a.destroy()); page.destroy() }
+  } finally { saved.destroy() }
+ } finally { doc.destroy() }
+})
+it('edits depth, validates dimensions, supports Undo and saves changed Contents and KaruQuantity', async () => {
+ const doc = blank(), store = new AnnotationStore(), c = areaVolumeCases[2]
+ try {
+  applyEdits(doc, [{ kind: 'setCountFixtures', pageIndex: 0, fixtures: [areaVolumeFixture(c, 0)] }, areaVolumeEdit(c)], { BIZUDGothic: font })
+  await store.ensurePageLoaded(0, async () => listAnnotations(doc, 0))
+  await store.ensureCountFixtures(async () => readCountFixtures(doc), async () => {})
+  const a = store.getPageAnnotations(0)[0]
+  for (const values of [{ depthM: -1 }, { depthM: 1001 }, { depthM: .123 }, { depthM: NaN }, { widthM: 1 }, { depthM: 2, heightM: 1 }]) store.updateQuantityValues(a.id, values)
+  expect(store.get(a.id)?.text).toBe(c.text)
+  store.updateQuantityValues(a.id, { depthM: 2 })
+  expect(store.get(a.id)?.text).toBe('Q 6.45×D2.00=12.90 m³')
+  expect(store.countTotals().get(c.method)?.get(0)).toBeCloseTo(12.9032)
+  store.undo(); expect(store.get(a.id)?.text).toBe(c.text)
+  store.updateQuantityValues(a.id, { depthM: 2 })
+  expect(applyEdits(doc, store.toEdits(), { BIZUDGothic: font }).errors).toEqual([])
+  const saved = reopen(doc)
+  try {
+   const [info] = listAnnotations(saved,0)
+   expect(info.contents).toBe('Q 6.45×D2.00=12.90 m³')
+   expect(info.quantity).toMatchObject({ depthM: 2, method: 'polygonDepth' })
+   expect(readCountFixtures(saved)[0].defaults).toBeUndefined()
+  } finally { saved.destroy() }
+ } finally { doc.destroy() }
 })

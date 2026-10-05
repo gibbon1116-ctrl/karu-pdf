@@ -142,3 +142,18 @@ it('exports mixed counts and length quantities with units, fixed decimals and sc
  expect(createCsv([q], ['count'], { fixtures })).toContain('数量拾い（長さ）,,1,,CV 2.54+3.00=5.54 m')
  expect(createCsv([q], ['count'], { fixtures })).toContain('約 1/100,ケーブル（CV）,CV,電線・ケーブル')
 })
+
+it('exports area and volume quantities per page and overall with the correct kind and unit', () => {
+ const fixtures: CountFixture[] = [
+  { id: 'area', code: '内部足場', name: '内部足場（囲む）', category: '仮設', kind: 'area', method: 'polygon', order: 0, style: nextCountStyle([]) },
+  { id: 'volume', code: '根切り', name: '根切り（囲む×深さ）', category: '土工', kind: 'volume', method: 'polygonDepth', order: 1, style: nextCountStyle([]) },
+ ]
+ const vertices: [number, number][] = [[0,0],[72,0],[72,72],[0,72]]
+ const area = annotation({ pageIndex: 0, kind: 'area', vertices, measure: { kind: 'area', mmPerPoint: 25.4/72*100, unit: 'mm', decimals: null }, quantity: { version: 1, id: 'a', itemId: 'area', method: 'polygon' } })
+ const volume = annotation({ ...area, pageIndex: 1, quantity: { version: 1, id: 'v', itemId: 'volume', method: 'polygonDepth', depthM: 1.2 } })
+ const csv = createCountCsv([area, { ...area, pageIndex: 1 }, volume], fixtures, 0)
+ expect(csv).toContain('仮設,内部足場,内部足場（囲む）,面積,m²,6.45,12.90,6.45,6.45')
+ expect(csv).toContain('土工,根切り,根切り（囲む×深さ）,体積,m³,0.00,7.74,0.00,7.74')
+ expect(createCsv([area,volume], ['count'], { fixtures })).toContain('数量拾い（面積）')
+ expect(createCsv([area,volume], ['count'], { fixtures })).toContain('数量拾い（体積）')
+})

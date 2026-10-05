@@ -1,6 +1,7 @@
-import { quantityLabel, quantityDashes, type QuantityMark } from '../core/quantity'
+import { quantityLabel, quantityDashes, quantityPoints, quantityDimensions, type QuantityMark } from '../core/quantity'
 import { quantityMethod, quantityLine, type CountFixture, type QuantityLineStyle } from '../core/countFixtures'
-import { createContext, useContext, useEffect, useRef, type RefObject } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type RefObject } from 'react'
+import { QuantityDimensionsDialog } from './QuantityDimensionsDialog'
 import type { Point } from '../core/annotations'
 import { cloudPath, type CloudIntensity } from '../core/cloud'
 import { constrainMeasurePoint, measureBounds, measureLabel, measureText, type MeasureKind } from '../core/measure'
@@ -52,8 +53,10 @@ export function useMeasurementInteraction(props: Props) {
   const frame = useRef(0)
   const tracing = scaleInteraction.tracePage === props.pageIndex
   const cloud = props.tool === 'cloudPolygon'
-  const quantityItem = props.tool === 'count' && props.quantityItem && quantityMethod(props.quantityItem) === 'polyline' ? props.quantityItem : undefined
-  const quantityMark = (id = 'draft'): QuantityMark => ({ version: 1, id, itemId: quantityItem!.id, method: 'polyline', ...(quantityItem?.defaults?.addM ? { addM: quantityItem.defaults.addM } : {}) })
+  const quantityItem = props.tool === 'count' && props.quantityItem && quantityMethod(props.quantityItem) !== 'click' ? props.quantityItem : undefined
+  const quantityKind = quantityItem && quantityPoints(quantityMethod(quantityItem) as QuantityMark['method']) === 'polygon' ? 'area' : 'perimeter'
+  const quantityMark = (id = 'draft'): QuantityMark => ({ version: 1, id, itemId: quantityItem!.id, method: quantityMethod(quantityItem!) as QuantityMark['method'], ...quantityItem?.defaults })
+  const [pending, setPending] = useState<{ mark: QuantityMark; save(mark: QuantityMark): void } | null>(null)
   const constrain = (start: Point, end: Point, shift: boolean): Point => {
     if (!shift || !(quantityItem || vertex.current?.original.quantity)) return constrainMeasurePoint(start, end, shift)
     const dx = end[0] - start[0], dy = end[1] - start[1], length = Math.hypot(dx, dy), step = Math.PI / 4
@@ -105,14 +108,14 @@ export function useMeasurementInteraction(props: Props) {
       return
     }
     if (!points.current.length) { draftRef.current?.replaceChildren(); return }
-    const kind = tracing ? 'distance' : cloud ? 'area' : quantityItem ? 'perimeter' : isMeasureTool(props.tool) ? props.tool : 'distance'
+    const kind = tracing ? 'distance' : cloud ? 'area' : quantityItem ? quantityKind : isMeasureTool(props.tool) ? props.tool : 'distance'
     const p = cursor.current ? [...points.current, cursor.current] : points.current
     const scale = props.store.getScale(props.pageIndex)
     const f = props.defaults[cloud ? 'cloudPolygon' : kind]
     if (cloud) { draw(p, '', 'area', cssColor(f.color), f.fontSize, f.borderWidth, true, f.cloudIntensity, f.fillColor ? cssColor(f.fillColor) : undefined); return }
     if (quantityItem && scale && !tracing) {
       const line = quantityLine(quantityItem)
-      draw(p, quantityLabel(p, scale.mmPerPoint, quantityMark(), quantityItem.code, quantityItem.style.showCode), 'perimeter', cssColor(quantityItem.style.color), quantityItem.style.size, line.width, true, undefined, undefined, line.dash, quantityItem.style.opacity); return
+      draw(p, quantityLabel(p, scale.mmPerPoint, quantityMark(), quantityItem.code, quantityItem.style.showCode), kind, cssColor(quantityItem.style.color), quantityItem.style.size, line.width, true, undefined, undefined, line.dash, quantityItem.style.opacity); return
     }
     draw(p, tracing ? 'なぞって合わせる' : scale ? measureText(p, { ...scale, kind }) : '', kind, cssColor(f.color), f.fontSize, f.borderWidth, true)
   }
@@ -127,22 +130,28 @@ export function useMeasurementInteraction(props: Props) {
       const a = props.store.create({ pageIndex: props.pageIndex, kind: 'cloudPolygon', rect, vertices: p, color: f.color, borderWidth: f.borderWidth, opacity: f.opacity, interiorColor: f.fillColor, cloudIntensity: f.cloudIntensity })
       clear(); props.store.selectOnly(a.id); props.select(a.id); return
     }
-    const kind = quantityItem ? 'perimeter' : isMeasureTool(props.tool) ? props.tool : null
+    const kind = quantityItem ? quantityKind : isMeasureTool(props.tool) ? props.tool : null
     if (!kind || p.length < (kind === 'area' ? 3 : 2)) return
     const scale = props.store.getScale(props.pageIndex)
     if (!scale) return
     const f = quantityItem ? { color: quantityItem.style.color, fontSize: quantityItem.style.size, borderWidth: quantityLine(quantityItem).width, opacity: quantityItem.style.opacity } : props.defaults[kind], measure = { ...scale, kind }
     const quantity = quantityItem ? quantityMark(crypto.randomUUID()) : null
-    const text = quantity ? quantityLabel(p, scale.mmPerPoint, quantity, quantityItem!.code, quantityItem!.style.showCode) : measureText(p, measure)
-    const a = props.store.create({ pageIndex: props.pageIndex, kind, quantity, quantityDash: quantityItem ? quantityLine(quantityItem).dash : undefined, vertices: p, measure, text,
-      rect: measureBounds(p, kind, text, f.fontSize), color: f.color, fontSize: f.fontSize, borderWidth: f.borderWidth, opacity: f.opacity })
-    clear(); props.store.selectOnly(a.id); props.select(a.id)
+    const vertices = p.map(point => [...point] as Point)
+    const save = (mark: QuantityMark | null) => {
+      const text = mark ? quantityLabel(vertices, scale.mmPerPoint, mark, quantityItem!.code, quantityItem!.style.showCode) : measureText(vertices, measure)
+      const a = props.store.create({ pageIndex: props.pageIndex, kind, quantity: mark, quantityDash: quantityItem ? quantityLine(quantityItem).dash : undefined, vertices, measure, text,
+        rect: measureBounds(vertices, kind, text, f.fontSize), color: f.color, fontSize: f.fontSize, borderWidth: f.borderWidth, opacity: f.opacity })
+      props.store.selectOnly(a.id); props.select(a.id)
+    }
+    clear()
+    if (quantity && quantityDimensions(quantity.method).some(key => !quantity[key])) setPending({ mark: quantity, save })
+    else save(quantity)
   }
-  useEffect(() => { clear(); return clear }, [props.tool, props.pageIndex, tracing, props.quantityItem?.id])
+  useEffect(() => { clear(); setPending(null); return clear }, [props.tool, props.pageIndex, tracing, props.quantityItem?.id])
   useEffect(() => {
     if (!enabled) return
     const onKey = (event: KeyboardEvent) => {
-      if ((event.target as Element)?.matches('input,select,textarea,[contenteditable="true"]')) return
+      if (pending || (event.target as Element)?.matches('input,select,textarea,[contenteditable="true"]')) return
       if (!points.current.length && !tracing) return
       if (!['Backspace', 'Enter'].includes(event.key)) return
       event.preventDefault(); event.stopImmediatePropagation()
@@ -166,6 +175,7 @@ export function useMeasurementInteraction(props: Props) {
         return true
       }
     }
+    if (pending) return true
     if (!enabled) return false
     if (!tracing && !cloud && !props.store.getScale(props.pageIndex)) { scaleInteraction.request(props.pageIndex); return true }
     window.dispatchEvent(new CustomEvent('karu-pdf:measurement-start', { detail: props.pageIndex }))
@@ -209,5 +219,6 @@ export function useMeasurementInteraction(props: Props) {
   }
   return { pointerDown, pointerMove, pointerUp, doubleClick: () => { if (enabled) { commit(); return true }; return false },
     cancel: () => { if (!points.current.length && !down.current && !vertex.current) return false; clear(); return true },
-    draft: <g ref={draftRef} className="measurement-draft" pointerEvents="none" /> }
+    draft: <g ref={draftRef} className="measurement-draft" pointerEvents="none" />,
+    dialog: pending && <QuantityDimensionsDialog mark={pending.mark} complete={mark => { setPending(null); if (mark) pending.save(mark) }} /> }
 }

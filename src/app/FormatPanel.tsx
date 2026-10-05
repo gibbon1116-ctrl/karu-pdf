@@ -1,5 +1,5 @@
-import { quantityValue } from '../core/quantity'
-import { polylineLength } from '../core/measure'
+import { quantityLabel, quantityPoints, quantityDimensions, QUANTITY_DIMENSIONS } from '../core/quantity'
+import { polygonArea, polylineLength } from '../core/measure'
 import { quantityMethod } from '../core/countFixtures'
 import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
@@ -14,6 +14,7 @@ import { getActiveTextEditorSnapshot, insertIntoActiveTextEditor, subscribeActiv
 import { SnippetPanel } from './SnippetPanel'
 import { FixtureUiContext } from './documentModel'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
+import { QuantityValueInput } from '../editor/QuantityValueInput'
 
 const COLORS: Array<{ name: string; value: RGB; css: string }> = [
   { name: '赤', value: [1, 0, 0], css: '#e00000' },
@@ -186,9 +187,10 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
         {!fixture && <option value="">項目を選んでください</option>}{store.getCountFixtures().filter(f => quantityMethod(f) === (quantity?.method ?? 'click')).map(f => <option key={f.id} value={f.id}>{f.code} {f.name}</option>)}
       </select></label>}
       {quantity && activeSelection?.measure && activeSelection.vertices && store.selectedIds().length === 1 && <>
-        <p>平面の長さ　{(polylineLength(activeSelection.vertices) * activeSelection.measure.mmPerPoint / 1000).toFixed(2)} m</p>
-        {quantity.method === 'polyline' && <QuantityAddInput key={activeSelection.id} value={quantity.addM ?? 0} commit={n => store.updateQuantityAdd(activeSelection.id, n)} />}
-        <p>この拾い　{quantityValue(activeSelection.vertices, activeSelection.measure.mmPerPoint, quantity).toFixed(2)} {quantity.method === 'polyline' ? 'm' : quantity.method === 'polygon' || quantity.method === 'lengthHeight' ? 'm²' : 'm³'}</p>
+        <p>{quantityPoints(quantity.method) === 'polygon' ? '面積' : quantity.method === 'polyline' ? '平面の長さ' : '長さ'}　{(quantityPoints(quantity.method) === 'polygon' ? polygonArea(activeSelection.vertices) * activeSelection.measure.mmPerPoint ** 2 / 1e6 : polylineLength(activeSelection.vertices) * activeSelection.measure.mmPerPoint / 1000).toFixed(2)} {quantityPoints(quantity.method) === 'polygon' ? 'm²' : 'm'}</p>
+        {quantity.method === 'polyline' && <QuantityValueInput label="立上り・立下りの加算" key={activeSelection.id} value={quantity.addM ?? 0} commit={n => store.updateQuantityAdd(activeSelection.id, n)} />}
+        {quantityDimensions(quantity.method).map(key => <QuantityValueInput key={activeSelection.id + key} label={QUANTITY_DIMENSIONS[key]} value={quantity[key] ?? 0} commit={n => store.updateQuantityValues(activeSelection.id, { [key]: n })} />)}
+        <p>この拾い　{quantityLabel(activeSelection.vertices, activeSelection.measure.mmPerPoint, quantity, '', false)}</p>
       </>}
     </aside>
   }
@@ -306,15 +308,4 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     </fieldset>}
     {target && <p className="format-target">{activeSelection ? '選択中の書き込み' : '次に作る書き込み'}</p>}
   </aside>
-}
-
-function QuantityAddInput({ value, commit }: { value: number; commit(value: number): void }) {
-  const [draft, setDraft] = useState(value.toFixed(2))
-  useEffect(() => setDraft(value.toFixed(2)), [value])
-  const save = () => {
-    const n = Number(draft)
-    if (draft.trim() && Number.isFinite(n) && n >= 0 && n <= 1000 && /^\d+(?:\.\d{0,2})?$/.test(draft)) { commit(n); setDraft(n.toFixed(2)) }
-    else setDraft(value.toFixed(2))
-  }
-  return <label>立上り・立下りの加算<span className="quantity-input-unit"><input aria-label="立上り・立下りの加算" type="number" min="0" max="1000" step="0.01" value={draft} onChange={e => setDraft(e.currentTarget.value)} onBlur={save} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() } }} />m</span></label>
 }

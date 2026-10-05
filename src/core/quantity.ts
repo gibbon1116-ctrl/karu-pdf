@@ -6,6 +6,10 @@ export interface QuantityMark {
   version: 1; id: string; itemId: string; method: Exclude<QuantityMethod, 'click'>
   addM?: number; heightM?: number; widthM?: number; depthM?: number
 }
+export const QUANTITY_DIMENSIONS = { heightM: '高さ', widthM: '幅', depthM: '深さ' } as const
+export function quantityDimensions(method: QuantityMethod): readonly (keyof typeof QUANTITY_DIMENSIONS)[] {
+  return method === 'lengthHeight' ? ['heightM'] : method === 'polygonDepth' ? ['depthM'] : method === 'lengthWidthDepth' ? ['widthM', 'depthM'] : []
+}
 export function parseQuantityMark(raw: string | null): QuantityMark | null {
   if (!raw || raw.length > 400) return null
   try {
@@ -39,14 +43,15 @@ const number = (n: number) => n.toLocaleString('ja-JP', { minimumFractionDigits:
 export function quantityLabel(points: readonly Point[], mmPerPoint: number, mark: QuantityMark, code: string, showCode: boolean): string {
   const length = number(polylineLength(points) * mmPerPoint / 1000)
   const area = number(polygonArea(points) * mmPerPoint ** 2 / 1e6)
-  const value = number(quantityValue(points, mmPerPoint, mark))
+  const value = quantityDimensions(mark.method).some(key => mark[key] === undefined) ? '?' : number(quantityValue(points, mmPerPoint, mark))
+  const dimension = (key: keyof typeof QUANTITY_DIMENSIONS) => mark[key] === undefined ? '?' : number(mark[key])
   let label: string
   switch (mark.method) {
     case 'polyline': label = `${mark.addM ? `${length}+${number(mark.addM)}=` : ''}${value} m`; break
     case 'polygon': label = `${value} m²`; break
-    case 'lengthHeight': label = `${length}×H${number(mark.heightM ?? 0)}=${value} m²`; break
-    case 'polygonDepth': label = `${area}×D${number(mark.depthM ?? 0)}=${value} m³`; break
-    case 'lengthWidthDepth': label = `${length}×W${number(mark.widthM ?? 0)}×D${number(mark.depthM ?? 0)}=${value} m³`; break
+    case 'lengthHeight': label = `${length}×H${dimension('heightM')}=${value} m²`; break
+    case 'polygonDepth': label = `${area}×D${dimension('depthM')}=${value} m³`; break
+    case 'lengthWidthDepth': label = `${length}×W${dimension('widthM')}×D${dimension('depthM')}=${value} m³`; break
   }
   return showCode && code ? `${code} ${label}` : label
 }

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import mupdf from 'mupdf'
-import { COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, FIXTURE_PRESETS, MAX_COUNT_FIXTURE_BYTES, MAX_COUNT_SAMPLE_BASE64, countHex, countRgb, nextCountStyle, parseCountFixtureSample, parseCountFixtures, readCountFixtures, serializeCountFixtures, writeCountFixtures, type CountFixture, type CountFixtureSample } from '../src/core/countFixtures'
+import { COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, FIXTURE_PRESETS, MAX_COUNT_FIXTURE_BYTES, MAX_COUNT_SAMPLE_BASE64, countHex, countRgb, sameFixtureAppearance, nextCountStyle, parseCountFixtureSample, parseCountFixtures, readCountFixtures, serializeCountFixtures, writeCountFixtures, type CountFixture, type CountFixtureSample } from '../src/core/countFixtures'
 import { countMarkerData, countPdfPath, countSvgPath } from '../src/editor/countMarkers'
 import { createCountCsv } from '../src/app/annotationCsv'
 const defaultStyle = nextCountStyle([])
@@ -194,4 +194,30 @@ it('round-trips quantity fields and rejects entire invalid items', () => {
  expect(FIXTURE_PRESETS.電気設備.filter(f => f.kind === 'length')).toHaveLength(13)
  expect(FIXTURE_PRESETS.機械設備.filter(f => f.kind === 'length')).toHaveLength(6)
  expect(FIXTURE_PRESETS.電気設備.find(f => f.code === 'CV')).toMatchObject({ name: 'ケーブル（CV）', method: 'polyline', kind: 'length' })
+})
+
+it('round-trips every area/volume kind-method pair and dimension defaults from presets', () => {
+ const presets = FIXTURE_PRESETS['仮設・土工']
+ expect(presets).toHaveLength(8)
+ expect(new Set(presets.map(p => p.method))).toEqual(new Set(['polygon', 'lengthHeight', 'polygonDepth', 'lengthWidthDepth']))
+ const items = presets.map((p, i): CountFixture => ({ ...fixture(String(i)), ...p, order: i, line: { width: 2, dash: 'dashed' } }))
+ expect(parseCountFixtures(serializeCountFixtures(items))).toEqual(items)
+ expect(presets.every(p => p.code.length <= 16)).toBe(true)
+ expect(presets.find(p => p.code === '外部足場')?.defaults?.heightM).toBeUndefined()
+ expect(presets.find(p => p.code === '根切り')?.defaults?.depthM).toBeUndefined()
+ expect(presets.find(p => p.code === '溝掘削')?.defaults).toEqual({ widthM: .6, depthM: .8 })
+ for (const p of items) {
+  const wrong = { ...p, kind: p.kind === 'area' ? 'volume' : 'area' }
+  expect(parseCountFixtures(JSON.stringify({ version: 1, fixtures: [wrong] }))).toEqual([])
+ }
+})
+
+it('distinguishes area/volume methods while matching color, line width and dash', () => {
+ const area: CountFixture = { ...fixture(), kind: 'area', method: 'polygon' }
+ expect(sameFixtureAppearance(area, { ...area, id: 'b' })).toBe(true)
+ expect(sameFixtureAppearance(area, { ...area, method: 'lengthHeight' })).toBe(false)
+ const volume: CountFixture = { ...area, kind: 'volume', method: 'polygonDepth' }
+ expect(sameFixtureAppearance(volume, { ...volume, method: 'lengthWidthDepth' })).toBe(false)
+ expect(sameFixtureAppearance(area, { ...area, line: { width: 2, dash: 'solid' } })).toBe(false)
+ expect(sameFixtureAppearance(area, { ...area, line: { width: 1.5, dash: 'dashed' } })).toBe(false)
 })

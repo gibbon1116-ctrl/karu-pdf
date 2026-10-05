@@ -1,4 +1,4 @@
-import { quantityLabel, quantityValue, type QuantityMark } from '../core/quantity'
+import { quantityLabel, quantityValue, quantityDimensions, type QuantityMark } from '../core/quantity'
 import { quantityKind, quantityMethod, quantityLine, type QuantityLineStyle } from '../core/countFixtures'
 import { nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type LegacyChangeData, type Point, type Rect, type RGB, type SymbolName } from '../core/annotations'
 import type { Quad } from 'mupdf'
@@ -482,11 +482,18 @@ export class AnnotationStore {
     a.text = this.quantityText(a); if (a.vertices && a.measure) a.rect = measureBounds(a.vertices, a.measure.kind, a.text, a.fontSize)
   }
   updateQuantityAdd(id: string, addM: number): void {
-    if (!Number.isFinite(addM) || addM < 0 || addM > 1000 || Math.abs(addM * 100 - Math.round(addM * 100)) > 1e-8) return
+    this.updateQuantityValues(id, { addM })
+  }
+  updateQuantityValues(id: string, values: Partial<Pick<QuantityMark, 'addM' | 'heightM' | 'widthM' | 'depthM'>>): void {
     const current = this.get(id)
-    if (!current?.quantity || current.quantity.method !== 'polyline' || (current.quantity.addM ?? 0) === addM) return
+    if (!current?.quantity) return
+    const allowed: readonly string[] = current.quantity.method === 'polyline' ? ['addM'] : quantityDimensions(current.quantity.method)
+    const entries = Object.entries(values)
+    if (!entries.length || entries.some(([key, n]) => !allowed.includes(key) || typeof n !== 'number' || !Number.isFinite(n) || n < 0 || n > 1000 || Math.abs(n * 100 - Math.round(n * 100)) > 1e-8)) return
+    if (entries.every(([key, n]) => (current.quantity![key as keyof typeof values] ?? 0) === n)) return
     this.mutate(id, a => {
-      a.quantity = { ...a.quantity! }; delete a.quantity.addM; if (addM) a.quantity.addM = addM
+      a.quantity = { ...a.quantity!, ...values }
+      if (!a.quantity.addM) delete a.quantity.addM
       a.text = this.quantityText(a); a.rect = measureBounds(a.vertices!, a.measure!.kind, a.text, a.fontSize)
     })
   }

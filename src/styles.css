@@ -548,7 +548,7 @@ button, input { font: inherit; }
 .fixture-action-row button, .fixture-panel-controls > button { padding: 2px 4px; font-size: 12px; }
 .fixture-fields { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .fixture-panel-controls > label { display: block; margin: 6px 0; font-size: 12px; }
-.fixture-panel input[type="search"], .fixture-dialog input:not([type="checkbox"]):not([type="color"]), .fixture-dialog textarea { width: 100%; box-sizing: border-box; }
+.fixture-panel input[type="search"], .fixture-dialog input:not([type="checkbox"]):not([type="color"]):not([type="radio"]), .fixture-dialog textarea { width: 100%; box-sizing: border-box; }
 .fixture-groups { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; margin-top: 6px; }
 .fixture-list-heading { position: sticky; z-index: 1; top: 0; display: grid; grid-template-columns: 22px 22px 24px 48px minmax(0, 1fr) 34px 40px; gap: 3px; align-items: center; min-height: 24px; border-bottom: 1px solid #aaa; background: #ededed; font-size: 10px; }
 .fixture-list-heading > span:nth-last-child(-n+2) { text-align: right; font-size: 8.5px; white-space: nowrap; }
@@ -585,12 +585,14 @@ button, input { font: inherit; }
 .fixture-dialog-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; min-height: 0; overflow: auto; padding: 0 16px 12px; }
 .fixture-dialog-details, .fixture-dialog-appearance { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .fixture-dialog-details > label, .fixture-dialog-appearance label { display: block; font-size: 13px; }
-.fixture-dialog-details input:not([type="checkbox"]), .fixture-dialog-details textarea { display: block; padding: 4px 6px; }
+.fixture-dialog-details input:not([type="checkbox"]):not([type="radio"]), .fixture-dialog-details textarea { display: block; padding: 4px 6px; }
 .fixture-dialog-details textarea { height: 64px; }
 .fixture-dialog-details .fixture-fields { margin: 0; gap: 12px; }
 .fixture-dialog-details .fixture-fields label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .fixture-dialog-details .fixture-preview { flex: 0 0 auto; height: 120px; }
 .fixture-dialog-details p { margin: 0; font-size: 13px; }
+.fixture-dialog-details fieldset { margin: 0; padding: 6px 10px; }
+.fixture-dialog-details fieldset > label { display: inline-flex; align-items: center; gap: 4px; margin-right: 14px; font-size: 13px; }
 .fixture-dialog-appearance fieldset { min-width: 0; margin: 0; padding: 8px 10px; }
 .fixture-dialog-appearance input[type="color"] { display: block; margin-top: 4px; }
 .fixture-editor-dialog .dialog-actions { display: flex; flex: 0 0 auto; justify-content: flex-end; gap: 8px; margin: 0; padding: 10px 16px; border-top: 1px solid #ccc; background: #fff; }
@@ -614,3 +616,5 @@ button, input { font: inherit; }
 .quantity-preview { display: flex; align-items: center; gap: 8px; }
 .quantity-input-unit { display: flex; align-items: center; gap: 6px; }
 .quantity-input-unit input { flex: 1; min-width: 0; }
+.quantity-dimensions-dialog { width: min(320px, 90vw); }
+.quantity-dimensions-dialog form { display: flex; flex-direction: column; gap: 12px; }
