@@ -405,9 +405,13 @@ for (const [name, kind] of [['蛍光ペン', 'highlight'], ['手書き', 'ink']]
 for (const [name, kind] of [['文字ハイライト', 'textHighlight'], ['文字に下線', 'underline'], ['文字に取り消し線', 'strikeout']] as const) {
   test(`${name}は文字を2回選んで2つ続けて作れる`, async ({ page }) => {
     await open(page)
-    const bounds = await searchBounds(page)
+    const measured = await searchBounds(page)
+    const viewerBefore = (await page.getByTestId('viewer').boundingBox())!
     const ids = (await annotations(page)).map(a => a.id)
     await choose(page, '文字に印', name)
+    // A longer tool label can wrap the toolbar and move the viewer; follow it.
+    const viewerAfter = (await page.getByTestId('viewer').boundingBox())!
+    const bounds = { ...measured, x: measured.x + viewerAfter.x - viewerBefore.x, y: measured.y + viewerAfter.y - viewerBefore.y }
     for (let i = 0; i < 2; i += 1) {
       await page.mouse.move(bounds.x + 2, bounds.y + bounds.height / 2)
       await page.mouse.down()

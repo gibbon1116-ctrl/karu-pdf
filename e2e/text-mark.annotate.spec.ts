@@ -33,8 +33,9 @@ async function textBounds(page: Page, text = 'Sample page 1') {
   const polygon = page.locator('.search-highlight-layer polygon.active')
   await expect(polygon).toBeVisible()
   const box = await polygon.boundingBox()
-  if (!box) throw new Error('選択対象の文字が見つかりません。')
-  return box
+  const viewer = await page.getByTestId('viewer').boundingBox()
+  if (!box || !viewer) throw new Error('選択対象の文字が見つかりません。')
+  return { ...box, viewerX: viewer.x, viewerY: viewer.y }
 }
 
 async function chooseMarkTool(page: Page, name: '文字を選択' | '文字ハイライト' | '文字に下線' | '文字に取り消し線'): Promise<void> {
@@ -42,7 +43,11 @@ async function chooseMarkTool(page: Page, name: '文字を選択' | '文字ハ�
   await page.getByRole('menuitemcheckbox', { name: new RegExp(`^${name}`) }).click()
 }
 
-async function dragText(page: Page, box: { x: number; y: number; width: number; height: number }): Promise<void> {
+async function dragText(page: Page, measured: { x: number; y: number; width: number; height: number; viewerX: number; viewerY: number }): Promise<void> {
+  // Choosing a tool with a longer label can wrap the toolbar and move the viewer; follow it.
+  const viewer = await page.getByTestId('viewer').boundingBox()
+  if (!viewer) throw new Error('表示領域がありません。')
+  const box = { ...measured, x: measured.x + viewer.x - measured.viewerX, y: measured.y + viewer.y - measured.viewerY }
   await page.mouse.move(box.x + 2, box.y + box.height / 2)
   await page.mouse.down()
   await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 8 })
