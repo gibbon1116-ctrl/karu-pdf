@@ -187,7 +187,7 @@ it('round-trips specifications, aggregation, mark locations and all items of a s
    expect(store.quantityIndex().total('cv')).toBeCloseTo(24.7);expect(store.quantityIndex().total('em')).toBeCloseTo(12.35)
    expect(store.quantityIndex().byFloorRoom('led').get('1階')?.get('事務室')).toBe(1)
    const page=saved.loadPage(0),annots=page.getAnnotations(),object=annots[0].getObject(), raw=object.get('KaruQuantity')
-   try {await fs.writeFile('work/spec-05c-saved-json-example.json',JSON.stringify({KaruCountFixtures:{version:1,fixtures:readCountFixtures(saved)},KaruCount:listAnnotations(saved,1)[0].count,KaruQuantity:JSON.parse(raw.asString())},null,2))}finally{raw.destroy();object.destroy();annots.forEach(a=>a.destroy());page.destroy()}
+   try {expect(JSON.parse(raw.asString())).toEqual(q)}finally{raw.destroy();object.destroy();annots.forEach(a=>a.destroy());page.destroy()}
   } finally {saved.destroy()}
  }finally{doc.destroy()}
 })
