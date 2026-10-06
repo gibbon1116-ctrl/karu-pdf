@@ -755,7 +755,7 @@ export default function App() {
     if (!session || !beginSave()) return
     setError('')
     try {
-      let handle = session.handle
+      let handle = saveAs ? null : session.handle
       const needsDestination = saveAs || !handle
       if (needsDestination && window.showSaveFilePicker) handle = await pickSaveHandle(session.name, session.handle ?? undefined)
       if (!needsDestination && handle && !await requestWritePermission(handle)) {
@@ -774,8 +774,10 @@ export default function App() {
       session.fileOutdated = true
       if (handle) {
         await writePdf(handle, result.bytes)
-        session.handle = handle
+        session.rebindToFile(handle, handle.name ?? session.name, result.bytes.byteLength)
         await saveLastOpenedHandle(handle, session.name)
+        persistView(session)
+        if (split.rightId === session.docId) updateSplit({ ...split, rightName: session.name })
         refreshRecent()
       } else {
         downloadPdf(result.bytes, session.name)
@@ -791,7 +793,7 @@ export default function App() {
     } finally {
       endSave()
     }
-  }, [beginSave, endSave, pool, refreshRecent, refreshTabs, showStatus, split.enabled])
+  }, [beginSave, endSave, persistView, pool, refreshRecent, refreshTabs, showStatus, split, updateSplit])
 
   const prepareOutput = useCallback(async (bake: boolean): Promise<PreparedOutputResult | null> => {
     const session = activeRef.current

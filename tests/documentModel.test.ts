@@ -62,6 +62,50 @@ describe('DocumentTabsModel', () => {
 })
 
 describe('DocumentSession の保存量管理', () => {
+  it('保存先の名前・サイズ・ハンドルだけを切り替え、文書・編集・履歴・表示を保つ', () => {
+    const original = handle('A.pdf'), destination = handle('B.pdf')
+    const target = session(1, original)
+    const store = target.annotationStore
+    const annotation = store.create({ pageIndex: 0, kind: 'square', rect: [10, 20, 50, 60] })
+    store.update(annotation.id, { borderWidth: 3 })
+    store.undo()
+    target.fileOutdated = true
+    target.sidePanelTab = 'annotations'
+    target.view = { page: 1, zoom: 1.5, scrollLeft: 20, scrollTop: 30 }
+    target.viewHistory.remember({ pageIndex: 0, x: 0, y: 0.1, widthRatio: 1, scrolling: false })
+    target.recordSave('incremental', 120)
+    const view = target.view, pageSizes = target.pageSizes, edits = store.toEdits()
+    const saveMode = target.nextSaveMode()
+
+    target.rebindToFile(destination, destination.name!, 130)
+
+    expect({ name: target.name, byteLength: target.byteLength, handle: target.handle })
+      .toEqual({ name: 'B.pdf', byteLength: 130, handle: destination })
+    expect(target.docId).toBe('doc-1')
+    expect(target.annotationStore).toBe(store)
+    expect(store.toEdits()).toEqual(edits)
+    expect(target.dirty).toBe(true)
+    expect(target.fileOutdated).toBe(true)
+    expect(target.view).toBe(view)
+    expect(target.pageSizes).toBe(pageSizes)
+    expect(target.sidePanelTab).toBe('annotations')
+    expect(target.viewHistory.canBack).toBe(true)
+    expect(target.incrementalSaveCount).toBe(1)
+    expect(target.incrementalGrowth).toBe(19)
+    expect(target.nextSaveMode()).toBe(saveMode)
+    expect(store.canUndo()).toBe(true)
+    expect(store.canRedo()).toBe(true)
+    store.redo()
+    expect(store.get(annotation.id)?.borderWidth).toBe(3)
+    store.undo()
+    expect(store.toEdits()).toEqual(edits)
+
+    target.rebindToFile(destination, destination.name!, 140)
+    expect(target.byteLength).toBe(140)
+    expect(target.handle).toBe(destination)
+    expect(target.docId).toBe('doc-1')
+  })
+
   it('古いしおりタブの保存値はページへ戻す', () => {
     expect(normalizeSidePanelTab('outline')).toBe('pages')
     expect(normalizeSidePanelTab('search')).toBe('search')

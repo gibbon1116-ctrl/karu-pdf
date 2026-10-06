@@ -45,9 +45,7 @@ export class DocumentSession {
   readonly editRestriction: string | null
   readonly viewHistory = new ViewHistory()
   readonly docId: string
-  readonly name: string
-  readonly byteLength: number
-  handle: PdfFileHandle | null
+  private fileIdentity: DocumentIdentity
   pageSizes: PageSize[]
   readonly annotationStore = new AnnotationStore()
   view: DocumentViewState
@@ -69,9 +67,7 @@ export class DocumentSession {
   constructor(init: DocumentSessionInit) {
     this.editRestriction = init.editRestriction ?? null
     this.docId = init.docId
-    this.name = init.name
-    this.byteLength = init.byteLength
-    this.handle = init.handle
+    this.fileIdentity = { name: init.name, byteLength: init.byteLength, handle: init.handle }
     this.pageSizes = init.pageSizes
     this.lastSavedByteLength = init.byteLength
     this.lastFullByteLength = init.byteLength
@@ -83,6 +79,16 @@ export class DocumentSession {
       scrollLeft: init.view?.scrollLeft ?? 0,
       scrollTop: init.view?.scrollTop ?? 0,
     }
+  }
+
+  get name(): string { return this.fileIdentity.name }
+  get byteLength(): number { return this.fileIdentity.byteLength }
+  get handle(): PdfFileHandle | null { return this.fileIdentity.handle }
+
+  // Call only after the destination stream has closed successfully. The Worker,
+  // edits, history and view continue to belong to the same in-memory document.
+  rebindToFile(handle: PdfFileHandle, name: string, byteLength: number): void {
+    this.fileIdentity = { handle, name, byteLength }
   }
 
   get sidePanelTab(): SidePanelTab { return this._sidePanelTab }
