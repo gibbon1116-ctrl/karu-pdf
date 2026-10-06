@@ -49,7 +49,7 @@ async function polygon(page: Page, x: number, y: number) {
 async function line(page: Page, x: number, y: number) {
  await click(page,x,y); await click(page,x+72,y); await page.keyboard.press('Enter')
 }
-const value = (page: Page, name: string) => page.getByRole('button', { name, exact: true }).locator('.fixture-row-count').first()
+const value = (page: Page, name: string) => page.getByRole('button', { name, exact: true }).locator('..').locator('.fixture-row-count').first()
 const labels = (page: Page) => page.locator('.measurement-shape .measurement-label')
 
 test('four area/volume methods: prompts, format Undo, totals, CSV and PDF reload', async ({ page }) => {
@@ -101,14 +101,15 @@ test('four area/volume methods: prompts, format Undo, totals, CSV and PDF reload
  await page.evaluate(() => { Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined }) })
  const downloaded = page.waitForEvent('download')
  await page.getByRole('button', { name: '数量をCSVに書き出す', exact: true }).click()
+  await page.getByRole('dialog', { name: '数量をCSVに書き出す', exact: true }).getByRole('button', { name: '書き出す', exact: true }).click()
  const download = await downloaded, stream = await download.createReadStream(), chunks: Buffer[] = []
  for await (const chunk of stream!) chunks.push(chunk)
  const csv = Buffer.concat(chunks).toString('utf8')
  for (const row of [
-  '仮設,内部足場,内部足場（囲む）,面積,m²,6.45,6.45,6.45',
-  '仮設,外部足場,外部足場（長さ×高さ）,面積,m²,8.89,8.89,8.89',
-  '土工,根切り,根切り（囲む×深さ）,体積,m³,7.74,7.74,7.74',
-  '土工,溝掘削,ケーブル・配管の溝掘削（長さ×幅×深さ）,体積,m³,1.22,1.22,1.22',
+  '仮設,内部足場,内部足場（囲む）,,面積,m²,全図面,6.45,6.45,6.45',
+  '仮設,外部足場,外部足場（長さ×高さ）,,面積,m²,全図面,8.89,8.89,8.89',
+  '土工,根切り,根切り（囲む×深さ）,,体積,m³,全図面,7.74,7.74,7.74',
+  '土工,溝掘削,ケーブル・配管の溝掘削（長さ×幅×深さ）,,体積,m³,全図面,1.22,1.22,1.22',
  ]) expect(csv).toContain(row)
  await download.delete()
  const expectedLabels = await labels(page).allTextContents()
@@ -117,7 +118,7 @@ test('four area/volume methods: prompts, format Undo, totals, CSV and PDF reload
  await page.getByRole('tab', { name: '数量', exact: true }).click()
  await expect(labels(page)).toHaveText(expectedLabels)
  for (const [key, expected] of [['internal','6.45'],['external','8.89'],['root','7.74'],['trench','1.22']] as const) {
-  const row = page.getByRole('button', { name: names[key], exact: true }).locator('.fixture-row-count')
+  const row = page.getByRole('button', { name: names[key], exact: true }).locator('..').locator('.fixture-row-count')
   await expect(row).toHaveText([expected,expected])
  }
  await page.getByRole('button', { name: names.internal + 'の表示切替', exact: true }).click()

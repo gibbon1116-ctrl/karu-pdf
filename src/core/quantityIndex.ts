@@ -2,6 +2,22 @@ import type { Point } from './annotations'
 import { countFixtureId, type CountMark } from './counts'
 import { quantityMethod, type CountFixture } from './countFixtures'
 import { quantityValue, type QuantityMark } from './quantity'
+import { normalizeFloor } from './location'
+/** Recognized floors precede free-form names; basement numbers run down to up. */
+export function compareFloors(a: string, b: string): number {
+  const rank = (s: string): [number, number] => {
+    const n = normalizeFloor(s)
+    let m: RegExpMatchArray | null
+    if ((m = n.match(/^B(\d+)階$/))) return [0, -Number(m[1])]
+    if ((m = n.match(/^(\d+)階$/))) return [1, Number(m[1])]
+    if ((m = n.match(/^M(\d+)階$/))) return [1, Number(m[1]) + .5]
+    if (n === 'RF') return [2, 0]
+    if ((m = n.match(/^PH(?:(\d+))?階$/))) return [3, Number(m[1] ?? 0)]
+    return [4, 0]
+  }
+  const x = rank(a), y = rank(b)
+  return x[0] - y[0] || x[1] - y[1] || a.localeCompare(b, 'ja', { numeric: true })
+}
 export interface QuantityEntry {
   itemId: string; annotationId: string; pageIndex: number; floor?: string; room?: string
   value: number; routeCount?: number

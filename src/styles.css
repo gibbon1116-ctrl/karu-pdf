@@ -650,3 +650,23 @@ button, input { font: inherit; }
 .route-item input { width: 50px; }
 .route-item > span:first-of-type { flex: 1; min-width: 100px; }
 .route-items select { max-width: 100%; }
+
+/* Quantity totals remain separate buttons from the item selection button. */
+.fixture-row { grid-template-columns: 22px 24px 48px minmax(0, 1fr) 34px; }
+.fixture-groups li > button.fixture-total-button { flex: 0 0 40px; width: 40px; justify-content: flex-end; border: 0; background: transparent; font-size: 12px; }
+.fixture-total-button:not(:disabled), .fixture-summary-totals button:not(:disabled) { color: #0068b7; text-decoration: underline; }
+.fixture-summary-totals button { border: 0; background: transparent; padding: 0; font: inherit; }
+.quantity-breakdown { position: absolute; z-index: 3; bottom: 8px; left: 8px; right: 8px; box-shadow: 0 2px 10px #0002; max-height: 45%; min-height: 110px; overflow: auto; border: 1px solid #a5b6c9; border-radius: 4px; background: #f7faff; padding: 8px; margin-top: 6px; font-size: 12px; }
+.quantity-breakdown-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.quantity-breakdown p { margin: 6px 0; }
+.quantity-breakdown-tabs { display: flex; gap: 5px; margin-bottom: 6px; }
+.quantity-breakdown-tabs button[aria-pressed="true"] { background: #dcecff; border-color: #0068b7; }
+.quantity-breakdown-page { width: 100%; display: grid; grid-template-columns: 65px minmax(0,1fr) auto; gap: 6px; text-align: left; padding: 7px 3px; border: 0; border-bottom: 1px solid #d2dce7; background: transparent; }
+.quantity-breakdown-page small { grid-column: 1 / -1; text-align: right; }
+.quantity-breakdown-floor, .quantity-breakdown-room { display: block; width: 100%; padding: 6px; text-align: left; border: 0; background: transparent; }
+.quantity-breakdown-floor { font-weight: bold; }
+.quantity-breakdown-room { padding-left: 22px; }
+.quantity-breakdown button:hover { background: #e3edfa; }
+.quantity-breakdown-total { text-align: right; font-weight: bold; }
+
+.fixture-panel { position: relative; }

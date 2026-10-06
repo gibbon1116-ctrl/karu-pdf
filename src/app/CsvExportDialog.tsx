@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
+import { QuantityNavigationContext } from './QuantityBreakdown'
+import type { QuantityIndex } from '../core/quantityIndex'
+import { createQuantityCsv, quantityCsvFileName, type QuantityCsvType } from './annotationCsv'
 import type { EditableAnnotation } from '../editor/AnnotationStore'
 import type { CountFixture } from '../core/countFixtures'
 import { CSV_KINDS, CSV_KIND_LABELS, csvAnnotations, createCsv, annotationCsvFileName, issueCsvFileName, type CsvKind, type CsvOptions } from './annotationCsv'
@@ -10,13 +13,14 @@ export default function CsvExportDialog({ annotations, fixtures, pdfName, pageCo
   onExport(csv: string, fileName: string): Promise<void>; onClose(): void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
+  const navigation = useContext(QuantityNavigationContext)
   const [kinds, setKinds] = useState<readonly CsvKind[]>(initialKinds)
   const [start, setStart] = useState(firstPage), [end, setEnd] = useState(lastPage)
   const [status, setStatus] = useState(initialStatus ?? 'all')
   const [saving, setSaving] = useState(false), [error, setError] = useState('')
   useEffect(() => { dialog.current?.showModal() }, [])
   const validRange = Number.isInteger(start) && Number.isInteger(end) && start >= 1 && end <= pageCount && start <= end
-  const options: CsvOptions = { firstPage: start, lastPage: end, issueStatus: status, fixtures }
+  const options: CsvOptions = { firstPage: start, lastPage: end, issueStatus: status, fixtures, drawingInfo: navigation?.drawingInfo }
   const count = validRange ? csvAnnotations(annotations, kinds, options).length : 0
   const reason = !kinds.length ? '書き出す種類を選んでください。' : !validRange ? 'ページ範囲を正しく指定してください。' : !count ? '指定した種類・ページ範囲・状態に対象がありません。' : ''
   return <dialog ref={dialog} className="csv-export-dialog" aria-labelledby="csv-export-title" onCancel={onClose}>
@@ -45,5 +49,28 @@ export default function CsvExportDialog({ annotations, fixtures, pdfName, pageCo
           .then(onClose).catch(reason => setError(String(reason))).finally(() => setSaving(false))
       }}>書き出す</button>
     </div>
+  </dialog>
+}
+
+export function QuantityCsvExportDialog({ index, fixtures, pdfName, pageIndex, onExport, onClose }: {
+  index: QuantityIndex; fixtures: readonly CountFixture[]; pdfName: string; pageIndex: number
+  onExport(csv: string, fileName: string): Promise<void>; onClose(): void
+}) {
+  const dialog = useRef<HTMLDialogElement>(null), navigation = useContext(QuantityNavigationContext)
+  const [type, setType] = useState<QuantityCsvType>('summary')
+  const [saving, setSaving] = useState(false), [error, setError] = useState('')
+  useEffect(() => { dialog.current?.showModal() }, [])
+  return <dialog ref={dialog} className="csv-export-dialog" aria-label="数量をCSVに書き出す" onCancel={onClose}>
+    <h2>数量をCSVに書き出す</h2>
+    <fieldset><legend>書き出す種類</legend>
+      <label><input type="radio" name="quantity-csv" checked={type === 'summary'} onChange={() => setType('summary')} />集計（項目ごとの全図面の合計）</label>
+      <label><input type="radio" name="quantity-csv" checked={type === 'detail'} onChange={() => setType('detail')} />明細（項目・ページ・場所ごと）</label>
+    </fieldset>
+    {error && <p role="alert">{error}</p>}
+    <div className="dialog-actions"><button disabled={saving} onClick={onClose}>閉じる</button><button disabled={saving} onClick={() => {
+      setSaving(true); setError('')
+      void onExport(createQuantityCsv(index, fixtures, pageIndex, type, navigation?.drawingInfo), quantityCsvFileName(pdfName, type))
+        .then(onClose).catch(e => { if (!(e instanceof DOMException && e.name === 'AbortError')) setError(String(e)) }).finally(() => setSaving(false))
+    }}>書き出す</button></div>
   </dialog>
 }

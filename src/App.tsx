@@ -1,3 +1,4 @@
+import { QuantityNavigationContext } from './app/QuantityBreakdown'
 import { DrawingInfoDialog } from './app/DrawingInfoDialog'
 import { DrawingUiContext } from './app/documentModel'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
@@ -1519,10 +1520,10 @@ export default function App() {
       getLastRasterizeMetrics: () => lastRasterizeMetricsRef.current,
       getMenuActions: () => [...menuActionsRef.current],
       exportIssueCsv: () => { const session = activeRef.current; return session ? createIssueCsv(allSessionAnnotations(session)) : '' },
-      exportCsv: (kinds) => { const session = activeRef.current; return session ? createCsv(allSessionAnnotations(session), kinds, { fixtures: session.annotationStore.getCountFixtures() }) : '' },
+      exportCsv: (kinds) => { const session = activeRef.current; return session ? createCsv(allSessionAnnotations(session), kinds, { fixtures: session.annotationStore.getCountFixtures(), drawingInfo: i => session.annotationStore.getDrawingInfo(i) }) : '' },
       exportAnnotationCsv: () => {
         const session = activeRef.current
-        return session ? createCsv(allSessionAnnotations(session), ['issue', 'count', 'text', 'callout', 'measure', 'shape', 'symbol', 'pen', 'markup'], { fixtures: session.annotationStore.getCountFixtures() }) : ''
+        return session ? createCsv(allSessionAnnotations(session), ['issue', 'count', 'text', 'callout', 'measure', 'shape', 'symbol', 'pen', 'markup'], { fixtures: session.annotationStore.getCountFixtures(), drawingInfo: i => session.annotationStore.getDrawingInfo(i) }) : ''
       },
       getHeaderFooterSettings: () => activeRef.current ? pool.getHeaderFooterSettings(activeRef.current.docId) : Promise.resolve(null),
       applyHeaderFooter: (settings, dateText = '2026年10月1日') => applyHeaderFooterSettings(settings, dateText),
@@ -1735,6 +1736,15 @@ export default function App() {
           <WorkspaceFailureProbe fail={workspaceFailure}>
           <DrawingUiContext.Provider value={{ edit: pageIndex => setDrawingDialog({ session: active, pageIndex }) }}>
           <ScaleInteractionContext.Provider value={{ request: i => openScale(i, true), tracePage: scaleTracing ? scaleDialog?.pageIndex ?? null : null, complete: p => { setScalePoints(p); setScaleTracing(false) } }}>
+          <QuantityNavigationContext.Provider value={{ drawingInfo: i => active.annotationStore.getDrawingInfo(i), navigate: (page, rect) => {
+            const viewer = viewerRef.current
+            if (!viewer || organizeRef.current) { active.view.page = page + 1; refreshTabs(); return }
+            if (!rect) { viewer.scrollToPage(page); return }
+            // scrollToPosition anchors at the upper third; offset to centre the mark.
+            const height = document.querySelector<HTMLElement>('[data-testid="viewer"]')?.clientHeight ?? 0
+            const y = (rect[1] + rect[3]) / 2 - height / (6 * (96 / 72) * viewer.getZoom())
+            viewer.scrollToPosition(page, (rect[0] + rect[2]) / 2, y)
+          } }}>
           <FixtureUiContext.Provider value={{ documents, select: () => void changeTool('count'), open: () => openSidePanel('fixtures', false), edit: id => {
             void ensureSessionFixtures(active, pool).then(() => setFixtureEdit({ session: active, id })).catch(reason => showStatus(String(reason)))
           } }}>
@@ -1771,6 +1781,7 @@ export default function App() {
           } : null}
           />
           </FixtureUiContext.Provider>
+          </QuantityNavigationContext.Provider>
           </ScaleInteractionContext.Provider>
           </DrawingUiContext.Provider>
           </WorkspaceFailureProbe>

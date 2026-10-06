@@ -4,16 +4,19 @@ import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { fixtureCode, nextCountStyle, quantityKind, QUANTITY_UNITS, type FixturePreset, type CountFixture } from '../core/countFixtures'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 import { ensureSessionFixtures, FixtureUiContext, type DocumentSession } from './documentModel'
-import { createCountCsv } from './annotationCsv'
+import QuantityBreakdown from './QuantityBreakdown'
 import { floorFromDrawingName } from '../core/location'
 import { annotationFilterLabel } from '../editor/annotationFilter'
 import { groupFixtures, moveCategory, moveFixture, stepFixture } from './fixtureOrder'
+const QuantityCsvExportDialog = lazy(() => import('./CsvExportDialog').then(m => ({ default: m.QuantityCsvExportDialog })))
 const FixtureDialog = lazy(() => import('./FixtureDialog'))
 const FixturePresetDialog = lazy(() => import('./FixturePresetDialog'))
 
 export default function FixturePanel({ session, pool }: { session: DocumentSession; pool: PdfWorkerPool }) {
   const store = session.annotationStore, ui = useContext(FixtureUiContext)
   const version = useSyncExternalStore(store.subscribe, store.getSnapshot)
+  const [breakdownId, setBreakdownId] = useState<string | null>(null), [csvOpen, setCsvOpen] = useState(false)
+  const closeBreakdown = useRef(() => setBreakdownId(null)).current
   const [search, setSearch] = useState(''), [collapsed, setCollapsed] = useState(new Set<string>()), [error, setError] = useState('')
   const [dialog, setDialog] = useState<{ initial: CountFixture; editing: boolean; duplicate?: boolean } | null>(null)
   const dragging = useRef<{ kind: 'fixture' | 'category'; id: string } | null>(null)
@@ -105,9 +108,8 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     }
     if (next.length !== fixtures.length) store.setCountFixtures(next)
   }
-  const csv = async () => {
-    const annotations = session.pageSizes.flatMap((_, i) => store.getPageAnnotations(i)), value = createCountCsv(annotations, fixtures, pageIndex)
-    const blob = new Blob([value], { type: 'text/csv;charset=utf-8' }), name = session.name.replace(/\.pdf$/i, '') + '_数量.csv'
+  const csv = async (value: string, name: string) => {
+    const blob = new Blob([value], { type: 'text/csv;charset=utf-8' })
     if (window.showSaveFilePicker) { const handle = await window.showSaveFilePicker({ suggestedName: name }); const writable = await handle.createWritable(); await writable.write(blob); await writable.close() }
     else { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 0) }
   }
@@ -123,7 +125,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     {!store.fixturesReady && <p role="status">数量拾いを読み込んでいます…</p>}
     <p className="fixture-count-summary" aria-live="polite">{selected ? <>
       <span className="fixture-summary-name">{quantityKind(selected) === 'count' ? <svg className="fixture-swatch" viewBox="-14 -14 28 28" aria-hidden="true"><CountMarker style={{ ...selected.style, size: 24, opacity: 1 }} showCode={false} /></svg> : <QuantitySwatch fixture={selected} />}<span title={`${fixtureCode(selected)} ${selected.name}`}>{fixtureCode(selected)} {selected.name}{'　'}</span></span>
-      <span className="fixture-summary-totals"><span>表示中の図面（p.{session.view.page}）: <strong>{format(selected, pageTotal(selected.id))}</strong>{unit(selected)}</span>{' ／ '}<span>全図面: <strong>{format(selected, total(selected.id))}</strong>{unit(selected)}</span></span>
+      <span className="fixture-summary-totals"><span>表示中の図面（p.{session.view.page}）: <strong>{format(selected, pageTotal(selected.id))}</strong>{unit(selected)}</span>{' ／ '}<button disabled={total(selected.id) === 0} aria-label={`${fixtureCode(selected)} ${selected.name}の全図面の内訳`} onClick={() => setBreakdownId(selected.id)}>全図面: <strong>{format(selected, total(selected.id))}</strong>{unit(selected)}</button></span>
     </> : '数量拾いの一覧で項目を選んでください'}</p>
     {store.visibleCountTotal(pageIndex) > 1000 && <p role="status">印が多いため略号の表示を省略しています</p>}
     <div className="fixture-actions">
@@ -150,7 +152,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
         void Promise.all((ui?.documents ?? []).filter(d => d !== session).map(async d => ({ name: d.name, fixtures: d.annotationStore.fixturesReady ? d.annotationStore.getCountFixtures() : await pool.getCountFixtures(d.docId) })))
           .then(list => setSources(list.filter(s => s.fixtures.length))).catch(e => setError(String(e))).finally(() => setBusy(false))
       }}>他のPDFから読み込む</button>
-      <button disabled={!store.fixturesReady || busy} onClick={() => { setBusy(true); void csv().catch(e => { if (!(e instanceof DOMException && e.name === 'AbortError')) setError(String(e)) }).finally(() => setBusy(false)) }}>数量をCSVに書き出す</button>
+      <button disabled={!store.fixturesReady || busy} onClick={() => setCsvOpen(true)}>数量をCSVに書き出す</button>
       <button disabled={!canEdit || !selected || selectedIndex <= 0} title={selectedIndex === 0 ? '分類の先頭です。分類ごと動かすときは、分類の見出しをドラッグします' : undefined} onClick={() => step(-1)}>上へ</button>
       <button disabled={!canEdit || !selected || selectedIndex < 0 || selectedIndex === selectedItems.length - 1} title={selectedIndex === selectedItems.length - 1 ? '分類の末尾です。分類ごと動かすときは、分類の見出しをドラッグします' : undefined} onClick={() => step(1)}>下へ</button>
       </div>
@@ -188,12 +190,15 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
         <button className="fixture-row" aria-label={`${fixtureCode(f)} ${f.name}`.trim()} aria-pressed={f.id === selected?.id} onClick={() => { setSelectedCategory(null); store.selectFixture(f.id); ui?.select() }}>
           {quantityKind(f) === 'count' ? <svg className="fixture-swatch" viewBox="-14 -14 28 28" aria-hidden="true"><CountMarker style={{ ...f.style, size: 24, opacity: 1 }} showCode={false} /></svg> : <QuantitySwatch fixture={f} />}
           <span className="fixture-sample-cell">{quantityKind(f) === 'count' && f.sample && <img className="fixture-sample-thumbnail" src={`data:image/png;base64,${f.sample.png}`} alt={`${f.name}の見本`} draggable={false} />}</span>
-          <span className="fixture-row-code" title={f.code}>{f.code}{' '}</span><span className="fixture-row-name" title={f.name}>{f.name}{f.spec && <span className="fixture-row-spec"> {f.spec}</span>}{quantityKind(f) !== 'count' && <span className="fixture-row-unit">{QUANTITY_UNITS[quantityKind(f)]}</span>}</span><span className="fixture-row-count" title={`表示中の図面: ${format(f, pageTotal(f.id))}${unit(f)}`}>{format(f, pageTotal(f.id))}</span><span className="fixture-row-count" title={`全図面: ${format(f, total(f.id))}${unit(f)}`}>{format(f, total(f.id))}</span>
+          <span className="fixture-row-code" title={f.code}>{f.code}{' '}</span><span className="fixture-row-name" title={f.name}>{f.name}{f.spec && <span className="fixture-row-spec"> {f.spec}</span>}{quantityKind(f) !== 'count' && <span className="fixture-row-unit">{QUANTITY_UNITS[quantityKind(f)]}</span>}</span><span className="fixture-row-count" title={`表示中の図面: ${format(f, pageTotal(f.id))}${unit(f)}`}>{format(f, pageTotal(f.id))}</span>
         </button>
+        <button className="fixture-total-button fixture-row-count" disabled={total(f.id) === 0} aria-label={`${fixtureCode(f)} ${f.name}の全図面の内訳`} title={`全図面: ${format(f, total(f.id))}${unit(f)}`} onClick={() => setBreakdownId(f.id)}>{format(f, total(f.id))}</button>
       </li>)}</ul>}
     </section>)}</div>
+    {breakdownId && fixtures.find(f => f.id === breakdownId) && <QuantityBreakdown key={breakdownId} fixture={fixtures.find(f => f.id === breakdownId)!} index={index} session={session} pool={pool} onClose={closeBreakdown} />}
     {!dialog && sampleHover?.fixture.sample && <div className="fixture-sample-hover" role="tooltip" style={{ left: sampleHover.left, top: sampleHover.top }}><img src={`data:image/png;base64,${sampleHover.fixture.sample.png}`} alt={`${sampleHover.fixture.name}の見本（拡大）`} /></div>}
     <Suspense fallback={<p>画面を開いています…</p>}>
+      {csvOpen && <QuantityCsvExportDialog index={index} fixtures={fixtures} pdfName={session.name} pageIndex={pageIndex} onExport={csv} onClose={() => setCsvOpen(false)} />}
       {dialog && <FixtureDialog initial={dialog.initial} fixtures={fixtures} editing={dialog.editing} duplicate={dialog.duplicate} hasMarks={dialog.editing && store.fixtureMarkCount(dialog.initial.id) > 0} onSave={saveFixture} onClose={() => setDialog(null)} />}
       {preset && <FixturePresetDialog onAdd={addMany} onClose={() => setPreset(false)} />}
       {sources && <FixturePresetDialog sources={sources} onAdd={addMany} onClose={() => setSources(null)} />}

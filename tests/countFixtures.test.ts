@@ -181,7 +181,7 @@ it('fills double circles as a hollow ring for solid and half styles', () => {
 it('exports page/all totals, nonempty-page columns and zero rows with BOM, CRLF and formula suppression', () => {
   const f = fixture(), zero = { ...fixture('b'), code: '@Z', name: '=ゼロ', category: '+分類', order: 1 }
   const csv = createCountCsv([{ pageIndex: 0, count: { version: 2, id: '1', fixtureId: 'a' } }, { pageIndex: 2, count: { version: 2, id: '2', fixtureId: 'a' } }, { pageIndex: 2, count: { version: 2, id: '3', fixtureId: 'a' } }], [f, zero], 2)
-  expect(csv).toBe("\uFEFF分類,略号,名称,種別,単位,表示中の図面（p.3）,全図面の合計,p.1,p.3\r\n照明器具,DL,ダウンライト,個数,個,2,3,1,2\r\n'+分類,'@Z,'=ゼロ,個数,個,0,0,0,0\r\n")
+  expect(csv).toBe("\uFEFF分類,略号,名称,規格,種別,単位,集計方式,全図面の合計,表示中の図面（p.3）,p.1,p.3\r\n照明器具,DL,ダウンライト,,個数,個,場所別,3,2,1,2\r\n'+分類,'@Z,'=ゼロ,,個数,個,場所別,0,0,0,0\r\n")
 })
 
 it('round-trips quantity fields and rejects entire invalid items', () => {

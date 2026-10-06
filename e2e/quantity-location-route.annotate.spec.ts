@@ -67,8 +67,8 @@ test('locations, drawing-name fallback, bulk Undo, shared route, spec duplicatio
  await format.getByLabel('長さの項目を選ぶ',{exact:true}).selectOption({label:'EM-CE 5.5sq-3C ケーブル'})
  await format.getByRole('button',{name:'この経路に足す',exact:true}).click()
  await expect(page.locator('.measurement-label')).toHaveText('CV 38sq-3C×2, EM-CE 5.5sq-3C  2.54 m')
- await expect(row(page,'CV 38sq-3C 幹線ケーブル').locator('.fixture-row-count').last()).toHaveText('5.08')
- await expect(row(page,'EM-CE 5.5sq-3C ケーブル').locator('.fixture-row-count').last()).toHaveText('2.54')
+ await expect(row(page,'CV 38sq-3C 幹線ケーブル').locator('..').locator('.fixture-row-count').last()).toHaveText('5.08')
+ await expect(row(page,'EM-CE 5.5sq-3C ケーブル').locator('..').locator('.fixture-row-count').last()).toHaveText('2.54')
  // The route remains visible through its extra item and in selected-item-only mode.
  await panel.getByRole('button',{name:'CV 38sq-3C 幹線ケーブルの表示切替',exact:true}).click();await expect(page.locator('.measurement-label')).toBeVisible()
  await row(page,'EM-CE 5.5sq-3C ケーブル').click();await panel.getByLabel('選択中の項目だけ表示',{exact:true}).check();await expect(page.locator('.measurement-label')).toBeVisible();await panel.getByLabel('選択中の項目だけ表示',{exact:true}).uncheck()
@@ -89,7 +89,7 @@ test('locations, drawing-name fallback, bulk Undo, shared route, spec duplicatio
   expect(listAnnotations(doc,0).find(a=>a.quantity)?.quantity).toMatchObject({count:2,extra:[{count:1}],room:'事務室'})
  }finally{doc.destroy()}
  await page.evaluate(b=>window.__karu!.openBytes(b,'再読込.pdf'),saved);await page.getByRole('tab',{name:'数量',exact:true}).click()
- await expect(row(page,'CV 38sq-3C 幹線ケーブル').locator('.fixture-row-count').last()).toHaveText('5.08')
+ await expect(row(page,'CV 38sq-3C 幹線ケーブル').locator('..').locator('.fixture-row-count').last()).toHaveText('5.08')
  expect((await marks(page,0)).every(m=>m?.version===2&&m.floor==='1階'&&m.room==='事務室')).toBe(true)
  expect((await marks(page,1))[0]).toMatchObject({floor:'2階',room:'事務室'})
  await expect(page.locator('.measurement-label')).toHaveText('CV 38sq-3C×2, EM-CE 5.5sq-3C  2.54 m')

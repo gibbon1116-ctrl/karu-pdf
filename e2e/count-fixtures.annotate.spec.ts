@@ -440,13 +440,14 @@ test('presets count across pages, visibility excludes hit testing, and quantity 
   await page.evaluate(() => { Object.defineProperty(window, 'showSaveFilePicker', { value: undefined, configurable: true }) })
   const pending = page.waitForEvent('download')
   await page.getByRole('button', { name: '数量をCSVに書き出す', exact: true }).click()
+  await page.getByRole('dialog', { name: '数量をCSVに書き出す', exact: true }).getByRole('button', { name: '書き出す', exact: true }).click()
   const download = await pending
-  expect(download.suggestedFilename()).toBe('項目試験_数量.csv')
+  expect(download.suggestedFilename()).toBe('項目試験_数量集計.csv')
   const csv = await fs.readFile((await download.path())!, 'utf8')
-  expect(csv).toContain('分類,略号,名称,種別,単位,表示中の図面（p.1）,全図面の合計,p.1,p.2\r\n')
-  expect(csv).toContain('照明器具,DL,ダウンライト,個数,個,2,2,2,0\r\n')
-  expect(csv).toContain('コンセント,C2,コンセント（2口）,個数,個,1,2,1,1\r\n')
-  expect(csv).toContain('照明器具,BL,ベースライト（直付）,個数,個,0,0,0,0\r\n')
+  expect(csv).toContain('分類,略号,名称,規格,種別,単位,集計方式,全図面の合計,表示中の図面（p.1）,p.1,p.2\r\n')
+  expect(csv).toContain('照明器具,DL,ダウンライト,,個数,個,場所別,2,2,2,0\r\n')
+  expect(csv).toContain('コンセント,C2,コンセント（2口）,,個数,個,場所別,2,1,1,1\r\n')
+  expect(csv).toContain('照明器具,BL,ベースライト（直付）,,個数,個,場所別,0,0,0,0\r\n')
 })
 
 test('custom style, duplication, bulk editing, multiple reassignment, undo, and save/reopen', async ({ page }) => {

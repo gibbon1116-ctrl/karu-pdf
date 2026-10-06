@@ -11,7 +11,7 @@ it('counts 5,000 marks across 100 fixtures and two pages, preserving undo and co
   for (let i = 0; i < 5000; i++) store.create({ kind: 'symbol', pageIndex: Math.floor(i / 100) % 2, rect: [0, 0, 10, 10], symbol: 'circle', count: { version: 2, id: String(i), fixtureId: `f${i % 100}` } })
   const all = [0,1].flatMap(p => store.getPageAnnotations(p))
   expect([...store.countTotals().values()].every(pages => pages.get(0) === 25 && pages.get(1) === 25)).toBe(true)
-  expect(createCountCsv(all, fixtures, 1)).toContain('電気,F99,項目99,個数,個,25,50,25,25\r\n')
+  expect(createCountCsv(all, fixtures, 1)).toContain('電気,F99,項目99,,個数,個,場所別,50,25,25,25\r\n')
   const last = all.find(a => a.count?.id === '4999')!
   store.reassignCounts([last.id], 'f0'); expect(store.countTotals().get('f0')?.get(1)).toBe(26); store.undo()
   expect(countFixtureId(store.get(last.id)!.count!)).toBe('f99')
