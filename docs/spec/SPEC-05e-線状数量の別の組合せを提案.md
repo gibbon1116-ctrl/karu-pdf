@@ -65,6 +65,8 @@ export function nextQuantityLineStyle(fixtures: readonly CountFixture[], exclude
 
 ## 禁止事項
 
+- 試験のコードから、`work/` など Git の管理外のフォルダへ書き込まないこと（GitHub の公開の流れには無いフォルダで、試験が失敗する）。報告用のファイルは試験の外で作る。
+
 - 個数の項目の候補の順（`nextCountStyle` の結果）を変えないこと。
 - 保存の形を変えないこと（色・線種・線幅は今の欄を使う）。
 - 対象外のファイルを変更しないこと。git の変更操作をしないこと。python・pytest は使わない。
