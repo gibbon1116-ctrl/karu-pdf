@@ -282,7 +282,7 @@ button, input { font: inherit; }
 .header-footer-paper .hf-topCenter, .header-footer-paper .hf-bottomCenter { transform: translateX(-50%); }
 .header-footer-dialog > footer { display: flex; gap: 8px; padding: 9px 12px; border-top: 1px solid #bbb; }
 .header-footer-dialog > footer span { flex: 1; }
-.annotation-selection { fill: none; stroke: #1473e6; stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+.annotation-selection { fill: rgba(20, 115, 230, 0.15); stroke: #1473e6; stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
 .annotation-draft { display: none; fill: none; stroke: #e00000; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
 .annotation-line-draft, .annotation-line-preview, .annotation-ink-draft { display: none; fill: none; stroke: #e00000; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 .annotation-line-preview { stroke: #1473e6; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
