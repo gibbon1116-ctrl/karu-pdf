@@ -80,8 +80,12 @@ test('category selection, visible steps, drag moves, Undo, and persisted categor
   await drag(row(page, '新LED'), row(page, 'C2 コンセント（2口）'), 'after')
   await expect(category(page, 'コンセント').locator('.fixture-row-name').nth(1)).toHaveText('新LED')
   await expect(panel(page).getByRole('status')).toHaveText('新LEDを分類「コンセント」へ移しました（Ctrl+Z で戻せます）')
+  // Row heights differ between fonts (the Linux runner); collapse the long groups so both headers stay in the scroll viewport.
+  for (const name of ['照明器具', 'コンセント']) await header(page, name).click()
+  await header(page, '幹線').scrollIntoViewIfNeeded()
   await drag(header(page, '幹線'), header(page, '照明器具'))
   await expect(panel(page).locator('.fixture-category button[aria-expanded]').first()).toHaveText('幹線（1）')
+  for (const name of ['照明器具', 'コンセント']) await header(page, name).click()
   await panel(page).getByLabel('名称・略号で検索').fill('新LED')
   await expect(row(page, '新LED')).toHaveAttribute('draggable', 'false')
   await expect(header(page, 'コンセント')).toHaveAttribute('draggable', 'false')
