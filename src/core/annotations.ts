@@ -1,3 +1,4 @@
+import { writeDrawingInfo, type DrawingInfo } from './drawingInfo'
 import { parseQuantityMark, quantityPoints, quantityDashes, type QuantityMark } from './quantity'
 import { QUANTITY_DASHES, type QuantityLineStyle } from './countFixtures'
 import { arrowHeadSize } from './lineGeometry'
@@ -115,6 +116,7 @@ export type AnnotationEdit =
   | { kind: 'createIssue'; pageIndex: number; rect: Rect; issue: Issue; text: string; color: RGB }
   | { kind: 'updateIssue'; objNum: number; pageIndex: number; rect: Rect; issue: Issue; text: string; color: RGB }
   | { kind: 'createLegacyChange'; pageIndex: number; data: LegacyChangeData }
+  | { kind: 'setDrawingInfo'; pageIndex: number; info: DrawingInfo | null }
   | { kind: 'setPageScale'; pageIndex: number; scale: PageScale | null }
   | { kind: 'createMeasure'; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number; quantity?: QuantityMark | null; quantityDash?: QuantityLineStyle['dash'] }
   | { kind: 'updateMeasure'; objNum: number; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number; quantity?: QuantityMark | null; quantityDash?: QuantityLineStyle['dash'] }
@@ -1444,6 +1446,7 @@ export function applyEdits(
         page = doc.loadPage(edit.pageIndex)
         pages.set(edit.pageIndex, page)
       }
+      if (edit.kind === 'setDrawingInfo') { writeDrawingInfo(doc, page, edit.info); continue }
       if (edit.kind === 'setPageScale') {
         writePageScale(doc, page, edit.scale)
         continue

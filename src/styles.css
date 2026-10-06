@@ -630,3 +630,11 @@ button, input { font: inherit; }
 .fixture-dialog-details > label > select { display: block; padding: 4px 6px; }
 
 .fixture-category.selected:not(.fixture-drop-inside) { outline: 1px solid #0068b7; outline-offset: -1px; }
+
+.thumbnail-drawing-number { display: block; font-size: 11px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+.drawing-context-menu { position: sticky; top: 0; z-index: 5; background: var(--panel-bg, white); padding: 6px; border: 1px solid #aaa; }
+.drawing-info-dialog { width: min(460px, 90vw); }
+.drawing-info-field { display: flex; align-items: end; gap: 8px; margin: 14px 0; }
+.drawing-info-field label { flex: 1; }
+.drawing-info-field input { display: block; width: 100%; margin-top: 5px; }
+.status-drawing-info { max-width: 42vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

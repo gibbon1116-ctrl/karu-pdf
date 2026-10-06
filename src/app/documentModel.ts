@@ -1,8 +1,10 @@
+import { reconcileDrawingInfos, type DrawingDetection, type DrawingInfo } from '../core/drawingInfo'
 import type { PageSize } from '../core/mupdfDoc'
 import type { AnnotationEdit } from '../core/annotations'
 import type { SaveMode } from '../core/save'
 import { createContext } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
+export const DrawingUiContext = createContext<{ edit(pageIndex: number): void } | null>(null)
 export const FixtureUiContext = createContext<{ documents: readonly DocumentSession[]; select(): void; edit(id: string): void; open(): void } | null>(null)
 export async function ensureSessionFixtures(session: DocumentSession, pool: PdfWorkerPool): Promise<void> {
   await session.annotationStore.ensureCountFixtures(() => pool.getCountFixtures(session.docId), async () => {
@@ -48,6 +50,48 @@ export class DocumentSession {
   private fileIdentity: DocumentIdentity
   pageSizes: PageSize[]
   readonly annotationStore = new AnnotationStore()
+  private drawingScanToken = 0
+  private drawingScanPromise: Promise<void> | null = null
+  drawingScanStatus = ''
+  drawingScanning = false
+  drawingScanMs = 0
+  drawingPageMs: number[] = []
+  private drawingNotify: (() => void) | null = null
+  subscribeDrawingScan = (listener: () => void): (() => void) => { this.drawingNotify = listener; return () => { if (this.drawingNotify === listener) this.drawingNotify = null } }
+  getDrawingScanSnapshot = (): string => this.drawingScanStatus
+  cancelDrawingScan(): void { this.drawingScanToken++; this.drawingScanPromise = null; this.drawingScanning = false }
+  scanDrawingInfos(pool: PdfWorkerPool, force = false): Promise<void> {
+    if (this.drawingScanPromise) return this.drawingScanPromise
+    const indices = this.pageSizes.flatMap((_, i) => force || !this.annotationStore.getDrawingInfo(i)?.scanned ? [i] : [])
+    if (!indices.length) return Promise.resolve()
+    const token = ++this.drawingScanToken, started = performance.now()
+    this.drawingScanning = true; this.drawingPageMs = []
+    const notify = (message: string) => { this.drawingScanStatus = message; this.drawingNotify?.() }
+    notify('図面番号・図面名称を読み取っています（0 / ' + indices.length + ' ページ）')
+    const task = (async () => {
+      const results = new Map<number, DrawingDetection>(); let errors = 0
+      for (const i of indices) {
+        if (token !== this.drawingScanToken) return
+        try {
+          const result = await pool.drawingPage(this.docId, i)
+          if (token !== this.drawingScanToken) return
+          results.set(i, result.detection); this.drawingPageMs.push(result.elapsedMs)
+        } catch { if (token !== this.drawingScanToken) return; errors++ }
+        notify('図面番号・図面名称を読み取っています（' + (results.size + errors) + ' / ' + indices.length + ' ページ）')
+      }
+      if (token !== this.drawingScanToken) return
+      const pages = this.pageSizes.map((_, i): DrawingDetection => {
+        const info = this.annotationStore.getDrawingInfo(i)
+        return results.get(i) ?? { number: info?.number, name: info?.name, numbers: info?.number && !info.numberManual ? [{ value: info.number, score: 80, reasons: ['保存済み'], rect: [0,0,0,0] }] : [], names: [], reasons: [] }
+      })
+      const reconciled = reconcileDrawingInfos(pages)
+      for (const i of results.keys()) this.annotationStore.applyAutomaticDrawingInfo(i, reconciled[i])
+      const recognized = this.pageSizes.filter((_, i) => { const info = this.annotationStore.getDrawingInfo(i); return info?.number || info?.name }).length
+      this.drawingScanMs = performance.now() - started; this.drawingScanning = false
+      notify('図面番号・図面名称を読み取りました（認識 ' + recognized + ' / ' + this.pageSizes.length + ' ページ）' + (errors ? '／取得失敗 ' + errors + ' ページ（再試行できます）' : ''))
+    })().finally(() => { if (token === this.drawingScanToken) this.drawingScanPromise = null })
+    this.drawingScanPromise = task; return task
+  }
   view: DocumentViewState
   fileOutdated = false
   private _sidePanelTab: SidePanelTab = 'pages'
@@ -124,12 +168,13 @@ export class DocumentSession {
 
   recordSavedRendering(edits: readonly AnnotationEdit[], errors: readonly { editIndex: number }[]): void {
     const failed = new Set(errors.map(error => error.editIndex))
-    const pages = new Set(edits.flatMap((edit, index) => !failed.has(index) && edit.kind !== 'setPageScale' && edit.kind !== 'setCountFixtures' ? [edit.pageIndex] : []))
+    const pages = new Set(edits.flatMap((edit, index) => !failed.has(index) && edit.kind !== 'setDrawingInfo' && edit.kind !== 'setPageScale' && edit.kind !== 'setCountFixtures' ? [edit.pageIndex] : []))
     this.savedRevision += 1
     for (const page of pages) this.savedPageRevisions.set(page, this.savedRevision)
   }
 
-  updateAfterPageLayout(pageSizes: PageSize[], canUndoOrganize: boolean, scales?: import('../core/measure').PageScale[] | (import('../core/measure').PageScale | null)[]): void {
+  updateAfterPageLayout(pageSizes: PageSize[], canUndoOrganize: boolean, scales?: import('../core/measure').PageScale[] | (import('../core/measure').PageScale | null)[], drawings?: (DrawingInfo | null)[]): void {
+    this.cancelDrawingScan()
     this.viewHistory.clear()
     this.savedPageRevisions.clear()
     this.savedRevision = 0
@@ -139,6 +184,7 @@ export class DocumentSession {
     this.pageRevision += 1
     this.annotationStore.reset(true)
     if (scales) this.annotationStore.loadScales(scales)
+    if (drawings) this.annotationStore.loadDrawingInfos(drawings)
     this.view.page = Math.min(Math.max(1, this.view.page), pageSizes.length)
     this.view.scrollLeft = 0
     this.view.scrollTop = 0

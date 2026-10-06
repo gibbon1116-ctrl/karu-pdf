@@ -1,3 +1,5 @@
+import { DrawingInfoDialog } from './app/DrawingInfoDialog'
+import { DrawingUiContext } from './app/documentModel'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { DocumentTabs } from './app/DocumentTabs'
 import { DocumentWorkspace } from './app/DocumentWorkspace'
@@ -105,6 +107,8 @@ declare global {
       getHeaderFooterSettings(): Promise<HeaderFooterSettings | null>
       applyHeaderFooter(settings: HeaderFooterSettings, dateText?: string): Promise<PageLayoutTimings | null>
       removeHeaderFooter(): Promise<PageLayoutTimings | null>
+      getDrawingInfos(): (import('./core/drawingInfo').DrawingInfo | null)[]
+      getDrawingScanMetrics(): { scanning: boolean; totalMs: number; pageMs: number[] }
       pageTextLines(pageIndex: number): ReturnType<PdfWorkerPool['pageTextLines']>
       exportDocumentBytes(): Promise<Uint8Array>
       imagesToPdfToBytes(files: File[], settings: ImagePdfSettings): Promise<Uint8Array>
@@ -241,6 +245,7 @@ export default function App() {
   const [, setTabsVersion] = useState(0)
   const [page, setPage] = useState(() => tabs.active?.view.page ?? 0)
   const [zoom, setZoom] = useState(() => tabs.active?.view.zoom ?? 1)
+  const [drawingDialog, setDrawingDialog] = useState<{ session: DocumentSession; pageIndex: number } | null>(null)
   const [scaleDialog, setScaleDialog] = useState<{ session: DocumentSession; pageIndex: number; required: boolean } | null>(null)
   const [scaleTracing, setScaleTracing] = useState(false)
   const [scalePoints, setScalePoints] = useState<Point[] | null>(null)
@@ -621,6 +626,7 @@ export default function App() {
       const session = new DocumentSession({ docId, name, byteLength, handle, pageSizes: result.pageSizes, editRestriction: result.editRestriction, view })
       session.fileOutdated = created
       session.annotationStore.loadScales(result.pageScales ?? [])
+      session.annotationStore.loadDrawingInfos(result.pageDrawingInfos ?? [])
       tabs.add(session)
       activeRef.current = session
       setPage(session.view.page)
@@ -699,6 +705,7 @@ export default function App() {
       const next = documents[index + 1] ?? documents[index - 1] ?? null
       if (next) await pool.activate(next.docId)
     }
+    tabs.list().find(s => s.docId === docId)?.cancelDrawingScan()
     tabs.close(docId)
     pool.close(docId)
     finishOpeningDocument(docId)
@@ -984,14 +991,14 @@ export default function App() {
 
   const applyPendingEdits = useCallback(async (session: DocumentSession) => {
     await viewerRef.current?.commitEditor()
+    const wasDirty = session.dirty
     const edits = session.annotationStore.toEdits()
     if (edits.length === 0) return
     const result = await pool.applyEdits(session.docId, edits)
     if (result.errors.length) throw new Error(result.errors.map(item => item.message).join(' / '))
-    session.fileOutdated = true
+    session.fileOutdated ||= wasDirty
     session.annotationStore.markApplied(result)
     session.recordSavedRendering(edits, result.errors)
-    session.fileOutdated = true
     viewerRef.current?.clearSelection()
     refreshTabs()
     if (result.errors.length > 0) throw new Error(result.errors.map((item) => item.message).join(' / '))
@@ -1105,9 +1112,9 @@ export default function App() {
     return inserted
   }, [pool])
 
-  const finishPageLayout = useCallback((session: DocumentSession, result: { pageSizes: typeof session.pageSizes; hasBackup: boolean; pageScales?: (import('./core/measure').PageScale | null)[] }) => {
+  const finishPageLayout = useCallback((session: DocumentSession, result: { pageSizes: typeof session.pageSizes; hasBackup: boolean; pageScales?: (import('./core/measure').PageScale | null)[]; pageDrawingInfos?: (import('./core/drawingInfo').DrawingInfo | null)[] }) => {
     const reloadFixtures = session.annotationStore.fixturesReady
-    session.updateAfterPageLayout(result.pageSizes, result.hasBackup, result.pageScales)
+    session.updateAfterPageLayout(result.pageSizes, result.hasBackup, result.pageScales, result.pageDrawingInfos)
     activeRef.current = session
     setPage(session.view.page)
     setZoom(session.view.zoom)
@@ -1122,6 +1129,7 @@ export default function App() {
     const current = organizeRef.current
     const session = activeRef.current
     if (!current || !session || current.docId !== session.docId || current.busy) return null
+    session.cancelDrawingScan()
     const missingSourceIds = new Set(sourceIdsForCards(session.docId, current.draft.getCards()).filter((docId) => !pool.hasDocument(docId)))
     if (missingSourceIds.size > 0) {
       const invalidCards = current.draft.getCards().filter((card) => card.source.kind === 'page' && missingSourceIds.has(card.source.docId)).map((card) => card.id)
@@ -1518,6 +1526,8 @@ export default function App() {
       getHeaderFooterSettings: () => activeRef.current ? pool.getHeaderFooterSettings(activeRef.current.docId) : Promise.resolve(null),
       applyHeaderFooter: (settings, dateText = '2026年10月1日') => applyHeaderFooterSettings(settings, dateText),
       removeHeaderFooter: removeHeaderFooterSettings,
+      getDrawingInfos: () => { const s = activeRef.current; return s ? s.pageSizes.map((_, i) => s.annotationStore.getDrawingInfo(i)) : [] },
+      getDrawingScanMetrics: () => { const s = activeRef.current; return { scanning: s?.drawingScanning ?? false, totalMs: s?.drawingScanMs ?? 0, pageMs: s?.drawingPageMs.slice() ?? [] } },
       pageTextLines: (pageIndex) => {
         const session = activeRef.current
         return session ? pool.pageTextLines(session.docId, pageIndex) : Promise.resolve([])
@@ -1721,6 +1731,7 @@ export default function App() {
           </section>}
         >
           <WorkspaceFailureProbe fail={workspaceFailure}>
+          <DrawingUiContext.Provider value={{ edit: pageIndex => setDrawingDialog({ session: active, pageIndex }) }}>
           <ScaleInteractionContext.Provider value={{ request: i => openScale(i, true), tracePage: scaleTracing ? scaleDialog?.pageIndex ?? null : null, complete: p => { setScalePoints(p); setScaleTracing(false) } }}>
           <FixtureUiContext.Provider value={{ documents, select: () => void changeTool('count'), open: () => openSidePanel('fixtures', false), edit: id => {
             void ensureSessionFixtures(active, pool).then(() => setFixtureEdit({ session: active, id })).catch(reason => showStatus(String(reason)))
@@ -1759,6 +1770,7 @@ export default function App() {
           />
           </FixtureUiContext.Provider>
           </ScaleInteractionContext.Provider>
+          </DrawingUiContext.Provider>
           </WorkspaceFailureProbe>
         </ErrorBoundary>
       ) : (
@@ -1773,6 +1785,7 @@ export default function App() {
       <footer className="status-bar">
         {install.supported && (install.installed || install.error) && <span className="install-app-status" role="status">{install.installed ? installedMessage : install.error}</span>}
         <span>{active ? `${page} / ${active.pageSizes.length} ページ` : 'PDFを開いてください'}</span>
+        {!comparison && active && (active.annotationStore.getDrawingInfo(page - 1)?.number || active.annotationStore.getDrawingInfo(page - 1)?.name) && <button type="button" data-testid="status-drawing-info" className="status-drawing-info" onClick={() => setDrawingDialog({ session: active, pageIndex: page - 1 })}>{[active.annotationStore.getDrawingInfo(page - 1)?.number, active.annotationStore.getDrawingInfo(page - 1)?.name].filter(Boolean).join(' ')}</button>}
         {!comparison && active?.annotationStore.drawingFilterActive() && <span className="drawing-filter-status">
           図面の表示: {annotationFilterLabel(active.annotationStore.annotationFilter)}だけ
           <button type="button" onClick={() => active.annotationStore.setDrawingFollowsFilter(false)}>解除</button>
@@ -1780,6 +1793,7 @@ export default function App() {
         {!comparison && active?.annotationStore.getScale(page - 1) && <button type="button" className="status-scale" onClick={() => openScale(page - 1)}>{scaleLabel(active.annotationStore.getScale(page - 1)!)}</button>}
         <span role="status">{runtimeError || status}</span>{/* @single:start */}<span style={{ marginLeft: 'auto', fontSize: '11px' }}>固定・閉域版（HTML）</span>{/* @single:end */}{/* @fixed:start */}<span style={{ marginLeft: 'auto', fontSize: '11px' }}>固定・閉域版</span>{/* @fixed:end */}
       </footer>
+      {drawingDialog && <DrawingInfoDialog session={drawingDialog.session} pageIndex={drawingDialog.pageIndex} pool={pool} onClose={() => setDrawingDialog(null)} onSave={info => { drawingDialog.session.annotationStore.setDrawingInfo([drawingDialog.pageIndex], info); setDrawingDialog(null); refreshTabs() }} />}
       {scaleDialog && <ScaleDialog key={`${scaleDialog.session.docId}:${scaleDialog.pageIndex}`} pageIndex={scaleDialog.pageIndex} size={scaleDialog.session.pageSizes[scaleDialog.pageIndex]} initial={scaleDialog.session.annotationStore.getScale(scaleDialog.pageIndex)} required={scaleDialog.required} tracing={scaleTracing} points={scalePoints}
         onTrace={() => { viewerRef.current?.scrollToPage(scaleDialog.pageIndex); setScaleTracing(true) }}
         onClose={() => { setScaleDialog(null); setScaleTracing(false) }}

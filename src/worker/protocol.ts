@@ -1,3 +1,4 @@
+import type { DrawingInfo, DrawingDetection } from '../core/drawingInfo'
 import type { PageScale } from '../core/measure'
 import type { PageSize } from '../core/mupdfDoc'
 import type { AnnotationEdit, AnnotationInfo, ApplyError } from '../core/annotations'
@@ -143,6 +144,8 @@ export interface PageHasTextRequest {
   pageIndex: number
 }
 
+export interface DrawingPageRequest { type: 'drawingPage'; requestId: number; docId: string; pageIndex: number }
+export interface DrawingPageResponse { type: 'drawingPageResult'; requestId: number; detection: DrawingDetection; elapsedMs: number }
 export interface PageTextLinesRequest {
   type: 'pageTextLines'
   requestId: number
@@ -287,6 +290,7 @@ export type WorkerRequest =
   | CancelSearchRequest
   | SelectTextRequest
   | PageHasTextRequest
+  | DrawingPageRequest
   | PageTextLinesRequest
   | LayoutTextRequest
   | ApplyAndSaveRequest
@@ -311,6 +315,7 @@ export interface ReadyResponse {
 
 export interface OpenResponse {
   editRestriction?: string | null
+  pageDrawingInfos?: (DrawingInfo | null)[]
   pageScales?: (PageScale | null)[]
   type: 'opened'
   requestId: number
@@ -434,6 +439,7 @@ export interface OutputPreparedResponse {
 }
 
 export interface PageLayoutResponse {
+  pageDrawingInfos?: (DrawingInfo | null)[]
   pageScales?: (PageScale | null)[]
   type: 'pageLayoutApplied' | 'pageLayoutUndone' | 'headerFooterApplied' | 'headerFooterRemoved'
   requestId: number
@@ -515,6 +521,7 @@ export type WorkerResponse =
   | SearchProgressResponse
   | TextSelectedResponse
   | PageHasTextResponse
+  | DrawingPageResponse
   | PageTextLinesResponse
   | LayoutTextResponse
   | ApplyAndSaveResponse

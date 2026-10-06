@@ -1,3 +1,4 @@
+import { readDrawingInfo, writeDrawingInfo } from './drawingInfo'
 import mupdf, { type PDFDocument, type PDFObject } from 'mupdf'
 import type { PageSize } from './mupdfDoc'
 
@@ -159,6 +160,18 @@ function rebuildAcroFormFields(document: PDFDocument, preservedAcroForm: PDFObje
   }
 }
 
+// MuPDF graftPage copies a fixed whitelist of page keys, excluding KaruDrawing.
+function graftDrawingPage(target: PDFDocument, source: PDFDocument, pageIndex: number): void {
+  const original = source.loadPage(pageIndex)
+  try {
+    const info = readDrawingInfo(original), appended = target.countPages()
+    target.graftPage(-1, source, pageIndex)
+    if (info) {
+      const page = target.loadPage(appended)
+      try { writeDrawingInfo(target, page, info) } finally { page.destroy() }
+    }
+  } finally { original.destroy() }
+}
 export function applyPageLayout(
   targetDocId: string,
   target: PDFDocument,
@@ -186,7 +199,7 @@ export function applyPageLayout(
       throw new Error(`追加元のページ番号が範囲外です: ${card.source.pageIndex + 1}`)
     }
     const appended = target.countPages()
-    target.graftPage(-1, source, card.source.pageIndex)
+    graftDrawingPage(target, source, card.source.pageIndex)
     order.push(appended)
   }
 
@@ -224,7 +237,7 @@ export function extractPages(
   try {
     cards.forEach((card, index) => {
       if (card.source.kind === 'blank') addBlank(output, card.source.width, card.source.height)
-      else output.graftPage(-1, sourceDocument(targetDocId, target, card.source.docId, sources), card.source.pageIndex)
+      else graftDrawingPage(output, sourceDocument(targetDocId, target, card.source.docId, sources), card.source.pageIndex)
       rotatePage(output, index, card.rotation)
     })
     const buffer = output.saveToBuffer('garbage=4,compress,compress-images')

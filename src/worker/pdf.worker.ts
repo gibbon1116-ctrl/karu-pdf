@@ -1,4 +1,6 @@
 import { installWorkerExternalSendGuard } from '../security/externalSend'
+import { detectDrawingInfo, readDocumentDrawingInfos } from '../core/drawingInfo'
+import { extractTextLines } from '../core/textExtract'
 /* @single:start */import { requestEmbeddedFont } from '../single/workerFonts'
 /* @single:end *//// <reference lib="webworker" />
 /* @fixed:start */import { fixedAssetUrl } from '../fixed/security'
@@ -88,6 +90,7 @@ let sequence = 0
 let running = false
 let processedCount = 0
 type CoreRequest =
+  | import('./protocol').DrawingPageRequest
   | import('./protocol').GetCountFixturesRequest
   | MaxIssueNumberRequest
   | OpenRequest
@@ -344,6 +347,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         pageCount: opened.pageCount,
         editRestriction: opened.editRestriction,
         pageSizes: opened.pageSizes,
+        pageDrawingInfos: includeMetadata ? readDocumentDrawingInfos(pdf) : [],
         pageScales: includeMetadata ? readDocumentScales(pdf) : [],
         openMs: opened.openMs,
         sizesMs: opened.sizesMs,
@@ -398,6 +402,17 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       return
     }
 
+    if (request.type === 'drawingPage') {
+      const started = performance.now(), page = document.loadPage(request.pageIndex)
+      let display: ReturnType<typeof page.toDisplayList> | undefined, structured: ReturnType<typeof page.toStructuredText> | undefined
+      try {
+        display = page.toDisplayList(false); structured = display.toStructuredText('preserve-whitespace')
+        const bounds = page.getBounds(), text = extractTextLines(structured, bounds, 0)
+        const detection = text.truncated || text.invalidPositions || text.uncertainCharacters ? detectDrawingInfo([], bounds) : detectDrawingInfo(text.lines, bounds, 0, true)
+        post({ type: 'drawingPageResult', requestId: request.requestId, detection, elapsedMs: performance.now() - started })
+      } finally { structured?.destroy(); display?.destroy(); page.destroy() }
+      return
+    }
     if (request.type === 'pageTextLines') {
       post({ type: 'pageTextLinesResult', requestId: request.requestId, lines: entry.textSelections.pageTextLines(request.pageIndex) })
       return
@@ -588,7 +603,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         post({
           type: 'pageLayoutApplied', requestId: request.requestId, bytes,
           pageCount: pageSizes.length,
-          pageSizes, pageScales: readDocumentScales(reopenedDocument),
+          pageSizes, pageDrawingInfos: readDocumentDrawingInfos(reopenedDocument), pageScales: readDocumentScales(reopenedDocument),
           hasBackup: true,
           timings: {
             backupMs,
@@ -636,7 +651,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         const bytes = saved.buffer as ArrayBuffer
         post({
           type: request.type === 'applyHeaderFooter' ? 'headerFooterApplied' : 'headerFooterRemoved', requestId: request.requestId, bytes,
-          pageCount: pageSizes.length, pageSizes, pageScales: readDocumentScales(reopenedDocument), hasBackup: true,
+          pageCount: pageSizes.length, pageSizes, pageDrawingInfos: readDocumentDrawingInfos(reopenedDocument), pageScales: readDocumentScales(reopenedDocument), hasBackup: true,
           timings: { backupMs, assembleMs, exportMs, primaryReloadMs, pageMetadataMs, workerTotalMs: performance.now() - workerStarted },
         }, [bytes])
       } catch (error) {
@@ -662,7 +677,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       post({
         type: 'pageLayoutUndone', requestId: request.requestId, bytes,
         pageCount: pageSizes.length,
-        pageSizes, pageScales: readDocumentScales(restoredDocument),
+        pageSizes, pageDrawingInfos: readDocumentDrawingInfos(restoredDocument), pageScales: readDocumentScales(restoredDocument),
         hasBackup: false,
         timings: {
           backupMs: 0,
@@ -813,6 +828,11 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     queue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence)
     schedule()
     return
+  }
+  if (message.type === 'drawingPage') {
+    queue.push({ ...message, priority: 3, sequence: sequence++ })
+    queue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence)
+    schedule(); return
   }
   if (message.type === 'render' || message.type === 'renderCompare') {
     queue.push({ ...message, sequence: sequence++ })

@@ -1,3 +1,4 @@
+import { mergeAutomaticDrawingInfo, type DrawingInfo } from '../core/drawingInfo'
 import { quantityLabel, quantityValue, quantityDimensions, type QuantityMark } from '../core/quantity'
 import { quantityKind, quantityMethod, quantityLine, type QuantityLineStyle } from '../core/countFixtures'
 import { nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type LegacyChangeData, type Point, type Rect, type RGB, type SymbolName } from '../core/annotations'
@@ -54,7 +55,8 @@ export interface EditableAnnotation {
 }
 
 type ScaleChange = { pageIndex: number; scale: PageScale | null }
-type HistoryState = AnnotationState[] & { scales?: ScaleChange[]; issueMaximum?: number; fixtures?: CountFixture[] }
+type DrawingChange = { pageIndex: number; info: DrawingInfo | null }
+type HistoryState = AnnotationState[] & { drawings?: DrawingChange[]; scales?: ScaleChange[]; issueMaximum?: number; fixtures?: CountFixture[] }
 interface AnnotationState extends Omit<EditableAnnotation, 'dirty'> {}
 interface StoredAnnotation extends AnnotationState {
   deleted: boolean
@@ -226,6 +228,11 @@ export class AnnotationStore {
   private readonly pendingCreations = new Set<string>()
   private readonly selection = new Set<string>()
   private pendingEdits: PendingEdit[] = []
+  private readonly drawings = new Map<number, DrawingInfo | null>()
+  private readonly drawingBaselines = new Map<number, DrawingInfo | null>()
+  private readonly drawingDirtyBaselines = new Map<number, DrawingInfo | null>()
+  private readonly automaticDrawings = new Map<number, DrawingInfo>()
+  private pendingDrawings: Array<DrawingChange & { editIndex: number }> = []
   private readonly scales = new Map<number, PageScale | null>()
   private readonly scaleBaselines = new Map<number, PageScale | null>()
   private pendingScales: Array<ScaleChange & { editIndex: number }> = []
@@ -292,6 +299,7 @@ export class AnnotationStore {
     if (!preserveFixtureVisibility) { this.selectedFixtureId = null; this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.showQuantityValues = true }
     if (!preserveFixtureVisibility) { this.filter = DEFAULT_ANNOTATION_FILTER; this.followsFilter = false }
     this.legacyCountObjects.clear(); this.pendingFixtureSave = null
+    this.drawings.clear(); this.drawingBaselines.clear(); this.drawingDirtyBaselines.clear(); this.automaticDrawings.clear(); this.pendingDrawings = []
     this.scales.clear(); this.scaleBaselines.clear(); this.pendingScales = []
     this.annotations.clear()
     this.baselines.clear()
@@ -368,6 +376,27 @@ export class AnnotationStore {
     return request
   }
 
+  loadDrawingInfos(infos: readonly (DrawingInfo | null)[]): void {
+    infos.forEach((info, i) => { this.drawings.set(i, info); this.drawingBaselines.set(i, info); this.drawingDirtyBaselines.set(i, info) })
+    this.notify()
+  }
+  getDrawingInfo(pageIndex: number): DrawingInfo | null { const info = this.drawings.get(pageIndex); return info ? { ...info } : null }
+  getAutomaticDrawingInfo(pageIndex: number): DrawingInfo | null { return this.automaticDrawings.get(pageIndex) ?? null }
+  setDrawingInfo(pageIndices: readonly number[], info: DrawingInfo): void {
+    const before: HistoryState = [], after: HistoryState = []
+    before.drawings = pageIndices.map(pageIndex => ({ pageIndex, info: this.getDrawingInfo(pageIndex) }))
+    after.drawings = pageIndices.map(pageIndex => ({ pageIndex, info: { ...info } }))
+    after.drawings.forEach(({ pageIndex, info }) => this.drawings.set(pageIndex, info))
+    this.history.push({ before, after }); this.notify()
+  }
+  applyAutomaticDrawingInfo(pageIndex: number, result: DrawingInfo): void {
+    this.automaticDrawings.set(pageIndex, { number: result.number, name: result.name, scanned: true })
+    const old = this.getDrawingInfo(pageIndex), next = mergeAutomaticDrawingInfo(old, result)
+    this.drawings.set(pageIndex, next)
+    const baseline = this.drawingDirtyBaselines.get(pageIndex) ?? null
+    this.drawingDirtyBaselines.set(pageIndex, mergeAutomaticDrawingInfo(baseline, result))
+    this.notify()
+  }
   loadScales(scales: readonly (PageScale | null)[]): void {
     scales.forEach((scale, pageIndex) => { this.scales.set(pageIndex, scale); this.scaleBaselines.set(pageIndex, scale) })
     this.notify()
@@ -1059,6 +1088,8 @@ export class AnnotationStore {
     const edits = entries.map(({ edit }) => edit)
     this.pendingScales = [...this.scales].filter(([i, scale]) => JSON.stringify(scale) !== JSON.stringify(this.scaleBaselines.get(i) ?? null)).map(([pageIndex, scale], i) => ({ pageIndex, scale: scale ? { ...scale } : null, editIndex: edits.length + i }))
     const result: AnnotationEdit[] = [...edits, ...this.pendingScales.map(({ pageIndex, scale }) => ({ kind: 'setPageScale' as const, pageIndex, scale }))]
+    this.pendingDrawings = [...this.drawings].filter(([i, info]) => JSON.stringify(info) !== JSON.stringify(this.drawingBaselines.get(i) ?? null)).map(([pageIndex, info], i) => ({ pageIndex, info: info ? { ...info } : null, editIndex: result.length + i }))
+    result.push(...this.pendingDrawings.map(({ pageIndex, info }) => ({ kind: 'setDrawingInfo' as const, pageIndex, info })))
     this.pendingFixtureSave = null
     if (this.fixturesReady && (JSON.stringify(this.fixtures) !== this.fixtureBaseline || entries.some(e => e.annotation.count))) {
       this.pendingFixtureSave = { editIndex: result.length, json: JSON.stringify(this.fixtures) }
@@ -1075,6 +1106,8 @@ export class AnnotationStore {
     this.pendingFixtureSave = null
     for (const item of this.pendingScales) if (!failed.has(item.editIndex)) this.scaleBaselines.set(item.pageIndex, item.scale)
     this.pendingScales = []
+    for (const item of this.pendingDrawings) if (!failed.has(item.editIndex)) { this.drawingBaselines.set(item.pageIndex, item.info); this.drawingDirtyBaselines.set(item.pageIndex, this.automaticDrawings.has(item.pageIndex) ? mergeAutomaticDrawingInfo(item.info, this.automaticDrawings.get(item.pageIndex)!) : item.info) }
+    this.pendingDrawings = []
     let createdIndex = 0
     pending.forEach((item, editIndex) => {
       if (failed.has(editIndex)) return
@@ -1101,7 +1134,7 @@ export class AnnotationStore {
   }
 
   isDirty(): boolean {
-    return JSON.stringify(this.fixtures) !== this.fixtureBaseline || this.editEntries().length > 0 || [...this.scales].some(([i, scale]) => JSON.stringify(scale) !== JSON.stringify(this.scaleBaselines.get(i) ?? null))
+    return [...this.drawings].some(([i, info]) => JSON.stringify(info) !== JSON.stringify(this.drawingDirtyBaselines.get(i) ?? null)) || JSON.stringify(this.fixtures) !== this.fixtureBaseline || this.editEntries().length > 0 || [...this.scales].some(([i, scale]) => JSON.stringify(scale) !== JSON.stringify(this.scaleBaselines.get(i) ?? null))
   }
 
   private mutate(id: string, change: (annotation: StoredAnnotation) => void): void {
@@ -1140,6 +1173,10 @@ export class AnnotationStore {
   }
 
   private restoreMany(target: HistoryState, counterpart: HistoryState): void {
+    for (const item of target.drawings ?? []) {
+      const auto = this.automaticDrawings.get(item.pageIndex)
+      this.drawings.set(item.pageIndex, auto ? mergeAutomaticDrawingInfo(item.info, auto) : item.info)
+    }
     if (target.fixtures) this.fixtures = structuredClone(target.fixtures)
     if (target.issueMaximum !== undefined) this.issueNumbers.renumber(target.issueMaximum)
     for (const item of target.scales ?? []) this.scales.set(item.pageIndex, item.scale ? { ...item.scale } : null)
@@ -1302,7 +1339,7 @@ export class AnnotationStore {
     step: HistoryStep<HistoryState>,
     mapper: (state: AnnotationState) => AnnotationState,
   ): HistoryStep<HistoryState> {
-    return { before: Object.assign(step.before.map(mapper), { scales: step.before.scales, issueMaximum: step.before.issueMaximum, fixtures: step.before.fixtures }), after: Object.assign(step.after.map(mapper), { scales: step.after.scales, issueMaximum: step.after.issueMaximum, fixtures: step.after.fixtures }) }
+    return { before: Object.assign(step.before.map(mapper), { drawings: step.before.drawings, scales: step.before.scales, issueMaximum: step.before.issueMaximum, fixtures: step.before.fixtures }), after: Object.assign(step.after.map(mapper), { drawings: step.after.drawings, scales: step.after.scales, issueMaximum: step.after.issueMaximum, fixtures: step.after.fixtures }) }
   }
 
   private markTouched(annotation: AnnotationState): void {

@@ -21,6 +21,8 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   const [sampleHover, setSampleHover] = useState<{ fixture: CountFixture; left: number; top: number } | null>(null)
   const [preset, setPreset] = useState(false), [sources, setSources] = useState<Array<{ name: string; fixtures: CountFixture[] }> | null>(null), [busy, setBusy] = useState(false)
   useEffect(() => { let alive = true; void ensureSessionFixtures(session, pool).catch(e => { if (alive) setError(String(e)) }); return () => { alive = false } }, [session, pool, session.pageRevision])
+  const drawingStatus = useSyncExternalStore(session.subscribeDrawingScan, session.getDrawingScanSnapshot)
+  useEffect(() => { void session.scanDrawingInfos(pool) }, [session, pool, session.pageRevision])
   const fixtures = useMemo(() => store.getCountFixtures(), [store, version])
   const totals = useMemo(() => store.countTotals(), [store, version])
   const selected = fixtures.find(f => f.id === store.selectedFixtureId), pageIndex = session.view.page - 1
@@ -108,6 +110,8 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   return <section className={`fixture-panel${store.drawingHidesCounts() ? ' drawing-hides-counts' : ''}`} aria-label="数量拾い" data-testid="fixture-panel">
     <div className="fixture-panel-controls">
     <h2>数量拾い</h2>
+    <p aria-live="polite" data-testid="drawing-scan-status">{drawingStatus}</p>
+    <button type="button" disabled={session.drawingScanning} onClick={() => void session.scanDrawingInfos(pool, true)}>図面番号・図面名称を読み直す</button>
     {store.drawingHidesCounts() && <div className="fixture-drawing-filter-warning" role="status">
       <p>書き込みタブの絞り込み（{annotationFilterLabel(store.annotationFilter)}）で、図面に数量拾いの印を出していません。</p>
       <button type="button" onClick={() => store.setDrawingFollowsFilter(false)}>図面への反映をやめる</button>

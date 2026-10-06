@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { DrawingUiContext } from './documentModel'
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { RenderScheduler } from '../client/RenderScheduler'
 import type { PageSize } from '../core/mupdfDoc'
 import type { AnnotationStore } from '../editor/AnnotationStore'
@@ -67,6 +68,8 @@ function Thumbnail({ layout, pageSize, docId, scheduler, store }: {
 }
 
 export function ThumbnailPanel({ docId, pageSizes, currentPage, scheduler, annotationStore, onPageClick }: Props) {
+  const drawingUi = useContext(DrawingUiContext)
+  const [contextPage, setContextPage] = useState<number | null>(null)
   const version = useSyncExternalStore(annotationStore.subscribe, annotationStore.getSnapshot)
   void version
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -74,17 +77,18 @@ export function ThumbnailPanel({ docId, pageSizes, currentPage, scheduler, annot
   const followScrollRef = useRef(false)
   const scrollTimerRef = useRef<number | undefined>(undefined)
   const [viewport, setViewport] = useState({ top: 0, height: 700 })
+  const hasDrawingNumbers = useMemo(() => pageSizes.some((_, i) => Boolean(annotationStore.getDrawingInfo(i)?.number)), [pageSizes, annotationStore, version])
   const { layouts, totalHeight } = useMemo(() => {
     let top = ITEM_GAP
     const entries = pageSizes.map((pageSize, index) => {
       const height = THUMBNAIL_WIDTH * pageSize.height / pageSize.width
-      const itemHeight = height + LABEL_HEIGHT + ITEM_GAP
+      const itemHeight = height + LABEL_HEIGHT + (hasDrawingNumbers ? 20 : 0) + ITEM_GAP
       const item = { index, top, width: THUMBNAIL_WIDTH, height, itemHeight }
       top += itemHeight
       return item
     })
     return { layouts: entries, totalHeight: top }
-  }, [pageSizes])
+  }, [pageSizes, hasDrawingNumbers])
   const visible = layouts.filter((item) => (
     item.top + item.itemHeight >= viewport.top - 300
     && item.top <= viewport.top + viewport.height + 300
@@ -128,6 +132,10 @@ export function ThumbnailPanel({ docId, pageSizes, currentPage, scheduler, annot
         scrollTimerRef.current = window.setTimeout(() => { userScrollingRef.current = false }, 800)
       }}
     >
+      {contextPage !== null && <div role="menu" className="drawing-context-menu" onKeyDown={e => { if (e.key === 'Escape') setContextPage(null) }}>
+        <button type="button" role="menuitem" onClick={() => { drawingUi?.edit(contextPage); setContextPage(null) }}>図面番号・図面名称を変更…</button>
+        <button type="button" role="menuitem" onClick={() => setContextPage(null)}>閉じる</button>
+      </div>}
       <div className="thumbnail-strip" style={{ height: totalHeight }}>
         {visible.map((layout) => (
           <button
@@ -137,10 +145,13 @@ export function ThumbnailPanel({ docId, pageSizes, currentPage, scheduler, annot
             data-testid={`thumbnail-${layout.index}`}
             className={`thumbnail-item${currentPage === layout.index + 1 ? ' active' : ''}`}
             style={{ top: layout.top, height: layout.itemHeight }}
-            onClick={() => onPageClick(layout.index)}
+            title={[annotationStore.getDrawingInfo(layout.index)?.number, annotationStore.getDrawingInfo(layout.index)?.name].filter(Boolean).join(' ') || '未設定'}
+            onContextMenu={e => { e.preventDefault(); setContextPage(layout.index) }}
+            onClick={() => { setContextPage(null); onPageClick(layout.index) }}
           >
             <Thumbnail layout={layout} pageSize={pageSizes[layout.index]} docId={docId} scheduler={scheduler} store={annotationStore} />
             <span>{layout.index + 1}</span>
+            {annotationStore.getDrawingInfo(layout.index)?.number && <span className="thumbnail-drawing-number">{annotationStore.getDrawingInfo(layout.index)?.number}</span>}
           </button>
         ))}
       </div>
