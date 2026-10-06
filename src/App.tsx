@@ -26,13 +26,12 @@ import type { ImagePdfSettings } from './core/imagePdfLayout'
 import { HeaderFooterDialog } from './app/HeaderFooterDialog'
 import type { HeaderFooterSettings } from './app/headerFooterText'
 import { ScaleDialog } from './app/ScaleDialog'
-import { ScaleInteractionContext, SnapContext, isMeasureTool } from './editor/MeasurementOverlay'
+import { ScaleInteractionContext, SnapContext } from './editor/MeasurementOverlay'
 import { buildSnapIndex, findSnap } from './core/snap'
-import { quantityMethod } from './core/countFixtures'
 import { scaleLabel } from './core/measure'
 import type { Point } from './core/annotations'
 import { ToolRow } from './app/ToolRow'
-import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS, FixtureUiContext, ensureSessionFixtures, type SidePanelTab } from './app/documentModel'
+import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS, FixtureUiContext, SnapUiContext, ensureSessionFixtures, type SidePanelTab } from './app/documentModel'
 import { allSessionAnnotations } from './app/AnnotationListPanel'
 import { createIssueCsv, createCsv } from './app/annotationCsv'
 import { StartScreen } from './app/StartScreen'
@@ -260,6 +259,7 @@ export default function App() {
   const [sampleMessage, setSampleMessage] = useState('')
   const [tool, setTool] = useState<EditorTool>('select')
   const [snapEnabled, setSnapEnabled] = useState(() => { try { return localStorage.getItem('karu-pdf:snap') === '1' } catch { return false } })
+  const toggleSnap = () => setSnapEnabled(value => { const next = !value; try { localStorage.setItem('karu-pdf:snap', next ? '1' : '0') } catch { /* 操作は続ける。 */ } return next })
   const [formatDefaults, setFormatDefaults] = useState<FormatDefaults>(() => loadFormatDefaults())
   const [panels, setPanels] = useState(loadPanels)
   const [recent, setRecent] = useState<RecentFile[]>([])
@@ -1635,6 +1635,7 @@ export default function App() {
   } : null
   return (
     <FixtureSampleContext.Provider value={fixtureSampleInteraction}>
+    <SnapUiContext.Provider value={{ enabled: snapEnabled, toggle: toggleSnap }}>
     <main className={`app${comparison ? ' comparing' : ''}${updateReady ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { if (!comparison) void handleDrop(event).catch(reason => setError(`PDFを開けませんでした: ${String(reason)}`)) }}>
       {sampleCapture && <div className="fixture-sample-instruction" role="status">{sampleMessage}<button type="button" onClick={() => finishSampleCapture(null)}>中止</button></div>}
       {updateReady && (
@@ -1702,9 +1703,6 @@ export default function App() {
           onDesktopSteps={() => setDesktopStepsOpen(true)}
         />
         <ToolRow
-          snapEnabled={snapEnabled}
-          snapAvailable={scaleTracing || isMeasureTool(tool) || tool === 'count' && !!active?.annotationStore.getCountFixture(active.annotationStore.selectedFixtureId) && quantityMethod(active.annotationStore.getCountFixture(active.annotationStore.selectedFixtureId)!) !== 'click'}
-          onSnapToggle={() => setSnapEnabled(value => { const next = !value; try { localStorage.setItem('karu-pdf:snap', next ? '1' : '0') } catch { /* 操作は続ける。 */ } return next })}
           readOnly={!!active?.editRestriction}
           tool={tool}
           hasDocument={!!active}
@@ -1897,6 +1895,7 @@ export default function App() {
         onClose={() => setHeaderFooterOpen(false)}
       />}
     </main>
+    </SnapUiContext.Provider>
     </FixtureSampleContext.Provider>
   )
 }

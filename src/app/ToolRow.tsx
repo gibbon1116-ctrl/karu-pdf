@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
+import { SnapUiContext } from './documentModel'
 import type { EditorTool } from '../editor/AnnotationLayer'
 import { Dropdown, type DropdownItem } from '../ui/Dropdown'
 import { ToolIcon } from '../ui/ToolIcon'
@@ -88,9 +89,6 @@ interface Props {
   canUndo: boolean
   canRedo: boolean
   onScale(): void
-  snapEnabled?: boolean
-  snapAvailable?: boolean
-  onSnapToggle?(): void
   onToolChange(tool: EditorTool): void
   onUndo(): void
   onRedo(): void
@@ -101,6 +99,7 @@ interface Props {
 }
 
 export function ToolRow(props: Props) {
+  const snap = useContext(SnapUiContext)
   const [lastTools, setLastTools] = useState(loadLastTools)
 
   useEffect(() => {
@@ -118,7 +117,12 @@ export function ToolRow(props: Props) {
       label: item.label, icon: <ToolIcon tool={item.tool} />, description: item.description,
       shortcut: item.shortcut, checked: item.tool === lastTools[group], onSelect: () => choose(item.tool),
     }))
-    if (group === 'measure') items.push({ type: 'separator' }, { label: '縮尺の設定…', description: 'このページの縮尺を決める', onSelect: props.onScale })
+    if (group === 'measure') items.push(
+      { type: 'separator' },
+      { label: '縮尺の設定…', description: 'このページの縮尺を決める', onSelect: props.onScale },
+      { type: 'separator' },
+      { label: 'スナップ（既存の頂点に合わせる）', description: '計測・数量拾い・縮尺のなぞりで、既存の頂点に吸い付く（Alt で一時解除）', checked: snap?.enabled ?? false, onSelect: () => snap?.toggle() },
+    )
     return <div key={group} className={`split-button${active ? ' active' : ''}`}>
       <button type="button" className="split-main" title={`${labelFor(lastTools[group])}: ${descriptionFor(lastTools[group])}（${label}: ${groups[group].map((item) => item.label).join('・')}）`}
         aria-pressed={active} disabled={!props.hasDocument || props.readOnly} onClick={() => props.onToolChange(lastTools[group])}>
@@ -151,7 +155,6 @@ export function ToolRow(props: Props) {
     <button type="button" className="icon-button" title="やり直し" aria-label="やり直し" disabled={!props.canRedo} onClick={props.onRedo}>↷ やり直し</button>
     <span className="tool-row-separator" />
     <div className="zoom-controls">
-      <button type="button" data-testid="snap-toggle" title="既存の頂点にスナップ（Alt を押している間は解除）" disabled={!props.hasDocument || props.readOnly || !props.snapAvailable} aria-pressed={!!props.snapEnabled} className={props.snapEnabled ? 'active' : ''} onClick={props.onSnapToggle}>スナップ</button>
       <button type="button" title="縮小" aria-label="縮小" disabled={!props.hasDocument} onClick={props.onZoomOut}>−</button>
       <Dropdown label={`${Math.round(props.zoom * 100)}%`} items={zoomItems} disabled={!props.hasDocument} buttonClassName="zoom-value" />
       <button type="button" title="拡大" aria-label="拡大" disabled={!props.hasDocument} onClick={props.onZoomIn}>＋</button>

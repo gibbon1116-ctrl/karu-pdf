@@ -17,7 +17,8 @@ async function frames(page: Page, index: number, mode: string) {
   await expect.poll(() => page.evaluate(() => window.__karu!.isSharp()), { timeout: 180000 }).toBe(true)
   await page.getByRole('button', { name: '計測▼' }).click(); await page.getByRole('menuitemcheckbox', { name: '面積', exact: false }).click()
   if (mode !== 'off') {
-    await page.getByTestId('snap-toggle').click()
+    await page.getByRole('button', { name: '計測▼', exact: true }).click()
+    await page.getByRole('menuitemcheckbox', { name: 'スナップ（既存の頂点に合わせる）', exact: true }).click()
   }
   await page.evaluate(i => window.__karu!.scrollToPage(i), index)
   await page.waitForTimeout(400)

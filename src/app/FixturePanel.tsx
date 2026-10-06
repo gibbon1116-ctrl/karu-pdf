@@ -3,7 +3,7 @@ import { lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, useSy
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { countHex, fixtureCode, nextCountStyle, nextQuantityLineStyle, quantityKind, quantityLine, QUANTITY_UNITS, type FixturePreset, type CountFixture, type QuantityLineAppearance } from '../core/countFixtures'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
-import { ensureSessionFixtures, FixtureUiContext, type DocumentSession } from './documentModel'
+import { ensureSessionFixtures, FixtureUiContext, SnapUiContext, type DocumentSession } from './documentModel'
 import QuantityBreakdown from './QuantityBreakdown'
 import { floorFromDrawingName } from '../core/location'
 import { annotationFilterLabel } from '../editor/annotationFilter'
@@ -14,6 +14,7 @@ const FixturePresetDialog = lazy(() => import('./FixturePresetDialog'))
 
 export default function FixturePanel({ session, pool }: { session: DocumentSession; pool: PdfWorkerPool }) {
   const store = session.annotationStore, ui = useContext(FixtureUiContext)
+  const snap = useContext(SnapUiContext)
   const version = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [breakdownId, setBreakdownId] = useState<string | null>(null), [csvOpen, setCsvOpen] = useState(false)
   const closeBreakdown = useRef(() => setBreakdownId(null)).current
@@ -183,6 +184,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     <label>名称・略号で検索<input type="search" value={search} onChange={e => setSearch(e.currentTarget.value)} /></label>
     <label><input type="checkbox" checked={store.onlySelectedFixture} onChange={e => store.setOnlySelectedFixture(e.currentTarget.checked)} />選択中の項目だけ表示</label>
     <label><input type="checkbox" checked={store.showQuantityValues} onChange={e => store.setShowQuantityValues(e.currentTarget.checked)} />図面に長さ・面積・体積の数値を表示</label>
+    <label title="計測・数量拾い・縮尺のなぞりで、既存の頂点に吸い付く（Alt で一時解除）"><input type="checkbox" checked={snap?.enabled ?? false} onChange={() => snap?.toggle()} />スナップ（既存の頂点に合わせる）</label>
     <button onClick={() => store.showAllFixtures()}>すべて表示</button>
     {status && <p role="status">{status}</p>}
     {error && <p role="alert">{error}</p>}

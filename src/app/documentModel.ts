@@ -5,6 +5,7 @@ import type { SaveMode } from '../core/save'
 import { createContext } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 export const DrawingUiContext = createContext<{ edit(pageIndex: number): void } | null>(null)
+export const SnapUiContext = createContext<{ enabled: boolean; toggle(): void } | null>(null)
 export const FixtureUiContext = createContext<{ documents: readonly DocumentSession[]; select(): void; edit(id: string): void; open(): void } | null>(null)
 export async function ensureSessionFixtures(session: DocumentSession, pool: PdfWorkerPool): Promise<void> {
   await session.annotationStore.ensureCountFixtures(() => pool.getCountFixtures(session.docId), async () => {
