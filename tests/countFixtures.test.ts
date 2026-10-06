@@ -221,3 +221,16 @@ it('distinguishes area/volume methods while matching color, line width and dash'
  expect(sameFixtureAppearance(area, { ...area, line: { width: 2, dash: 'solid' } })).toBe(false)
  expect(sameFixtureAppearance(area, { ...area, line: { width: 1.5, dash: 'dashed' } })).toBe(false)
 })
+
+it('round-trips spec and aggregation without changing legacy defaults', async () => {
+ const { quantityAggregation, fixtureCode } = await import('../src/core/countFixtures')
+ const f = { ...fixture(), spec: '300W', aggregation: 'document' as const }
+ expect(parseCountFixtures(serializeCountFixtures([f]))).toEqual([f])
+ expect(fixtureCode(f)).toBe('DL 300W')
+ expect(quantityAggregation(fixture())).toBe('location')
+ expect(quantityAggregation({ ...fixture(), kind: 'length' })).toBe('document')
+ expect(quantityAggregation(f)).toBe('document')
+ expect(serializeCountFixtures([{ ...f, spec: '' }])).not.toContain('"spec"')
+ for (const change of [{ spec: 'x'.repeat(41) }, { spec: null }, { aggregation: 'auto' }, { aggregation: null }]) expect(parseCountFixtures(JSON.stringify({ version: 1, fixtures: [{ ...f, ...change }, fixture('ok')] }))).toEqual([fixture('ok')])
+ for (const presets of Object.values(FIXTURE_PRESETS)) for (const p of presets) expect(p.aggregation).toBe(p.kind && p.kind !== 'count' ? 'document' : 'location')
+})

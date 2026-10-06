@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
-import { COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, COUNT_SIZES, COUNT_OPACITIES, countHex, countRgb, nextCountStyle, sameFixtureAppearance, quantityKind, quantityMethod, QUANTITY_METHODS, quantityLine, QUANTITY_LINE_WIDTHS, QUANTITY_DASHES, type QuantityLineStyle, serializeCountFixtures, type CountFixture, type CountStyle } from '../core/countFixtures'
+import { fixtureCode, quantityAggregation, COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, COUNT_SIZES, COUNT_OPACITIES, countHex, countRgb, nextCountStyle, sameFixtureAppearance, quantityKind, quantityMethod, QUANTITY_METHODS, quantityLine, QUANTITY_LINE_WIDTHS, QUANTITY_DASHES, type QuantityLineStyle, serializeCountFixtures, type CountFixture, type CountStyle } from '../core/countFixtures'
 import { quantityDimensions, quantityLabel, QUANTITY_DIMENSIONS, type QuantityMark } from '../core/quantity'
 import { FixtureSampleContext } from '../editor/AnnotationLayer'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
@@ -8,8 +8,9 @@ import { groupFixtures } from './fixtureOrder'
 // Shared across add/duplicate/edit mounts, and reset when the app reloads.
 let fixtureDialogPosition = { x: 0, y: 0 }
 
-export default function FixtureDialog({ initial, fixtures, editing, hasMarks = false, onSave, onClose }: { initial: CountFixture; fixtures: readonly CountFixture[]; editing: boolean; hasMarks?: boolean; onSave(fixture: CountFixture): void; onClose(): void }) {
+export default function FixtureDialog({ initial, fixtures, editing, duplicate = false, hasMarks = false, onSave, onClose }: { initial: CountFixture; fixtures: readonly CountFixture[]; editing: boolean; duplicate?: boolean; hasMarks?: boolean; onSave(fixture: CountFixture): void; onClose(): void }) {
   const dialog = useRef<HTMLDialogElement>(null), [value, setValue] = useState(initial), [error, setError] = useState('')
+  const specInput = useRef<HTMLInputElement>(null), aggregationTouched = useRef(editing)
   const categories = useMemo(() => {
     const result = groupFixtures(fixtures).map(g => g.category)
     if ((fixtures.length || editing) && !result.includes(initial.category)) result.push(initial.category)
@@ -41,7 +42,7 @@ export default function FixtureDialog({ initial, fixtures, editing, hasMarks = f
   const cancelCapture = useRef(sampleInteraction?.cancel)
   cancelCapture.current = sampleInteraction?.cancel
   useEffect(() => {
-    alive.current = true; dialog.current?.showModal()
+    alive.current = true; dialog.current?.showModal(); if (duplicate) { specInput.current?.focus(); specInput.current?.select() }
     const constrain = () => move(position.current.x, position.current.y)
     constrain()
     window.addEventListener('resize', constrain)
@@ -76,7 +77,7 @@ export default function FixtureDialog({ initial, fixtures, editing, hasMarks = f
     <form onSubmit={event => {
       event.preventDefault()
       try {
-        const f = { ...value, name: value.name.trim(), category: categories.find(c => c.trim() === value.category.trim()) ?? value.category.trim() }
+        const f = { ...value, aggregation: quantityAggregation(value), spec: value.spec?.trim() || undefined, name: value.name.trim(), category: categories.find(c => c.trim() === value.category.trim()) ?? value.category.trim() }
         serializeCountFixtures(editing ? fixtures.map(p => p.id === f.id ? f : p) : [...fixtures, f])
         onSave(f)
       } catch (reason) { setError(String(reason)) }
@@ -94,11 +95,13 @@ export default function FixtureDialog({ initial, fixtures, editing, hasMarks = f
       </h2>
       <div className="fixture-dialog-body">
       <div className="fixture-dialog-details">
-      <fieldset><legend>種別</legend>{(['count', 'length', 'area', 'volume'] as const).map(kind => <label key={kind}><input type="radio" name="quantity-kind" value={kind} checked={quantityKind(value) === kind} disabled={hasMarks} onChange={() => setValue(v => ({ ...v, kind: kind === 'count' ? undefined : kind, method: undefined, line: kind !== 'count' ? { width: 1.5, dash: 'solid' } : undefined, defaults: kind !== 'count' ? {} : undefined }))} />{{ count: '個数', length: '長さ', area: '面積', volume: '体積' }[kind]}</label>)}</fieldset>
+      <fieldset><legend>種別</legend>{(['count', 'length', 'area', 'volume'] as const).map(kind => <label key={kind}><input type="radio" name="quantity-kind" value={kind} checked={quantityKind(value) === kind} disabled={hasMarks} onChange={() => setValue(v => ({ ...v, aggregation: aggregationTouched.current ? quantityAggregation(v) : kind === 'count' ? 'location' : 'document', kind: kind === 'count' ? undefined : kind, method: undefined, line: kind !== 'count' ? { width: 1.5, dash: 'solid' } : undefined, defaults: kind !== 'count' ? {} : undefined }))} />{{ count: '個数', length: '長さ', area: '面積', volume: '体積' }[kind]}</label>)}</fieldset>
       {['area', 'volume'].includes(quantityKind(value)) && <fieldset><legend>拾い方</legend>{QUANTITY_METHODS[quantityKind(value)].map(method => <label key={method}><input type="radio" name="quantity-method" checked={quantityMethod(value) === method} disabled={hasMarks} onChange={() => setValue(v => ({ ...v, method, defaults: {} }))} />{{ polygon: '囲む', lengthHeight: '長さ×高さ', polygonDepth: '囲む×深さ', lengthWidthDepth: '長さ×幅×深さ', click: '', polyline: '' }[method]}</label>)}</fieldset>}
       {hasMarks && <p>拾いがあるため種別は変えられません</p>}
       <label>名称<input required maxLength={80} value={value.name} onChange={e => setValue({ ...value, name: e.currentTarget.value })} /></label>
       <label>略号<input maxLength={16} value={value.code} onChange={e => setValue({ ...value, code: e.currentTarget.value })} /></label>
+      <label>規格<input ref={specInput} maxLength={40} value={value.spec ?? ''} onChange={e => setValue({ ...value, spec: e.currentTarget.value })} /></label>
+      <fieldset><legend>集計方式</legend>{(['location', 'document'] as const).map(aggregation => <label key={aggregation}><input type="radio" name="quantity-aggregation" checked={quantityAggregation(value) === aggregation} onChange={() => { aggregationTouched.current = true; setValue({ ...value, aggregation }) }} />{aggregation === 'location' ? '場所別（階・部屋ごと）' : '全図面の合計'}</label>)}</fieldset>
       <label>分類<select aria-label="分類" value={newCategory ? '' : value.category} onChange={e => { const category = e.currentTarget.value; setNewCategory(category === ''); setValue({ ...value, category }) }}>
         {categories.map(c => <option key={c} value={c}>{c}</option>)}
         <option value="">＋ 新しい分類…</option>
@@ -108,7 +111,7 @@ export default function FixtureDialog({ initial, fixtures, editing, hasMarks = f
         <label>透明度<select value={value.style.opacity} onChange={e => style({ opacity: Number(e.currentTarget.value) })}>{COUNT_OPACITIES.map(n => <option key={n} value={n}>{Math.round(n * 100)}%</option>)}</select></label></div>
       <label><input type="checkbox" checked={value.style.showCode} onChange={e => style({ showCode: e.currentTarget.checked })} />略号を図面に表示</label>
       <label>メモ<textarea maxLength={200} value={value.memo ?? ''} onChange={e => setValue({ ...value, memo: e.currentTarget.value })} /></label>
-      {length ? <div className="quantity-preview"><QuantitySwatch fixture={value} preview /><span>{quantityLabel(quantityMethod(value) === 'polygon' || quantityMethod(value) === 'polygonDepth' ? [[0, 0], [8, 0], [8, 6], [0, 6]] : [[0, 0], [quantityMethod(value) === 'polyline' ? 9.35 : 24, 0]], 1000, { version: 1, id: 'preview', itemId: value.id, method: quantityMethod(value) as QuantityMark['method'], ...value.defaults }, value.code, value.style.showCode)}</span></div> : <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + value.style.size * (1 + .7 * value.code.length))} 50`} aria-label="印の見本"><CountMarker style={value.style} code={value.code} /></svg>}
+      {length ? <div className="quantity-preview"><QuantitySwatch fixture={value} preview /><span>{quantityLabel(quantityMethod(value) === 'polygon' || quantityMethod(value) === 'polygonDepth' ? [[0, 0], [8, 0], [8, 6], [0, 6]] : [[0, 0], [quantityMethod(value) === 'polyline' ? 9.35 : 24, 0]], 1000, { version: 1, id: 'preview', itemId: value.id, method: quantityMethod(value) as QuantityMark['method'], ...value.defaults }, fixtureCode(value), value.style.showCode)}</span></div> : <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + value.style.size * (1 + .7 * fixtureCode(value).length))} 50`} aria-label="印の見本"><CountMarker style={value.style} code={fixtureCode(value)} /></svg>}
       {!length && <div className="fixture-sample-editor">
         {value.sample && <img className="fixture-sample-preview" src={`data:image/png;base64,${value.sample.png}`} width={value.sample.width} height={value.sample.height} alt="図面から切り取った見本" />}
         <div className="fixture-fields"><button type="button" disabled={!sampleInteraction} onClick={() => void capture()}>図面から見本を切り取る</button>
@@ -118,7 +121,7 @@ export default function FixtureDialog({ initial, fixtures, editing, hasMarks = f
       {quantityMethod(value) === 'polyline' && <label>立上り・立下りの加算（新しく拾うときの初期値）<input type="number" min="0" max="1000" step="0.01" value={value.defaults?.addM ?? 0} onChange={e => { const addM = Number(e.currentTarget.value); setValue(v => ({ ...v, defaults: { ...v.defaults, addM } })) }} /> m</label>}
       {quantityDimensions(quantityMethod(value)).map(key => <label key={key}>{QUANTITY_DIMENSIONS[key]}（新しく拾うときの初期値）<span className="quantity-input-unit"><input aria-label={QUANTITY_DIMENSIONS[key] + '（新しく拾うときの初期値）'} type="number" min="0" max="1000" step="0.01" value={value.defaults?.[key] ?? ''} onChange={e => { const text = e.currentTarget.value; setValue(v => ({ ...v, defaults: { ...v.defaults, [key]: text === '' ? undefined : Number(text) } })) }} />m</span></label>)}
       {quantityDimensions(quantityMethod(value)).length > 0 && <p>空欄または0なら、拾うときに寸法を入力します。</p>}
-      {!!collisions.length && <p role="status">同じ見た目の項目があります: {collisions.map(f => `${f.code} ${f.name}`.trim()).join('、')}</p>}
+      {!!collisions.length && <p role="status">同じ見た目の項目があります: {collisions.map(f => `${fixtureCode(f)} ${f.name}`.trim()).join('、')}</p>}
       {error && <p role="alert">{error}</p>}
       </div>
       <div className="fixture-dialog-appearance">

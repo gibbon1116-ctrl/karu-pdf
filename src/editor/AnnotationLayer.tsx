@@ -1,3 +1,4 @@
+import { fixtureCode } from '../core/countFixtures'
 import { quantityMethod } from '../core/countFixtures'
 import { constrainLinePoint, arrowHeadSize } from '../core/lineGeometry'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
@@ -654,8 +655,8 @@ export function AnnotationLayer(props: Props) {
       const annotation = props.store.create({
         pageIndex: props.pageIndex,
         kind: 'symbol',
-        count: fixture ? { version: 2, id: crypto.randomUUID(), fixtureId: fixture.id } : null,
-        text: fixture ? `個数: ${fixture.code} ${fixture.name}`.trim() : '',
+        count: fixture ? { version: 2, id: crypto.randomUUID(), fixtureId: fixture.id, ...props.store.pickupLocation(props.pageIndex) } : null,
+        text: fixture ? `個数: ${fixtureCode(fixture)} ${fixture.name}`.trim() : '',
         rect,
         color: fixture?.style.color ?? format.color,
         symbol: fixture ? 'circle' : format.symbol,
@@ -779,7 +780,7 @@ export function AnnotationLayer(props: Props) {
         ) : annotation.kind === 'strikeout' ? (
           <line key={`${annotation.id}-quad-${index}`} className="annotation-text-mark-line" x1={(quad[0] + quad[4]) / 2} y1={(quad[1] + quad[5]) / 2} x2={(quad[2] + quad[6]) / 2} y2={(quad[3] + quad[7]) / 2} stroke={color(annotation.color)} />
         ) : null)}
-        {visible && fixture && annotation.count && <CountMarker style={fixture.style} code={fixture.code} showCode={visibleCount <= 1000} x={(x0 + x1) / 2} y={(y0 + y1) / 2} />}
+        {visible && fixture && annotation.count && <CountMarker style={fixture.style} code={fixtureCode(fixture)} showCode={visibleCount <= 1000} x={(x0 + x1) / 2} y={(y0 + y1) / 2} />}
         {visible && !fixture && annotation.kind === 'symbol' && symbolGlyph && <text
           className="annotation-symbol"
           x={(x0 + x1) / 2}

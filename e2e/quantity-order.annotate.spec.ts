@@ -64,7 +64,7 @@ test('category selection, visible steps, drag moves, Undo, and persisted categor
   await add(page, '幹線項目', '幹線', true)
   await expect(header(page, '幹線')).toBeVisible()
   // Collapse unrelated groups to keep both drag endpoints in the scroll viewport.
-  for (const name of ['スイッチ', '弱電・防災', '電線・ケーブル', '電線管', 'ケーブルラック']) await header(page, name).click()
+  for (const name of ['コンセント', 'スイッチ', '弱電・防災', '電線・ケーブル', '電線管', 'ケーブルラック']) await header(page, name).click()
   const first = row(page, 'DL ダウンライト')
   await drag(row(page, '新LED'), first)
   await expect(category(page, '照明器具').locator('.fixture-row-name').first()).toHaveText('新LED')
@@ -77,6 +77,7 @@ test('category selection, visible steps, drag moves, Undo, and persisted categor
   }
   await expect(panel(page).getByRole('button', { name: '上へ', exact: true })).toBeDisabled()
   await expect(panel(page).getByRole('button', { name: '上へ', exact: true })).toHaveAttribute('title', /分類の先頭/)
+  await header(page, 'コンセント').click()
   await drag(row(page, '新LED'), row(page, 'C2 コンセント（2口）'), 'after')
   await expect(category(page, 'コンセント').locator('.fixture-row-name').nth(1)).toHaveText('新LED')
   await expect(panel(page).getByRole('status')).toHaveText('新LEDを分類「コンセント」へ移しました（Ctrl+Z で戻せます）')

@@ -1,6 +1,8 @@
+import { LocationInput } from './LocationInput'
+import { RouteItems } from './RouteItems'
 import { quantityLabel, quantityPoints, quantityDimensions, QUANTITY_DIMENSIONS } from '../core/quantity'
 import { polygonArea, polylineLength } from '../core/measure'
-import { quantityMethod } from '../core/countFixtures'
+import { fixtureCode, quantityMethod } from '../core/countFixtures'
 import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { SYMBOL_OPTIONS, type RGB, type SymbolName } from '../core/annotations'
@@ -85,13 +87,14 @@ function formatToolLabel(tool: FormatTool): string {
 
 export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsChange }: Props) {
   useSyncExternalStore(store.subscribe, store.getSnapshot)
+  const [pickupError, setPickupError] = useState('')
   const fixtureUi = useContext(FixtureUiContext)
   const textEditorOpen = useSyncExternalStore(
     subscribeActiveTextEditor,
     getActiveTextEditorSnapshot,
     getActiveTextEditorSnapshot,
   )
-  const activeSelection = selected ?? (store.selectedCountsOnly() || store.selectedQuantitiesOnly() ? store.get(store.primarySelection()!) ?? null : null)
+  const activeSelection = selected ?? (store.selectedPickupsOnly() ? store.get(store.primarySelection()!) ?? null : null)
   const target = activeSelection?.legacyChange ? null : activeSelection?.count || activeSelection?.quantity ? 'count' : formatTool(activeSelection?.kind ?? (tool === 'select' ? 'text' : tool))
   const requestedCountStore = useRef<AnnotationStore | null>(null)
   useEffect(() => {
@@ -180,14 +183,16 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     const quantity = activeSelection?.quantity
     const fixture = quantity ? store.getCountFixture(quantity.itemId) : activeSelection?.count ? store.fixtureForCount(activeSelection.count) : store.getCountFixture(store.selectedFixtureId)
     return <aside className="format-panel" aria-label="書式" data-testid="format-panel">
-      <h2>数量拾い</h2>
-      {fixture ? <><p>{fixture.code} {fixture.name}</p>{quantityMethod(fixture) === 'click' ? <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + fixture.style.size * (1 + .7 * fixture.code.length))} 50`} aria-label="印の見本"><CountMarker style={fixture.style} code={fixture.code} /></svg> : <QuantitySwatch fixture={fixture} />}
+      <h2>数量拾い</h2>{pickupError && <p role="alert">{pickupError}</p>}
+      {fixture ? <><p>{fixtureCode(fixture)} {fixture.name}</p>{quantityMethod(fixture) === 'click' ? <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + fixture.style.size * (1 + .7 * fixtureCode(fixture).length))} 50`} aria-label="印の見本"><CountMarker style={fixture.style} code={fixtureCode(fixture)} /></svg> : <QuantitySwatch fixture={fixture} />}
         <button onClick={() => fixtureUi?.edit(fixture.id)}>項目を編集…</button></> : <button onClick={() => fixtureUi?.open()}>数量拾いの一覧で項目を選んでください</button>}
-      {(activeSelection?.count || quantity) && <label>項目を変更<select aria-label="項目を変更" value={fixture?.id ?? ''} onChange={e => store.reassignCounts(store.selectedIds(), e.currentTarget.value)}>
-        {!fixture && <option value="">項目を選んでください</option>}{store.getCountFixtures().filter(f => quantityMethod(f) === (quantity?.method ?? 'click')).map(f => <option key={f.id} value={f.id}>{f.code} {f.name}</option>)}
+      {store.selectedPickupsOnly() && <PickupLocation key={store.selectedIds().join(',') + ':' + store.getSnapshot()} store={store} />}
+      {(activeSelection?.count || quantity) && <label>項目を変更<select aria-label="項目を変更" value={fixture?.id ?? ''} onChange={e => setPickupError(store.reassignCounts(store.selectedIds(), e.currentTarget.value) ?? '')}>
+        {!fixture && <option value="">項目を選んでください</option>}{store.getCountFixtures().filter(f => quantityMethod(f) === (quantity?.method ?? 'click')).map(f => <option key={f.id} value={f.id}>{fixtureCode(f)} {f.name}</option>)}
       </select></label>}
       {quantity && activeSelection?.measure && activeSelection.vertices && store.selectedIds().length === 1 && <>
         <p>{quantityPoints(quantity.method) === 'polygon' ? '面積' : quantity.method === 'polyline' ? '平面の長さ' : '長さ'}　{(quantityPoints(quantity.method) === 'polygon' ? polygonArea(activeSelection.vertices) * activeSelection.measure.mmPerPoint ** 2 / 1e6 : polylineLength(activeSelection.vertices) * activeSelection.measure.mmPerPoint / 1000).toFixed(2)} {quantityPoints(quantity.method) === 'polygon' ? 'm²' : 'm'}</p>
+        {quantity.method === 'polyline' && <RouteItems annotation={activeSelection} store={store} />}
         {quantity.method === 'polyline' && <QuantityValueInput label="立上り・立下りの加算" key={activeSelection.id} value={quantity.addM ?? 0} commit={n => store.updateQuantityAdd(activeSelection.id, n)} />}
         {quantityDimensions(quantity.method).map(key => <QuantityValueInput key={activeSelection.id + key} label={QUANTITY_DIMENSIONS[key]} value={quantity[key] ?? 0} commit={n => store.updateQuantityValues(activeSelection.id, { [key]: n })} />)}
         <p>この拾い　{quantityLabel(activeSelection.vertices, activeSelection.measure.mmPerPoint, quantity, '', false)}</p>
@@ -308,4 +313,12 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     </fieldset>}
     {target && <p className="format-target">{activeSelection ? '選択中の書き込み' : '次に作る書き込み'}</p>}
   </aside>
+}
+
+function PickupLocation({ store }: { store: AnnotationStore }) {
+  const marks = store.selectedIds().map(id => { const a = store.get(id)!; return (a.quantity ?? (a.count?.version === 2 ? a.count : {})) as { floor?: string; room?: string } })
+  return <fieldset><legend>拾いの場所</legend>{(['floor', 'room'] as const).map(key => {
+    const values = marks.map(m => m[key] ?? ''), mixed = values.some(v => v !== values[0])
+    return <label key={key}>{key === 'floor' ? '階' : '部屋'}<LocationInput label={key === 'floor' ? '拾いの階' : '拾いの部屋'} value={mixed ? '' : values[0]} mixed={mixed} commit={v => store.updatePickupLocation(store.selectedIds(), key, v)} /></label>
+  })}</fieldset>
 }

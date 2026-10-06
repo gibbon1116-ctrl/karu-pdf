@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { FIXTURE_PRESETS, QUANTITY_UNITS, type FixturePreset, type CountFixture } from '../core/countFixtures'
+import { fixtureCode, FIXTURE_PRESETS, QUANTITY_UNITS, type FixturePreset, type CountFixture } from '../core/countFixtures'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 type Preset = FixturePreset
 const isFixture = (item: Preset | CountFixture): item is CountFixture => 'style' in item
@@ -14,7 +14,7 @@ export default function FixturePresetDialog({ sources, onAdd, onClose }: { sourc
     </select></label>
     {!items?.length && <p>数量拾いを持つPDFがありません。</p>}
     <div className="fixture-presets">{items?.map((f, i) => <label key={i}><input type="checkbox" checked={!unchecked.has(i)} onChange={e => { const checked = e.currentTarget.checked; setUnchecked(previous => { const next = new Set(previous); if (checked) next.delete(i); else next.add(i); return next }) }} />
-      {isFixture(f) && (!f.kind || f.kind === 'count') && <svg className="fixture-swatch" viewBox="-16 -16 32 32" aria-hidden="true"><CountMarker style={f.style} showCode={false} /></svg>}{isFixture(f) && f.kind && f.kind !== 'count' && <QuantitySwatch fixture={f} />}{f.category}／{f.code} {f.name}{f.kind && f.kind !== 'count' ? `（${{ length: '長さ', area: '面積', volume: '体積' }[f.kind]}・${QUANTITY_UNITS[f.kind]}）` : ''}
+      {isFixture(f) && (!f.kind || f.kind === 'count') && <svg className="fixture-swatch" viewBox="-16 -16 32 32" aria-hidden="true"><CountMarker style={f.style} showCode={false} /></svg>}{isFixture(f) && f.kind && f.kind !== 'count' && <QuantitySwatch fixture={f} />}{f.category}／{fixtureCode(f)} {f.name}{f.kind && f.kind !== 'count' ? `（${{ length: '長さ', area: '面積', volume: '体積' }[f.kind]}・${QUANTITY_UNITS[f.kind]}）` : ''}
     </label>)}</div>
     {error && <p role="alert">{error}</p>}
     <div className="dialog-actions"><button onClick={onClose}>閉じる</button><button disabled={!items?.some((_, i) => !unchecked.has(i))} onClick={() => {

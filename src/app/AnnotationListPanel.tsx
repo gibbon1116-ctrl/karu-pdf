@@ -1,3 +1,4 @@
+import { fixtureCode } from '../core/countFixtures'
 import { quantityAnnotationLabel } from './annotationCsv'
 import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
@@ -138,7 +139,7 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
           <span className="annotation-page">p.{annotation.pageIndex + 1}</span>
           <span className="annotation-summary">
             <span className="annotation-kind">{annotation.legacyChange ? '変更記録（旧版）' : annotation.quantity ? quantityAnnotationLabel(annotation) : annotation.count ? '数量拾い' : annotationKindLabel(annotation.kind)}</span>
-            <span className="annotation-body" title={annotation.legacyChange ? annotation.text : annotationBody(annotation)}>{annotation.legacyChange ? annotation.text.slice(0, 40) : annotation.count ? `個数: ${session.annotationStore.fixtureForCount(annotation.count)?.name ?? (annotation.count.version === 1 ? annotation.count.group : annotation.text)}` : annotationBody(annotation).slice(0, 40)}</span>
+            <span className="annotation-body" title={annotation.legacyChange ? annotation.text : annotationBody(annotation)}>{annotation.legacyChange ? annotation.text.slice(0, 40) : annotation.count ? `個数: ${countListName(session.annotationStore.fixtureForCount(annotation.count)) ?? (annotation.count.version === 1 ? annotation.count.group : annotation.text)}` : annotationBody(annotation).slice(0, 40)}</span>
           </span>
           <span className="annotation-color" style={{ backgroundColor: annotationColorHex(annotation) }} aria-label={`色 ${annotationColorHex(annotation)}`} />
         </button>
@@ -159,3 +160,5 @@ export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) 
     </ol>
   </section>
 }
+
+function countListName(f: import('../core/countFixtures').CountFixture | undefined): string | undefined { return f ? f.spec ? fixtureCode(f) + ' ' + f.name : f.name : undefined }

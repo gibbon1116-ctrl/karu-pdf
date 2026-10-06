@@ -491,7 +491,7 @@ test('imports another open PDF without duplicate names/codes and keeps fixture d
   await page.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
   await select(page, 'DS 片開き戸'); await clickPoint(page, 0, 90, 90)
   await page.getByRole('button', { name: '削除', exact: true }).click({ trial: true })
-  page.once('dialog', async d => { expect(d.message()).toContain('この項目の拾い 1 件も削除します'); await d.accept() })
+  page.once('dialog', async d => { expect(d.message()).toContain('この項目の拾い 1 件を削除します。'); await d.accept() })
   await page.getByRole('button', { name: '削除', exact: true }).click()
   await expect(page.getByRole('button', { name: 'DS 片開き戸', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: '元に戻す', exact: true }).click()

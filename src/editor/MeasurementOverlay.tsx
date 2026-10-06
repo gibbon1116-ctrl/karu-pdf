@@ -1,3 +1,4 @@
+import { fixtureCode } from '../core/countFixtures'
 import { quantityLabel, quantityDashes, quantityPoints, quantityDimensions, type QuantityMark } from '../core/quantity'
 import { quantityMethod, quantityLine, type CountFixture, type QuantityLineStyle } from '../core/countFixtures'
 import { createContext, useContext, useEffect, useRef, useState, type RefObject } from 'react'
@@ -115,7 +116,7 @@ export function useMeasurementInteraction(props: Props) {
     if (cloud) { draw(p, '', 'area', cssColor(f.color), f.fontSize, f.borderWidth, true, f.cloudIntensity, f.fillColor ? cssColor(f.fillColor) : undefined); return }
     if (quantityItem && scale && !tracing) {
       const line = quantityLine(quantityItem)
-      draw(p, quantityLabel(p, scale.mmPerPoint, quantityMark(), quantityItem.code, quantityItem.style.showCode), kind, cssColor(quantityItem.style.color), quantityItem.style.size, line.width, true, undefined, undefined, line.dash, quantityItem.style.opacity); return
+      draw(p, quantityLabel(p, scale.mmPerPoint, quantityMark(), fixtureCode(quantityItem), quantityItem.style.showCode), kind, cssColor(quantityItem.style.color), quantityItem.style.size, line.width, true, undefined, undefined, line.dash, quantityItem.style.opacity); return
     }
     draw(p, tracing ? 'なぞって合わせる' : scale ? measureText(p, { ...scale, kind }) : '', kind, cssColor(f.color), f.fontSize, f.borderWidth, true)
   }
@@ -138,8 +139,8 @@ export function useMeasurementInteraction(props: Props) {
     const quantity = quantityItem ? quantityMark(crypto.randomUUID()) : null
     const vertices = p.map(point => [...point] as Point)
     const save = (mark: QuantityMark | null) => {
-      const text = mark ? quantityLabel(vertices, scale.mmPerPoint, mark, quantityItem!.code, quantityItem!.style.showCode) : measureText(vertices, measure)
-      const a = props.store.create({ pageIndex: props.pageIndex, kind, quantity: mark, quantityDash: quantityItem ? quantityLine(quantityItem).dash : undefined, vertices, measure, text,
+      const text = mark ? quantityLabel(vertices, scale.mmPerPoint, mark, fixtureCode(quantityItem!), quantityItem!.style.showCode) : measureText(vertices, measure)
+      const a = props.store.create({ pageIndex: props.pageIndex, kind, quantity: mark ? { ...mark, ...props.store.pickupLocation(props.pageIndex) } : null, quantityDash: quantityItem ? quantityLine(quantityItem).dash : undefined, vertices, measure, text,
         rect: measureBounds(vertices, kind, text, f.fontSize), color: f.color, fontSize: f.fontSize, borderWidth: f.borderWidth, opacity: f.opacity })
       props.store.selectOnly(a.id); props.select(a.id)
     }

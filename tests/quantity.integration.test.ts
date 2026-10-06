@@ -169,3 +169,40 @@ it('edits depth, validates dimensions, supports Undo and saves changed Contents 
   } finally { saved.destroy() }
  } finally { doc.destroy() }
 })
+
+it('round-trips specifications, aggregation, mark locations and all items of a shared route', async () => {
+ const fixtures:CountFixture[]=[{...fixture,spec:'38sq-3C',aggregation:'document'}, {...fixture,id:'em',code:'EM-CE',spec:'5.5sq-3C',aggregation:'location',order:1}, {...fixture,id:'led',code:'LED',name:'照明器具',spec:'300W',kind:undefined,method:undefined,defaults:undefined,line:undefined,aggregation:'location',order:2}]
+ const q:QuantityMark={version:1,id:'route',itemId:'cv',method:'polyline',addM:3,count:2,extra:[{itemId:'em',count:1}],floor:'B1階',room:'電気室'}
+ const route={...edit(3),quantity:q,text:quantityLabel(points,measure.mmPerPoint,q,'CV 38sq-3C',true,()=> 'EM-CE 5.5sq-3C')}
+ const count={version:2 as const,id:'led-mark',fixtureId:'led',floor:'1階',room:'事務室'}
+ const doc=blank()
+ try {
+  expect(applyEdits(doc,[{kind:'setCountFixtures',pageIndex:0,fixtures},route,{kind:'createSymbol',pageIndex:1,rect:[100,100,110,110],symbol:'circle',color:[1,0,0],count,countFixture:fixtures[2]}],{BIZUDGothic:font}).errors).toEqual([])
+  const saved=reopen(doc)
+  try {
+   expect(readCountFixtures(saved)).toEqual(fixtures)
+   const info=listAnnotations(saved,0);expect(info[0].quantity).toEqual(q);expect(info[0].contents).toBe(route.text)
+   expect(listAnnotations(saved,1)[0].count).toEqual(count)
+   const store=new AnnotationStore();await store.ensureCountFixtures(async()=>readCountFixtures(saved),async()=>{for(let p=0;p<2;p++)await store.ensurePageLoaded(p,async()=>listAnnotations(saved,p))})
+   expect(store.quantityIndex().total('cv')).toBeCloseTo(24.7);expect(store.quantityIndex().total('em')).toBeCloseTo(12.35)
+   expect(store.quantityIndex().byFloorRoom('led').get('1階')?.get('事務室')).toBe(1)
+   const page=saved.loadPage(0),annots=page.getAnnotations(),object=annots[0].getObject(), raw=object.get('KaruQuantity')
+   try {await fs.writeFile('work/spec-05c-saved-json-example.json',JSON.stringify({KaruCountFixtures:{version:1,fixtures:readCountFixtures(saved)},KaruCount:listAnnotations(saved,1)[0].count,KaruQuantity:JSON.parse(raw.asString())},null,2))}finally{raw.destroy();object.destroy();annots.forEach(a=>a.destroy());page.destroy()}
+  } finally {saved.destroy()}
+ }finally{doc.destroy()}
+})
+it('opens old fields unchanged, edits metadata and saves another compatible PDF', async () => {
+ const doc=blank(), oldCount={version:2 as const,id:'old',fixtureId:'led'}, led:CountFixture={id:'led',code:'LED',name:'器具',category:'照明',order:1,style:nextCountStyle([])}
+ try {
+  expect(applyEdits(doc,[{kind:'setCountFixtures',pageIndex:0,fixtures:[fixture,led]},edit(),{kind:'createSymbol',pageIndex:1,rect:[100,100,110,110],color:[1,0,0],symbol:'circle',count:oldCount,countFixture:led}],{BIZUDGothic:font}).errors).toEqual([])
+  const old=reopen(doc)
+  try {
+   const store=new AnnotationStore();await store.ensureCountFixtures(async()=>readCountFixtures(old),async()=>{for(let p=0;p<2;p++)await store.ensurePageLoaded(p,async()=>listAnnotations(old,p))})
+   expect(store.quantityIndex().total('cv')).toBeCloseTo(9.35);expect(store.quantityIndex().total('led')).toBe(1)
+   const ids=[0,1].flatMap(p=>store.getPageAnnotations(p).map(a=>a.id));store.updatePickupLocation(ids,'floor','1F')
+   const edits=store.toEdits();expect(applyEdits(old,edits,{BIZUDGothic:font}).errors).toEqual([])
+   const saved=reopen(old)
+   try {expect(listAnnotations(saved,0)[0].quantity?.floor).toBe('1階');expect(listAnnotations(saved,1)[0].count).toMatchObject({...oldCount,floor:'1階'});expect(readCountFixtures(saved)).toEqual([fixture,led])}finally{saved.destroy()}
+  }finally{old.destroy()}
+ }finally{doc.destroy()}
+})

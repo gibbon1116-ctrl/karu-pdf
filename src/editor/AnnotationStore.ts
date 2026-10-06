@@ -1,6 +1,8 @@
+import { QuantityIndex } from '../core/quantityIndex'
+import { floorFromDrawingName, normalizeFloor } from '../core/location'
 import { mergeAutomaticDrawingInfo, type DrawingInfo } from '../core/drawingInfo'
-import { quantityLabel, quantityValue, quantityDimensions, type QuantityMark } from '../core/quantity'
-import { quantityKind, quantityMethod, quantityLine, type QuantityLineStyle } from '../core/countFixtures'
+import { validRouteCount, quantityLabel, quantityDimensions, type QuantityMark } from '../core/quantity'
+import { fixtureCode, quantityKind, quantityMethod, quantityLine, type QuantityLineStyle } from '../core/countFixtures'
 import { nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type LegacyChangeData, type Point, type Rect, type RGB, type SymbolName } from '../core/annotations'
 import type { Quad } from 'mupdf'
 import type { FontName } from '../core/fontMetrics'
@@ -84,10 +86,12 @@ function clonePoints(points: readonly Point[]): Point[] {
   return points.map((point) => [point[0], point[1]])
 }
 
+function cloneQuantity(mark: QuantityMark): QuantityMark { return { ...mark, ...(mark.extra ? { extra: mark.extra.map(e => ({ ...e })) } : {}) } }
+
 function cloneState(annotation: AnnotationState): AnnotationState {
   return {
     ...annotation,
-    quantity: annotation.quantity ? { ...annotation.quantity } : null,
+    quantity: annotation.quantity ? cloneQuantity(annotation.quantity) : null,
     count: annotation.count ? { ...annotation.count } : null,
     issue: annotation.issue ? { ...annotation.issue } : null,
     measure: annotation.measure ? { ...annotation.measure } : null,
@@ -237,6 +241,13 @@ export class AnnotationStore {
   private readonly scaleBaselines = new Map<number, PageScale | null>()
   private pendingScales: Array<ScaleChange & { editIndex: number }> = []
   private nextNewId = 1
+  private quantityVersion = 0
+  private indexVersion = -1
+  private index: QuantityIndex | null = null
+  private visibilityVersion = 0
+  private visibleCountCache: { index: QuantityIndex; visibilityVersion: number; pages: Map<number, number> } | null = null
+  currentFloor = ''
+  currentRoom = ''
   private version = 0
   private generation = 0
   private lastNudge: { key: string; step: HistoryStep<HistoryState>; at: number } | null = null
@@ -255,12 +266,12 @@ export class AnnotationStore {
   setAnnotationFilter(filter: AnnotationFilter): void {
     if (this.filter.kind === filter.kind && this.filter.discipline === filter.discipline && this.filter.status === filter.status) return
     this.filter = Object.freeze({ ...filter })
-    this.pruneHiddenSelection(); this.notify()
+    this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false)
   }
   setDrawingFollowsFilter(value: boolean): void {
     if (this.followsFilter === value) return
     this.followsFilter = value
-    this.pruneHiddenSelection(); this.notify()
+    this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false)
   }
   releaseDrawingFilter(reason: DrawingFilterReleaseReason): void {
     if (!this.followsFilter) return
@@ -284,19 +295,21 @@ export class AnnotationStore {
   }
   prepareCountTool(): void {
     if (this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を数えるため')
-    if (this.selectedFixtureId && this.revealCountFixture(this.selectedFixtureId)) this.notify()
+    if (this.selectedFixtureId && this.revealCountFixture(this.selectedFixtureId)) this.notify(false)
   }
   private revealCountFixture(id: string): boolean {
     const changed = this.hiddenFixtures.delete(id)
-    if (this.onlySelectedFixture && id !== this.selectedFixtureId) { this.onlySelectedFixture = false; return true }
+    if (changed) this.visibilityVersion++
+    if (this.onlySelectedFixture && id !== this.selectedFixtureId) { this.onlySelectedFixture = false; this.visibilityVersion++; return true }
     return changed
   }
   canUndo = (): boolean => this.history.canUndo
   canRedo = (): boolean => this.history.canRedo
 
   reset(preserveFixtureVisibility = false): void {
+    this.index = null; this.visibleCountCache = null
     this.fixtures = []; this.fixtureBaseline = '[]'; this.fixtureLoading = null; this.fixturesReady = false
-    if (!preserveFixtureVisibility) { this.selectedFixtureId = null; this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.showQuantityValues = true }
+    if (!preserveFixtureVisibility) { this.currentFloor = ''; this.currentRoom = ''; this.selectedFixtureId = null; this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.showQuantityValues = true }
     if (!preserveFixtureVisibility) { this.filter = DEFAULT_ANNOTATION_FILTER; this.followsFilter = false }
     this.legacyCountObjects.clear(); this.pendingFixtureSave = null
     this.drawings.clear(); this.drawingBaselines.clear(); this.drawingDirtyBaselines.clear(); this.automaticDrawings.clear(); this.pendingDrawings = []
@@ -331,7 +344,7 @@ export class AnnotationStore {
           legacyChange: info.legacyChange,
           legacyChangeData: info.legacyChangeData,
           issue: info.issue ? { ...info.issue } : null,
-          quantity: info.quantity ? { ...info.quantity } : null, quantityDash: info.quantityDash,
+          quantity: info.quantity ? cloneQuantity(info.quantity) : null, quantityDash: info.quantityDash,
           count: info.count ? { ...info.count } : null,
           cloudIntensity: info.cloudIntensity ?? null,
           id,
@@ -378,7 +391,7 @@ export class AnnotationStore {
 
   loadDrawingInfos(infos: readonly (DrawingInfo | null)[]): void {
     infos.forEach((info, i) => { this.drawings.set(i, info); this.drawingBaselines.set(i, info); this.drawingDirtyBaselines.set(i, info) })
-    this.notify()
+    this.notify(false)
   }
   getDrawingInfo(pageIndex: number): DrawingInfo | null { const info = this.drawings.get(pageIndex); return info ? { ...info } : null }
   getAutomaticDrawingInfo(pageIndex: number): DrawingInfo | null { return this.automaticDrawings.get(pageIndex) ?? null }
@@ -387,7 +400,7 @@ export class AnnotationStore {
     before.drawings = pageIndices.map(pageIndex => ({ pageIndex, info: this.getDrawingInfo(pageIndex) }))
     after.drawings = pageIndices.map(pageIndex => ({ pageIndex, info: { ...info } }))
     after.drawings.forEach(({ pageIndex, info }) => this.drawings.set(pageIndex, info))
-    this.history.push({ before, after }); this.notify()
+    this.history.push({ before, after }); this.notify(false)
   }
   applyAutomaticDrawingInfo(pageIndex: number, result: DrawingInfo): void {
     this.automaticDrawings.set(pageIndex, { number: result.number, name: result.name, scanned: true })
@@ -395,7 +408,7 @@ export class AnnotationStore {
     this.drawings.set(pageIndex, next)
     const baseline = this.drawingDirtyBaselines.get(pageIndex) ?? null
     this.drawingDirtyBaselines.set(pageIndex, mergeAutomaticDrawingInfo(baseline, result))
-    this.notify()
+    this.notify(false)
   }
   loadScales(scales: readonly (PageScale | null)[]): void {
     scales.forEach((scale, pageIndex) => { this.scales.set(pageIndex, scale); this.scaleBaselines.set(pageIndex, scale) })
@@ -434,29 +447,89 @@ export class AnnotationStore {
     })().finally(() => { if (generation === this.generation) this.fixtureLoading = null })
     return this.fixtureLoading
   }
-  selectFixture(id: string | null): void { this.selectedFixtureId = id; this.pruneHiddenSelection(); this.notify() }
+  selectFixture(id: string | null): void { this.selectedFixtureId = id; this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false) }
   isFixtureVisible(id: string): boolean { return !this.hiddenFixtures.has(id) && (!this.onlySelectedFixture || id === this.selectedFixtureId) }
-  isCountVisible(mark: CountMark | null | undefined, quantity?: QuantityMark | null): boolean { return quantity ? this.isFixtureVisible(quantity.itemId) : !mark || this.isFixtureVisible(countFixtureId(mark)) }
+  isCountVisible(mark: CountMark | null | undefined, quantity?: QuantityMark | null): boolean { return quantity ? [quantity.itemId, ...(quantity.extra ?? []).map(e => e.itemId)].some(id => this.isFixtureVisible(id)) : !mark || this.isFixtureVisible(countFixtureId(mark)) }
   setFixtureVisible(ids: readonly string[], visible: boolean): void {
     if (visible && this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため')
     for (const id of ids) { if (visible) this.hiddenFixtures.delete(id); else this.hiddenFixtures.add(id) }
-    this.pruneHiddenSelection(); this.notify()
+    this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false)
   }
-  setShowQuantityValues(value: boolean): void { this.showQuantityValues = value; this.notify() }
-  setOnlySelectedFixture(value: boolean): void { if (value && this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため'); this.onlySelectedFixture = value; this.pruneHiddenSelection(); this.notify() }
-  showAllFixtures(): void { if (this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため'); this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.notify() }
+  setShowQuantityValues(value: boolean): void { this.showQuantityValues = value; this.notify(false) }
+  setOnlySelectedFixture(value: boolean): void { if (value && this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため'); this.onlySelectedFixture = value; this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false) }
+  showAllFixtures(): void { if (this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため'); this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.visibilityVersion++; this.notify(false) }
   private pruneHiddenSelection(): void { for (const id of this.selection) { const a = this.annotations.get(id); if (!a || a.deleted || !this.isShownOnDrawing(a)) this.selection.delete(id) } }
-  countTotals(): Map<string, Map<number, number>> {
-    const totals = new Map<string, Map<number, number>>()
-    for (const a of this.annotations.values()) if (!a.deleted && (a.count || a.quantity)) {
-      const id = a.quantity?.itemId ?? countFixtureId(a.count!), pages = totals.get(id) ?? new Map<number, number>()
-      pages.set(a.pageIndex, (pages.get(a.pageIndex) ?? 0) + (a.quantity && a.vertices && a.measure ? quantityValue(a.vertices, a.measure.mmPerPoint, a.quantity) : 1)); totals.set(id, pages)
+  quantityIndex(): QuantityIndex {
+    if (!this.index || this.indexVersion !== this.quantityVersion) {
+      this.index = QuantityIndex.build(this.annotations.values(), this.fixtures)
+      this.indexVersion = this.quantityVersion
     }
-    return totals
+    return this.index
+  }
+  countTotals(): Map<string, Map<number, number>> {
+    const index = this.quantityIndex()
+    return new Map([...index.itemIds()].map(id => [id, index.byPage(id)]))
+  }
+  setCurrentLocation(key: 'floor' | 'room', value: string): void {
+    if (value.length > 40) return
+    if (key === 'floor') this.currentFloor = normalizeFloor(value); else this.currentRoom = value.trim()
+    this.notify(false)
+  }
+  pickupLocation(pageIndex: number): { floor?: string; room?: string } {
+    const floor = normalizeFloor(this.currentFloor) || floorFromDrawingName(this.getDrawingInfo(pageIndex)?.name ?? '')
+    return { ...(floor ? { floor } : {}), ...(this.currentRoom.trim() ? { room: this.currentRoom.trim() } : {}) }
+  }
+  updatePickupLocation(ids: readonly string[], key: 'floor' | 'room', value: string): void {
+    if (value.length > 40) return
+    const text = key === 'floor' ? normalizeFloor(value) : value.trim()
+    const eligible = ids.filter(id => {
+      const a = this.annotations.get(id), mark = a?.quantity ?? (a?.count?.version === 2 ? a.count : a?.count ? {} : null)
+      return !!mark && ((mark as { floor?: string; room?: string })[key] ?? '') !== text
+    })
+    this.mutateMany(eligible, a => {
+      // Upgrade legacy count marks on their first location edit.
+      if (a.count?.version === 1) a.count = { version: 2, id: a.count.id, fixtureId: countFixtureId(a.count) }
+      const mark = a.quantity ?? (a.count?.version === 2 ? a.count : null)
+      if (mark) { if (text) mark[key] = text; else delete mark[key] }
+    })
+  }
+  updateRoute(id: string, count: number, extra: NonNullable<QuantityMark['extra']>): void {
+    const a = this.get(id), q = a?.quantity
+    if (!q || q.method !== 'polyline' || !validRouteCount(count) || extra.length > 10) return
+    const ids = new Set([q.itemId])
+    for (const e of extra) {
+      const f = this.getCountFixture(e.itemId)
+      if (!f || quantityMethod(f) !== 'polyline' || ids.has(e.itemId) || !validRouteCount(e.count)) return
+      ids.add(e.itemId)
+    }
+    if ((q.count ?? 1) === count && JSON.stringify(q.extra ?? []) === JSON.stringify(extra)) return
+    this.mutate(id, a => {
+      a.quantity = { ...q, count: count === 1 ? undefined : count, extra: extra.length ? extra.map(e => ({ ...e })) : undefined }
+      a.text = this.quantityText(a); a.rect = measureBounds(a.vertices!, a.measure!.kind, a.text, a.fontSize)
+    })
+    this.pruneHiddenSelection()
+  }
+  fixtureRemovalCounts(id: string): { deleted: number; detached: number } {
+    let deleted = 0, detached = 0
+    for (const a of this.annotations.values()) if (!a.deleted) {
+      if (a.count && countFixtureId(a.count) === id || a.quantity?.itemId === id && !a.quantity.extra?.length) deleted++
+      else if (a.quantity && (a.quantity.itemId === id || a.quantity.extra?.some(e => e.itemId === id))) detached++
+    }
+    return { deleted, detached }
   }
   visibleCountTotal(pageIndex: number): number {
+    const index = this.quantityIndex()
+    if (!this.visibleCountCache || this.visibleCountCache.index !== index || this.visibleCountCache.visibilityVersion !== this.visibilityVersion) {
+      this.visibleCountCache = { index, visibilityVersion: this.visibilityVersion, pages: new Map() }
+    }
+    const cache = this.visibleCountCache.pages, previous = cache.get(pageIndex)
+    if (previous !== undefined) return previous
     let n = 0
-    for (const a of this.annotations.values()) if (!a.deleted && a.pageIndex === pageIndex && a.count && this.isShownOnDrawing(a)) n++
+    for (const entry of index.countEntriesOnPage(pageIndex)) {
+      const a = this.annotations.get(entry.annotationId)
+      if (a && this.isShownOnDrawing(a)) n++
+    }
+    cache.set(pageIndex, n)
     return n
   }
   countOverlayObjNums(pageIndex: number): number[] {
@@ -474,27 +547,48 @@ export class AnnotationStore {
     serializeCountFixtures(fixtures)
     const before: HistoryState = [], after: HistoryState = []
     before.fixtures = this.getCountFixtures(); after.fixtures = structuredClone(fixtures)
-    const appearance = (f: CountFixture | undefined) => f ? JSON.stringify([f.name, f.code, f.style, f.line]) : ''
+    const appearance = (f: CountFixture | undefined) => f ? JSON.stringify([f.name, f.code, f.spec, f.style, f.line]) : ''
     const changed = new Set(fixtures.filter(f => appearance(f) !== appearance(this.getCountFixture(f.id))).map(f => f.id))
     this.fixtures = structuredClone(fixtures)
     for (const a of this.annotations.values()) if (!a.deleted && (a.count || a.quantity)) {
       const id = a.quantity?.itemId ?? countFixtureId(a.count!)
-      if (!removeIds.includes(id) && !changed.has(id)) continue
+      const routeIds = [id, ...(a.quantity?.extra ?? []).map(e => e.itemId)]
+      if (!routeIds.some(id => removeIds.includes(id) || changed.has(id))) continue
       before.push(cloneState(a))
-      if (removeIds.includes(id)) { a.deleted = true; this.selection.delete(a.id) }
-      else { if (a.quantity) this.applyFixtureToQuantity(a, this.getCountFixture(id)!); else this.applyFixtureToMark(a, this.getCountFixture(id)!); after.push(cloneState(a)) }
+      if (a.quantity) {
+        const remaining = [{ itemId: a.quantity.itemId, count: a.quantity.count ?? 1 }, ...(a.quantity.extra ?? [])].filter(e => !removeIds.includes(e.itemId))
+        if (!remaining.length) { a.deleted = true; this.selection.delete(a.id) }
+        else {
+          const [main, ...extra] = remaining
+          a.quantity = { ...a.quantity, itemId: main.itemId, count: a.quantity.method === 'polyline' && main.count !== 1 ? main.count : undefined, extra: extra.length ? extra : undefined }
+          this.applyFixtureToQuantity(a, this.getCountFixture(main.itemId)!); after.push(cloneState(a))
+        }
+      } else if (removeIds.includes(id)) { a.deleted = true; this.selection.delete(a.id) }
+      else { this.applyFixtureToMark(a, this.getCountFixture(id)!); after.push(cloneState(a)) }
       this.markTouched(a); a.revision++
     }
     this.history.push({ before, after }); this.pruneHiddenSelection(); this.notify()
   }
-  reassignCounts(ids: readonly string[], fixtureId: string): void {
+  reassignCounts(ids: readonly string[], fixtureId: string): string | undefined {
     const fixture = this.getCountFixture(fixtureId)
     if (!fixture) return
+    for (const id of ids) {
+      const q = this.annotations.get(id)?.quantity, match = q?.extra?.find(e => e.itemId === fixtureId)
+      if (q && match && (q.count ?? 1) + match.count > 99) return '条数の合計が99を超えるため、項目を変更できません。'
+    }
     const before: HistoryState = [], after: HistoryState = []
     for (const id of ids) {
       const a = this.annotations.get(id)
       if (!a || a.deleted || !(a.count && quantityKind(fixture) === 'count' || a.quantity && quantityMethod(fixture) === a.quantity.method)) continue
-      before.push(cloneState(a)); if (a.quantity) this.applyFixtureToQuantity(a, fixture); else this.applyFixtureToMark(a, fixture); this.markTouched(a); a.revision++; after.push(cloneState(a))
+      before.push(cloneState(a)); if (a.quantity) {
+        const match = a.quantity.extra?.find(e => e.itemId === fixtureId)
+        if (match) {
+          const count = (a.quantity.count ?? 1) + match.count
+          a.quantity = { ...a.quantity, count, extra: a.quantity.extra!.filter(e => e.itemId !== fixtureId) }
+          if (!a.quantity.extra!.length) delete a.quantity.extra
+        }
+        this.applyFixtureToQuantity(a, fixture)
+      } else this.applyFixtureToMark(a, fixture); this.markTouched(a); a.revision++; after.push(cloneState(a))
     }
     if (before.length) this.history.push({ before, after })
     this.pruneHiddenSelection(); this.notify()
@@ -504,7 +598,7 @@ export class AnnotationStore {
     if (!a.quantity) return measureText(points, a.measure)
     const f = this.getCountFixture(a.quantity.itemId)
     if (!f) return a.text
-    return quantityLabel(points, a.measure.mmPerPoint, a.quantity, f.code, f.style.showCode)
+    return quantityLabel(points, a.measure.mmPerPoint, a.quantity, fixtureCode(f), f.style.showCode, id => { const item = this.getCountFixture(id); return item ? fixtureCode(item) : id })
   }
   private applyFixtureToQuantity(a: StoredAnnotation, fixture: CountFixture): void {
     a.quantity = { ...a.quantity!, itemId: fixture.id }
@@ -529,7 +623,7 @@ export class AnnotationStore {
     })
   }
   fixtureMarkCount(id: string): number {
-    return [...this.annotations.values()].filter(a => !a.deleted && (a.quantity?.itemId === id || a.count && countFixtureId(a.count) === id)).length
+    return [...this.annotations.values()].filter(a => !a.deleted && (a.quantity?.itemId === id || a.quantity?.extra?.some(e => e.itemId === id) || a.count && countFixtureId(a.count) === id)).length
   }
   selectedQuantitiesOnly(): boolean {
     const annotations = this.selectedIds().map(id => this.annotations.get(id)!)
@@ -537,8 +631,8 @@ export class AnnotationStore {
   }
   private applyFixtureToMark(a: StoredAnnotation, fixture: CountFixture): void {
     const x = (a.rect[0] + a.rect[2]) / 2, y = (a.rect[1] + a.rect[3]) / 2, r = fixture.style.size / 2
-    a.count = { version: 2, id: a.count!.id, fixtureId: fixture.id }; a.rect = [x - r, y - r, x + r, y + r]
-    a.color = [...fixture.style.color]; a.opacity = fixture.style.opacity; a.text = `個数: ${fixture.code} ${fixture.name}`.trim()
+    a.count = { ...(a.count?.version === 2 ? a.count : {}), version: 2, id: a.count!.id, fixtureId: fixture.id }; a.rect = [x - r, y - r, x + r, y + r]
+    a.color = [...fixture.style.color]; a.opacity = fixture.style.opacity; a.text = `個数: ${fixtureCode(fixture)} ${fixture.name}`.trim()
   }
 
   setScale(pageIndices: readonly number[], scale: PageScale, recalculate: boolean): void {
@@ -589,6 +683,10 @@ export class AnnotationStore {
   primarySelection(): string | null {
     return this.selectedIds().at(-1) ?? null
   }
+  selectedPickupsOnly(): boolean {
+    const ids = this.selectedIds()
+    return ids.length > 0 && ids.every(id => { const a = this.annotations.get(id); return !!(a?.count || a?.quantity) })
+  }
   selectedCountsOnly(): boolean {
     const ids = this.selectedIds()
     return ids.length > 0 && ids.every(id => !!this.annotations.get(id)?.count)
@@ -604,7 +702,7 @@ export class AnnotationStore {
     if (this.selectedIds().length === next.length && next.every((value) => this.selection.has(value))) return
     this.selection.clear()
     for (const value of next) this.selection.add(value)
-    this.notify()
+    this.notify(false)
   }
 
   toggleSelection(id: string): void {
@@ -612,13 +710,13 @@ export class AnnotationStore {
     if (!a || a.deleted || !this.isShownOnDrawing(a)) return
     if (this.selection.has(id)) this.selection.delete(id)
     else this.selection.add(id)
-    this.notify()
+    this.notify(false)
   }
 
   clearSelection(): void {
     if (this.selection.size === 0) return
     this.selection.clear()
-    this.notify()
+    this.notify(false)
   }
 
   selectInRect(pageIndex: number, rect: Rect): string[] {
@@ -630,7 +728,7 @@ export class AnnotationStore {
     for (const annotation of this.getPageAnnotations(pageIndex)) {
       if (this.isShownOnDrawing(annotation) && annotationInsideSelection(annotation, normalized)) this.selection.add(annotation.id)
     }
-    this.notify()
+    this.notify(false)
     return this.selectedIds()
   }
 
@@ -673,7 +771,7 @@ export class AnnotationStore {
   }): EditableAnnotation {
     const id = `new-${this.nextNewId++}`
     const annotation: StoredAnnotation = {
-      quantity: input.quantity ? { ...input.quantity } : null, quantityDash: input.quantityDash,
+      quantity: input.quantity ? cloneQuantity(input.quantity) : null, quantityDash: input.quantityDash,
       count: input.count ? { ...input.count } : null,
       issue: input.kind === 'issue' ? input.issue ? { ...input.issue } : { number: this.issueNumbers.next(), status: 'open', version: 1, id: crypto.randomUUID() } : null,
       cloudIntensity: input.cloudIntensity ?? (input.kind === 'cloudSquare' || input.kind === 'cloudPolygon' ? 1 : null),
@@ -728,7 +826,7 @@ export class AnnotationStore {
       if (!touched.has(annotation.objNum)) {
         touched.add(annotation.objNum)
         this.touchedByPage.set(annotation.pageIndex, touched)
-        this.notify()
+        this.notify(false)
       }
     }
     return this.get(id)
@@ -1032,7 +1130,7 @@ export class AnnotationStore {
     const step = this.history.undo()
     if (!step) return
     this.restoreMany(step.before, step.after)
-    this.notify()
+    this.notify(!!(step.before.length || step.after.length || step.before.fixtures || step.before.scales))
   }
 
   updateIssueText(id: string, text: string): void {
@@ -1055,7 +1153,7 @@ export class AnnotationStore {
     const step = this.history.redo()
     if (!step) return
     this.restoreMany(step.after, step.before)
-    this.notify()
+    this.notify(!!(step.before.length || step.after.length || step.after.fixtures || step.after.scales))
   }
 
   touchedObjNums(pageIndex: number): number[] {
@@ -1307,7 +1405,7 @@ export class AnnotationStore {
         rect: annotation.rect,
         color: annotation.color,
         symbol: annotation.symbol ?? 'check' as const,
-        count: annotation.count && fixture ? { version: 2 as const, id: annotation.count.id, fixtureId: fixture.id } : annotation.count,
+        count: annotation.count && fixture ? { ...(annotation.count.version === 2 ? annotation.count : {}), version: 2 as const, id: annotation.count.id, fixtureId: fixture.id } : annotation.count,
         countFixture: fixture,
         opacity: annotation.opacity,
       }
@@ -1349,7 +1447,8 @@ export class AnnotationStore {
     this.touchedByPage.set(annotation.pageIndex, touched)
   }
 
-  private notify(): void {
+  private notify(quantityChanged = true): void {
+    if (quantityChanged) this.quantityVersion += 1
     this.version += 1
     for (const listener of this.listeners) listener()
   }

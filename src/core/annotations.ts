@@ -1,3 +1,4 @@
+import { fixtureCode } from './countFixtures'
 import { writeDrawingInfo, type DrawingInfo } from './drawingInfo'
 import { parseQuantityMark, quantityPoints, quantityDashes, type QuantityMark } from './quantity'
 import { QUANTITY_DASHES, type QuantityLineStyle } from './countFixtures'
@@ -1099,7 +1100,7 @@ function drawIssue(device: DisplayListDevice, text: InstanceType<typeof mupdf.Te
 }
 
 function drawCountMarker(device: DisplayListDevice, text: InstanceType<typeof mupdf.Text>, task: AppearanceTask, font: FontResource, fallback?: FontResource): void {
-  const fixture = task.countFixture!, s = fixture.style, top = s.showCode && fixture.code ? s.size * .7 * 1.2 : 0
+  const fixture = task.countFixture!, s = fixture.style, top = s.showCode && fixtureCode(fixture) ? s.size * .7 * 1.2 : 0
   const data = countMarkerData(s, s.size / 2 + 1, top + s.size / 2 + 1)
   const draw = (polygons: Point[][], fill: boolean, rgb: RGB, width: number, close = true) => {
     const path = new mupdf.Path(), stroke = new mupdf.StrokeState({ lineWidth: width, lineJoin: 'Round', lineCap: 'Butt', miterLimit: 10 })
@@ -1111,9 +1112,9 @@ function drawCountMarker(device: DisplayListDevice, text: InstanceType<typeof mu
   }
   if (data.bright) draw(data.outline, false, [64 / 255, 64 / 255, 64 / 255], 1.8)
   draw(data.fills, true, s.color, .8); draw(data.outline, false, s.color, .8); draw(data.strokes, false, s.color, .8, false)
-  if (s.showCode && fixture.code) {
+  if (s.showCode && fixtureCode(fixture)) {
     let x = data.code.x
-    for (const char of [...fixture.code].map(c => encodeCharacter(font.font, c, fallback?.font))) {
+    for (const char of [...fixtureCode(fixture)].map(c => encodeCharacter(font.font, c, fallback?.font))) {
       text.showGlyph(char.font, [data.code.size, 0, 0, -data.code.size, x, data.code.y], char.glyph, char.unicode)
       x += char.advance * data.code.size
     }
@@ -1314,7 +1315,7 @@ function installTemporaryAppearances(
     const countTemplates = new Map<string, number>()
     for (const task of tasks) {
       // Round the size: e.g. 10 * .7 carries float noise that differs by position and would split templates.
-      const key = task.countFixture ? JSON.stringify([task.countFixture.style, task.countFixture.code, Math.round(task.width * 1000) / 1000, Math.round(task.height * 1000) / 1000]) : null
+      const key = task.countFixture ? JSON.stringify([task.countFixture.style, fixtureCode(task.countFixture), Math.round(task.width * 1000) / 1000, Math.round(task.height * 1000) / 1000]) : null
       const cached = key ? countTemplates.get(key) : undefined
       if (cached !== undefined) { task.temporaryPageIndex = cached; continue }
       const fontResource = fontResources[task.fontName]
@@ -1632,13 +1633,13 @@ export function applyEdits(
         try {
           if (edit.count) {
             if (!parseCount(JSON.stringify(edit.count))) throw new Error('数量拾いの種類が不正です。')
-            setPdfString(doc, countObject, 'KaruCount', JSON.stringify(edit.count))
-            annotation.setContents(`個数: ${edit.countFixture ? `${edit.countFixture.code} ${edit.countFixture.name}`.trim() : edit.count.version === 1 ? edit.count.group : edit.count.fixtureId}`)
+            setPdfString(doc, countObject, 'KaruCount', JSON.stringify(parseCount(JSON.stringify(edit.count))))
+            annotation.setContents(`個数: ${edit.countFixture ? `${fixtureCode(edit.countFixture)} ${edit.countFixture.name}`.trim() : edit.count.version === 1 ? edit.count.group : edit.count.fixtureId}`)
           } else countObject.delete('KaruCount')
         } finally { countObject.destroy() }
         if (edit.count && edit.countFixture) {
           const f = edit.countFixture, s = f.style, fs = s.size * .7
-          const top = s.showCode && f.code ? fs * 1.2 : 0, extra = s.showCode ? [...f.code].length * fs : 0
+          const top = s.showCode && fixtureCode(f) ? fs * 1.2 : 0, extra = s.showCode ? [...fixtureCode(f)].length * fs : 0
           const visibleRect: Rect = [edit.rect[0] - 1, edit.rect[1] - top - 1, edit.rect[0] + s.size + extra + 1, edit.rect[1] + s.size + 1]
           annotation.setRect(visibleRect); annotation.setColor(s.color); annotation.setOpacity(s.opacity)
           const obj = annotation.getObject()

@@ -42,3 +42,11 @@ it('undoes fixture additions, style edits and bulk deletion without persisting v
   store.setCountFixtures([second], ['a']); expect(store.get(a.id)).toBeUndefined()
   store.undo(); expect(store.get(a.id)?.count).toEqual({ version: 2, id: 'mark', fixtureId: 'a' })
 })
+
+it('parses optional count locations, rejects invalid fields and omits empty locations', () => {
+ const mark = { version: 2, id: 'a', fixtureId: 'f', floor: '1階', room: '事務室' }
+ expect(parseCount(JSON.stringify(mark))).toEqual(mark)
+ for (const key of ['floor', 'room']) for (const value of ['x'.repeat(41), 1, null]) expect(parseCount(JSON.stringify({ ...mark, [key]: value }))).toBeNull()
+ expect(parseCount(JSON.stringify({ ...mark, floor: '', room: ' ' }))).toEqual({ version: 2, id: 'a', fixtureId: 'f' })
+ expect(parseCount(JSON.stringify({ version: 1, id: 'a', group: '器具' }))).toEqual({ version: 1, id: 'a', group: '器具' })
+})

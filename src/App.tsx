@@ -107,6 +107,7 @@ declare global {
       getHeaderFooterSettings(): Promise<HeaderFooterSettings | null>
       applyHeaderFooter(settings: HeaderFooterSettings, dateText?: string): Promise<PageLayoutTimings | null>
       removeHeaderFooter(): Promise<PageLayoutTimings | null>
+      setDrawingInfo(pageIndex: number, info: import('./core/drawingInfo').DrawingInfo): void
       getDrawingInfos(): (import('./core/drawingInfo').DrawingInfo | null)[]
       getDrawingScanMetrics(): { scanning: boolean; totalMs: number; pageMs: number[] }
       pageTextLines(pageIndex: number): ReturnType<PdfWorkerPool['pageTextLines']>
@@ -1526,6 +1527,7 @@ export default function App() {
       getHeaderFooterSettings: () => activeRef.current ? pool.getHeaderFooterSettings(activeRef.current.docId) : Promise.resolve(null),
       applyHeaderFooter: (settings, dateText = '2026年10月1日') => applyHeaderFooterSettings(settings, dateText),
       removeHeaderFooter: removeHeaderFooterSettings,
+      setDrawingInfo: (pageIndex, info) => activeRef.current?.annotationStore.setDrawingInfo([pageIndex], info),
       getDrawingInfos: () => { const s = activeRef.current; return s ? s.pageSizes.map((_, i) => s.annotationStore.getDrawingInfo(i)) : [] },
       getDrawingScanMetrics: () => { const s = activeRef.current; return { scanning: s?.drawingScanning ?? false, totalMs: s?.drawingScanMs ?? 0, pageMs: s?.drawingPageMs.slice() ?? [] } },
       pageTextLines: (pageIndex) => {

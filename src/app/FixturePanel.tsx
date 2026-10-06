@@ -1,9 +1,11 @@
+import { LocationInput } from './LocationInput'
 import { lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
-import { nextCountStyle, quantityKind, QUANTITY_UNITS, type FixturePreset, type CountFixture } from '../core/countFixtures'
+import { fixtureCode, nextCountStyle, quantityKind, QUANTITY_UNITS, type FixturePreset, type CountFixture } from '../core/countFixtures'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 import { ensureSessionFixtures, FixtureUiContext, type DocumentSession } from './documentModel'
 import { createCountCsv } from './annotationCsv'
+import { floorFromDrawingName } from '../core/location'
 import { annotationFilterLabel } from '../editor/annotationFilter'
 import { groupFixtures, moveCategory, moveFixture, stepFixture } from './fixtureOrder'
 const FixtureDialog = lazy(() => import('./FixtureDialog'))
@@ -13,7 +15,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   const store = session.annotationStore, ui = useContext(FixtureUiContext)
   const version = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [search, setSearch] = useState(''), [collapsed, setCollapsed] = useState(new Set<string>()), [error, setError] = useState('')
-  const [dialog, setDialog] = useState<{ initial: CountFixture; editing: boolean } | null>(null)
+  const [dialog, setDialog] = useState<{ initial: CountFixture; editing: boolean; duplicate?: boolean } | null>(null)
   const dragging = useRef<{ kind: 'fixture' | 'category'; id: string } | null>(null)
   const [dropTarget, setDropTarget] = useState<{ kind: 'fixture' | 'category'; id: string; side: 'before' | 'after' | 'inside' } | null>(null)
   const [status, setStatus] = useState('')
@@ -24,14 +26,16 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   const drawingStatus = useSyncExternalStore(session.subscribeDrawingScan, session.getDrawingScanSnapshot)
   useEffect(() => { void session.scanDrawingInfos(pool) }, [session, pool, session.pageRevision])
   const fixtures = useMemo(() => store.getCountFixtures(), [store, version])
-  const totals = useMemo(() => store.countTotals(), [store, version])
+  const index = store.quantityIndex()
+  const locations = useMemo(() => index.locations(), [index])
+  const inferredFloor = floorFromDrawingName(store.getDrawingInfo(session.view.page - 1)?.name ?? '')
   const selected = fixtures.find(f => f.id === store.selectedFixtureId), pageIndex = session.view.page - 1
-  const total = (id: string) => [...(totals.get(id)?.values() ?? [])].reduce((n, m) => n + m, 0)
+  const total = (id: string) => index.total(id)
   const format = (f: CountFixture, n: number) => quantityKind(f) === 'count' ? String(n) : n.toFixed(2)
   const unit = (f: CountFixture) => (quantityKind(f) === 'count' ? '' : ' ') + QUANTITY_UNITS[quantityKind(f)]
-  const pageTotal = (id: string) => totals.get(id)?.get(pageIndex) ?? 0
+  const pageTotal = (id: string) => index.byPage(id).get(pageIndex) ?? 0
   const groups = useMemo(() => groupFixtures(fixtures), [fixtures])
-  const categories = useMemo(() => groups.map(g => ({ ...g, items: g.items.filter(f => `${f.code} ${f.name}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())) })).filter(g => g.items.length), [groups, search])
+  const categories = useMemo(() => groups.map(g => ({ ...g, items: g.items.filter(f => `${fixtureCode(f)} ${f.name}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())) })).filter(g => g.items.length), [groups, search])
   const canEdit = store.fixturesReady && !session.editRestriction && !busy
   const canReorder = canEdit && search.length === 0
   const reorderTitle = search.length ? '検索中は並べ替えできません' : 'ドラッグして並べ替え'
@@ -96,7 +100,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     const next = [...fixtures]
     let order = nextOrder
     for (const item of items) {
-      if (next.some(f => f.name === item.name && f.code === item.code)) continue
+      if (next.some(f => f.name === item.name && f.code === item.code && (f.spec ?? '') === (item.spec ?? ''))) continue
       next.push({ ...item, id: crypto.randomUUID(), order: order++, ...(!('style' in item) && item.kind && item.kind !== 'count' ? { line: { width: 1.5 as const, dash: 'solid' as const } } : {}), style: 'style' in item ? structuredClone(item.style) : nextCountStyle(next) })
     }
     if (next.length !== fixtures.length) store.setCountFixtures(next)
@@ -118,7 +122,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     </div>}
     {!store.fixturesReady && <p role="status">数量拾いを読み込んでいます…</p>}
     <p className="fixture-count-summary" aria-live="polite">{selected ? <>
-      <span className="fixture-summary-name">{quantityKind(selected) === 'count' ? <svg className="fixture-swatch" viewBox="-14 -14 28 28" aria-hidden="true"><CountMarker style={{ ...selected.style, size: 24, opacity: 1 }} showCode={false} /></svg> : <QuantitySwatch fixture={selected} />}<span title={`${selected.code} ${selected.name}`}>{selected.code} {selected.name}{'　'}</span></span>
+      <span className="fixture-summary-name">{quantityKind(selected) === 'count' ? <svg className="fixture-swatch" viewBox="-14 -14 28 28" aria-hidden="true"><CountMarker style={{ ...selected.style, size: 24, opacity: 1 }} showCode={false} /></svg> : <QuantitySwatch fixture={selected} />}<span title={`${fixtureCode(selected)} ${selected.name}`}>{fixtureCode(selected)} {selected.name}{'　'}</span></span>
       <span className="fixture-summary-totals"><span>表示中の図面（p.{session.view.page}）: <strong>{format(selected, pageTotal(selected.id))}</strong>{unit(selected)}</span>{' ／ '}<span>全図面: <strong>{format(selected, total(selected.id))}</strong>{unit(selected)}</span></span>
     </> : '数量拾いの一覧で項目を選んでください'}</p>
     {store.visibleCountTotal(pageIndex) > 1000 && <p role="status">印が多いため略号の表示を省略しています</p>}
@@ -129,13 +133,14 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       <button disabled={!canEdit || !selected || fixtures.length >= 1000} onClick={() => {
         if (!selected) return
         const proposed = nextCountStyle(fixtures)
-        setDialog({ editing: false, initial: { ...structuredClone(selected), id: crypto.randomUUID(), name: `${selected.name.slice(0, 74)} のコピー`, order: nextOrder, style: { ...selected.style, shape: proposed.shape, fill: proposed.fill, color: proposed.color } } })
+        setDialog({ editing: false, duplicate: true, initial: { ...structuredClone(selected), id: crypto.randomUUID(), name: selected.spec ? selected.name : `${selected.name.slice(0, 74)} のコピー`, order: nextOrder, style: { ...selected.style, shape: proposed.shape, fill: proposed.fill, color: proposed.color } } })
       }}>複製</button>
       <button disabled={!canEdit || !selected} onClick={() => selected && setDialog({ editing: true, initial: structuredClone(selected) })}>編集</button>
       <button disabled={!canEdit || !selected} onClick={() => {
         if (!selected) return
-        const n = store.fixtureMarkCount(selected.id)
-        if (!window.confirm(n ? `この項目の拾い ${n} 件も削除します。よろしいですか？` : `${selected.name}を削除しますか？`)) return
+        const { deleted, detached } = store.fixtureRemovalCounts(selected.id)
+        const parts = [deleted ? `この項目の拾い ${deleted} 件を削除し` : '', detached ? `${detached} 件の経路からこの項目を外し` : ''].filter(Boolean)
+        if (!window.confirm(parts.length ? `${parts.join('、')}ます。よろしいですか？` : `${selected.name}を削除しますか？`)) return
         store.setCountFixtures(fixtures.filter(f => f.id !== selected.id), [selected.id]); store.selectFixture(null)
       }}>削除</button>
       </div>
@@ -150,6 +155,13 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       <button disabled={!canEdit || !selected || selectedIndex < 0 || selectedIndex === selectedItems.length - 1} title={selectedIndex === selectedItems.length - 1 ? '分類の末尾です。分類ごと動かすときは、分類の見出しをドラッグします' : undefined} onClick={() => step(1)}>下へ</button>
       </div>
     </div>
+    <fieldset className="current-location"><legend>現在の場所</legend>
+      <label>階<LocationInput value={store.currentFloor} label="現在の階" list="pickup-floors" commit={v => store.setCurrentLocation('floor', v)} /></label>
+      {inferredFloor && !store.currentFloor && <small>（図面名から: {inferredFloor}）</small>}
+      <label>部屋<LocationInput value={store.currentRoom} label="現在の部屋" list="pickup-rooms" commit={v => store.setCurrentLocation('room', v)} /></label>
+      <datalist id="pickup-floors">{locations.floors.map(f => <option key={f} value={f} />)}</datalist>
+      <datalist id="pickup-rooms">{locations.rooms.map(r => <option key={r} value={r} />)}</datalist>
+    </fieldset>
     <label>名称・略号で検索<input type="search" value={search} onChange={e => setSearch(e.currentTarget.value)} /></label>
     <label><input type="checkbox" checked={store.onlySelectedFixture} onChange={e => store.setOnlySelectedFixture(e.currentTarget.checked)} />選択中の項目だけ表示</label>
     <label><input type="checkbox" checked={store.showQuantityValues} onChange={e => store.setShowQuantityValues(e.currentTarget.checked)} />図面に長さ・面積・体積の数値を表示</label>
@@ -172,17 +184,17 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
           setSampleHover({ fixture: f, left: Math.max(8, Math.min(window.innerWidth - 176, rect.right + 8)), top: Math.max(8, Math.min(window.innerHeight - 176, rect.top)) })
         }} onMouseLeave={() => setSampleHover(null)}>
         <span className="fixture-grip" aria-hidden="true">⠿</span>
-        <button aria-label={`${f.code} ${f.name}の表示切替`} aria-pressed={store.isFixtureVisible(f.id)} onClick={() => store.setFixtureVisible([f.id], !store.isFixtureVisible(f.id))}><Eye visible={store.isFixtureVisible(f.id)} /></button>
-        <button className="fixture-row" aria-label={`${f.code} ${f.name}`.trim()} aria-pressed={f.id === selected?.id} onClick={() => { setSelectedCategory(null); store.selectFixture(f.id); ui?.select() }}>
+        <button aria-label={`${fixtureCode(f)} ${f.name}の表示切替`} aria-pressed={store.isFixtureVisible(f.id)} onClick={() => store.setFixtureVisible([f.id], !store.isFixtureVisible(f.id))}><Eye visible={store.isFixtureVisible(f.id)} /></button>
+        <button className="fixture-row" aria-label={`${fixtureCode(f)} ${f.name}`.trim()} aria-pressed={f.id === selected?.id} onClick={() => { setSelectedCategory(null); store.selectFixture(f.id); ui?.select() }}>
           {quantityKind(f) === 'count' ? <svg className="fixture-swatch" viewBox="-14 -14 28 28" aria-hidden="true"><CountMarker style={{ ...f.style, size: 24, opacity: 1 }} showCode={false} /></svg> : <QuantitySwatch fixture={f} />}
           <span className="fixture-sample-cell">{quantityKind(f) === 'count' && f.sample && <img className="fixture-sample-thumbnail" src={`data:image/png;base64,${f.sample.png}`} alt={`${f.name}の見本`} draggable={false} />}</span>
-          <span className="fixture-row-code" title={f.code}>{f.code}{' '}</span><span className="fixture-row-name" title={f.name}>{f.name}{quantityKind(f) !== 'count' && <span className="fixture-row-unit">{QUANTITY_UNITS[quantityKind(f)]}</span>}</span><span className="fixture-row-count" title={`表示中の図面: ${format(f, pageTotal(f.id))}${unit(f)}`}>{format(f, pageTotal(f.id))}</span><span className="fixture-row-count" title={`全図面: ${format(f, total(f.id))}${unit(f)}`}>{format(f, total(f.id))}</span>
+          <span className="fixture-row-code" title={f.code}>{f.code}{' '}</span><span className="fixture-row-name" title={f.name}>{f.name}{f.spec && <span className="fixture-row-spec"> {f.spec}</span>}{quantityKind(f) !== 'count' && <span className="fixture-row-unit">{QUANTITY_UNITS[quantityKind(f)]}</span>}</span><span className="fixture-row-count" title={`表示中の図面: ${format(f, pageTotal(f.id))}${unit(f)}`}>{format(f, pageTotal(f.id))}</span><span className="fixture-row-count" title={`全図面: ${format(f, total(f.id))}${unit(f)}`}>{format(f, total(f.id))}</span>
         </button>
       </li>)}</ul>}
     </section>)}</div>
     {!dialog && sampleHover?.fixture.sample && <div className="fixture-sample-hover" role="tooltip" style={{ left: sampleHover.left, top: sampleHover.top }}><img src={`data:image/png;base64,${sampleHover.fixture.sample.png}`} alt={`${sampleHover.fixture.name}の見本（拡大）`} /></div>}
     <Suspense fallback={<p>画面を開いています…</p>}>
-      {dialog && <FixtureDialog initial={dialog.initial} fixtures={fixtures} editing={dialog.editing} hasMarks={dialog.editing && store.fixtureMarkCount(dialog.initial.id) > 0} onSave={saveFixture} onClose={() => setDialog(null)} />}
+      {dialog && <FixtureDialog initial={dialog.initial} fixtures={fixtures} editing={dialog.editing} duplicate={dialog.duplicate} hasMarks={dialog.editing && store.fixtureMarkCount(dialog.initial.id) > 0} onSave={saveFixture} onClose={() => setDialog(null)} />}
       {preset && <FixturePresetDialog onAdd={addMany} onClose={() => setPreset(false)} />}
       {sources && <FixturePresetDialog sources={sources} onAdd={addMany} onClose={() => setSources(null)} />}
     </Suspense>
