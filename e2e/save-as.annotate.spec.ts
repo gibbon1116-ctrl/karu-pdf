@@ -189,6 +189,9 @@ test('普通の上書き保存でも新しいファイルサイズのキーで�
 })
 
 test('別名保存後に再読み込みしてもBのハンドル・履歴・表示位置を復元する', async ({ page }) => {
+  // chrome-headless-shell (the CI browser) crashes when a reloaded page reads an
+  // OPFS file handle back from IndexedDB, even without the app; Edge does not.
+  test.skip(process.env.PLAYWRIGHT_CHANNEL === 'chromium', 'chrome-headless-shell crashes reading a stored OPFS handle after reload')
   // Native handles in browser-private storage can be structured-cloned into
   // IndexedDB, unlike the recording mocks used by the other save tests.
   await page.addInitScript(pdfBytes => {
