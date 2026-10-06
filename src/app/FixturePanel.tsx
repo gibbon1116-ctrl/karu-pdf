@@ -1,7 +1,7 @@
 import { LocationInput } from './LocationInput'
 import { lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
-import { fixtureCode, nextCountStyle, quantityKind, QUANTITY_UNITS, type FixturePreset, type CountFixture } from '../core/countFixtures'
+import { countHex, fixtureCode, nextCountStyle, nextQuantityLineStyle, quantityKind, quantityLine, QUANTITY_UNITS, type FixturePreset, type CountFixture, type QuantityLineAppearance } from '../core/countFixtures'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 import { ensureSessionFixtures, FixtureUiContext, type DocumentSession } from './documentModel'
 import QuantityBreakdown from './QuantityBreakdown'
@@ -100,13 +100,20 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   const nextOrder = fixtures.reduce((n, f) => Math.max(n, f.order + 1), 0)
   const saveFixture = (f: CountFixture) => { store.setCountFixtures(dialog?.editing ? fixtures.map(p => p.id === f.id ? f : p) : [...fixtures, f]); store.selectFixture(f.id); setDialog(null) }
   const addMany = (items: Array<FixturePreset | CountFixture>) => {
-    const next = [...fixtures]
-    let order = nextOrder
-    for (const item of items) {
-      if (next.some(f => f.name === item.name && f.code === item.code && (f.spec ?? '') === (item.spec ?? ''))) continue
-      next.push({ ...item, id: crypto.randomUUID(), order: order++, ...(!('style' in item) && item.kind && item.kind !== 'count' ? { line: { width: 1.5 as const, dash: 'solid' as const } } : {}), style: 'style' in item ? structuredClone(item.style) : nextCountStyle(next) })
-    }
-    if (next.length !== fixtures.length) store.setCountFixtures(next)
+    try {
+      const next = [...fixtures]
+      let order = nextOrder
+      for (const item of items) {
+        if (next.some(f => f.name === item.name && f.code === item.code && (f.spec ?? '') === (item.spec ?? ''))) continue
+        const imported = 'style' in item, isLine = item.kind && item.kind !== 'count'
+        let appearance: QuantityLineAppearance | undefined
+        if (isLine && (!imported || next.some(f => quantityKind(f) !== 'count' && countHex(f.style.color) === countHex(item.style.color) && quantityLine(f).width === quantityLine(item).width && quantityLine(f).dash === quantityLine(item).dash))) appearance = nextQuantityLineStyle(next)
+        const style = imported ? structuredClone(item.style) : nextCountStyle(isLine ? [] : next)
+        next.push({ ...item, id: crypto.randomUUID(), order: order++, style: appearance ? { ...style, color: appearance.color } : style, ...(appearance ? { line: appearance.line } : {}) })
+      }
+      if (next.length !== fixtures.length) store.setCountFixtures(next)
+      setError('')
+    } catch (reason) { setError(String(reason)) }
   }
   const csv = async (value: string, name: string) => {
     const blob = new Blob([value], { type: 'text/csv;charset=utf-8' })
@@ -134,8 +141,17 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       <button disabled={!canEdit} onClick={() => setPreset(true)}>見本から追加</button>
       <button disabled={!canEdit || !selected || fixtures.length >= 1000} onClick={() => {
         if (!selected) return
-        const proposed = nextCountStyle(fixtures)
-        setDialog({ editing: false, duplicate: true, initial: { ...structuredClone(selected), id: crypto.randomUUID(), name: selected.spec ? selected.name : `${selected.name.slice(0, 74)} のコピー`, order: nextOrder, style: { ...selected.style, shape: proposed.shape, fill: proposed.fill, color: proposed.color } } })
+        try {
+          const initial = { ...structuredClone(selected), id: crypto.randomUUID(), name: selected.spec ? selected.name : `${selected.name.slice(0, 74)} のコピー`, order: nextOrder }
+          if (quantityKind(selected) === 'count') {
+            const proposed = nextCountStyle(fixtures)
+            initial.style = { ...selected.style, shape: proposed.shape, fill: proposed.fill, color: proposed.color }
+          } else {
+            const proposed = nextQuantityLineStyle(fixtures)
+            initial.style = { ...selected.style, color: proposed.color }; initial.line = proposed.line
+          }
+          setDialog({ editing: false, duplicate: true, initial }); setError('')
+        } catch (reason) { setError(String(reason)) }
       }}>複製</button>
       <button disabled={!canEdit || !selected} onClick={() => selected && setDialog({ editing: true, initial: structuredClone(selected) })}>編集</button>
       <button disabled={!canEdit || !selected} onClick={() => {

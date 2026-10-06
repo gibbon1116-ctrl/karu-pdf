@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
-import { fixtureCode, quantityAggregation, COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, COUNT_SIZES, COUNT_OPACITIES, countHex, countRgb, nextCountStyle, sameFixtureAppearance, quantityKind, quantityMethod, QUANTITY_METHODS, quantityLine, QUANTITY_LINE_WIDTHS, QUANTITY_DASHES, type QuantityLineStyle, serializeCountFixtures, type CountFixture, type CountStyle } from '../core/countFixtures'
+import { fixtureCode, quantityAggregation, COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, COUNT_SIZES, COUNT_OPACITIES, countHex, countRgb, nextCountStyle, nextQuantityLineStyle, sameFixtureAppearance, quantityKind, quantityMethod, QUANTITY_METHODS, quantityLine, QUANTITY_LINE_WIDTHS, QUANTITY_DASHES, type QuantityKind, type QuantityLineAppearance, type QuantityLineStyle, serializeCountFixtures, type CountFixture, type CountStyle } from '../core/countFixtures'
 import { quantityDimensions, quantityLabel, QUANTITY_DIMENSIONS, type QuantityMark } from '../core/quantity'
 import { FixtureSampleContext } from '../editor/AnnotationLayer'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
@@ -39,6 +39,7 @@ export default function FixtureDialog({ initial, fixtures, editing, duplicate = 
   }
   const sampleInteraction = useContext(FixtureSampleContext)
   const alive = useRef(false), capturing = useRef(false), suggestions = useRef<CountStyle[]>([])
+  const lineSuggestions = useRef<QuantityLineAppearance[]>([])
   const cancelCapture = useRef(sampleInteraction?.cancel)
   cancelCapture.current = sampleInteraction?.cancel
   useEffect(() => {
@@ -70,6 +71,13 @@ export default function FixtureDialog({ initial, fixtures, editing, duplicate = 
   const style = (changes: Partial<CountStyle>) => setValue(v => ({ ...v, style: { ...v.style, ...changes } }))
   const length = quantityKind(value) !== 'count'
   const line = (changes: Partial<QuantityLineStyle>) => setValue(v => ({ ...v, line: { ...quantityLine(v), ...changes } }))
+  const changeKind = (kind: QuantityKind) => {
+    try {
+      const appearance = kind !== 'count' && !editing ? nextQuantityLineStyle(fixtures) : undefined
+      setValue(v => ({ ...v, aggregation: aggregationTouched.current ? quantityAggregation(v) : kind === 'count' ? 'location' : 'document', kind: kind === 'count' ? undefined : kind, method: undefined, style: appearance ? { ...v.style, color: appearance.color } : v.style, line: kind !== 'count' ? appearance?.line ?? { width: 1.5, dash: 'solid' } : undefined, defaults: kind !== 'count' ? {} : undefined }))
+      setError('')
+    } catch (reason) { setError(String(reason)) }
+  }
   const collisions = fixtures.filter(f => f.id !== value.id && sameFixtureAppearance(f, value))
   const shapeNames = ['丸', '二重丸', '四角', '角丸四角', '三角', '逆三角', 'ひし形', '五角形', '六角形', '八角形', '星', '十字', 'バツ', '砂時計']
   const fillNames = ['塗りなし', '塗りつぶし', '半分塗り', '中心に点', '斜線']
@@ -95,7 +103,7 @@ export default function FixtureDialog({ initial, fixtures, editing, duplicate = 
       </h2>
       <div className="fixture-dialog-body">
       <div className="fixture-dialog-details">
-      <fieldset><legend>種別</legend>{(['count', 'length', 'area', 'volume'] as const).map(kind => <label key={kind}><input type="radio" name="quantity-kind" value={kind} checked={quantityKind(value) === kind} disabled={hasMarks} onChange={() => setValue(v => ({ ...v, aggregation: aggregationTouched.current ? quantityAggregation(v) : kind === 'count' ? 'location' : 'document', kind: kind === 'count' ? undefined : kind, method: undefined, line: kind !== 'count' ? { width: 1.5, dash: 'solid' } : undefined, defaults: kind !== 'count' ? {} : undefined }))} />{{ count: '個数', length: '長さ', area: '面積', volume: '体積' }[kind]}</label>)}</fieldset>
+      <fieldset><legend>種別</legend>{(['count', 'length', 'area', 'volume'] as const).map(kind => <label key={kind}><input type="radio" name="quantity-kind" value={kind} checked={quantityKind(value) === kind} disabled={hasMarks} onChange={() => changeKind(kind)} />{{ count: '個数', length: '長さ', area: '面積', volume: '体積' }[kind]}</label>)}</fieldset>
       {['area', 'volume'].includes(quantityKind(value)) && <fieldset><legend>拾い方</legend>{QUANTITY_METHODS[quantityKind(value)].map(method => <label key={method}><input type="radio" name="quantity-method" checked={quantityMethod(value) === method} disabled={hasMarks} onChange={() => setValue(v => ({ ...v, method, defaults: {} }))} />{{ polygon: '囲む', lengthHeight: '長さ×高さ', polygonDepth: '囲む×深さ', lengthWidthDepth: '長さ×幅×深さ', click: '', polyline: '' }[method]}</label>)}</fieldset>}
       {hasMarks && <p>拾いがあるため種別は変えられません</p>}
       <label>名称<input required maxLength={80} value={value.name} onChange={e => setValue({ ...value, name: e.currentTarget.value })} /></label>
@@ -125,14 +133,22 @@ export default function FixtureDialog({ initial, fixtures, editing, duplicate = 
       {error && <p role="alert">{error}</p>}
       </div>
       <div className="fixture-dialog-appearance">
-      {!length && <><button type="button" onClick={() => {
+      <button type="button" onClick={() => {
         try {
-          const proposed = nextCountStyle(fixtures, [...suggestions.current, value.style, ...(editing ? [initial.style] : [])])
-          suggestions.current.push(value.style, proposed)
-          style({ shape: proposed.shape, fill: proposed.fill, color: proposed.color })
+          if (length) {
+            const current = { color: value.style.color, line: quantityLine(value) }
+            const proposed = nextQuantityLineStyle(fixtures.filter(f => f.id !== value.id), [...lineSuggestions.current, current, ...(editing && quantityKind(initial) !== 'count' ? [{ color: initial.style.color, line: quantityLine(initial) }] : [])])
+            lineSuggestions.current.push(current, proposed)
+            setValue(v => ({ ...v, style: { ...v.style, color: proposed.color }, line: proposed.line }))
+          } else {
+            const proposed = nextCountStyle(fixtures, [...suggestions.current, value.style, ...(editing ? [initial.style] : [])])
+            suggestions.current.push(value.style, proposed)
+            style({ shape: proposed.shape, fill: proposed.fill, color: proposed.color })
+          }
           setError('')
         } catch (reason) { setError(String(reason)) }
       }}>別の組合せを提案</button>
+      {!length && <>
       <fieldset><legend>形</legend><div className="fixture-shapes">{COUNT_SHAPES.map((shape, i) => <button type="button" key={shape} title={shapeNames[i]} aria-label={`形 ${shapeNames[i]}`} aria-pressed={value.style.shape === shape} onClick={() => style({ shape })}>
         <svg viewBox="-14 -14 28 28" aria-hidden="true"><CountMarker style={{ ...value.style, shape, fill: 'none', size: 20, opacity: 1, showCode: false }} /></svg>
       </button>)}</div></fieldset>

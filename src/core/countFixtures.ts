@@ -18,6 +18,7 @@ export const QUANTITY_LINE_WIDTHS = [0.5, 1, 1.5, 2, 3, 4] as const
 export const QUANTITY_DASHES = ['solid', 'dashed', 'dashDot', 'dotted'] as const
 export interface QuantityDefaults { addM?: number; heightM?: number; widthM?: number; depthM?: number }
 export interface QuantityLineStyle { width: typeof QUANTITY_LINE_WIDTHS[number]; dash: typeof QUANTITY_DASHES[number] }
+export interface QuantityLineAppearance { color: RGB; line: QuantityLineStyle }
 export function quantityAggregation(f: CountFixture): 'location' | 'document' { return f.aggregation ?? (quantityKind(f) === 'count' ? 'location' : 'document') }
 export function fixtureCode(f: Pick<CountFixture, 'code' | 'spec'>): string { return [f.code, f.spec].filter(Boolean).join(' ') }
 export function quantityKind(f: CountFixture): QuantityKind { return f.kind ?? 'count' }
@@ -49,10 +50,29 @@ export function countRgb(hex: string): RGB { return [1, 3, 5].map(i => parseInt(
 export function countHex(rgb: RGB): string { return '#' + rgb.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('').toUpperCase() }
 export function sameCountAppearance(a: CountStyle, b: CountStyle): boolean { return a.shape === b.shape && a.fill === b.fill && countHex(a.color) === countHex(b.color) }
 type CountCandidate = { shape: CountShape; fill: CountFill; hex: string; key: string }
-let countCandidates: CountCandidate[] | undefined
+function cachedCandidates<T>(build: () => T[]): () => readonly T[] {
+  let candidates: T[] | undefined
+  return () => candidates ??= build()
+}
+function usageCounts<T>(values: readonly T[]): Map<T, number> {
+  const counts = new Map<T, number>()
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1)
+  return counts
+}
+function appearanceKeys<T>(used: readonly T[], excluded: readonly T[], key: (value: T) => string): Set<string> {
+  return new Set([...used.map(key), ...excluded.map(key)])
+}
+function leastUsedCandidate<T extends { key: string }>(candidates: readonly T[], used: ReadonlySet<string>, score: (candidate: T) => number): T | undefined {
+  let best: T | undefined, bestScore = Infinity
+  for (const candidate of candidates) {
+    if (used.has(candidate.key)) continue
+    const candidateScore = score(candidate)
+    if (candidateScore < bestScore) { best = candidate; bestScore = candidateScore; if (candidateScore === 0) break }
+  }
+  return best
+}
 // Every combination once, in the tie-break order. Built on first use and reused.
-function allCountCandidates(): CountCandidate[] {
-  if (countCandidates) return countCandidates
+const allCountCandidates = cachedCandidates<CountCandidate>(() => {
   const list: CountCandidate[] = [], seen = new Set<string>()
   const add = (shape: CountShape, fill: CountFill, hex: string) => {
     const key = `${shape}:${fill}:${hex}`
@@ -62,26 +82,38 @@ function allCountCandidates(): CountCandidate[] {
   // The prescribed sequence covers 840 combinations (shape/color parity is linked).
   // Continue with the remaining combinations so all 1,000 fixture slots are usable.
   for (const fill of COUNT_FILLS) for (const shape of COUNT_SHAPES) for (const hex of COUNT_COLORS) add(shape, fill, hex)
-  return countCandidates = list
-}
+  return list
+})
 export function nextCountStyle(fixtures: readonly CountFixture[], excluded: readonly CountStyle[] = []): CountStyle {
   const key = (s: CountStyle) => `${s.shape}:${s.fill}:${countHex(s.color)}`
-  const used = new Set([...fixtures.map(f => key(f.style)), ...excluded.map(key)])
-  const shapes = new Map<string, number>(), colors = new Map<string, number>(), fills = new Map<string, number>()
-  for (const { style } of fixtures) {
-    shapes.set(style.shape, (shapes.get(style.shape) ?? 0) + 1)
-    const hex = countHex(style.color)
-    colors.set(hex, (colors.get(hex) ?? 0) + 1)
-    fills.set(style.fill, (fills.get(style.fill) ?? 0) + 1)
-  }
-  let best: CountCandidate | undefined, bestScore = Infinity
-  for (const candidate of allCountCandidates()) {
-    if (used.has(candidate.key)) continue
-    const score = (shapes.get(candidate.shape) ?? 0) + (colors.get(candidate.hex) ?? 0) + (fills.get(candidate.fill) ?? 0)
-    if (score < bestScore) { best = candidate; bestScore = score; if (score === 0) break }
-  }
+  const used = appearanceKeys(fixtures.map(f => f.style), excluded, key)
+  const shapes = usageCounts(fixtures.map(f => f.style.shape)), colors = usageCounts(fixtures.map(f => countHex(f.style.color))), fills = usageCounts(fixtures.map(f => f.style.fill))
+  const best = leastUsedCandidate(allCountCandidates(), used, candidate => (shapes.get(candidate.shape) ?? 0) + (colors.get(candidate.hex) ?? 0) + (fills.get(candidate.fill) ?? 0))
   if (!best) throw new Error('印の組合せを割り当てられません。')
   return { shape: best.shape, fill: best.fill, color: countRgb(best.hex), size: 10, opacity: .8, showCode: true }
+}
+type LineCandidate = { hex: string; line: QuantityLineStyle; tier: number; key: string }
+const lineAppearanceKey = (appearance: QuantityLineAppearance) => `${countHex(appearance.color)}:${appearance.line.dash}:${appearance.line.width}`
+const allLineCandidates = cachedCandidates<LineCandidate>(() => {
+  const list: LineCandidate[] = []
+  const widths = [1.5, 3, ...QUANTITY_LINE_WIDTHS.filter(width => width !== 1.5 && width !== 3)] as const
+  for (const [widthIndex, width] of widths.entries()) for (const [dashIndex, dash] of QUANTITY_DASHES.entries()) for (let i = 0; i < COUNT_COLORS.length; i++) {
+    const hex = COUNT_COLORS[(i * 7) % COUNT_COLORS.length], line = { width, dash }
+    list.push({ hex, line, tier: widthIndex * QUANTITY_DASHES.length + dashIndex, key: `${hex}:${dash}:${width}` })
+  }
+  return list
+})
+export function nextQuantityLineStyle(fixtures: readonly CountFixture[], excluded: readonly QuantityLineAppearance[] = []): QuantityLineAppearance {
+  const appearances = fixtures.filter(f => quantityKind(f) !== 'count').map(f => ({ color: f.style.color, line: quantityLine(f) }))
+  const used = appearanceKeys(appearances, excluded, lineAppearanceKey)
+  const colors = usageCounts(appearances.map(a => countHex(a.color))), dashes = usageCounts(appearances.map(a => a.line.dash)), widths = usageCounts(appearances.map(a => a.line.width))
+  const candidates = allLineCandidates(), tier = candidates.find(candidate => !used.has(candidate.key))?.tier
+  // Exhaust colors before changing dash, and dashes before changing width.
+  // Adaptive weights ensure even N secondary uses cannot outweigh one color use.
+  const dashWeight = 1 / (appearances.length + 1), widthWeight = dashWeight ** 2
+  const best = leastUsedCandidate(candidates.filter(candidate => candidate.tier === tier), used, candidate => (colors.get(candidate.hex) ?? 0) + (dashes.get(candidate.line.dash) ?? 0) * dashWeight + (widths.get(candidate.line.width) ?? 0) * widthWeight)
+  if (!best) throw new Error('線の組合せを割り当てられません。')
+  return { color: countRgb(best.hex), line: { ...best.line } }
 }
 export function parseCountFixtures(raw: string | null): CountFixture[] {
   try {

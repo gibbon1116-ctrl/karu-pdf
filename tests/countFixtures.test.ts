@@ -1,10 +1,72 @@
 import { expect, it } from 'vitest'
 import mupdf from 'mupdf'
-import { COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, FIXTURE_PRESETS, MAX_COUNT_FIXTURE_BYTES, MAX_COUNT_SAMPLE_BASE64, countHex, countRgb, sameFixtureAppearance, nextCountStyle, parseCountFixtureSample, parseCountFixtures, readCountFixtures, serializeCountFixtures, writeCountFixtures, type CountFixture, type CountFixtureSample } from '../src/core/countFixtures'
+import { COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, QUANTITY_DASHES, QUANTITY_LINE_WIDTHS, FIXTURE_PRESETS, MAX_COUNT_FIXTURE_BYTES, MAX_COUNT_SAMPLE_BASE64, countHex, countRgb, sameFixtureAppearance, nextCountStyle, nextQuantityLineStyle, quantityLine, parseCountFixtureSample, parseCountFixtures, readCountFixtures, serializeCountFixtures, writeCountFixtures, type CountFixture, type CountFixtureSample, type QuantityLineAppearance } from '../src/core/countFixtures'
 import { countMarkerData, countPdfPath, countSvgPath } from '../src/editor/countMarkers'
 import { createCountCsv } from '../src/app/annotationCsv'
 const defaultStyle = nextCountStyle([])
 const fixture = (id = 'a'): CountFixture => ({ id, name: 'ダウンライト', code: 'DL', category: '照明器具', order: 0, style: structuredClone(defaultStyle) })
+
+const lineKey = (a: QuantityLineAppearance) => `${countHex(a.color)}:${a.line.dash}:${a.line.width}`
+const lineFixture = (appearance: QuantityLineAppearance, id = 'line'): CountFixture => ({ ...fixture(id), kind: 'length', method: 'polyline', style: { ...defaultStyle, color: appearance.color }, line: appearance.line })
+
+it('starts line suggestions with the first color, solid and 1.5pt, ignoring count fixtures', () => {
+  const first = { color: countRgb(COUNT_COLORS[0]), line: { width: 1.5, dash: 'solid' } }
+  expect(nextQuantityLineStyle([])).toEqual(first)
+  expect(nextQuantityLineStyle([fixture()])).toEqual(first)
+  const legacy = { ...lineFixture(nextQuantityLineStyle([])), line: undefined }
+  expect(countHex(nextQuantityLineStyle([legacy]).color)).toBe(COUNT_COLORS[7])
+})
+
+it('exhausts solid colors in the count palette order before dashed, then prefers less used colors', () => {
+  const fixtures: CountFixture[] = []
+  for (let i = 0; i < 24; i++) {
+    const appearance = nextQuantityLineStyle(fixtures)
+    expect(countHex(appearance.color)).toBe(COUNT_COLORS[(i * 7) % 24])
+    expect(appearance.line).toEqual({ width: 1.5, dash: 'solid' })
+    fixtures.push(lineFixture(appearance, String(i)))
+  }
+  expect(nextQuantityLineStyle(fixtures)).toEqual({ color: countRgb(COUNT_COLORS[0]), line: { width: 1.5, dash: 'dashed' } })
+  fixtures.push({ ...fixtures[0], id: 'extra', line: { width: 3, dash: 'dotted' } })
+  expect(countHex(nextQuantityLineStyle(fixtures).color)).toBe(COUNT_COLORS[7])
+})
+
+it('excludes existing and twenty previous line suggestions across all quantity kinds and methods', () => {
+  const first = nextQuantityLineStyle([]), fixtures = [lineFixture(first)]
+  const excluded: QuantityLineAppearance[] = []
+  const keys = new Set([lineKey(first)])
+  for (let i = 0; i < 20; i++) {
+    const proposed = nextQuantityLineStyle(fixtures, excluded)
+    expect(keys.has(lineKey(proposed))).toBe(false)
+    keys.add(lineKey(proposed)); excluded.push(proposed)
+  }
+  const area: CountFixture = { ...fixtures[0], kind: 'area', method: 'lengthHeight' }
+  const volume: CountFixture = { ...fixtures[0], kind: 'volume', method: 'polygonDepth' }
+  expect(nextQuantityLineStyle([area])).toEqual(nextQuantityLineStyle(fixtures))
+  expect(nextQuantityLineStyle([volume])).toEqual(nextQuantityLineStyle(fixtures))
+})
+
+it('uses all 576 line combinations in width/dash/color order and throws only after exhaustion', () => {
+  const fixtures: CountFixture[] = [], excluded: QuantityLineAppearance[] = []
+  const widths = [1.5, 3, ...QUANTITY_LINE_WIDTHS.filter(n => n !== 1.5 && n !== 3)]
+  for (const width of widths) for (const dash of QUANTITY_DASHES) for (let i = 0; i < 24; i++) {
+    const proposed = nextQuantityLineStyle(fixtures)
+    expect(proposed.line).toEqual({ width, dash })
+    expect(countHex(proposed.color)).toBe(COUNT_COLORS[(i * 7) % 24])
+    fixtures.push(lineFixture(proposed, String(fixtures.length)))
+    excluded.push(proposed)
+  }
+  expect(new Set(excluded.map(lineKey)).size).toBe(576)
+  expect(() => nextQuantityLineStyle(fixtures)).toThrow('線の組合せ')
+  expect(() => nextQuantityLineStyle([], excluded)).toThrow('線の組合せ')
+  const last = fixtures.pop()!
+  expect(nextQuantityLineStyle(fixtures)).toEqual({ color: last.style.color, line: quantityLine(last) })
+})
+
+it('returns independent line appearances so changing a suggestion does not mutate the candidate cache', () => {
+  const proposed = nextQuantityLineStyle([])
+  proposed.color[0] = 0; proposed.line.width = 4; proposed.line.dash = 'dotted'
+  expect(nextQuantityLineStyle([])).toEqual({ color: countRgb(COUNT_COLORS[0]), line: { width: 1.5, dash: 'solid' } })
+})
 
 it('validates fields and rejects malformed entries, duplicate IDs, excess count and UTF-8 capacity', () => {
   const f = fixture(), raw = (items: unknown[]) => JSON.stringify({ version: 1, fixtures: items })
