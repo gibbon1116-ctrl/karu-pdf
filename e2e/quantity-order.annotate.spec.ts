@@ -106,6 +106,8 @@ test('category selection, visible steps, drag moves, Undo, and persisted categor
 })
 
 test('new category validation, existing-name reuse, edit/duplicate defaults, and collapsed-header drop', async ({ page }) => {
+  // The 数量 tab's controls leave a short list at 900px on the Linux runner; keep drag endpoints in view.
+  await page.setViewportSize({ width: 1440, height: 1400 })
   await open(page, false)
   await page.getByRole('button', { name: '項目を追加', exact: true }).click()
   let dialog = page.getByRole('dialog', { name: '項目を追加', exact: true })
