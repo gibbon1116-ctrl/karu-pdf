@@ -1,8 +1,9 @@
 import type { Point } from './annotations'
 import { countFixtureId, type CountMark } from './counts'
 import { quantityMethod, type CountFixture } from './countFixtures'
-import { quantityValue, type QuantityMark } from './quantity'
+import { quantityValue, routeLength, type QuantityMark, type RouteScope } from './quantity'
 import { normalizeFloor } from './location'
+import { polylineLength } from './measure'
 /** Recognized floors precede free-form names; basement numbers run down to up. */
 export function compareFloors(a: string, b: string): number {
   const rank = (s: string): [number, number] => {
@@ -20,7 +21,7 @@ export function compareFloors(a: string, b: string): number {
 }
 export interface QuantityEntry {
   itemId: string; annotationId: string; pageIndex: number; floor?: string; room?: string
-  value: number; routeCount?: number
+  value: number; routeCount?: number; scope?: RouteScope
 }
 interface IndexedAnnotation {
   id: string; pageIndex: number; deleted?: boolean; count?: CountMark | null; quantity?: QuantityMark | null
@@ -44,11 +45,12 @@ export class QuantityIndex {
       if (a.deleted) continue
       const q = a.quantity
       if (q && a.vertices && a.measure) {
-        const value = quantityValue(a.vertices, a.measure.mmPerPoint, q)
+        const planM = q.method === 'polyline' ? polylineLength(a.vertices) * a.measure.mmPerPoint / 1000 : 0
+        const value = q.method === 'polyline' ? routeLength(planM, q, q.scope) : quantityValue(a.vertices, a.measure.mmPerPoint, q)
         const common = { annotationId: a.id, pageIndex: a.pageIndex, ...(q.floor ? { floor: q.floor } : {}), ...(q.room ? { room: q.room } : {}) }
         const count = q.method === 'polyline' ? q.count ?? 1 : 1
-        add({ ...common, itemId: q.itemId, value: value * count, ...(q.method === 'polyline' ? { routeCount: count } : {}) })
-        if (q.method === 'polyline') for (const e of q.extra ?? []) if (lengths.has(e.itemId)) add({ ...common, itemId: e.itemId, value: value * e.count, routeCount: e.count })
+        add({ ...common, itemId: q.itemId, value: value * count, ...(q.method === 'polyline' ? { routeCount: count, scope: q.scope ?? 'all' } : {}) })
+        if (q.method === 'polyline') for (const e of q.extra ?? []) if (lengths.has(e.itemId)) add({ ...common, itemId: e.itemId, value: routeLength(planM, q, e.scope) * e.count, routeCount: e.count, scope: e.scope ?? 'all' })
       } else if (a.count) {
         const c = a.count
         const entry = { itemId: countFixtureId(c), annotationId: a.id, pageIndex: a.pageIndex, value: 1, ...(c.version === 2 ? { floor: c.floor, room: c.room } : {}) }

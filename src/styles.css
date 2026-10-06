@@ -650,6 +650,7 @@ button, input { font: inherit; }
 .route-item input { width: 50px; }
 .route-item > span:first-of-type { flex: 1; min-width: 100px; }
 .route-items select { max-width: 100%; }
+.route-item select { flex: 1 1 100%; min-width: 0; }
 
 /* Quantity totals remain separate buttons from the item selection button. */
 .fixture-row { grid-template-columns: 22px 24px 48px minmax(0, 1fr) 34px; }

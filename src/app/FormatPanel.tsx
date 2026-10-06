@@ -193,7 +193,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
       {quantity && activeSelection?.measure && activeSelection.vertices && store.selectedIds().length === 1 && <>
         <p>{quantityPoints(quantity.method) === 'polygon' ? '面積' : quantity.method === 'polyline' ? '平面の長さ' : '長さ'}　{(quantityPoints(quantity.method) === 'polygon' ? polygonArea(activeSelection.vertices) * activeSelection.measure.mmPerPoint ** 2 / 1e6 : polylineLength(activeSelection.vertices) * activeSelection.measure.mmPerPoint / 1000).toFixed(2)} {quantityPoints(quantity.method) === 'polygon' ? 'm²' : 'm'}</p>
         {quantity.method === 'polyline' && <RouteItems annotation={activeSelection} store={store} />}
-        {quantity.method === 'polyline' && <QuantityValueInput label="立上り・立下りの加算" key={activeSelection.id} value={quantity.addM ?? 0} commit={n => store.updateQuantityAdd(activeSelection.id, n)} />}
+        {quantity.method === 'polyline' && <><QuantityValueInput label="立上り・立下り" key={activeSelection.id + "addM"} value={quantity.addM ?? 0} commit={n => store.updateQuantityAdd(activeSelection.id, n)} /><QuantityValueInput label="余長・その他" key={activeSelection.id + "slackM"} value={quantity.slackM ?? 0} commit={n => store.updateQuantityValues(activeSelection.id, { slackM: n })} /></>}
         {quantityDimensions(quantity.method).map(key => <QuantityValueInput key={activeSelection.id + key} label={QUANTITY_DIMENSIONS[key]} value={quantity[key] ?? 0} commit={n => store.updateQuantityValues(activeSelection.id, { [key]: n })} />)}
         <p>この拾い　{quantityLabel(activeSelection.vertices, activeSelection.measure.mmPerPoint, quantity, '', false)}</p>
       </>}

@@ -66,7 +66,7 @@ export function useMeasurementInteraction(props: Props) {
   const cloud = props.tool === 'cloudPolygon'
   const quantityItem = props.tool === 'count' && props.quantityItem && quantityMethod(props.quantityItem) !== 'click' ? props.quantityItem : undefined
   const quantityKind = quantityItem && quantityPoints(quantityMethod(quantityItem) as QuantityMark['method']) === 'polygon' ? 'area' : 'perimeter'
-  const quantityMark = (id = 'draft'): QuantityMark => ({ version: 1, id, itemId: quantityItem!.id, method: quantityMethod(quantityItem!) as QuantityMark['method'], ...quantityItem?.defaults })
+  const quantityMark = (id = 'draft'): QuantityMark => ({ version: 1, id, itemId: quantityItem!.id, method: quantityMethod(quantityItem!) as QuantityMark['method'], ...quantityItem?.defaults, ...(quantityMethod(quantityItem!) === 'polyline' && quantityItem?.routeScope && quantityItem.routeScope !== 'all' ? { scope: quantityItem.routeScope } : {}) })
   const [pending, setPending] = useState<{ mark: QuantityMark; save(mark: QuantityMark): void } | null>(null)
   const constrain = (start: Point, end: Point, shift: boolean): Point => {
     if (!shift || !(quantityItem || vertex.current?.original.quantity)) return constrainMeasurePoint(start, end, shift)

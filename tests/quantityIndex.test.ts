@@ -1,4 +1,3 @@
-import fs from 'node:fs'
 import { expect, it } from 'vitest'
 import { QuantityIndex } from '../src/core/quantityIndex'
 import type { CountFixture } from '../src/core/countFixtures'
@@ -65,7 +64,6 @@ it('measures rebuilding 1,000 fixtures and 10,000 annotations without concurrent
  const times:number[]=[]
  for(let i=0;i<7;i++){const start=performance.now();const index=QuantityIndex.build(a,fixtures);times.push(performance.now()-start);expect(index.total('f0')).toBeCloseTo(247)}
  const sorted=[...times].sort((a,b)=>a-b)
- fs.mkdirSync('work', { recursive: true }); fs.writeFileSync('work/spec-05c-index-benchmark.json', JSON.stringify({ items:1000, annotations:10000, times, median:sorted[3], max:sorted[6], node:process.version, platform:process.platform, date:new Date().toISOString() },null,2))
  console.log('QuantityIndex 1000 items / 10000 annotations ms: '+JSON.stringify({times,median:sorted[3],max:sorted[6]}))
  expect(sorted[3]).toBeLessThan(1000)
 })

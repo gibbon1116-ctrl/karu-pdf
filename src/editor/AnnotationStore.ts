@@ -1,7 +1,7 @@
 import { QuantityIndex } from '../core/quantityIndex'
 import { floorFromDrawingName, normalizeFloor } from '../core/location'
 import { mergeAutomaticDrawingInfo, type DrawingInfo } from '../core/drawingInfo'
-import { validRouteCount, quantityLabel, quantityDimensions, type QuantityMark } from '../core/quantity'
+import { validRouteScope, type RouteScope, validRouteCount, quantityLabel, quantityDimensions, type QuantityMark } from '../core/quantity'
 import { fixtureCode, quantityKind, quantityMethod, quantityLine, type QuantityLineStyle } from '../core/countFixtures'
 import { nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type LegacyChangeData, type Point, type Rect, type RGB, type SymbolName } from '../core/annotations'
 import type { Quad } from 'mupdf'
@@ -493,18 +493,18 @@ export class AnnotationStore {
       if (mark) { if (text) mark[key] = text; else delete mark[key] }
     })
   }
-  updateRoute(id: string, count: number, extra: NonNullable<QuantityMark['extra']>): void {
+  updateRoute(id: string, count: number, extra: NonNullable<QuantityMark['extra']>, scope: RouteScope = this.get(id)?.quantity?.scope ?? 'all'): void {
     const a = this.get(id), q = a?.quantity
-    if (!q || q.method !== 'polyline' || !validRouteCount(count) || extra.length > 10) return
+    if (!q || q.method !== 'polyline' || !validRouteCount(count) || !validRouteScope(scope) || extra.length > 10) return
     const ids = new Set([q.itemId])
     for (const e of extra) {
       const f = this.getCountFixture(e.itemId)
-      if (!f || quantityMethod(f) !== 'polyline' || ids.has(e.itemId) || !validRouteCount(e.count)) return
+      if (!f || quantityMethod(f) !== 'polyline' || ids.has(e.itemId) || !validRouteCount(e.count) || (e.scope !== undefined && !validRouteScope(e.scope))) return
       ids.add(e.itemId)
     }
-    if ((q.count ?? 1) === count && JSON.stringify(q.extra ?? []) === JSON.stringify(extra)) return
+    if ((q.count ?? 1) === count && JSON.stringify(q.extra ?? []) === JSON.stringify(extra) && (q.scope ?? 'all') === scope) return
     this.mutate(id, a => {
-      a.quantity = { ...q, count: count === 1 ? undefined : count, extra: extra.length ? extra.map(e => ({ ...e })) : undefined }
+      a.quantity = { ...q, scope: scope === 'all' ? undefined : scope, count: count === 1 ? undefined : count, extra: extra.length ? extra.map(e => ({ ...e, scope: e.scope === 'all' ? undefined : e.scope })) : undefined }
       a.text = this.quantityText(a); a.rect = measureBounds(a.vertices!, a.measure!.kind, a.text, a.fontSize)
     })
     this.pruneHiddenSelection()
@@ -556,11 +556,11 @@ export class AnnotationStore {
       if (!routeIds.some(id => removeIds.includes(id) || changed.has(id))) continue
       before.push(cloneState(a))
       if (a.quantity) {
-        const remaining = [{ itemId: a.quantity.itemId, count: a.quantity.count ?? 1 }, ...(a.quantity.extra ?? [])].filter(e => !removeIds.includes(e.itemId))
+        const remaining = [{ itemId: a.quantity.itemId, count: a.quantity.count ?? 1, scope: a.quantity.scope }, ...(a.quantity.extra ?? [])].filter(e => !removeIds.includes(e.itemId))
         if (!remaining.length) { a.deleted = true; this.selection.delete(a.id) }
         else {
           const [main, ...extra] = remaining
-          a.quantity = { ...a.quantity, itemId: main.itemId, count: a.quantity.method === 'polyline' && main.count !== 1 ? main.count : undefined, extra: extra.length ? extra : undefined }
+          a.quantity = { ...a.quantity, itemId: main.itemId, scope: main.scope, count: a.quantity.method === 'polyline' && main.count !== 1 ? main.count : undefined, extra: extra.length ? extra : undefined }
           this.applyFixtureToQuantity(a, this.getCountFixture(main.itemId)!); after.push(cloneState(a))
         }
       } else if (removeIds.includes(id)) { a.deleted = true; this.selection.delete(a.id) }
@@ -574,6 +574,7 @@ export class AnnotationStore {
     if (!fixture) return
     for (const id of ids) {
       const q = this.annotations.get(id)?.quantity, match = q?.extra?.find(e => e.itemId === fixtureId)
+      if (q && match && (q.scope ?? 'all') !== (match.scope ?? 'all')) return '経路での範囲が異なるため、項目を変更できません。先に範囲をそろえてください。'
       if (q && match && (q.count ?? 1) + match.count > 99) return '条数の合計が99を超えるため、項目を変更できません。'
     }
     const before: HistoryState = [], after: HistoryState = []
@@ -609,16 +610,17 @@ export class AnnotationStore {
   updateQuantityAdd(id: string, addM: number): void {
     this.updateQuantityValues(id, { addM })
   }
-  updateQuantityValues(id: string, values: Partial<Pick<QuantityMark, 'addM' | 'heightM' | 'widthM' | 'depthM'>>): void {
+  updateQuantityValues(id: string, values: Partial<Pick<QuantityMark, 'addM' | 'slackM' | 'heightM' | 'widthM' | 'depthM'>>): void {
     const current = this.get(id)
     if (!current?.quantity) return
-    const allowed: readonly string[] = current.quantity.method === 'polyline' ? ['addM'] : quantityDimensions(current.quantity.method)
+    const allowed: readonly string[] = current.quantity.method === 'polyline' ? ['addM', 'slackM'] : quantityDimensions(current.quantity.method)
     const entries = Object.entries(values)
     if (!entries.length || entries.some(([key, n]) => !allowed.includes(key) || typeof n !== 'number' || !Number.isFinite(n) || n < 0 || n > 1000 || Math.abs(n * 100 - Math.round(n * 100)) > 1e-8)) return
     if (entries.every(([key, n]) => (current.quantity![key as keyof typeof values] ?? 0) === n)) return
     this.mutate(id, a => {
       a.quantity = { ...a.quantity!, ...values }
       if (!a.quantity.addM) delete a.quantity.addM
+      if (!a.quantity.slackM) delete a.quantity.slackM
       a.text = this.quantityText(a); a.rect = measureBounds(a.vertices!, a.measure!.kind, a.text, a.fontSize)
     })
   }

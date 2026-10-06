@@ -1,6 +1,6 @@
 import { useContext, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { fixtureCode, quantityAggregation, COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, COUNT_SIZES, COUNT_OPACITIES, countHex, countRgb, nextCountStyle, nextQuantityLineStyle, sameFixtureAppearance, quantityKind, quantityMethod, QUANTITY_METHODS, quantityLine, QUANTITY_LINE_WIDTHS, QUANTITY_DASHES, type QuantityKind, type QuantityLineAppearance, type QuantityLineStyle, serializeCountFixtures, type CountFixture, type CountStyle } from '../core/countFixtures'
-import { quantityDimensions, quantityLabel, QUANTITY_DIMENSIONS, type QuantityMark } from '../core/quantity'
+import { ROUTE_SCOPES, type RouteScope, quantityDimensions, quantityLabel, QUANTITY_DIMENSIONS, type QuantityMark } from '../core/quantity'
 import { FixtureSampleContext } from '../editor/AnnotationLayer'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 import { groupFixtures } from './fixtureOrder'
@@ -74,7 +74,7 @@ export default function FixtureDialog({ initial, fixtures, editing, duplicate = 
   const changeKind = (kind: QuantityKind) => {
     try {
       const appearance = kind !== 'count' && !editing ? nextQuantityLineStyle(fixtures) : undefined
-      setValue(v => ({ ...v, aggregation: aggregationTouched.current ? quantityAggregation(v) : kind === 'count' ? 'location' : 'document', kind: kind === 'count' ? undefined : kind, method: undefined, style: appearance ? { ...v.style, color: appearance.color } : v.style, line: kind !== 'count' ? appearance?.line ?? { width: 1.5, dash: 'solid' } : undefined, defaults: kind !== 'count' ? {} : undefined }))
+      setValue(v => ({ ...v, aggregation: aggregationTouched.current ? quantityAggregation(v) : kind === 'count' ? 'location' : 'document', kind: kind === 'count' ? undefined : kind, routeScope: kind === 'length' ? v.routeScope : undefined, method: undefined, style: appearance ? { ...v.style, color: appearance.color } : v.style, line: kind !== 'count' ? appearance?.line ?? { width: 1.5, dash: 'solid' } : undefined, defaults: kind !== 'count' ? {} : undefined }))
       setError('')
     } catch (reason) { setError(String(reason)) }
   }
@@ -119,14 +119,18 @@ export default function FixtureDialog({ initial, fixtures, editing, duplicate = 
         <label>透明度<select value={value.style.opacity} onChange={e => style({ opacity: Number(e.currentTarget.value) })}>{COUNT_OPACITIES.map(n => <option key={n} value={n}>{Math.round(n * 100)}%</option>)}</select></label></div>
       <label><input type="checkbox" checked={value.style.showCode} onChange={e => style({ showCode: e.currentTarget.checked })} />略号を図面に表示</label>
       <label>メモ<textarea maxLength={200} value={value.memo ?? ''} onChange={e => setValue({ ...value, memo: e.currentTarget.value })} /></label>
-      {length ? <div className="quantity-preview"><QuantitySwatch fixture={value} preview /><span>{quantityLabel(quantityMethod(value) === 'polygon' || quantityMethod(value) === 'polygonDepth' ? [[0, 0], [8, 0], [8, 6], [0, 6]] : [[0, 0], [quantityMethod(value) === 'polyline' ? 9.35 : 24, 0]], 1000, { version: 1, id: 'preview', itemId: value.id, method: quantityMethod(value) as QuantityMark['method'], ...value.defaults }, fixtureCode(value), value.style.showCode)}</span></div> : <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + value.style.size * (1 + .7 * fixtureCode(value).length))} 50`} aria-label="印の見本"><CountMarker style={value.style} code={fixtureCode(value)} /></svg>}
+      {length ? <div className="quantity-preview"><QuantitySwatch fixture={value} preview /><span>{quantityLabel(quantityMethod(value) === 'polygon' || quantityMethod(value) === 'polygonDepth' ? [[0, 0], [8, 0], [8, 6], [0, 6]] : [[0, 0], [quantityMethod(value) === 'polyline' ? 9.35 : 24, 0]], 1000, { version: 1, id: 'preview', itemId: value.id, method: quantityMethod(value) as QuantityMark['method'], ...value.defaults, scope: value.routeScope }, fixtureCode(value), value.style.showCode)}</span></div> : <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + value.style.size * (1 + .7 * fixtureCode(value).length))} 50`} aria-label="印の見本"><CountMarker style={value.style} code={fixtureCode(value)} /></svg>}
       {!length && <div className="fixture-sample-editor">
         {value.sample && <img className="fixture-sample-preview" src={`data:image/png;base64,${value.sample.png}`} width={value.sample.width} height={value.sample.height} alt="図面から切り取った見本" />}
         <div className="fixture-fields"><button type="button" disabled={!sampleInteraction} onClick={() => void capture()}>図面から見本を切り取る</button>
           <button type="button" disabled={!value.sample} onClick={() => setValue(v => ({ ...v, sample: undefined }))}>見本を外す</button></div>
       </div>
       }
-      {quantityMethod(value) === 'polyline' && <label>立上り・立下りの加算（新しく拾うときの初期値）<input type="number" min="0" max="1000" step="0.01" value={value.defaults?.addM ?? 0} onChange={e => { const addM = Number(e.currentTarget.value); setValue(v => ({ ...v, defaults: { ...v.defaults, addM } })) }} /> m</label>}
+      {quantityMethod(value) === 'polyline' && <label>立上り・立下り（新しく拾うときの初期値）<input type="number" min="0" max="1000" step="0.01" value={value.defaults?.addM ?? 0} onChange={e => { const addM = Number(e.currentTarget.value); setValue(v => ({ ...v, defaults: { ...v.defaults, addM } })) }} /> m</label>}
+      {quantityMethod(value) === 'polyline' && <>
+        <label>余長・その他（初期値）<input type="number" min="0" max="1000" step="0.01" value={value.defaults?.slackM ?? 0} onChange={e => { const slackM = Number(e.currentTarget.value); setValue(v => ({ ...v, defaults: { ...v.defaults, slackM: slackM || undefined } })) }} /> m</label>
+        <label>経路での範囲（初期値）<select aria-label="経路での範囲（初期値）" value={value.routeScope ?? 'all'} onChange={e => { const scope = e.currentTarget.value as RouteScope; setValue(v => ({ ...v, routeScope: scope === 'all' ? undefined : scope })) }}>{Object.entries(ROUTE_SCOPES).map(([scope, label]) => <option key={scope} value={scope}>{label}</option>)}</select></label>
+      </>}
       {quantityDimensions(quantityMethod(value)).map(key => <label key={key}>{QUANTITY_DIMENSIONS[key]}（新しく拾うときの初期値）<span className="quantity-input-unit"><input aria-label={QUANTITY_DIMENSIONS[key] + '（新しく拾うときの初期値）'} type="number" min="0" max="1000" step="0.01" value={value.defaults?.[key] ?? ''} onChange={e => { const text = e.currentTarget.value; setValue(v => ({ ...v, defaults: { ...v.defaults, [key]: text === '' ? undefined : Number(text) } })) }} />m</span></label>)}
       {quantityDimensions(quantityMethod(value)).length > 0 && <p>空欄または0なら、拾うときに寸法を入力します。</p>}
       {!!collisions.length && <p role="status">同じ見た目の項目があります: {collisions.map(f => `${fixtureCode(f)} ${f.name}`.trim()).join('、')}</p>}

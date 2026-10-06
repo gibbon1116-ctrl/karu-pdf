@@ -206,3 +206,43 @@ it('opens old fields unchanged, edits metadata and saves another compatible PDF'
   }finally{old.destroy()}
  }finally{doc.destroy()}
 })
+
+it('saves scoped routes as version 1 JSON, Contents and exact item totals after reopening', async () => {
+ const pf: CountFixture = { ...fixture, id: 'pf', name: '立上り電線管', code: 'PF28', order: 1, routeScope: 'rise', defaults: { addM: 3, slackM: 1 } }
+ const rack: CountFixture = { ...fixture, id: 'rack', code: 'CR', order: 2, routeScope: 'noSlack' }
+ const fixtures = [{ ...fixture, spec: '38sq-3C' }, pf, rack]
+ const q: QuantityMark = { version: 1, id: 'route', itemId: 'cv', method: 'polyline', addM: 3, slackM: 1, count: 2, extra: [{ itemId: 'pf', count: 1, scope: 'rise' }, { itemId: 'rack', count: 1, scope: 'noSlack' }] }
+ const text = quantityLabel(points, measure.mmPerPoint, q, 'CV 38sq-3C', true, id => id === 'pf' ? 'PF28' : 'CR')
+ const doc = blank()
+ try {
+  expect(applyEdits(doc, [{ kind: 'setCountFixtures', pageIndex: 0, fixtures }, { ...edit(), quantity: q, text }, { ...edit(3), pageIndex: 1 }], { BIZUDGothic: font }).errors).toEqual([])
+  const saved = reopen(doc)
+  try {
+   expect(readCountFixtures(saved)).toEqual(fixtures)
+   const info = listAnnotations(saved, 0)[0]
+   expect(info.quantity).toEqual(q)
+   expect(info.contents).toBe('CV 38sq-3C×2, PF28（立上り）, CR（平面＋立上り）  9.35+3.00+余1.00=13.35 m')
+   const store = new AnnotationStore()
+   await store.ensureCountFixtures(async () => readCountFixtures(saved), async () => { await store.ensurePageLoaded(0, async () => listAnnotations(saved, 0)) })
+   expect(store.quantityIndex().total('cv')).toBeCloseTo(26.7)
+   expect(store.quantityIndex().total('pf')).toBe(3)
+   expect(store.quantityIndex().total('rack')).toBeCloseTo(12.35)
+   // A legacy addM-only mark in the same PDF keeps its original quantity and text.
+   const old = listAnnotations(saved, 1)[0]
+   expect(old.quantity).toEqual({ version: 1, id: 'plus', itemId: 'cv', method: 'polyline', addM: 3 })
+   expect(old.contents).toBe('CV 9.35+3.00=12.35 m')
+   const page = saved.loadPage(0), annotations = page.getAnnotations(), object = annotations[0].getObject(), raw = object.get('KaruQuantity'), contents = object.get('Contents')
+   try {
+    expect(raw.asString()).toBe('{"version":1,"id":"route","itemId":"cv","method":"polyline","addM":3,"slackM":1,"count":2,"extra":[{"itemId":"pf","count":1,"scope":"rise"},{"itemId":"rack","count":1,"scope":"noSlack"}]}')
+    expect(contents.asString()).toBe(text)
+   } finally { contents.destroy(); raw.destroy(); object.destroy(); annotations.forEach(a => a.destroy()); page.destroy() }
+   store.updateRoute(store.getPageAnnotations(0)[0].id, 2, q.extra!, 'rise')
+   expect(applyEdits(saved, store.toEdits(), { BIZUDGothic: font }).errors).toEqual([])
+   const again = reopen(saved)
+   try {
+    expect(listAnnotations(again, 0)[0].quantity).toMatchObject({ scope: 'rise', slackM: 1, extra: q.extra })
+    expect(listAnnotations(again, 0)[0].contents).toContain('CV 38sq-3C（立上り）×2')
+   } finally { again.destroy() }
+  } finally { saved.destroy() }
+ } finally { doc.destroy() }
+})
