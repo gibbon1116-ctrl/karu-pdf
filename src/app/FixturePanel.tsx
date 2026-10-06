@@ -1,10 +1,11 @@
-import { lazy, Suspense, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { nextCountStyle, quantityKind, QUANTITY_UNITS, type FixturePreset, type CountFixture } from '../core/countFixtures'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 import { ensureSessionFixtures, FixtureUiContext, type DocumentSession } from './documentModel'
 import { createCountCsv } from './annotationCsv'
 import { annotationFilterLabel } from '../editor/annotationFilter'
+import { groupFixtures, moveCategory, moveFixture, stepFixture } from './fixtureOrder'
 const FixtureDialog = lazy(() => import('./FixtureDialog'))
 const FixturePresetDialog = lazy(() => import('./FixturePresetDialog'))
 
@@ -13,6 +14,10 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   const version = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [search, setSearch] = useState(''), [collapsed, setCollapsed] = useState(new Set<string>()), [error, setError] = useState('')
   const [dialog, setDialog] = useState<{ initial: CountFixture; editing: boolean } | null>(null)
+  const dragging = useRef<{ kind: 'fixture' | 'category'; id: string } | null>(null)
+  const [dropTarget, setDropTarget] = useState<{ kind: 'fixture' | 'category'; id: string; side: 'before' | 'after' | 'inside' } | null>(null)
+  const [status, setStatus] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [sampleHover, setSampleHover] = useState<{ fixture: CountFixture; left: number; top: number } | null>(null)
   const [preset, setPreset] = useState(false), [sources, setSources] = useState<Array<{ name: string; fixtures: CountFixture[] }> | null>(null), [busy, setBusy] = useState(false)
   useEffect(() => { let alive = true; void ensureSessionFixtures(session, pool).catch(e => { if (alive) setError(String(e)) }); return () => { alive = false } }, [session, pool, session.pageRevision])
@@ -23,9 +28,66 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   const format = (f: CountFixture, n: number) => quantityKind(f) === 'count' ? String(n) : n.toFixed(2)
   const unit = (f: CountFixture) => (quantityKind(f) === 'count' ? '' : ' ') + QUANTITY_UNITS[quantityKind(f)]
   const pageTotal = (id: string) => totals.get(id)?.get(pageIndex) ?? 0
-  const categories = new Map<string, CountFixture[]>()
-  for (const f of fixtures) if (`${f.code} ${f.name}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())) categories.set(f.category, [...(categories.get(f.category) ?? []), f])
+  const groups = useMemo(() => groupFixtures(fixtures), [fixtures])
+  const categories = useMemo(() => groups.map(g => ({ ...g, items: g.items.filter(f => `${f.code} ${f.name}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())) })).filter(g => g.items.length), [groups, search])
   const canEdit = store.fixturesReady && !session.editRestriction && !busy
+  const canReorder = canEdit && search.length === 0
+  const reorderTitle = search.length ? '検索中は並べ替えできません' : 'ドラッグして並べ替え'
+  const selectedItems = categories.find(g => g.category === selected?.category)?.items ?? []
+  const selectedIndex = selectedItems.findIndex(f => f.id === selected?.id)
+  const step = (direction: -1 | 1) => {
+    if (!selected) return
+    const neighbor = selectedItems[selectedIndex + direction]
+    if (!neighbor) return
+    // Keep hidden search results while moving past the adjacent visible item.
+    const next = search.length ? moveFixture(fixtures, selected.id, direction === -1 ? { beforeId: neighbor.id } : { afterId: neighbor.id }) : stepFixture(fixtures, selected.id, direction)
+    if (next) store.setCountFixtures(next)
+  }
+  const ownDrag = (event: DragEvent) => Boolean(dragging.current && event.dataTransfer.types.includes(dragging.current.kind === 'fixture' ? 'application/x-karu-fixture' : 'application/x-karu-category'))
+  const startDrag = (event: DragEvent, kind: 'fixture' | 'category', id: string) => {
+    if (!canReorder) { event.preventDefault(); return }
+    dragging.current = { kind, id }
+    event.dataTransfer.setData(kind === 'fixture' ? 'application/x-karu-fixture' : 'application/x-karu-category', id)
+    event.dataTransfer.effectAllowed = 'move'
+    setSampleHover(null); setDropTarget(null)
+  }
+  const endDrag = () => { dragging.current = null; setDropTarget(null) }
+  const targetAt = (event: DragEvent<HTMLElement>, kind: 'fixture' | 'category', id: string) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    const side = kind === 'category' && dragging.current?.kind === 'fixture' ? 'inside' : event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    return { kind, id, side } as const
+  }
+  const dragOver = (event: DragEvent<HTMLElement>, kind: 'fixture' | 'category', id: string) => {
+    if (!canReorder || !ownDrag(event)) return
+    event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'
+    const target = targetAt(event, kind, id)
+    setDropTarget(previous => previous?.kind === target.kind && previous.id === target.id && previous.side === target.side ? previous : target)
+  }
+  const drop = (event: DragEvent<HTMLElement>, kind: 'fixture' | 'category', id: string) => {
+    if (!canReorder || !ownDrag(event)) return
+    event.preventDefault(); event.stopPropagation()
+    const active = dragging.current!, target = targetAt(event, kind, id)
+    const source = fixtures.find(f => f.id === active.id)
+    const category = kind === 'category' ? id : fixtures.find(f => f.id === id)!.category
+    let next: CountFixture[]
+    if (active.kind === 'fixture') {
+      next = moveFixture(fixtures, active.id, kind === 'category' ? { endOfCategory: category } : target.side === 'before' ? { beforeId: id } : { afterId: id })
+    } else {
+      const index = groups.findIndex(g => g.category === category)
+      const before = groups[index + (target.side === 'after' ? 1 : 0)]?.category
+      next = moveCategory(fixtures, active.id, before === undefined ? { end: true } : { beforeCategory: before })
+    }
+    const previous = groups.flatMap(g => g.items)
+    if (next.some((f, i) => f.id !== previous[i]?.id || f.category !== previous[i]?.category)) {
+      store.setCountFixtures(next)
+      if (active.kind === 'fixture' && source?.category !== category) setStatus(`${source?.name}を分類「${category}」へ移しました（Ctrl+Z で戻せます）`)
+      else setStatus('並び替えました（Ctrl+Z で戻せます）')
+    }
+    if (active.kind === 'fixture') { setSelectedCategory(null); store.selectFixture(active.id); ui?.select() }
+    else setSelectedCategory(active.id)
+    endDrag()
+  }
+  const dropClass = (kind: 'fixture' | 'category', id: string) => dropTarget?.kind === kind && dropTarget.id === id ? ` fixture-drop-${dropTarget.side}` : ''
   const nextOrder = fixtures.reduce((n, f) => Math.max(n, f.order + 1), 0)
   const saveFixture = (f: CountFixture) => { store.setCountFixtures(dialog?.editing ? fixtures.map(p => p.id === f.id ? f : p) : [...fixtures, f]); store.selectFixture(f.id); setDialog(null) }
   const addMany = (items: Array<FixturePreset | CountFixture>) => {
@@ -58,7 +120,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     {store.visibleCountTotal(pageIndex) > 1000 && <p role="status">印が多いため略号の表示を省略しています</p>}
     <div className="fixture-actions">
       <div className="fixture-action-row">
-      <button disabled={!canEdit || fixtures.length >= 1000} onClick={() => setDialog({ editing: false, initial: { id: crypto.randomUUID(), name: '', code: '', category: selected?.category ?? 'その他', style: nextCountStyle(fixtures), order: nextOrder } })}>項目を追加</button>
+      <button disabled={!canEdit || fixtures.length >= 1000} onClick={() => setDialog({ editing: false, initial: { id: crypto.randomUUID(), name: '', code: '', category: selected?.category ?? groups[0]?.category ?? 'その他', style: nextCountStyle(fixtures), order: nextOrder } })}>項目を追加</button>
       <button disabled={!canEdit} onClick={() => setPreset(true)}>見本から追加</button>
       <button disabled={!canEdit || !selected || fixtures.length >= 1000} onClick={() => {
         if (!selected) return
@@ -80,35 +142,36 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
           .then(list => setSources(list.filter(s => s.fixtures.length))).catch(e => setError(String(e))).finally(() => setBusy(false))
       }}>他のPDFから読み込む</button>
       <button disabled={!store.fixturesReady || busy} onClick={() => { setBusy(true); void csv().catch(e => { if (!(e instanceof DOMException && e.name === 'AbortError')) setError(String(e)) }).finally(() => setBusy(false)) }}>数量をCSVに書き出す</button>
-      <button disabled={!canEdit || !selected || fixtures[0]?.id === selected.id} onClick={() => {
-        if (!selected) return; const next = [...fixtures], index = next.findIndex(f => f.id === selected.id); [next[index - 1], next[index]] = [next[index], next[index - 1]]; store.setCountFixtures(next.map((f, order) => ({ ...f, order })))
-      }}>上へ</button>
-      <button disabled={!canEdit || !selected || fixtures.at(-1)?.id === selected.id} onClick={() => {
-        if (!selected) return; const next = [...fixtures], index = next.findIndex(f => f.id === selected.id); [next[index + 1], next[index]] = [next[index], next[index + 1]]; store.setCountFixtures(next.map((f, order) => ({ ...f, order })))
-      }}>下へ</button>
+      <button disabled={!canEdit || !selected || selectedIndex <= 0} title={selectedIndex === 0 ? '分類の先頭です。分類ごと動かすときは、分類の見出しをドラッグします' : undefined} onClick={() => step(-1)}>上へ</button>
+      <button disabled={!canEdit || !selected || selectedIndex < 0 || selectedIndex === selectedItems.length - 1} title={selectedIndex === selectedItems.length - 1 ? '分類の末尾です。分類ごと動かすときは、分類の見出しをドラッグします' : undefined} onClick={() => step(1)}>下へ</button>
       </div>
     </div>
     <label>名称・略号で検索<input type="search" value={search} onChange={e => setSearch(e.currentTarget.value)} /></label>
     <label><input type="checkbox" checked={store.onlySelectedFixture} onChange={e => store.setOnlySelectedFixture(e.currentTarget.checked)} />選択中の項目だけ表示</label>
+    <label><input type="checkbox" checked={store.showQuantityValues} onChange={e => store.setShowQuantityValues(e.currentTarget.checked)} />図面に長さ・面積・体積の数値を表示</label>
     <button onClick={() => store.showAllFixtures()}>すべて表示</button>
+    {status && <p role="status">{status}</p>}
     {error && <p role="alert">{error}</p>}
     </div>
-    <div className="fixture-groups" onScroll={() => setSampleHover(null)}>
+    <div className="fixture-groups" onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null) }} onScroll={() => setSampleHover(null)}>
       <div className="fixture-list-heading"><span>表示</span><span>印</span><span>見本</span><span>略号</span><span>名称</span><span>この図面</span><span>全図面</span></div>
-      {[...categories].map(([category, list]) => <section key={category}>
-      <div className="fixture-category"><button aria-expanded={!collapsed.has(category)} onClick={() => setCollapsed(previous => { const next = new Set(previous); if (next.has(category)) next.delete(category); else next.add(category); return next })}>{category}（{list.length}）</button>
+      {categories.map(({ category, items: list }) => <section key={category}>
+      <div className={`fixture-category${selectedCategory === category ? ' selected' : ''}${dropClass('category', category)}`} onDragOver={event => dragOver(event, 'category', category)} onDrop={event => drop(event, 'category', category)}><button draggable={canReorder} title={reorderTitle} onDragStart={event => startDrag(event, 'category', category)} onDragEnd={endDrag} aria-expanded={!collapsed.has(category)} onClick={() => { setSelectedCategory(category); setCollapsed(previous => { const next = new Set(previous); if (next.has(category)) next.delete(category); else next.add(category); return next }) }}>{category}（{list.length}）</button>
         <button aria-label={`${category}の表示切替`} aria-pressed={list.every(f => store.isFixtureVisible(f.id))} onClick={() => store.setFixtureVisible(fixtures.filter(f => f.category === category).map(f => f.id), !list.every(f => store.isFixtureVisible(f.id)))}><Eye visible={list.every(f => store.isFixtureVisible(f.id))} /></button>
       </div>
-      {!collapsed.has(category) && <ul>{list.map(f => <li key={f.id} className={f.id === selected?.id ? 'selected' : ''} data-fixture-id={f.id}
+      {!collapsed.has(category) && <ul>{list.map(f => <li key={f.id} className={(f.id === selected?.id ? 'selected' : '') + dropClass('fixture', f.id)} data-fixture-id={f.id} draggable={canReorder} title={reorderTitle}
+        onDragStart={event => startDrag(event, 'fixture', f.id)} onDragEnd={endDrag} onDragOver={event => dragOver(event, 'fixture', f.id)} onDrop={event => drop(event, 'fixture', f.id)}
+        onClick={event => { if (!(event.target as HTMLElement).closest('button')) { setSelectedCategory(null); store.selectFixture(f.id); ui?.select() } }}
         onMouseEnter={event => {
-          if (!f.sample || quantityKind(f) !== 'count') return
+          if (dragging.current || !f.sample || quantityKind(f) !== 'count') return
           const rect = event.currentTarget.getBoundingClientRect()
           setSampleHover({ fixture: f, left: Math.max(8, Math.min(window.innerWidth - 176, rect.right + 8)), top: Math.max(8, Math.min(window.innerHeight - 176, rect.top)) })
         }} onMouseLeave={() => setSampleHover(null)}>
+        <span className="fixture-grip" aria-hidden="true">⠿</span>
         <button aria-label={`${f.code} ${f.name}の表示切替`} aria-pressed={store.isFixtureVisible(f.id)} onClick={() => store.setFixtureVisible([f.id], !store.isFixtureVisible(f.id))}><Eye visible={store.isFixtureVisible(f.id)} /></button>
-        <button className="fixture-row" aria-label={`${f.code} ${f.name}`.trim()} aria-pressed={f.id === selected?.id} onClick={() => { store.selectFixture(f.id); ui?.select() }}>
+        <button className="fixture-row" aria-label={`${f.code} ${f.name}`.trim()} aria-pressed={f.id === selected?.id} onClick={() => { setSelectedCategory(null); store.selectFixture(f.id); ui?.select() }}>
           {quantityKind(f) === 'count' ? <svg className="fixture-swatch" viewBox="-14 -14 28 28" aria-hidden="true"><CountMarker style={{ ...f.style, size: 24, opacity: 1 }} showCode={false} /></svg> : <QuantitySwatch fixture={f} />}
-          <span className="fixture-sample-cell">{quantityKind(f) === 'count' && f.sample && <img className="fixture-sample-thumbnail" src={`data:image/png;base64,${f.sample.png}`} alt={`${f.name}の見本`} />}</span>
+          <span className="fixture-sample-cell">{quantityKind(f) === 'count' && f.sample && <img className="fixture-sample-thumbnail" src={`data:image/png;base64,${f.sample.png}`} alt={`${f.name}の見本`} draggable={false} />}</span>
           <span className="fixture-row-code" title={f.code}>{f.code}{' '}</span><span className="fixture-row-name" title={f.name}>{f.name}{quantityKind(f) !== 'count' && <span className="fixture-row-unit">{QUANTITY_UNITS[quantityKind(f)]}</span>}</span><span className="fixture-row-count" title={`表示中の図面: ${format(f, pageTotal(f.id))}${unit(f)}`}>{format(f, pageTotal(f.id))}</span><span className="fixture-row-count" title={`全図面: ${format(f, total(f.id))}${unit(f)}`}>{format(f, total(f.id))}</span>
         </button>
       </li>)}</ul>}

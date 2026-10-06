@@ -161,7 +161,7 @@ button, input { font: inherit; }
 .fixture-drawing-filter-warning p { margin: 0 0 6px; }
 .drawing-hides-counts .fixture-list-heading > span:first-child,
 .drawing-hides-counts .fixture-category > button:last-child,
-.drawing-hides-counts .fixture-groups li > button:first-child { opacity: .45; }
+.drawing-hides-counts .fixture-groups li > button:not(.fixture-row) { opacity: .45; }
 .csv-export { width: 100%; margin: 9px 0; padding: 5px; }
 .annotation-rows .annotation-row-main { display: grid; grid-template-columns: 24px 35px minmax(0, 1fr) 16px; width: 100%; align-items: center; gap: 4px; padding: 6px 3px; border: 0; border-bottom: 1px solid #d2d2d2; background: transparent; text-align: left; }
 .annotation-rows .annotation-row-main:hover { background: #dcecff; }
@@ -555,7 +555,7 @@ button, input { font: inherit; }
 .fixture-groups ul { margin: 0; padding: 0; list-style: none; }
 .fixture-groups li, .fixture-category { display: flex; align-items: center; gap: 3px; }
 .fixture-groups li { height: 28px; }
-.fixture-groups li > button:first-child { display: flex; align-items: center; justify-content: center; flex: 0 0 22px; width: 22px; height: 22px; padding: 0; }
+.fixture-groups li > button:not(.fixture-row) { display: flex; align-items: center; justify-content: center; flex: 0 0 22px; width: 22px; height: 22px; padding: 0; }
 .fixture-category { background: #eef3f9; padding: 4px 0; margin-top: 8px; }
 .fixture-category button:first-child { flex: 1; text-align: left; }
 .fixture-groups li.selected { background: #dcecff; outline: 1px solid #0068b7; }
@@ -618,3 +618,15 @@ button, input { font: inherit; }
 .quantity-input-unit input { flex: 1; min-width: 0; }
 .quantity-dimensions-dialog { width: min(320px, 90vw); }
 .quantity-dimensions-dialog form { display: flex; flex-direction: column; gap: 12px; }
+
+.fixture-grip { flex: 0 0 10px; color: #667788; cursor: grab; }
+.fixture-groups li, .fixture-category { position: relative; }
+.fixture-drop-before::before, .fixture-drop-after::after { content: ''; position: absolute; left: 0; right: 0; height: 2px; background: #0068b7; pointer-events: none; z-index: 1; }
+.fixture-drop-before::before { top: 0; }
+.fixture-drop-after::after { bottom: 0; }
+.fixture-drop-inside { background: #dcecff; outline: 2px solid #0068b7; outline-offset: -2px; }
+.fixture-category button[draggable="true"] { cursor: grab; }
+.fixture-list-heading { padding-left: 13px; }
+.fixture-dialog-details > label > select { display: block; padding: 4px 6px; }
+
+.fixture-category.selected:not(.fixture-drop-inside) { outline: 1px solid #0068b7; outline-offset: -1px; }

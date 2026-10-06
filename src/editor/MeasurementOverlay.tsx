@@ -17,8 +17,8 @@ export const ScaleInteractionContext = createContext<{
 export const isMeasureTool = (tool: string): tool is MeasureKind => tool === 'distance' || tool === 'perimeter' || tool === 'area'
 const cssColor = (c: readonly number[]) => `rgb(${c.map(n => n * 255).join(' ')})`
 
-export function MeasurementShape({ points, kind, text, fontSize, color, width, opacity, dash }: {
-  points: Point[]; kind: MeasureKind; text: string; fontSize: number; color: string; width: number; opacity: number; dash?: QuantityLineStyle['dash']
+export function MeasurementShape({ points, kind, text, fontSize, color, width, opacity, dash, showText = true }: {
+  points: Point[]; kind: MeasureKind; text: string; fontSize: number; color: string; width: number; opacity: number; dash?: QuantityLineStyle['dash']; showText?: boolean
 }) {
   const label = measureLabel(points, kind, fontSize)
   const coords = points.map(p => p.join(',')).join(' ')
@@ -30,7 +30,7 @@ export function MeasurementShape({ points, kind, text, fontSize, color, width, o
   return <g opacity={opacity} className="measurement-shape">
     {kind === 'area' ? <><polygon points={coords} fill={color} fillOpacity=".15" /><polygon points={coords} fill="none" stroke={color} strokeWidth={width} strokeDasharray={quantityDashes(dash, width).join(' ')} /></> : <polyline points={coords} fill="none" stroke={color} strokeWidth={width} strokeDasharray={quantityDashes(dash, width).join(' ')} />}
     {ticks && <path d={ticks} fill="none" stroke={color} strokeWidth={width} strokeDasharray={quantityDashes(dash, width).join(' ')} />}
-    <text className="measurement-label" x={label.anchor[0]} y={label.anchor[1] + fontSize * .3} transform={`rotate(${label.angle * 180 / Math.PI} ${label.anchor.join(' ')})`} textAnchor="middle" fontSize={fontSize} fill={color} stroke="white" strokeWidth="3" paintOrder="stroke" strokeLinejoin="round">{text}</text>
+    {showText && <text className="measurement-label" x={label.anchor[0]} y={label.anchor[1] + fontSize * .3} transform={`rotate(${label.angle * 180 / Math.PI} ${label.anchor.join(' ')})`} textAnchor="middle" fontSize={fontSize} fill={color} stroke="white" strokeWidth="3" paintOrder="stroke" strokeLinejoin="round">{text}</text>}
   </g>
 }
 

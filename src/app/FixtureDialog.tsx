@@ -1,14 +1,21 @@
-import { useContext, useEffect, useRef, useState, type PointerEvent } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, COUNT_SIZES, COUNT_OPACITIES, countHex, countRgb, nextCountStyle, sameFixtureAppearance, quantityKind, quantityMethod, QUANTITY_METHODS, quantityLine, QUANTITY_LINE_WIDTHS, QUANTITY_DASHES, type QuantityLineStyle, serializeCountFixtures, type CountFixture, type CountStyle } from '../core/countFixtures'
 import { quantityDimensions, quantityLabel, QUANTITY_DIMENSIONS, type QuantityMark } from '../core/quantity'
 import { FixtureSampleContext } from '../editor/AnnotationLayer'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
+import { groupFixtures } from './fixtureOrder'
 
 // Shared across add/duplicate/edit mounts, and reset when the app reloads.
 let fixtureDialogPosition = { x: 0, y: 0 }
 
 export default function FixtureDialog({ initial, fixtures, editing, hasMarks = false, onSave, onClose }: { initial: CountFixture; fixtures: readonly CountFixture[]; editing: boolean; hasMarks?: boolean; onSave(fixture: CountFixture): void; onClose(): void }) {
   const dialog = useRef<HTMLDialogElement>(null), [value, setValue] = useState(initial), [error, setError] = useState('')
+  const categories = useMemo(() => {
+    const result = groupFixtures(fixtures).map(g => g.category)
+    if ((fixtures.length || editing) && !result.includes(initial.category)) result.push(initial.category)
+    return result
+  }, [fixtures, initial.category, editing])
+  const [newCategory, setNewCategory] = useState(!fixtures.length && !editing)
   const heading = useRef<HTMLHeadingElement>(null)
   const position = useRef({ ...fixtureDialogPosition })
   const drag = useRef<{ pointerId: number; x: number; y: number; startX: number; startY: number } | null>(null)
@@ -69,7 +76,7 @@ export default function FixtureDialog({ initial, fixtures, editing, hasMarks = f
     <form onSubmit={event => {
       event.preventDefault()
       try {
-        const f = { ...value, name: value.name.trim(), category: value.category.trim() }
+        const f = { ...value, name: value.name.trim(), category: categories.find(c => c.trim() === value.category.trim()) ?? value.category.trim() }
         serializeCountFixtures(editing ? fixtures.map(p => p.id === f.id ? f : p) : [...fixtures, f])
         onSave(f)
       } catch (reason) { setError(String(reason)) }
@@ -92,8 +99,11 @@ export default function FixtureDialog({ initial, fixtures, editing, hasMarks = f
       {hasMarks && <p>拾いがあるため種別は変えられません</p>}
       <label>名称<input required maxLength={80} value={value.name} onChange={e => setValue({ ...value, name: e.currentTarget.value })} /></label>
       <label>略号<input maxLength={16} value={value.code} onChange={e => setValue({ ...value, code: e.currentTarget.value })} /></label>
-      <label>分類<input required maxLength={40} list="fixture-categories" value={value.category} onChange={e => setValue({ ...value, category: e.currentTarget.value })} /></label>
-      <datalist id="fixture-categories">{[...new Set(fixtures.map(f => f.category))].map(c => <option key={c} value={c} />)}</datalist>
+      <label>分類<select aria-label="分類" value={newCategory ? '' : value.category} onChange={e => { const category = e.currentTarget.value; setNewCategory(category === ''); setValue({ ...value, category }) }}>
+        {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        <option value="">＋ 新しい分類…</option>
+      </select></label>
+      {newCategory && <label>新しい分類の名前<input aria-label="新しい分類の名前" required maxLength={40} value={value.category} onChange={e => setValue({ ...value, category: e.currentTarget.value })} /></label>}
       <div className="fixture-fields"><label>{length ? '文字の大きさ' : '大きさ'}<select value={value.style.size} onChange={e => style({ size: Number(e.currentTarget.value) })}>{COUNT_SIZES.map(n => <option key={n} value={n}>{n} pt</option>)}</select></label>
         <label>透明度<select value={value.style.opacity} onChange={e => style({ opacity: Number(e.currentTarget.value) })}>{COUNT_OPACITIES.map(n => <option key={n} value={n}>{Math.round(n * 100)}%</option>)}</select></label></div>
       <label><input type="checkbox" checked={value.style.showCode} onChange={e => style({ showCode: e.currentTarget.checked })} />略号を図面に表示</label>
@@ -134,7 +144,7 @@ export default function FixtureDialog({ initial, fixtures, editing, hasMarks = f
       </fieldset>
       </div>
       </div>
-      <div className="dialog-actions"><button type="button" onClick={onClose}>閉じる</button><button type="submit">{editing ? '変更する' : '追加する'}</button></div>
+      <div className="dialog-actions"><button type="button" onClick={onClose}>閉じる</button><button disabled={!value.category.trim()} type="submit">{editing ? '変更する' : '追加する'}</button></div>
     </form>
   </dialog>
 }

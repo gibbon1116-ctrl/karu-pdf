@@ -212,6 +212,7 @@ export class AnnotationStore {
   selectedFixtureId: string | null = null
   private readonly hiddenFixtures = new Set<string>()
   onlySelectedFixture = false
+  showQuantityValues = true
   private readonly legacyCountObjects = new Set<string>()
   private pendingFixtureSave: { editIndex: number; json: string } | null = null
   readonly issueNumbers = new IssueNumbers()
@@ -288,7 +289,7 @@ export class AnnotationStore {
 
   reset(preserveFixtureVisibility = false): void {
     this.fixtures = []; this.fixtureBaseline = '[]'; this.fixtureLoading = null; this.fixturesReady = false
-    if (!preserveFixtureVisibility) { this.selectedFixtureId = null; this.hiddenFixtures.clear(); this.onlySelectedFixture = false }
+    if (!preserveFixtureVisibility) { this.selectedFixtureId = null; this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.showQuantityValues = true }
     if (!preserveFixtureVisibility) { this.filter = DEFAULT_ANNOTATION_FILTER; this.followsFilter = false }
     this.legacyCountObjects.clear(); this.pendingFixtureSave = null
     this.scales.clear(); this.scaleBaselines.clear(); this.pendingScales = []
@@ -412,6 +413,7 @@ export class AnnotationStore {
     for (const id of ids) { if (visible) this.hiddenFixtures.delete(id); else this.hiddenFixtures.add(id) }
     this.pruneHiddenSelection(); this.notify()
   }
+  setShowQuantityValues(value: boolean): void { this.showQuantityValues = value; this.notify() }
   setOnlySelectedFixture(value: boolean): void { if (value && this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため'); this.onlySelectedFixture = value; this.pruneHiddenSelection(); this.notify() }
   showAllFixtures(): void { if (this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため'); this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.notify() }
   private pruneHiddenSelection(): void { for (const id of this.selection) { const a = this.annotations.get(id); if (!a || a.deleted || !this.isShownOnDrawing(a)) this.selection.delete(id) } }
