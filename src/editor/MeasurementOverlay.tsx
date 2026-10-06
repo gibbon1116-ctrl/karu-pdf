@@ -9,6 +9,9 @@ import { constrainMeasurePoint, measureBounds, measureLabel, measureText, type M
 import type { EditableAnnotation, AnnotationStore } from './AnnotationStore'
 import type { EditorTool } from './AnnotationLayer'
 import type { FormatDefaults } from './formatDefaults'
+import { buildSnapIndex, findSnap, MAX_SNAP_VERTICES, type SnapIndex } from '../core/snap'
+
+export const SnapContext = createContext(false)
 
 export const ScaleInteractionContext = createContext<{
   request(pageIndex: number): void
@@ -36,6 +39,9 @@ export function MeasurementShape({ points, kind, text, fontSize, color, width, o
 }
 
 interface Props {
+  zoom: number
+  version: number
+  onStatus(message: string): void
   svg: RefObject<SVGSVGElement | null>
   store: AnnotationStore
   pageIndex: number
@@ -45,6 +51,10 @@ interface Props {
   select(id: string | null): void
 }
 export function useMeasurementInteraction(props: Props) {
+  const snap = useContext(SnapContext)
+  const snapMarker = useRef<SVGPathElement>(null)
+  const rawCursor = useRef<Point | null>(null)
+  const vertexIndex = useRef<SnapIndex | null>(null)
   const scaleInteraction = useContext(ScaleInteractionContext)
   const draftRef = useRef<SVGGElement>(null)
   const points = useRef<Point[]>([])
@@ -65,7 +75,48 @@ export function useMeasurementInteraction(props: Props) {
     return [start[0] + Math.cos(angle) * length, start[1] + Math.sin(angle) * length]
   }
   const enabled = tracing || cloud || !!quantityItem || isMeasureTool(props.tool)
+  const snapEnabled = snap && (tracing || !!quantityItem || isMeasureTool(props.tool))
+  useEffect(() => {
+    vertexIndex.current = null
+    if (!snapEnabled) return
+    const vertices: Point[] = []
+    const add = (items: readonly Point[]) => { for (const p of items) { vertices.push(p); if (vertices.length > MAX_SNAP_VERTICES) return } }
+    for (const a of props.store.getPageAnnotations(props.pageIndex)) {
+      if (!props.store.isShownOnDrawing(a) || a.count) continue
+      if (a.vertices) add(a.vertices)
+      else if (a.line) vertices.push(...a.line)
+      else if (a.inkList) { for (const stroke of a.inkList) if (stroke.length) vertices.push(stroke[0], stroke.at(-1)!) }
+      else if (['square', 'cloudSquare', 'freetext', 'callout', 'symbol', 'issue'].includes(a.kind)) { const [x0, y0, x1, y1] = a.rect; vertices.push([x0, y0], [x1, y0], [x1, y1], [x0, y1]); if (a.calloutPoint) vertices.push(a.calloutPoint) }
+      if (vertices.length > MAX_SNAP_VERTICES) break
+    }
+    if (!vertices.length) return
+    const bounds = props.svg.current?.viewBox.baseVal
+    if (!bounds) return
+    try {
+      vertexIndex.current = buildSnapIndex(vertices, [bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height])
+    } catch { props.onStatus(`頂点が多すぎるため、このページではスナップを使えません（上限 ${MAX_SNAP_VERTICES.toLocaleString()} 点）`) }
+  }, [snapEnabled, props.version, props.pageIndex, props.store])
+  useEffect(() => { snapMarker.current?.setAttribute('display', 'none') }, [snapEnabled])
+  const resolvePoint = (p: Point, event: Pick<React.PointerEvent, 'altKey' | 'shiftKey'>, start?: Point): Point => {
+    if (!snapEnabled) return start ? constrain(start, p, event.shiftKey) : p
+    rawCursor.current = p
+    const marker = snapMarker.current
+    let point = p, axis: { start: Point; direction: Point } | undefined
+    if (start && event.shiftKey) {
+      const angle = Math.round(Math.atan2(p[1] - start[1], p[0] - start[0]) / (Math.PI / 4)) * Math.PI / 4
+      const direction: Point = [Math.cos(angle), Math.sin(angle)], length = Math.hypot(p[0] - start[0], p[1] - start[1])
+      point = [start[0] + direction[0] * length, start[1] + direction[1] * length]; axis = { start, direction }
+    }
+    const scale = props.zoom * (96 / 72), radius = 8 / scale
+    const hit = event.altKey ? null : findSnap(point, radius, vertexIndex.current, axis)
+    if (!hit) { marker?.setAttribute('display', 'none'); return point }
+    const [x, y] = hit.point, r = 4 / scale
+    const d = `M${x-r},${y-r}h${2*r}v${2*r}h${-2*r}Z`
+    marker?.setAttribute('d', d); marker?.setAttribute('display', ''); marker?.setAttribute('data-kind', hit.kind)
+    return hit.point
+  }
   const clear = () => {
+    snapMarker.current?.setAttribute('display', 'none'); rawCursor.current = null
     if (!frame.current && !points.current.length && !cursor.current && !down.current && !vertex.current && !draftRef.current?.firstChild) return
     if (frame.current) cancelAnimationFrame(frame.current)
     if (vertex.current?.element) vertex.current.element.style.visibility = ''
@@ -121,6 +172,16 @@ export function useMeasurementInteraction(props: Props) {
     draw(p, tracing ? 'なぞって合わせる' : scale ? measureText(p, { ...scale, kind }) : '', kind, cssColor(f.color), f.fontSize, f.borderWidth, true)
   }
   const schedule = () => { if (!frame.current) frame.current = requestAnimationFrame(redraw) }
+  useEffect(() => {
+    if (!snapEnabled) return
+    const modifiers = (event: KeyboardEvent) => {
+      if (!['Alt', 'Shift'].includes(event.key) || !rawCursor.current || (event.target as Element)?.matches('input,select,textarea,[contenteditable="true"]')) return
+      const p = resolvePoint(rawCursor.current, event, points.current.at(-1))
+      if (points.current.length) { cursor.current = p; schedule() }
+    }
+    window.addEventListener('keydown', modifiers); window.addEventListener('keyup', modifiers)
+    return () => { window.removeEventListener('keydown', modifiers); window.removeEventListener('keyup', modifiers) }
+  })
   const commit = () => {
     const p = points.current
     if (tracing) { if (p.length >= 2) { const copy = p.map(p => [...p] as Point); clear(); scaleInteraction.complete(copy) }; return }
@@ -182,7 +243,7 @@ export function useMeasurementInteraction(props: Props) {
     window.dispatchEvent(new CustomEvent('karu-pdf:measurement-start', { detail: props.pageIndex }))
     const hadPoints = points.current.length > 0
     const previous = points.current.at(-1)
-    const next = previous ? constrain(previous, p, event.shiftKey) : p
+    const next = resolvePoint(p, event, previous)
     if (tracing || props.tool === 'distance') {
       if (!hadPoints) points.current.push(next)
     } else if (!previous || Math.hypot(next[0] - previous[0], next[1] - previous[1]) > .01) points.current.push(next)
@@ -197,7 +258,8 @@ export function useMeasurementInteraction(props: Props) {
       v.points[v.index] = constrain(previous, p, event.shiftKey); schedule(); return true
     }
     if (!enabled) return false
-    if (points.current.length) { cursor.current = constrain(points.current.at(-1)!, p, event.shiftKey); schedule() }
+    if (points.current.length) { cursor.current = resolvePoint(p, event, points.current.at(-1)!); schedule() }
+    else if (snapEnabled) resolvePoint(p, event)
     return true
   }
   const pointerUp = (event: React.PointerEvent, p: Point): boolean => {
@@ -213,13 +275,14 @@ export function useMeasurementInteraction(props: Props) {
     down.current = null
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     if ((tracing || props.tool === 'distance') && (d.hadPoints || Math.hypot(p[0] - d.start[0], p[1] - d.start[1]) > 1)) {
-      const end = constrain(points.current[0], p, event.shiftKey)
+      const end = resolvePoint(p, event, points.current[0])
       if (Math.hypot(end[0] - points.current[0][0], end[1] - points.current[0][1]) > .01) { points.current.push(end); commit() }
     }
     return true
   }
   return { pointerDown, pointerMove, pointerUp, doubleClick: () => { if (enabled) { commit(); return true }; return false },
+    pointerLeave: () => { snapMarker.current?.setAttribute('display', 'none'); if (!down.current) rawCursor.current = null },
     cancel: () => { if (!points.current.length && !down.current && !vertex.current) return false; clear(); return true },
-    draft: <g ref={draftRef} className="measurement-draft" pointerEvents="none" />,
+    draft: <><g ref={draftRef} className="measurement-draft" pointerEvents="none" /><path ref={snapMarker} data-testid={`snap-marker-${props.pageIndex}`} display="none" fill="white" stroke="#007cbb" strokeWidth="1.5" vectorEffect="non-scaling-stroke" pointerEvents="none" /></>,
     dialog: pending && <QuantityDimensionsDialog mark={pending.mark} complete={mark => { setPending(null); if (mark) pending.save(mark) }} /> }
 }

@@ -26,7 +26,9 @@ import type { ImagePdfSettings } from './core/imagePdfLayout'
 import { HeaderFooterDialog } from './app/HeaderFooterDialog'
 import type { HeaderFooterSettings } from './app/headerFooterText'
 import { ScaleDialog } from './app/ScaleDialog'
-import { ScaleInteractionContext } from './editor/MeasurementOverlay'
+import { ScaleInteractionContext, SnapContext, isMeasureTool } from './editor/MeasurementOverlay'
+import { buildSnapIndex, findSnap } from './core/snap'
+import { quantityMethod } from './core/countFixtures'
 import { scaleLabel } from './core/measure'
 import type { Point } from './core/annotations'
 import { ToolRow } from './app/ToolRow'
@@ -72,6 +74,8 @@ declare global {
   interface Window {
     __karu?: {
       getExternalSendRecords: typeof getExternalSendRecords
+      snapVertexProbe(pageIndex: number, count?: number): unknown
+      seedSnapPerfVertices(pageIndex: number): void
       getMetrics: typeof getMetrics
       setZoom(zoom: number, anchor?: { x: number; y: number }): void
       scrollToPage(index: number): void
@@ -255,6 +259,7 @@ export default function App() {
   const sampleCaptureRef = useRef<typeof sampleCapture>(null)
   const [sampleMessage, setSampleMessage] = useState('')
   const [tool, setTool] = useState<EditorTool>('select')
+  const [snapEnabled, setSnapEnabled] = useState(() => { try { return localStorage.getItem('karu-pdf:snap') === '1' } catch { return false } })
   const [formatDefaults, setFormatDefaults] = useState<FormatDefaults>(() => loadFormatDefaults())
   const [panels, setPanels] = useState(loadPanels)
   const [recent, setRecent] = useState<RecentFile[]>([])
@@ -1480,6 +1485,27 @@ export default function App() {
   useEffect(() => {
     if (new URLSearchParams(location.search).get('test') !== '1') return
     window.__karu = {
+      seedSnapPerfVertices: pageIndex => {
+        const session = tabs.active, size = session?.pageSizes[pageIndex]
+        const scale = session?.annotationStore.getScale(pageIndex)
+        if (!session || !size || !scale) throw Error('No scaled page')
+        const vertices: Point[] = Array.from({ length: 1000 }, (_, i) => [(i % 50) * size.width / 50, Math.floor(i / 50) * size.height / 20])
+        session.annotationStore.create({ pageIndex, kind: 'perimeter', vertices, measure: { ...scale, kind: 'perimeter' }, text: '', rect: [0, 0, size.width, size.height], color: [.3, .3, .3], fontSize: 10, borderWidth: 1, opacity: 1 })
+      },
+      snapVertexProbe: (pageIndex, count = 1000) => {
+        const size = tabs.active?.pageSizes[pageIndex]
+        if (!size) throw Error('No page')
+        const vertices: Point[] = Array.from({ length: count }, (_, i) => [(i % 100) * size.width / 100, Math.floor(i / 100) * size.height / Math.ceil(count / 100)])
+        const start = performance.now(), index = buildSnapIndex(vertices, [0, 0, size.width, size.height]), indexMs = performance.now() - start
+        const samples: number[] = []
+        for (let i = 0; i < 1000; i++) {
+          const p = vertices[i % count], t = performance.now()
+          for (let n = 0; n < 100; n++) findSnap([p[0] + .3, p[1] + .3], 1.5, index)
+          samples.push((performance.now() - t) / 100)
+        }
+        samples.sort((a, b) => a - b)
+        return { index, count, indexMs, bytes: index.bytes, p50: samples[499], p95: samples[949], max: samples[999] }
+      },
       getExternalSendRecords,
       getMetrics,
       setZoom: (value, anchor) => viewerRef.current?.setZoom(value, anchor),
@@ -1676,6 +1702,9 @@ export default function App() {
           onDesktopSteps={() => setDesktopStepsOpen(true)}
         />
         <ToolRow
+          snapEnabled={snapEnabled}
+          snapAvailable={scaleTracing || isMeasureTool(tool) || tool === 'count' && !!active?.annotationStore.getCountFixture(active.annotationStore.selectedFixtureId) && quantityMethod(active.annotationStore.getCountFixture(active.annotationStore.selectedFixtureId)!) !== 'click'}
+          onSnapToggle={() => setSnapEnabled(value => { const next = !value; try { localStorage.setItem('karu-pdf:snap', next ? '1' : '0') } catch { /* 操作は続ける。 */ } return next })}
           readOnly={!!active?.editRestriction}
           tool={tool}
           hasDocument={!!active}
@@ -1736,6 +1765,7 @@ export default function App() {
           <WorkspaceFailureProbe fail={workspaceFailure}>
           <DrawingUiContext.Provider value={{ edit: pageIndex => setDrawingDialog({ session: active, pageIndex }) }}>
           <ScaleInteractionContext.Provider value={{ request: i => openScale(i, true), tracePage: scaleTracing ? scaleDialog?.pageIndex ?? null : null, complete: p => { setScalePoints(p); setScaleTracing(false) } }}>
+          <SnapContext.Provider value={snapEnabled}>
           <QuantityNavigationContext.Provider value={{ drawingInfo: i => active.annotationStore.getDrawingInfo(i), navigate: (page, rect) => {
             const viewer = viewerRef.current
             if (!viewer || organizeRef.current) { active.view.page = page + 1; refreshTabs(); return }
@@ -1782,6 +1812,7 @@ export default function App() {
           />
           </FixtureUiContext.Provider>
           </QuantityNavigationContext.Provider>
+          </SnapContext.Provider>
           </ScaleInteractionContext.Provider>
           </DrawingUiContext.Provider>
           </WorkspaceFailureProbe>

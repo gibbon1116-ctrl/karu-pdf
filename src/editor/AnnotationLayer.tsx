@@ -173,7 +173,7 @@ export function AnnotationLayer(props: Props) {
   const sampleInteraction = useContext(FixtureSampleContext)
   const version = useSyncExternalStore(props.store.subscribe, props.store.getSnapshot)
   const svgRef = useRef<SVGSVGElement>(null)
-  const measurement = useMeasurementInteraction({ svg: svgRef, store: props.store, pageIndex: props.pageIndex, tool: props.tool, quantityItem: props.store.getCountFixture(props.store.selectedFixtureId), defaults: props.formatDefaults, select: props.onSelect })
+  const measurement = useMeasurementInteraction({ svg: svgRef, store: props.store, pageIndex: props.pageIndex, tool: props.tool, quantityItem: props.store.getCountFixture(props.store.selectedFixtureId), defaults: props.formatDefaults, select: props.onSelect, zoom: props.zoom, version, onStatus: props.onStatus })
   const draftCloudRef = useRef<SVGPathElement>(null)
   const draftRectRef = useRef<SVGRectElement>(null)
   const draftLineRef = useRef<SVGLineElement>(null)
@@ -977,6 +977,7 @@ export function AnnotationLayer(props: Props) {
         if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
         finishDrag(true)
       }}
+      onPointerLeave={measurement.pointerLeave}
       onPointerCancel={() => { if (!measurement.cancel()) finishDrag(false) }}
       onDoubleClick={(event) => {
         if (measurement.doubleClick()) return

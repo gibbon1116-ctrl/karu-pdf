@@ -88,6 +88,9 @@ interface Props {
   canUndo: boolean
   canRedo: boolean
   onScale(): void
+  snapEnabled?: boolean
+  snapAvailable?: boolean
+  onSnapToggle?(): void
   onToolChange(tool: EditorTool): void
   onUndo(): void
   onRedo(): void
@@ -148,6 +151,7 @@ export function ToolRow(props: Props) {
     <button type="button" className="icon-button" title="やり直し" aria-label="やり直し" disabled={!props.canRedo} onClick={props.onRedo}>↷ やり直し</button>
     <span className="tool-row-separator" />
     <div className="zoom-controls">
+      <button type="button" data-testid="snap-toggle" title="既存の頂点にスナップ（Alt を押している間は解除）" disabled={!props.hasDocument || props.readOnly || !props.snapAvailable} aria-pressed={!!props.snapEnabled} className={props.snapEnabled ? 'active' : ''} onClick={props.onSnapToggle}>スナップ</button>
       <button type="button" title="縮小" aria-label="縮小" disabled={!props.hasDocument} onClick={props.onZoomOut}>−</button>
       <Dropdown label={`${Math.round(props.zoom * 100)}%`} items={zoomItems} disabled={!props.hasDocument} buttonClassName="zoom-value" />
       <button type="button" title="拡大" aria-label="拡大" disabled={!props.hasDocument} onClick={props.onZoomIn}>＋</button>
