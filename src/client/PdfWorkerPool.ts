@@ -35,6 +35,7 @@ import type {
   PagesSplitResponse,
   Priority,
   RenderResponse,
+  SearchImage,
   StatsResponse,
   WorkerResponse,
   PageLayoutWorkerTimings,
@@ -224,6 +225,10 @@ export class PdfWorkerPool {
   readonly primaryWorkerIndex = 0
   private readonly slots: WorkerSlot[]
   private readonly pendingRenders = new Map<number, Pending>()
+  private readonly pendingSearchImages = new Map<number, {
+    docId: string; slot: WorkerSlot; cancelled: boolean
+    resolve(image: SearchImage): void; reject(error: Error): void
+  }>()
   private readonly pendingRequests = new Map<number, { resolve(value: WorkerResponse): void; reject(error: Error): void }>()
   private readonly pendingSearches = new Map<number, {
     docId: string
@@ -366,6 +371,35 @@ export class PdfWorkerPool {
   }): RenderTask {
     const slot = this.slotForPage(options.docId, options.pageIndex)
     return this.startRender(slot, 'render', options)
+  }
+
+  renderSearchImage(options: {
+    docId: string; pageIndex: number; renderScale: number; deviceRect: DeviceRect
+  }): { promise: Promise<SearchImage>; cancel(): void } {
+    // Do not change display-page affinity or its DisplayList cache. Prefer a
+    // free rendering Worker, keeping Worker 0 available for document operations.
+    const renderSlots = this.slots.length > 1 ? this.slots.slice(1) : this.slots
+    const available = renderSlots.filter(slot => slot.documents.has(options.docId))
+    if (!available.length) return { promise: Promise.reject(new Error('PDF が開かれていません。')), cancel() {} }
+    const slot = available.reduce((a, b) => {
+      if (a.queueLength !== b.queueLength) return a.queueLength < b.queueLength ? a : b
+      return (this.assignedCounts[a.index] ?? 0) <= (this.assignedCounts[b.index] ?? 0) ? a : b
+    })
+    const jobId = this.nextId++
+    slot.queueLength++
+    const promise = new Promise<SearchImage>((resolve, reject) => {
+      this.pendingSearchImages.set(jobId, { docId: options.docId, slot, cancelled: false, resolve, reject })
+      slot.worker.postMessage({ type: 'renderSearchImage', jobId, ...options, priority: 4 })
+    })
+    return { promise, cancel: () => {
+      const pending = this.pendingSearchImages.get(jobId)
+      if (!pending || pending.cancelled) return
+      pending.cancelled = true
+      pending.reject(new CancelledRenderError())
+      // Queued requests are removed; a synchronous run already in progress
+      // finishes, and its late array is discarded by onMessage.
+      slot.worker.postMessage({ type: 'cancelJobs', docId: options.docId, jobIds: [jobId] })
+    } }
   }
 
   async renderFixtureSample(docId: string, pageIndex: number, rect: import('../core/annotations').Rect): Promise<import('../core/countFixtures').CountFixtureSample> {
@@ -788,7 +822,7 @@ export class PdfWorkerPool {
   }
 
   isIdle(): boolean {
-    return this.pendingRenders.size === 0 && this.slots.every((slot) => slot.queueLength === 0)
+    return this.pendingSearchImages.size === 0 && this.pendingRenders.size === 0 && this.slots.every((slot) => slot.queueLength === 0)
   }
 
   destroy(): void {
@@ -797,11 +831,13 @@ export class PdfWorkerPool {
       slot.worker.terminate()
     }
     const error = new Error('Worker pool は破棄されました。')
+    for (const pending of this.pendingSearchImages.values()) pending.reject(error)
     for (const pending of this.pendingRenders.values()) pending.reject(error)
     for (const pending of this.pendingRequests.values()) pending.reject(error)
     for (const pending of this.pendingSearches.values()) pending.reject(error)
     for (const pending of this.pendingAnnotationLists.values()) pending.reject(error)
     this.pendingRenders.clear()
+    this.pendingSearchImages.clear()
     this.pendingRequests.clear()
     this.pendingSearches.clear()
     this.pendingAnnotationLists.clear()
@@ -892,6 +928,17 @@ export class PdfWorkerPool {
   }
 
   private onMessage(slot: WorkerSlot, message: WorkerResponse): void {
+    if (message.type === 'searchImageRendered') {
+      const pending = this.pendingSearchImages.get(message.jobId)
+      if (!pending) return
+      this.pendingSearchImages.delete(message.jobId)
+      pending.slot.queueLength = Math.max(0, pending.slot.queueLength - 1)
+      if (pending.cancelled) return
+      if (message.cancelled) pending.reject(new CancelledRenderError())
+      else if (message.image) pending.resolve(message.image)
+      else pending.reject(new Error('検索画像を取得できませんでした。'))
+      return
+    }
     if (message.type === 'ready') {
       slot.markReady()
       return
@@ -958,6 +1005,12 @@ export class PdfWorkerPool {
     if (message.type === 'error') {
       const error = new Error(message.message)
       if (message.jobId !== undefined) {
+        const searchImage = this.pendingSearchImages.get(message.jobId)
+        if (searchImage) {
+          this.pendingSearchImages.delete(message.jobId)
+          searchImage.slot.queueLength = Math.max(0, searchImage.slot.queueLength - 1)
+          if (!searchImage.cancelled) searchImage.reject(error)
+        }
         const pending = this.pendingRenders.get(message.jobId)
         if (pending) {
           this.pendingRenders.delete(message.jobId)
@@ -985,6 +1038,12 @@ export class PdfWorkerPool {
   private failWorker(slot: WorkerSlot, error: Error): void {
     slot.markFailed(error)
     console.error(`PDF Worker ${slot.index} failed`, error)
+    for (const [jobId, pending] of this.pendingSearchImages) {
+      if (pending.slot === slot) {
+        pending.reject(error)
+        this.pendingSearchImages.delete(jobId)
+      }
+    }
     for (const [jobId, pending] of this.pendingRenders) {
       if (pending.slot === slot) {
         pending.reject(error)

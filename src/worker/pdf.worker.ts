@@ -57,6 +57,7 @@ import type {
   OpenRequest,
   PrepareOutputRequest,
   RenderRequest,
+  RenderSearchImageRequest,
   RenderCompareRequest,
   RenderRasterBandRequest,
   SearchDocumentRequest,
@@ -117,6 +118,7 @@ type CoreRequest =
   | RenderRasterBandRequest
 type QueuedRequest =
   | (RenderRequest & { sequence: number })
+  | (RenderSearchImageRequest & { sequence: number })
   | (RenderCompareRequest & { sequence: number })
   | (CoreRequest & { sequence: number; priority: -1 | 3 })
 const queue: QueuedRequest[] = []
@@ -240,7 +242,7 @@ async function yieldToInteractiveRequests(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0))
   for (let index = 0; index < queue.length;) {
     const job = queue[index]
-    if (job.type === 'render' || job.type === 'renderCompare' || !INTERACTIVE_REQUESTS.has(job.type)) {
+    if (job.type === 'render' || job.type === 'renderCompare' || job.type === 'renderSearchImage' || !INTERACTIVE_REQUESTS.has(job.type)) {
       index += 1
       continue
     }
@@ -250,6 +252,19 @@ async function yieldToInteractiveRequests(): Promise<void> {
 }
 
 async function execute(job: QueuedRequest): Promise<void> {
+  if (job.type === 'renderSearchImage') {
+    try {
+      post({ type: 'started', jobId: job.jobId })
+      const entry = documents.get(job.docId)
+      if (!entry) throw new Error('PDF が開かれていません。')
+      const image = renderSearchImage(entry, job)
+      processedCount++
+      post({ type: 'searchImageRendered', jobId: job.jobId, image }, [image.gray.buffer as ArrayBuffer])
+    } catch (error) {
+      post({ type: 'error', jobId: job.jobId, message: error instanceof Error ? error.message : String(error) })
+    }
+    return
+  }
   if (job.type === 'renderCompare') {
     const state = { docId: job.docId, newDocId: job.newDocId, cancelled: false }
     activeComparisons.set(job.jobId, state)
@@ -326,6 +341,31 @@ function renderFixtureRegion(entry: WorkerDocument, job: RenderRequest) {
     page.runPageContents(device, mupdf.Matrix.scale(job.renderScale, job.renderScale))
     device.close()
     return { width: pixmap.getWidth(), height: pixmap.getHeight(), rgba: new Uint8ClampedArray(pixmap.getPixels()) }
+  } finally { device?.destroy(); pixmap?.destroy(); page.destroy() }
+}
+
+// Explicit visual search only. Run the page contents once for the whole crop,
+// then transfer ink density without copying RGBA pixels to the main thread.
+function renderSearchImage(entry: WorkerDocument, job: RenderSearchImageRequest) {
+  const rect = job.deviceRect, width = rect[2] - rect[0], height = rect[3] - rect[1]
+  if (!Number.isFinite(job.renderScale) || job.renderScale <= 0 || !rect.every(Number.isSafeInteger)
+    || width <= 0 || height <= 0 || !Number.isSafeInteger(width * height) || width * height > 16_000_000
+    || !Number.isInteger(job.pageIndex) || job.pageIndex < 0) throw new Error('検索画像の描画範囲が不正です（上限1600万画素）。')
+  const page = entry.opened.document.loadPage(job.pageIndex)
+  let pixmap: Pixmap | undefined, device: DrawDevice | undefined
+  try {
+    pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, rect, false)
+    pixmap.clear(255)
+    device = new mupdf.DrawDevice(mupdf.Matrix.identity, pixmap)
+    page.runPageContents(device, mupdf.Matrix.scale(job.renderScale, job.renderScale))
+    device.close()
+    const pixels = pixmap.getPixels(), stride = pixmap.getStride(), components = pixmap.getNumberOfComponents()
+    const gray = new Uint8Array(width * height)
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const at = y * stride + x * components
+      gray[y * width + x] = Math.round(255 - (.2126 * pixels[at] + .7152 * pixels[at + 1] + .0722 * pixels[at + 2]))
+    }
+    return { width, height, gray }
   } finally { device?.destroy(); pixmap?.destroy(); page.destroy() }
 }
 
@@ -750,7 +790,8 @@ function cancelQueuedForDocument(docId: string, message: string): void {
     const queued = queue[index]
     if (!('docId' in queued) || (queued.docId !== docId && !(queued.type === 'renderCompare' && queued.newDocId === docId))) continue
     queue.splice(index, 1)
-    if (queued.type === 'render' || queued.type === 'renderCompare') post({ type: 'rendered', jobId: queued.jobId, cancelled: true })
+    if (queued.type === 'renderSearchImage') post({ type: 'searchImageRendered', jobId: queued.jobId, cancelled: true })
+    else if (queued.type === 'render' || queued.type === 'renderCompare') post({ type: 'rendered', jobId: queued.jobId, cancelled: true })
     else post({ type: 'error', requestId: queued.requestId, message })
   }
 }
@@ -834,7 +875,7 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     queue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence)
     schedule(); return
   }
-  if (message.type === 'render' || message.type === 'renderCompare') {
+  if (message.type === 'render' || message.type === 'renderCompare' || message.type === 'renderSearchImage') {
     queue.push({ ...message, sequence: sequence++ })
     queue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence)
     schedule()
@@ -845,6 +886,10 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     for (const id of ids) { const active = activeComparisons.get(id); if (active?.docId === message.docId) active.cancelled = true }
     for (let index = queue.length - 1; index >= 0; index -= 1) {
       const queued = queue[index]
+      if (queued.type === 'renderSearchImage' && queued.docId === message.docId && ids.has(queued.jobId)) {
+        queue.splice(index, 1)
+        post({ type: 'searchImageRendered', jobId: queued.jobId, cancelled: true })
+      }
       if ((queued.type === 'render' || queued.type === 'renderCompare') && queued.docId === message.docId && ids.has(queued.jobId)) {
         queue.splice(index, 1)
         post({ type: 'rendered', jobId: queued.jobId, cancelled: true })

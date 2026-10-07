@@ -1513,6 +1513,33 @@ export default function App() {
   useEffect(() => {
     if (new URLSearchParams(location.search).get('test') !== '1') return
     window.__karu = {
+      // SPEC-06h-1: test-only, demand-loaded, disposable visual-search prototype.
+      ...(() => {
+        const run = async (request: import('./client/SymbolSearchClient').SymbolSearchRequest, afterMs?: number) => {
+          if (afterMs !== undefined && (!Number.isFinite(afterMs) || afterMs < 0)) throw new Error('invalid cancellation delay')
+          const { SymbolSearchClient } = await import('./client/SymbolSearchClient')
+          if (!tabs.list().some(s => s.docId === request.docId)) throw new Error('PDF is closed')
+          const client = new SymbolSearchClient(pool, (docId, index) => tabs.list().find(s => s.docId === docId)?.pageSizes[index])
+          const task = client.search(request)
+          let cancelledAt: number | undefined
+          const timer = afterMs === undefined ? undefined : window.setTimeout(() => { cancelledAt = performance.now(); task.cancel() }, afterMs)
+          // The pool has no close subscription; watch only while an explicit test search runs.
+          const closed = window.setInterval(() => { if (!window.__karu || !tabs.list().some(s => s.docId === request.docId)) client.dispose() }, 50)
+          try {
+            const result = await task.promise
+            return afterMs === undefined ? result : { cancelled: false, settledMs: 0 }
+          } catch (error) {
+            if (afterMs !== undefined && cancelledAt !== undefined && error instanceof Error && error.message === 'cancelled') {
+              return { cancelled: true, settledMs: performance.now() - cancelledAt }
+            }
+            throw error
+          } finally { if (timer !== undefined) clearTimeout(timer); clearInterval(closed); client.dispose() }
+        }
+        return {
+          symbolSearch: (request: import('./client/SymbolSearchClient').SymbolSearchRequest) => run(request) as Promise<import('./client/SymbolSearchClient').SymbolSearchResult>,
+          symbolSearchCancelTest: (request: import('./client/SymbolSearchClient').SymbolSearchRequest, afterMs: number) => run(request, afterMs) as Promise<{ cancelled: boolean; settledMs: number }>,
+        }
+      })(),
       seedSnapPerfVertices: pageIndex => {
         const session = tabs.active, size = session?.pageSizes[pageIndex]
         const scale = session?.annotationStore.getScale(pageIndex)
@@ -1690,6 +1717,7 @@ export default function App() {
           onViewForward={() => moveViewHistory('forward')}
           fileName={active?.name ?? null}
           dirty={active?.dirty ?? false}
+          dirtyDescription={active?.dirtyDescription() ?? ''}
           hasDocument={!!active}
           saving={saving}
           organizing={!!organize}
@@ -1717,7 +1745,6 @@ export default function App() {
           onPaste={pasteAnnotations}
           onDuplicate={duplicateAnnotations}
           onClearSelection={() => viewerRef.current?.clearSelection()}
-          dirtyDescription={active?.dirtyDescription() ?? ''}
           onDeleteSelection={() => { active?.annotationStore.removeMany(active.annotationStore.selectedIds()); refreshTabs() }}
           onToggleThumbnails={() => updatePanels({ ...panels, thumbnails: !panels.thumbnails })}
           onOpenSidePanel={(tab) => openSidePanel(tab)}

@@ -48,6 +48,18 @@ export interface RenderRequest {
   contentsOnly?: boolean
 }
 
+export interface SearchImage { width: number; height: number; gray: Uint8Array }
+export interface RenderSearchImageRequest {
+  type: 'renderSearchImage'
+  jobId: number
+  docId: string
+  pageIndex: number
+  renderScale: number
+  deviceRect: DeviceRect
+  // Below every display-render priority; this request cannot be reprioritized.
+  priority: 4
+}
+
 export interface CompareOptions {
   overlayMode?: 'changes' | 'blend'
   blend?: number
@@ -279,6 +291,7 @@ export type WorkerRequest =
   | MaxIssueNumberRequest
   | OpenRequest
   | RenderRequest
+  | RenderSearchImageRequest
   | CancelJobsRequest
   | ReprioritizeRequest
   | StatsRequest
@@ -338,6 +351,13 @@ export interface RenderResponse {
 export interface StartedResponse {
   type: 'started'
   jobId: number
+}
+
+export interface SearchImageResponse {
+  type: 'searchImageRendered'
+  jobId: number
+  image?: SearchImage
+  cancelled?: true
 }
 
 export interface StatsResponse {
@@ -515,6 +535,7 @@ export type WorkerResponse =
   | OpenResponse
   | StartedResponse
   | RenderResponse
+  | SearchImageResponse
   | StatsResponse
   | ListAnnotationsResponse
   | AllAnnotationsProgressResponse
