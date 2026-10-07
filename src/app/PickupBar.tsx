@@ -7,9 +7,11 @@ import LinePicker, { changeRouteCount, routeEntries, routeHighlighted, useRouteF
 import { scopeSuffix } from './routeSets'
 import { QuantitySwatch } from '../editor/countMarkers'
 import type { AnnotationStore, EditableAnnotation } from '../editor/AnnotationStore'
+import { SymbolSearchContext } from './SymbolSearchPanel'
 
 export default function PickupBar({ session }: { session: DocumentSession }) {
   const store = session.annotationStore, ui = useContext(FixtureUiContext)
+  const symbolSearch = useContext(SymbolSearchContext)
   const version = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const fixtures = useMemo(() => store.getCountFixtures(), [store, version])
   const currentId = pickupFixtureId(store)
@@ -41,6 +43,7 @@ export default function PickupBar({ session }: { session: DocumentSession }) {
       </button>
       <button type="button" aria-label="次の項目" title="次の項目（]）" disabled={!next} onClick={() => next && select(next.id)}>▶</button>
       {current && <span className="pickup-bar-totals" aria-live="polite"><span title={`この図面 ${format(index.byPage(current.id).get(session.view.page - 1) ?? 0)}`}>この図面 <strong>{format(index.byPage(current.id).get(session.view.page - 1) ?? 0)}</strong></span><span title={`全図面 ${format(index.total(current.id))}`}>全図面 <strong>{format(index.total(current.id))}</strong></span></span>}
+      {current && quantityKind(current) === 'count' && symbolSearch && <button type="button" aria-label="同じ記号を探す" onClick={() => symbolSearch.start(session, current.id)}>同じ記号を探す</button>}
       <button type="button" aria-label="元に戻す" title="元に戻す（Ctrl+Z）" disabled={!store.canUndo()} onClick={event => {
         // Reuse App's Ctrl+Z path, including selection clearing and tab refresh.
         event.currentTarget.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }))

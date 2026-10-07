@@ -11,12 +11,14 @@ import { groupFixtures, moveCategory, moveFixture, stepFixture } from './fixture
 import { RecentFixtures } from './fixtureQuickList'
 import { useRouteSets } from './RouteItems'
 import { resolveRouteSet, routeSetSummary } from './routeSets'
+import { SymbolSearchContext } from './SymbolSearchPanel'
 const QuantityCsvExportDialog = lazy(() => import('./CsvExportDialog').then(m => ({ default: m.QuantityCsvExportDialog })))
 const FixtureDialog = lazy(() => import('./FixtureDialog'))
 const FixturePresetDialog = lazy(() => import('./FixturePresetDialog'))
 
 export default function FixturePanel({ session, pool }: { session: DocumentSession; pool: PdfWorkerPool }) {
   const store = session.annotationStore, ui = useContext(FixtureUiContext)
+  const symbolSearch = useContext(SymbolSearchContext)
   const table = useContext(QuantityTableContext)
   const snap = useContext(SnapUiContext)
   const version = useSyncExternalStore(store.subscribe, store.getSnapshot)
@@ -142,8 +144,11 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   return <section className={`fixture-panel fixture-panel-${mode}${store.drawingHidesCounts() ? ' drawing-hides-counts' : ''}`} aria-label="数量拾い" data-testid="fixture-panel">
     <div className="fixture-panel-controls">
     <div className="fixture-panel-heading"><h2>数量拾い</h2><button type="button" aria-pressed={!managing} onClick={() => changeMode('pickup')}>拾う</button><button type="button" aria-pressed={managing} onClick={() => changeMode('manage')}>管理</button></div>
-    <button type="button" aria-label="集計表を開く" onClick={() => table?.open()}
-      ref={button => button ? table?.bindPanel({ breakdown: setBreakdownId, csv: () => setCsvOpen(true) }) : undefined}>集計表</button>
+    <div className="fixture-panel-tools">
+      <button type="button" aria-label="集計表を開く" onClick={() => table?.open()}
+        ref={button => button ? table?.bindPanel({ breakdown: setBreakdownId, csv: () => setCsvOpen(true) }) : undefined}>集計表</button>
+      {selected && quantityKind(selected) === 'count' && symbolSearch && <button type="button" aria-label="同じ記号を探す" disabled={!!session.editRestriction} onClick={() => symbolSearch.start(session, selected.id)}>同じ記号を探す</button>}
+    </div>
     {(managing || session.drawingScanning || drawingStatus.includes('失敗')) && <p className="fixture-drawing-status" aria-live="polite" data-testid="drawing-scan-status" title={drawingStatus}>{drawingStatus}</p>}
     {managing && <button type="button" disabled={session.drawingScanning} onClick={() => void session.scanDrawingInfos(pool, true)}>図面番号・図面名称を読み直す</button>}
     {store.drawingHidesCounts() && <div className="fixture-drawing-filter-warning" role="status">

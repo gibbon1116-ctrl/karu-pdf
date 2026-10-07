@@ -4,7 +4,7 @@ import { floorFromDrawingName, normalizeFloor } from '../core/location'
 import { mergeAutomaticDrawingInfo, type DrawingInfo } from '../core/drawingInfo'
 import { validRouteScope, type RouteScope, validRouteCount, quantityLabel, quantityDimensions, type QuantityMark } from '../core/quantity'
 import { fixtureCode, quantityKind, quantityMethod, quantityLine, type QuantityLineStyle } from '../core/countFixtures'
-import { nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type LegacyChangeData, type Point, type Rect, type RGB, type SymbolName } from '../core/annotations'
+import { symbolRectFromDrag, nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type LegacyChangeData, type Point, type Rect, type RGB, type SymbolName } from '../core/annotations'
 import type { Quad } from 'mupdf'
 import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
@@ -17,6 +17,11 @@ import { nextCountStyle, serializeCountFixtures, type CountFixture } from '../co
 import { DEFAULT_ANNOTATION_FILTER, filterShowsCountMarks, matchesAnnotationFilter, type AnnotationFilter } from './annotationFilter'
 
 export type DrawingFilterReleaseReason = '数量拾いの印を数えるため' | '隠れている種類の書き込みを作ったため' | '次の未対応指摘を表示するため' | '数量拾いの印を表示するため'
+
+export interface SymbolSearchCandidate {
+  id: string; pageIndex: number; rect: Rect; center: Point; score: number
+  state: 'pending' | 'chosen' | 'counted'
+}
 
 export type Kind = MeasureKind | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
@@ -236,6 +241,66 @@ export class AnnotationStore {
   fixturesReady = false
   get fixturesLoading(): boolean { return this.fixtureLoading !== null }
   selectedFixtureId: string | null = null
+  // Allocated only by explicit visual search; excluded from persisted/history states.
+  symbolCandidates: SymbolSearchCandidate[] | null = null
+  private symbolCandidateFixture: string | null = null
+  private symbolCandidateRadius = 0
+
+  clearSymbolCandidates(): void {
+    if (this.symbolCandidates === null) return
+    this.symbolCandidates = null; this.symbolCandidateFixture = null; this.symbolCandidateRadius = 0
+    this.notify(false)
+  }
+  beginSymbolCandidates(fixtureId: string, sampleRect: Rect): void {
+    this.symbolCandidateFixture = fixtureId
+    this.symbolCandidateRadius = Math.min(sampleRect[2] - sampleRect[0], sampleRect[3] - sampleRect[1]) / 2
+    this.symbolCandidates = []; this.notify(false)
+  }
+  appendSymbolCandidates(candidates: Array<{ pageIndex: number; rect: Rect; center: Point; score: number }>): void {
+    if (!this.symbolCandidates || this.symbolCandidateFixture !== this.selectedFixtureId) return
+    for (const c of candidates) this.symbolCandidates.push({ ...c, rect: [...c.rect], center: [...c.center], id: crypto.randomUUID(), state: 'pending' })
+    this.refreshSymbolCandidates(); this.notify(false)
+  }
+  toggleSymbolCandidate(id: string): void {
+    const c = this.symbolCandidates?.find(c => c.id === id)
+    if (!c || c.state === 'counted') return
+    c.state = c.state === 'chosen' ? 'pending' : 'chosen'; this.notify(false)
+  }
+  chooseSymbolCandidates(chosen: boolean): void {
+    if (!this.symbolCandidates) return
+    for (const c of this.symbolCandidates) if (c.state !== 'counted') c.state = chosen ? 'chosen' : 'pending'
+    this.notify(false)
+  }
+  private refreshSymbolCandidates(): void {
+    if (!this.symbolCandidates) return
+    const marks = new Map<number, Point[]>()
+    for (const a of this.annotations.values()) {
+      if (a.deleted || !a.count || countFixtureId(a.count) !== this.symbolCandidateFixture) continue
+      const points = marks.get(a.pageIndex) ?? []; points.push([(a.rect[0] + a.rect[2]) / 2, (a.rect[1] + a.rect[3]) / 2]); marks.set(a.pageIndex, points)
+    }
+    for (const c of this.symbolCandidates) {
+      const counted = marks.get(c.pageIndex)?.some(p => Math.hypot(p[0] - c.center[0], p[1] - c.center[1]) <= this.symbolCandidateRadius)
+      if (counted) c.state = 'counted'
+      else if (c.state === 'counted') c.state = 'pending'
+    }
+  }
+
+  createCountMarks(fixtureId: string, points: Array<{ pageIndex: number; center: Point }>): string[] {
+    const fixture = this.getCountFixture(fixtureId)
+    if (!fixture || quantityKind(fixture) !== 'count') throw new Error('個数の項目を選んでください')
+    if (points.some(p => !Number.isInteger(p.pageIndex) || p.pageIndex < 0 || !p.center.every(Number.isFinite))) throw new Error('印の位置が不正です')
+    if (!points.length) return []
+    const after: HistoryState = []
+    for (const { pageIndex, center } of points) {
+      const a = this.create({ pageIndex, kind: 'symbol', rect: symbolRectFromDrag(center, center, false, fixture.style.size),
+        count: { version: 2, id: crypto.randomUUID(), fixtureId, ...this.pickupLocation(pageIndex) },
+        text: `個数: ${fixtureCode(fixture)} ${fixture.name}`.trim(), color: fixture.style.color, symbol: 'circle', opacity: fixture.style.opacity,
+        deferHistory: true, deferNotify: true })
+      this.pendingCreations.delete(a.id); after.push(cloneState(this.annotations.get(a.id)!))
+    }
+    this.history.push({ before: [], after }); this.notify()
+    return after.map(a => a.id)
+  }
   routeTemplate: { itemId: string; extra: NonNullable<QuantityMark['extra']>; count: number; scope?: RouteScope; name: string } | null = null
   setRouteTemplate(t: AnnotationStore['routeTemplate']): void { this.routeTemplate = t ? structuredClone(t) : null; this.notify(false) }
   routeTemplateItems(itemId: string): Partial<Pick<QuantityMark, 'count' | 'scope' | 'extra'>> {
@@ -344,6 +409,7 @@ export class AnnotationStore {
   canRedo = (): boolean => this.history.canRedo
 
   reset(preserveFixtureVisibility = false): void {
+    this.clearSymbolCandidates()
     if (!preserveFixtureVisibility) this.routeTemplate = null
     if (!preserveFixtureVisibility) this.recentFixtures = []
     this.index = null; this.visibleCountCache = null
@@ -519,7 +585,7 @@ export class AnnotationStore {
     })().finally(() => { if (generation === this.generation) this.fixtureLoading = null })
     return this.fixtureLoading
   }
-  selectFixture(id: string | null): void { if (id !== this.routeTemplate?.itemId) this.routeTemplate = null; this.selectedFixtureId = id; if (id !== null) this.rememberFixture(id); this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false) }
+  selectFixture(id: string | null): void { if (id !== this.selectedFixtureId) this.clearSymbolCandidates(); if (id !== this.routeTemplate?.itemId) this.routeTemplate = null; this.selectedFixtureId = id; if (id !== null) this.rememberFixture(id); this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false) }
   isFixtureVisible(id: string): boolean { return !this.hiddenFixtures.has(id) && (!this.onlySelectedFixture || id === this.selectedFixtureId) }
   isCountVisible(mark: CountMark | null | undefined, quantity?: QuantityMark | null): boolean { return quantity ? [quantity.itemId, ...(quantity.extra ?? []).map(e => e.itemId)].some(id => this.isFixtureVisible(id)) : !mark || this.isFixtureVisible(countFixtureId(mark)) }
   setFixtureVisible(ids: readonly string[], visible: boolean): void {
@@ -877,6 +943,7 @@ export class AnnotationStore {
     symbol?: SymbolName | null
     layout?: LayoutResult | null
     deferHistory?: boolean
+    deferNotify?: boolean
   }): EditableAnnotation {
     const id = `new-${this.nextNewId++}`
     const annotation: StoredAnnotation = {
@@ -924,7 +991,7 @@ export class AnnotationStore {
     if (annotation.issue) this.issueNumbers.observe(annotation.issue.number)
     if (input.deferHistory) this.pendingCreations.add(id)
     else this.history.push({ before: [], after: [cloneState(annotation)] })
-    this.notify()
+    if (!input.deferNotify) this.notify()
     return this.get(id)!
   }
 
@@ -1580,7 +1647,7 @@ export class AnnotationStore {
   }
 
   private notify(quantityChanged = true): void {
-    if (quantityChanged) this.quantityVersion += 1
+    if (quantityChanged) { this.quantityVersion += 1; this.refreshSymbolCandidates() }
     this.version += 1
     for (const listener of this.listeners) listener()
   }

@@ -1148,6 +1148,19 @@ export function AnnotationLayer(props: Props) {
         vectorEffect="non-scaling-stroke" pointerEvents="none" aria-hidden="true" />}
     </svg>
     {measurement.dialog}
+    {props.store.symbolCandidates?.some(c => c.pageIndex === props.pageIndex) && <svg className="annotation-layer symbol-search-candidates"
+      data-testid={`symbol-search-candidates-${props.pageIndex}`} viewBox={`0 0 ${props.pageSize.width} ${props.pageSize.height}`}>
+      {props.store.symbolCandidates.filter(c => c.pageIndex === props.pageIndex).map(c => <g key={c.id}
+        data-testid="symbol-search-candidate" data-candidate-id={c.id} data-state={c.state} className={`symbol-search-candidate ${c.state}`}
+        role="button" aria-label={`記号の候補${c.state === 'counted' ? '（拾い済み）' : ''}`} aria-pressed={c.state === 'chosen'} aria-disabled={c.state === 'counted'} tabIndex={c.state === 'counted' ? -1 : 0}
+        onPointerDown={e => { e.preventDefault(); e.stopPropagation() }} onPointerUp={e => { e.preventDefault(); e.stopPropagation() }}
+        onDoubleClick={e => { e.preventDefault(); e.stopPropagation() }} onClick={e => { e.preventDefault(); e.stopPropagation(); props.store.toggleSymbolCandidate(c.id) }}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); props.store.toggleSymbolCandidate(c.id) } }}>
+        <title>似ている度合い {c.score.toFixed(2)}</title>
+        <rect x={c.rect[0]} y={c.rect[1]} width={c.rect[2] - c.rect[0]} height={c.rect[3] - c.rect[1]} vectorEffect="non-scaling-stroke" />
+        {c.state === 'chosen' && <text x={c.center[0]} y={c.center[1]} textAnchor="middle" dominantBaseline="central" fontSize={Math.min(c.rect[2] - c.rect[0], c.rect[3] - c.rect[1]) * .75}>✓</text>}
+      </g>)}
+    </svg>}
     {sampleInteraction?.selection?.docId === props.docId && <FixtureSampleSelection pageSize={props.pageSize} pageIndex={props.pageIndex} complete={sampleInteraction.selection.complete} />}
     {props.tool === 'textSelect' && textSelection && selectionBounds(textSelection.quads) && <div className="text-selection-toolbar" style={{
       left: `${Math.max(0, Math.min(100, (selectionBounds(textSelection.quads)![0] / props.pageSize.width) * 100))}%`,

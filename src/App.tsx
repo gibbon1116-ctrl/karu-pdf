@@ -1,7 +1,7 @@
 import { QuantityNavigationContext } from './app/QuantityBreakdown'
 import { DrawingInfoDialog } from './app/DrawingInfoDialog'
 import { DrawingUiContext } from './app/documentModel'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { DocumentTabs } from './app/DocumentTabs'
 import { commitFocusedField } from './app/pendingInput'
 import { DocumentWorkspace } from './app/DocumentWorkspace'
@@ -11,6 +11,7 @@ import type { DocumentViewState } from './app/documentModel'
 import type { ViewPosition } from './viewer/viewSync'
 import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
 import { HelpDialog } from './app/HelpDialog'
+import SymbolSearchPanel, { SymbolSearchContext, type SymbolSearchSelection } from './app/SymbolSearchPanel'
 import { DesktopPromptBanner, DesktopStepsDialog, installedMessage, useInstallApp } from './app/InstallAppUi'
 import { ExternalSendAlert } from './app/ExternalSendAlert'
 import { getExternalSendRecords } from './security/externalSend'
@@ -43,7 +44,7 @@ import { PdfWorkerPool, type ApplyAndSaveResult, type PageLayoutTimings, type Pr
 import type { RasterizeOptions } from './core/rasterize'
 import { BlobPdfWriteTarget, type PdfWriteTarget } from './core/pdfStreamWriter'
 import { FixtureSampleContext, type EditorTool } from './editor/AnnotationLayer'
-import type { CountFixtureSample } from './core/countFixtures'
+import { quantityKind, type CountFixtureSample } from './core/countFixtures'
 import type { EditableAnnotation } from './editor/AnnotationStore'
 import { annotationFilterLabel } from './editor/annotationFilter'
 import { downloadPdf, pickOpenHandles, pickSaveHandle, requestWritePermission, writePdf, writePdfWithoutOverwrite, type PdfFileHandle } from './editor/fileAccess'
@@ -257,7 +258,9 @@ export default function App() {
   const [scaleRegionDrawing, setScaleRegionDrawing] = useState<{ session: DocumentSession; pageIndex: number } | null>(null)
   const [scaleTracing, setScaleTracing] = useState(false)
   const [scalePoints, setScalePoints] = useState<Point[] | null>(null)
-  const [sampleCapture, setSampleCapture] = useState<{ docId: string; busy: boolean; resolve(sample: CountFixtureSample | null): void } | null>(null)
+  const [sampleCapture, setSampleCapture] = useState<{ docId: string; busy: boolean; rect?: Rect; symbolFixtureId?: string; resolve(sample: CountFixtureSample | null): void } | null>(null)
+  const [symbolSearch, setSymbolSearch] = useState<SymbolSearchSelection | null>(null)
+  const symbolSearchDisposeRef = useRef<(() => void) | null>(null)
   const sampleCaptureRef = useRef<typeof sampleCapture>(null)
   const [sampleMessage, setSampleMessage] = useState('')
   const [tool, setTool] = useState<EditorTool>('select')
@@ -378,6 +381,28 @@ export default function App() {
     sampleCaptureRef.current = null; setSampleCapture(null); setSampleMessage('')
     pending?.resolve(sample)
   }, [])
+  const registerSymbolSearchDispose = useCallback((dispose: (() => void) | null) => { symbolSearchDisposeRef.current = dispose }, [])
+  const releaseSymbolSearch = useCallback(() => {
+    const dispose = symbolSearchDisposeRef.current; symbolSearchDisposeRef.current = null; dispose?.()
+  }, [])
+  const closeSymbolSearch = useCallback(() => {
+    releaseSymbolSearch()
+    setSymbolSearch(null)
+    if (sampleCaptureRef.current?.symbolFixtureId) finishSampleCapture(null)
+  }, [finishSampleCapture, releaseSymbolSearch])
+  const startSymbolSearch = useCallback((session: DocumentSession, fixtureId: string) => {
+    const fixture = session.annotationStore.getCountFixture(fixtureId)
+    if (session !== activeRef.current || session.editRestriction || comparison || organizeRef.current || !fixture || quantityKind(fixture) !== 'count') return
+    releaseSymbolSearch(); finishSampleCapture(null); setSymbolSearch(null); session.annotationStore.clearSymbolCandidates()
+    session.annotationStore.selectFixture(fixtureId)
+    const pageRevision = session.pageRevision, sideTab = session.sidePanelTab
+    const pending: NonNullable<typeof sampleCapture> = { docId: session.docId, busy: false, symbolFixtureId: fixtureId, resolve: sample => {
+      if (sample && pending.rect && activeRef.current === session && session.pageRevision === pageRevision && session.sidePanelTab === sideTab && !organizeRef.current && session.annotationStore.selectedFixtureId === fixtureId)
+        setSymbolSearch({ session, fixtureId, sample, rect: pending.rect })
+    } }
+    sampleCaptureRef.current = pending; setSampleCapture(pending)
+    setSampleMessage('探す記号を四角で囲んでください（Esc で中止）')
+  }, [comparison, finishSampleCapture, releaseSymbolSearch])
   const requestFixtureSample = useCallback((): Promise<CountFixtureSample | null> => {
     const session = activeRef.current
     if (!session || session.editRestriction || comparison || organizeRef.current) return Promise.reject(new Error('通常の図面表示で見本を切り取ってください。'))
@@ -394,7 +419,7 @@ export default function App() {
     if (Math.min(rect[2] - rect[0], rect[3] - rect[1]) < 2 * 72 / 25.4) {
       setSampleMessage('範囲が小さすぎます。切り取る範囲を四角で囲んでください（Esc で中止）'); return
     }
-    pending.busy = true; setSampleMessage('見本の画像を作っています…（Esc で中止）')
+    pending.rect = rect; pending.busy = true; setSampleMessage('見本の画像を作っています…（Esc で中止）')
     void pool.renderFixtureSample(pending.docId, pageIndex, rect).then(sample => {
       if (sampleCaptureRef.current === pending) finishSampleCapture(sample)
     }).catch(reason => {
@@ -403,10 +428,22 @@ export default function App() {
     })
   }, [pool, finishSampleCapture])
   const fixtureSampleInteraction = useMemo(() => ({ request: requestFixtureSample, cancel: () => finishSampleCapture(null), selection: sampleCapture ? { docId: sampleCapture.docId, complete: completeFixtureSample } : null }), [requestFixtureSample, sampleCapture, completeFixtureSample, finishSampleCapture])
-  useEffect(() => {
+  useLayoutEffect(() => {
     finishSampleCapture(null)
+    closeSymbolSearch()
     return () => finishSampleCapture(null)
-  }, [active?.docId, active?.pageRevision, comparison, organize, finishSampleCapture])
+  }, [active?.docId, active?.pageRevision, active?.sidePanelTab, comparison, organize, finishSampleCapture, closeSymbolSearch])
+  useEffect(() => {
+    const session = symbolSearch?.session ?? (sampleCapture?.symbolFixtureId ? active : null)
+    const fixtureId = symbolSearch?.fixtureId ?? sampleCapture?.symbolFixtureId
+    if (!session || !fixtureId) return
+    const check = () => {
+      const fixture = session.annotationStore.getCountFixture(fixtureId)
+      if (session.annotationStore.selectedFixtureId !== fixtureId || !fixture || quantityKind(fixture) !== 'count') closeSymbolSearch()
+    }
+    check()
+    return session.annotationStore.subscribe(check)
+  }, [symbolSearch, sampleCapture, active, closeSymbolSearch])
   useEffect(() => {
     if (!sampleCapture) return
     const keyDown = (event: KeyboardEvent) => {
@@ -564,6 +601,7 @@ export default function App() {
     const current = activeRef.current
     if (current?.docId === docId) return
     if (!discardOrganize()) return
+    closeSymbolSearch()
     await viewerRef.current?.commitEditor()
     persistView(current)
     await pool.activate(docId)
@@ -575,7 +613,7 @@ export default function App() {
     setZoom(next?.view.zoom ?? 1)
     setTool('select')
     refreshTabs()
-  }, [discardOrganize, finishOpening, persistView, pool, refreshTabs, tabs])
+  }, [closeSymbolSearch, discardOrganize, finishOpening, persistView, pool, refreshTabs, tabs])
 
   const swapSplit = useCallback(async (right: DocumentSession, rightPosition: ViewPosition, leftPosition: ViewPosition) => {
     const left = activeRef.current
@@ -715,6 +753,7 @@ export default function App() {
     if (organizeRef.current?.docId === docId && !discardOrganize(confirmDirty)) return
     if (activeRef.current?.docId === docId) await viewerRef.current?.commitEditor()
     if (confirmDirty && session.dirty && !window.confirm(`「${session.name}」に保存していない変更があります（${session.dirtyDescription()}）。\n保存せずに閉じますか？`)) return
+    if (activeRef.current?.docId === docId) closeSymbolSearch()
     if (activeRef.current?.docId === docId) {
       persistView(session)
       const next = documents[index + 1] ?? documents[index - 1] ?? null
@@ -730,7 +769,7 @@ export default function App() {
     setZoom(next?.view.zoom ?? 1)
     setTool('select')
     refreshTabs()
-  }, [discardOrganize, finishOpeningDocument, persistView, pool, refreshTabs, tabs])
+  }, [closeSymbolSearch, discardOrganize, finishOpeningDocument, persistView, pool, refreshTabs, tabs])
 
   const beginSave = useCallback(() => {
     if (savingRef.current) {
@@ -1696,6 +1735,7 @@ export default function App() {
     onSplit: (mode) => void splitAndSave(mode),
   } : null
   return (
+    <SymbolSearchContext.Provider value={{ start: startSymbolSearch }}>
     <FixtureSampleContext.Provider value={fixtureSampleInteraction}>
     <SnapUiContext.Provider value={{ enabled: snapEnabled, toggle: toggleSnap }}>
     <main className={`app${comparison ? ' comparing' : ''}${updateReady ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { if (!comparison) void handleDrop(event).catch(reason => setError(`PDFを開けませんでした: ${String(reason)}`)) }}>
@@ -1892,6 +1932,9 @@ export default function App() {
             settings: split, documents, views: rightViewsRef.current, positions: rightPositionsRef.current, onChange: updateSplit, onSwap: swapSplit,
           } : null}
           />
+          {symbolSearch?.session === active && !organize && <SymbolSearchPanel key={`${active.docId}:${symbolSearch.fixtureId}`} selection={symbolSearch} pool={pool}
+            onClose={closeSymbolSearch} onRecapture={() => startSymbolSearch(active, symbolSearch.fixtureId)}
+            onPage={index => viewerRef.current?.scrollToPage(index)} onStatus={showStatus} registerDispose={registerSymbolSearchDispose} />}
           </FixtureUiContext.Provider>
           </QuantityNavigationContext.Provider>
           </SnapContext.Provider>
@@ -2010,5 +2053,6 @@ export default function App() {
     </main>
     </SnapUiContext.Provider>
     </FixtureSampleContext.Provider>
+    </SymbolSearchContext.Provider>
   )
 }

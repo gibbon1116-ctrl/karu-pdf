@@ -629,6 +629,23 @@ button, input { font: inherit; }
 .fixture-sample-instruction button { margin-left: 10px; pointer-events: auto; }
 .annotation-layer.fixture-sample-selection { z-index: 5; cursor: crosshair; pointer-events: auto; }
 .fixture-sample-rect { fill: #0068b722; stroke: #0068b7; stroke-width: 1.5; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+.symbol-search-panel { position: absolute; z-index: 20; top: 8px; right: 8px; box-sizing: border-box; width: 260px; max-width: calc(100% - 16px); max-height: calc(100% - 16px); overflow: auto; padding: 10px; background: #fff; color: #222; border: 1px solid #999; border-radius: 4px; box-shadow: 0 2px 8px #0004; font-size: 12px; }
+.symbol-search-panel h2 { margin: 0 0 8px; font-size: 14px; }
+.symbol-search-panel p { margin: 6px 0; }
+.symbol-search-panel fieldset { margin: 8px 0; padding: 6px; }
+.symbol-search-panel label { display: block; margin: 4px 0; }
+.symbol-search-panel input:not([type="radio"]):not([type="checkbox"]), .symbol-search-panel progress { box-sizing: border-box; width: 100%; }
+.symbol-search-sample { display: flex; gap: 8px; align-items: center; overflow-wrap: anywhere; }
+.symbol-search-sample img { width: 56px; height: 56px; object-fit: contain; }
+.symbol-search-actions, .symbol-search-pages { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0; }
+.annotation-layer.symbol-search-candidates { z-index: 4; pointer-events: none; }
+.symbol-search-candidate { pointer-events: auto; cursor: pointer; }
+.symbol-search-candidate rect { fill: #ff950009; stroke: #cf7600; stroke-width: 1.5; stroke-dasharray: 5 3; }
+.symbol-search-candidate.chosen rect { fill: #008a1712; stroke: #008127; stroke-dasharray: none; }
+.symbol-search-candidate text { fill: #008127; pointer-events: none; }
+.symbol-search-candidate.counted { cursor: default; }
+.symbol-search-candidate.counted rect { fill: transparent; stroke: #777; stroke-width: 1; stroke-dasharray: 3 3; }
+.symbol-search-candidate:focus-visible rect { stroke-width: 3; }
 .fixture-preview { width: 100%; height: 100px; background: white; border: 1px solid #ddd; }
 .fixture-dialog { width: min(560px, 90vw); max-height: 88vh; overflow: auto; }
 .fixture-editor-dialog { width: min(860px, 95vw); max-width: 95vw; max-height: 92vh; overflow: hidden; padding: 0; border: 1px solid #888; }
@@ -831,3 +848,4 @@ button, input { font: inherit; }
 .drawing-scale-region { cursor: crosshair; }
 .scale-region-row { display: flex; align-items: center; gap: 8px; margin-block: 6px; }
 .scale-region-row > span { flex: 1; overflow-wrap: anywhere; }
+.fixture-panel-tools { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 4px; }
