@@ -63,11 +63,12 @@ export default function FixturePresetDialog({ sources, fixtures = [], onAdd, onC
         </>}
         <div className="quantity-master-specs">
           <h3>{searching ? `検索結果（${result.total}件）` : `${type}の規格`}</h3>
+          {!searching && visible[0] && <p className="quantity-master-type-name">{visible[0].name}{kindLabel(visible[0])}{visible[0].kind === 'count' ? '（個数・個）' : ''}</p>}
           {!searching && <div className="quantity-master-selection-actions"><button onClick={() => selectEntries(visible.filter(f => !existing.has(identity(f))).map(f => f.key), true)}>すべて選ぶ</button><button onClick={() => selectEntries(visible.map(f => f.key), false)}>選択を解除</button></div>}
           <div className="fixture-presets">{visible.map(f => {
             const added = existing.has(identity(f))
             return <label key={f.key}><input type="checkbox" checked={added || selected.has(f.key)} disabled={added} onChange={e => selectEntries([f.key], e.currentTarget.checked)} />
-              <span><strong>{fixtureCode(f)}</strong> {f.name}{kindLabel(f)}{f.kind === 'count' ? '（個数・個）' : ''}{added && <span className="quantity-master-added"> 追加済み</span>}</span>
+              <span><strong>{fixtureCode(f)}</strong> <span className={searching ? undefined : 'visually-hidden'}>{f.name}{kindLabel(f)}{f.kind === 'count' ? '（個数・個）' : ''}</span>{added && <span className="quantity-master-added"> 追加済み</span>}</span>
             </label>
           })}</div>
           {searching && result.total === 0 && <p>該当する項目がありません。</p>}
