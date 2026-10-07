@@ -1,3 +1,5 @@
+import type { DocumentSession } from '../app/documentModel'
+import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { fixtureCode } from '../core/countFixtures'
 import { quantityLabel, quantityDashes, quantityPoints, quantityDimensions, type QuantityMark } from '../core/quantity'
 import { quantityMethod, quantityLine, type CountFixture, type QuantityLineStyle } from '../core/countFixtures'
@@ -9,9 +11,10 @@ import { pointInScaleRegion, scaleLabel, type PageScale, type ScaleRegion, const
 import type { EditableAnnotation, AnnotationStore } from './AnnotationStore'
 import type { EditorTool } from './AnnotationLayer'
 import type { FormatDefaults } from './formatDefaults'
-import { buildSnapIndex, findSnap, MAX_SNAP_VERTICES, type SnapIndex } from '../core/snap'
+import { buildSnapIndex, findPreferredSnap, MAX_SNAP_VERTICES, type SnapIndex } from '../core/snap'
 
 export const SnapContext = createContext(false)
+export const DrawingSnapContext = createContext<{ enabled: boolean; session: DocumentSession; pool: PdfWorkerPool } | null>(null)
 
 export const ScaleInteractionContext = createContext<{
   request(pageIndex: number): void
@@ -61,6 +64,9 @@ interface Props {
 }
 export function useMeasurementInteraction(props: Props) {
   const snap = useContext(SnapContext)
+  const drawing = useContext(DrawingSnapContext)
+  const drawingIndex = useRef<SnapIndex | null>(null)
+  const requestDrawing = useRef<(() => void) | null>(null)
   const snapMarker = useRef<SVGPathElement>(null)
   const rawCursor = useRef<Point | null>(null)
   const vertexIndex = useRef<SnapIndex | null>(null)
@@ -107,7 +113,40 @@ export function useMeasurementInteraction(props: Props) {
       vertexIndex.current = buildSnapIndex(vertices, [bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height])
     } catch { props.onStatus(`頂点が多すぎるため、このページではスナップを使えません（上限 ${MAX_SNAP_VERTICES.toLocaleString()} 点）`) }
   }, [snapEnabled, props.version, props.pageIndex, props.store])
-  useEffect(() => { snapMarker.current?.setAttribute('display', 'none') }, [snapEnabled])
+  useEffect(() => {
+    snapMarker.current?.setAttribute('data-drawing-ready', 'false')
+    if (!snapEnabled || !drawing?.enabled || !props.svg.current) return
+    const svg = props.svg.current, session = drawing.session, pool = drawing.pool
+    let controller: AbortController | null = null, visible = false, alive = true, loading = false, unavailable = false
+    const load = () => {
+      if (!alive || !visible || loading || unavailable) return
+      loading = true; controller = new AbortController()
+      const own = controller, size = session.pageSizes[props.pageIndex]
+      if (!size) { loading = false; return }
+      void session.vectorCache.endpoints(props.pageIndex, pool, [0, 0, size.width, size.height], own.signal).then(index => {
+        if (!alive || own.signal.aborted) return
+        unavailable = !index
+        snapMarker.current?.setAttribute('data-drawing-ready', String(!!index))
+        if (!index && session.vectorCache.reportUnavailable(props.pageIndex)) props.onStatus('このページは線の情報が無いか上限で打ち切られたため、図面の端点には合わせません')
+      }).catch(error => {
+        if (alive && !own.signal.aborted) {
+          unavailable = true
+          if (session.vectorCache.reportUnavailable(props.pageIndex)) props.onStatus('図面の端点を取得できませんでした: ' + String(error))
+        }
+      }).finally(() => { if (controller === own) loading = false })
+    }
+    requestDrawing.current = load
+    const observe = new IntersectionObserver(entries => {
+      const next = entries.some(e => e.isIntersecting)
+      if (next === visible) return
+      visible = next; controller?.abort(); loading = false
+      snapMarker.current?.setAttribute('data-drawing-ready', 'false')
+      if (next) load()
+    })
+    observe.observe(svg)
+    return () => { alive = false; requestDrawing.current = null; observe.disconnect(); controller?.abort() }
+  }, [snapEnabled, drawing?.enabled, drawing?.session, drawing?.pool, drawing?.session.pageRevision, drawing?.session.savedRevision, props.pageIndex])
+  useEffect(() => { snapMarker.current?.setAttribute('display', 'none') }, [snapEnabled, drawing?.enabled])
   const resolvePoint = (p: Point, event: Pick<React.PointerEvent, 'altKey' | 'shiftKey'>, start?: Point): Point => {
     if (!snapEnabled) return start ? constrain(start, p, event.shiftKey) : p
     rawCursor.current = p
@@ -119,10 +158,13 @@ export function useMeasurementInteraction(props: Props) {
       point = [start[0] + direction[0] * length, start[1] + direction[1] * length]; axis = { start, direction }
     }
     const scale = props.zoom * (96 / 72), radius = 8 / scale
-    const hit = event.altKey ? null : findSnap(point, radius, vertexIndex.current, axis)
+    const endpointIndex = drawing?.enabled ? drawing.session.vectorCache.peekEndpoint(props.pageIndex) : null
+    // A page evicted by another search is prepared again on demand, without retaining a second index.
+    if (drawing?.enabled && !endpointIndex && !event.altKey) requestDrawing.current?.()
+    const hit = event.altKey ? null : findPreferredSnap(point, radius, vertexIndex.current, endpointIndex, axis)
     if (!hit) { marker?.setAttribute('display', 'none'); return point }
     const [x, y] = hit.point, r = 4 / scale
-    const d = `M${x-r},${y-r}h${2*r}v${2*r}h${-2*r}Z`
+    const d = hit.kind === 'drawing-endpoint' ? `M${x-r},${y}a${r},${r} 0 1,0 ${2*r},0a${r},${r} 0 1,0 ${-2*r},0` : `M${x-r},${y-r}h${2*r}v${2*r}h${-2*r}Z`
     marker?.setAttribute('d', d); marker?.setAttribute('display', ''); marker?.setAttribute('data-kind', hit.kind)
     return hit.point
   }

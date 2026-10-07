@@ -1,3 +1,4 @@
+import { VectorCache } from '../client/VectorCache'
 import { reconcileDrawingInfos, type DrawingDetection, type DrawingInfo } from '../core/drawingInfo'
 import type { PageSize } from '../core/mupdfDoc'
 import type { AnnotationEdit } from '../core/annotations'
@@ -5,7 +6,7 @@ import type { SaveMode } from '../core/save'
 import { createContext } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 export const DrawingUiContext = createContext<{ edit(pageIndex: number): void } | null>(null)
-export const SnapUiContext = createContext<{ enabled: boolean; toggle(): void } | null>(null)
+export const SnapUiContext = createContext<{ enabled: boolean; toggle(): void; drawingEndpoints: boolean; toggleDrawingEndpoints(): void } | null>(null)
 export const FixtureUiContext = createContext<{ documents: readonly DocumentSession[]; select(): void; edit(id: string): void; open(): void } | null>(null)
 export async function ensureSessionFixtures(session: DocumentSession, pool: PdfWorkerPool): Promise<void> {
   await session.annotationStore.ensureCountFixtures(() => pool.getCountFixtures(session.docId), async () => {
@@ -97,7 +98,10 @@ export class DocumentSession {
   fileOutdated = false
   private _sidePanelTab: SidePanelTab = 'pages'
   canUndoOrganize = false
-  pageRevision = 0
+  readonly vectorCache: VectorCache
+  private _pageRevision = 0
+  get pageRevision(): number { return this._pageRevision }
+  set pageRevision(value: number) { if (value !== this._pageRevision) { this.vectorCache.clear(); this._pageRevision = value } }
   // Rendering-only generation for saved annotations (the editable overlay stays independent).
   savedRevision = 0
   splitSnapshotRevision = 0
@@ -112,6 +116,7 @@ export class DocumentSession {
   constructor(init: DocumentSessionInit) {
     this.editRestriction = init.editRestriction ?? null
     this.docId = init.docId
+    this.vectorCache = new VectorCache(init.docId)
     this.fileIdentity = { name: init.name, byteLength: init.byteLength, handle: init.handle }
     this.pageSizes = init.pageSizes
     this.lastSavedByteLength = init.byteLength
@@ -182,6 +187,7 @@ export class DocumentSession {
   recordSavedRendering(edits: readonly AnnotationEdit[], errors: readonly { editIndex: number }[]): void {
     const failed = new Set(errors.map(error => error.editIndex))
     const pages = new Set(edits.flatMap((edit, index) => !failed.has(index) && edit.kind !== 'setDrawingInfo' && edit.kind !== 'setPageScale' && edit.kind !== 'setScaleRegions' && edit.kind !== 'setCountFixtures' ? [edit.pageIndex] : []))
+    if (pages.size) this.vectorCache.clear()
     this.savedRevision += 1
     for (const page of pages) this.savedPageRevisions.set(page, this.savedRevision)
   }
@@ -268,6 +274,7 @@ export class DocumentTabsModel {
     const index = this.sessions.findIndex((session) => session.docId === docId)
     if (index < 0) return null
     const [removed] = this.sessions.splice(index, 1)
+    removed.vectorCache.clear()
     this.sessions = [...this.sessions]
     if (this.activeId === docId) {
       this.activeId = this.sessions[Math.min(index, this.sessions.length - 1)]?.docId ?? null

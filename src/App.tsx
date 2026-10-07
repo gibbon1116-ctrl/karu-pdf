@@ -28,7 +28,7 @@ import type { ImagePdfSettings } from './core/imagePdfLayout'
 import { HeaderFooterDialog } from './app/HeaderFooterDialog'
 import type { HeaderFooterSettings } from './app/headerFooterText'
 import { ScaleDialog } from './app/ScaleDialog'
-import { ScaleInteractionContext, SnapContext } from './editor/MeasurementOverlay'
+import { ScaleInteractionContext, SnapContext, DrawingSnapContext } from './editor/MeasurementOverlay'
 import { buildSnapIndex, findSnap } from './core/snap'
 import { scaleLabel, ratioScale, pointInScaleRegion, MAX_SCALE_REGIONS, type ScaleRegion } from './core/measure'
 import { ScaleRegionInteractionContext } from './editor/AnnotationLayer'
@@ -84,6 +84,7 @@ declare global {
         endpointCount: number; endpointIndexMs: number
         snapQuery: { p50: number; p95: number; max: number }
       }>
+      vectorCacheProbe(): { requests: number; pages: number; bytes: number }
       vectorSymbolSearch(request: { pageIndex: number; sampleRect: Rect; threshold?: number; rotations?: boolean }): Promise<{
         matches: import('./core/vectorSymbolSearch').VectorSymbolMatch[]; extractMs: number; searchMs: number
         template: { segments: number; length: number }
@@ -230,6 +231,7 @@ function loadPanels(): { thumbnails: boolean; format: boolean } {
 }
 
 export default function App() {
+  const vectorExtractionRequests = useRef(0)
   const pool = appRuntime.pool
   const tabs = appRuntime.tabs
   const viewerRef = useRef<ViewerHandle>(null)
@@ -277,6 +279,8 @@ export default function App() {
   const [tool, setTool] = useState<EditorTool>('select')
   const [snapEnabled, setSnapEnabled] = useState(() => { try { return localStorage.getItem('karu-pdf:snap') === '1' } catch { return false } })
   const toggleSnap = () => setSnapEnabled(value => { const next = !value; try { localStorage.setItem('karu-pdf:snap', next ? '1' : '0') } catch { /* 操作は続ける。 */ } return next })
+  const [snapDrawingEndpoints, setSnapDrawingEndpoints] = useState(() => { try { return localStorage.getItem('karu-pdf:snap-drawing-endpoints') !== '0' } catch { return true } })
+  const toggleSnapDrawingEndpoints = () => setSnapDrawingEndpoints(value => { const next = !value; try { localStorage.setItem('karu-pdf:snap-drawing-endpoints', next ? '1' : '0') } catch { /* 操作は続ける。 */ } return next })
   const [formatDefaults, setFormatDefaults] = useState<FormatDefaults>(() => loadFormatDefaults())
   const [panels, setPanels] = useState(loadPanels)
   const [recent, setRecent] = useState<RecentFile[]>([])
@@ -1569,37 +1573,45 @@ export default function App() {
 
   useEffect(() => {
     if (new URLSearchParams(location.search).get('test') !== '1') return
+    const extractVectors = pool.extractVectors
+    pool.extractVectors = options => { vectorExtractionRequests.current++; return extractVectors.call(pool, options) }
     window.__karu = {
       vectorProbe: async pageIndex => {
         const session = tabs.active, size = session?.pageSizes[pageIndex]
         if (!session || !size) throw Error('No page')
-        const { classifyPage, segmentEndpoints } = await import('./core/vectorPaths')
+        const { classifyPage } = await import('./core/vectorPaths')
+        const { vectorWorkerTask } = await import('./client/VectorCache')
         performance.mark('karu-vector-extract-start')
         const page = await pool.extractVectors({ docId: session.docId, pageIndex }).promise
         performance.mark('karu-vector-extract-end')
-        const endpoints = segmentEndpoints(page.segments)
-        const start = performance.now(), index = buildSnapIndex(endpoints, [0, 0, size.width, size.height]), endpointIndexMs = performance.now() - start
+        const response = await vectorWorkerTask({ type: 'endpoints', id: pageIndex, segments: page.segments, bounds: [0, 0, size.width, size.height] })
+        if (response.type !== 'endpoint-result') throw Error('Invalid endpoint response')
+        const index = response.index, endpointIndexMs = response.indexMs ?? 0, endpointCount = index.points.length / 2
         const samples: number[] = []
         // Same timer-resolution compensation as snapVertexProbe: 1000 batches
         // of 100 queries, reporting time per query (including an empty page).
         for (let i = 0; i < 1000; i++) {
-          const p = endpoints[i % endpoints.length] ?? [0, 0], t = performance.now()
+          const offset = endpointCount ? (i % endpointCount) * 2 : 0, p = [index.points[offset] ?? 0, index.points[offset + 1] ?? 0], t = performance.now()
           for (let n = 0; n < 100; n++) findSnap([p[0] + .3, p[1] + .3], 1.5, index)
           samples.push((performance.now() - t) / 100)
         }
         samples.sort((a, b) => a - b)
         return { kind: classifyPage(page), segmentCount: page.segmentCount, truncated: page.truncated, stats: page.stats,
-          transferBytes: page.segments.byteLength, endpointCount: endpoints.length, endpointIndexMs,
+          transferBytes: page.segments.byteLength, endpointCount, endpointIndexMs,
           snapQuery: { p50: samples[499], p95: samples[949], max: samples[999] } }
       },
+      vectorCacheProbe: () => ({ requests: vectorExtractionRequests.current, pages: tabs.active?.vectorCache.size ?? 0, bytes: tabs.active?.vectorCache.bytes ?? 0 }),
       vectorSymbolSearch: async request => {
         const session = tabs.active
         if (!session?.pageSizes[request.pageIndex]) throw Error('No page')
-        const { vectorSymbolSearch } = await import('./core/vectorSymbolSearch')
-        const start = performance.now(), page = await pool.extractVectors({ docId: session.docId, pageIndex: request.pageIndex }).promise
-        const extractMs = performance.now() - start
-        const result = vectorSymbolSearch(page.segments, request.sampleRect, { threshold: request.threshold, rotations: request.rotations })
-        return { matches: result.matches, extractMs, searchMs: result.stats.ms, template: result.template }
+        const { SymbolSearchClient } = await import('./client/SymbolSearchClient')
+        const client = new SymbolSearchClient(pool, (_, i) => session.pageSizes[i], () => session.vectorCache)
+        try {
+          const result = await client.search({ docId: session.docId, pageIndex: request.pageIndex, samplePageIndex: request.pageIndex,
+            sampleRect: request.sampleRect, options: { threshold: request.threshold, rotations: request.rotations, maxResults: 2000 } }).promise
+          if (!result.vectorDetails) throw Error('見本の範囲に線がありません')
+          return { matches: result.vectorDetails.matches, extractMs: result.metrics.renderMs, searchMs: result.metrics.searchMs, template: result.vectorDetails.template }
+        } finally { client.dispose() }
       },
       // SPEC-06h-1: test-only, demand-loaded, disposable visual-search prototype.
       ...(() => {
@@ -1607,7 +1619,7 @@ export default function App() {
           if (afterMs !== undefined && (!Number.isFinite(afterMs) || afterMs < 0)) throw new Error('invalid cancellation delay')
           const { SymbolSearchClient } = await import('./client/SymbolSearchClient')
           if (!tabs.list().some(s => s.docId === request.docId)) throw new Error('PDF is closed')
-          const client = new SymbolSearchClient(pool, (docId, index) => tabs.list().find(s => s.docId === docId)?.pageSizes[index])
+          const client = new SymbolSearchClient(pool, (docId, index) => tabs.list().find(s => s.docId === docId)?.pageSizes[index], docId => tabs.list().find(s => s.docId === docId)?.vectorCache)
           const task = client.search(request)
           let cancelledAt: number | undefined
           const timer = afterMs === undefined ? undefined : window.setTimeout(() => { cancelledAt = performance.now(); task.cancel() }, afterMs)
@@ -1717,7 +1729,7 @@ export default function App() {
         } finally { client.dispose() }
       },
     }
-    return () => { delete window.__karu }
+    return () => { pool.extractVectors = extractVectors; delete window.__karu }
   }, [activateDocument, applyHeaderFooterSettings, applyOrganize, closeDocument, extractToBytes, openBuffer, openOrganize, pool, prepareOutput, rasterizeToBytes, rasterizeToTarget, removeHeaderFooterSettings, saveToBytes, splitToBytes, tabs, undoLastOrganize])
 
   const openRecent = async (item: RecentFile) => {
@@ -1779,7 +1791,7 @@ export default function App() {
   return (
     <SymbolSearchContext.Provider value={{ start: startSymbolSearch }}>
     <FixtureSampleContext.Provider value={fixtureSampleInteraction}>
-    <SnapUiContext.Provider value={{ enabled: snapEnabled, toggle: toggleSnap }}>
+    <SnapUiContext.Provider value={{ enabled: snapEnabled, toggle: toggleSnap, drawingEndpoints: snapDrawingEndpoints, toggleDrawingEndpoints: toggleSnapDrawingEndpoints }}>
     <main className={`app${comparison ? ' comparing' : ''}${updateReady ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { if (!comparison) void handleDrop(event).catch(reason => setError(`PDFを開けませんでした: ${String(reason)}`)) }}>
       {sampleCapture && <div className="fixture-sample-instruction" role="status">{sampleMessage}<button type="button" onClick={() => finishSampleCapture(null)}>中止</button></div>}
       {updateReady && (
@@ -1930,6 +1942,7 @@ export default function App() {
           }}>
           <ScaleInteractionContext.Provider value={{ request: i => openScale(i, true), tracePage: scaleTracing ? scaleDialog?.pageIndex ?? null : null, complete: p => { setScalePoints(p); setScaleTracing(false) } }}>
           <SnapContext.Provider value={snapEnabled}>
+          <DrawingSnapContext.Provider value={{ enabled: snapDrawingEndpoints, session: active, pool }}>
           <QuantityNavigationContext.Provider value={{ drawingInfo: i => active.annotationStore.getDrawingInfo(i), navigate: (page, rect) => {
             const viewer = viewerRef.current
             if (!viewer || organizeRef.current) { active.view.page = page + 1; refreshTabs(); return }
@@ -1979,6 +1992,7 @@ export default function App() {
             onPage={index => viewerRef.current?.scrollToPage(index)} onStatus={showStatus} registerDispose={registerSymbolSearchDispose} /></Suspense>}
           </FixtureUiContext.Provider>
           </QuantityNavigationContext.Provider>
+          </DrawingSnapContext.Provider>
           </SnapContext.Provider>
           </ScaleInteractionContext.Provider>
           </ScaleRegionInteractionContext.Provider>

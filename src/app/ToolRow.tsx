@@ -123,6 +123,7 @@ export function ToolRow(props: Props) {
       { label: '縮尺の設定…', description: 'このページの縮尺を決める', onSelect: props.onScale },
       { label: '縮尺の範囲を追加…', description: 'ページの一部に別の縮尺を決める（詳細図など）', onSelect: props.onAddScaleRegion },
       { type: 'separator' },
+      { label: '図面の線の端点にも合わせる', description: 'スナップがオンのとき、図面の線の端点にも吸い付く', checked: snap?.drawingEndpoints ?? true, onSelect: () => snap?.toggleDrawingEndpoints() },
       { label: 'スナップ（既存の頂点に合わせる）', description: '計測・数量拾い・縮尺のなぞりで、既存の頂点に吸い付く（Alt で一時解除）', checked: snap?.enabled ?? false, onSelect: () => snap?.toggle() },
     )
     return <div key={group} className={`split-button${active ? ' active' : ''}`}>

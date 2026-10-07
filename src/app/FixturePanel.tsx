@@ -221,6 +221,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     <label><input type="checkbox" checked={store.onlySelectedFixture} onChange={e => store.setOnlySelectedFixture(e.currentTarget.checked)} />選択中の項目だけ表示</label>
     <label><input type="checkbox" checked={store.showQuantityValues} onChange={e => store.setShowQuantityValues(e.currentTarget.checked)} />図面に長さ・面積・体積の数値を表示</label>
     <label title="計測・数量拾い・縮尺のなぞりで、既存の頂点に吸い付く（Alt で一時解除）"><input type="checkbox" checked={snap?.enabled ?? false} onChange={() => snap?.toggle()} />スナップ（既存の頂点に合わせる）</label>
+    <label><input type="checkbox" checked={snap?.drawingEndpoints ?? true} onChange={() => snap?.toggleDrawingEndpoints()} />図面の線の端点にも合わせる</label>
     <button onClick={() => store.showAllFixtures()}>すべて表示</button>
     </>}
     {status && <p role="status">{status}</p>}

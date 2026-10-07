@@ -33,9 +33,10 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
   const fixture = store.getCountFixture(fixtureId)
   const [host, setHost] = useState<HTMLElement | null>(null)
   const [scope, setScope] = useState<'current' | 'specified' | 'all'>('current'), [pagesText, setPagesText] = useState('')
-  const [rotations, setRotations] = useState(false), [threshold, setThreshold] = useState(.70)
+  const [rotations, setRotations] = useState(false), [threshold, setThreshold] = useState(.85)
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('')
   const [progress, setProgress] = useState({ page: 0, total: 1, stage: '描画中', fraction: 0 })
+  const [methods, setMethods] = useState<Record<number, 'vector' | 'image'>>({})
   const [completedPages, setCompletedPages] = useState<number[]>([]), [searchPageCount, setSearchPageCount] = useState(0)
   const client = useRef<SymbolSearchClient | null>(null), task = useRef<{ cancel(): void } | null>(null)
   const generation = useRef(0), alive = useRef(false)
@@ -48,7 +49,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
     return completedPages.map(page => [page, counts.get(page) ?? 0] as const)
   }, [store, version, completedPages])
   const stop = () => { generation.current++; task.current?.cancel(); task.current = null; setBusy(false) }
-  const invalidate = () => { stop(); store.clearSymbolCandidates(); setCompletedPages([]); setMessage('条件を変えました。「探す」を押してください'); setError('') }
+  const invalidate = () => { stop(); store.clearSymbolCandidates(); setCompletedPages([]); setMethods({}); setMessage('条件を変えました。「探す」を押してください'); setError('') }
   useLayoutEffect(() => {
     alive.current = true
     // Mount only during explicit search, outside the scrolling surface. No ordinary-view observer.
@@ -76,7 +77,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
       if (!client.current) {
         const module = await import('../client/SymbolSearchClient')
         if (!current()) return
-        client.current = new module.SymbolSearchClient(pool, (docId, index) => docId === session.docId ? session.pageSizes[index] : undefined)
+        client.current = new module.SymbolSearchClient(pool, (docId, index) => docId === session.docId ? session.pageSizes[index] : undefined, () => session.vectorCache)
       }
       for (let i = 0; i < pages.length; i++) {
         if (!current()) return
@@ -92,7 +93,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
         task.current = next
         const result = await next.promise
         if (!current()) return
-        task.current = null; store.appendSymbolCandidates(result.candidates); setCompletedPages(done => [...done, pageIndex])
+        setMethods(methods => ({ ...methods, [pageIndex]: result.method })); task.current = null; store.appendSymbolCandidates(result.candidates); setCompletedPages(done => [...done, pageIndex])
       }
       if (current()) { setProgress(p => ({ ...p, fraction: 1 })); setMessage('検索が終わりました。候補を確認して選んでください') }
     } catch (reason) { if (current()) setError(`検索できませんでした: ${(reason as Error).message}`) }
@@ -121,14 +122,15 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
     </fieldset>
     <label><input type="checkbox" checked={rotations} onChange={e => { invalidate(); setRotations(e.target.checked) }} />回転した記号も探す</label>
     <label className="symbol-search-threshold">似ている度合い <output>{threshold.toFixed(2)}</output>
-      <input type="range" aria-label="似ている度合い" min="0.55" max="0.95" step="0.05" value={threshold}
+      <input type="range" aria-label="似ている度合い" min="0.55" max="0.98" step="0.01" value={threshold}
         onChange={e => { invalidate(); setThreshold(Number(e.target.value)) }} /></label>
     {busy ? <><button type="button" onClick={() => { stop(); setMessage('中止しました') }}>中止</button>
       <p role="status">ページ {progress.page} / {progress.total}・{progress.stage}</p><progress aria-label="検索の進み" value={progress.fraction} max={1} /></>
       : <button type="button" onClick={() => void search()}>探す</button>}
     {candidates && <>
       <p aria-live="polite">候補 {candidates.length} 件（拾い済み {counted} 件）</p>
-      {searchPageCount > 1 && <div className="symbol-search-pages">{pageCounts.map(([page, count]) => <button key={page} type="button" onClick={() => onPage(page)}>ページ {page + 1}: {count} 件</button>)}</div>}
+      {searchPageCount === 1 && completedPages.length > 0 && <p>{methods[completedPages[0]] === 'vector' ? '線の情報で探しました' : '画像で探しました（線の情報が無いページ）'}</p>}
+      {searchPageCount > 1 && <div className="symbol-search-pages">{pageCounts.map(([page, count]) => <button key={page} type="button" onClick={() => onPage(page)}>p.{page + 1} {methods[page] === 'vector' ? '線で探しました' : '画像で探しました（線の情報が無いページ）'} {count} 件</button>)}</div>}
       <div className="symbol-search-actions"><button type="button" onClick={() => store.chooseSymbolCandidates(true)}>すべて選ぶ</button><button type="button" onClick={() => store.chooseSymbolCandidates(false)}>すべて外す</button></div>
       <button type="button" disabled={busy || chosen.length === 0} onClick={add}>選んだ {chosen.length} 件を数量へ追加</button>
     </>}

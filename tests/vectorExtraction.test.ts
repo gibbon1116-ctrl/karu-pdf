@@ -1,3 +1,7 @@
+import { vectorSearchSnapPdf } from './vectorSearchSnapFixtures'
+import { classifyPage } from '../src/core/vectorPaths'
+import { searchVectorMessage, buildEndpointIndex } from '../src/worker/symbolSearchMessages'
+import { findSnap } from '../src/core/snap'
 import mupdf from 'mupdf'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { WorkerRequest, WorkerResponse } from '../src/worker/protocol'
@@ -8,7 +12,7 @@ const messages: Array<{ message: WorkerResponse; transfer: Transferable[] }> = [
 const workerScope = { onmessage: null as ((event: { data: WorkerRequest }) => void) | null,
   postMessage: (message: WorkerResponse, transfer: Transferable[] = []) => messages.push({ message, transfer }) }
 let scheduler: { port1: { onmessage: (() => void) | null } }
-let extract: typeof import('../src/worker/pdf.worker').extractVectorPage
+let extract: typeof import('../src/worker/vectorExtract').extractVectorPage
 beforeAll(async () => {
   vi.stubGlobal('self', workerScope)
   vi.stubGlobal('MessageChannel', class {
@@ -16,7 +20,9 @@ beforeAll(async () => {
     port2 = { postMessage() {} }
     constructor() { scheduler = this }
   })
-  extract = (await import('../src/worker/pdf.worker')).extractVectorPage
+  // Importing the Worker entry installs its message handler on the stubbed scope.
+  await import('../src/worker/pdf.worker')
+  extract = (await import('../src/worker/vectorExtract')).extractVectorPage
 })
 afterAll(() => vi.unstubAllGlobals())
 
@@ -141,4 +147,20 @@ describe('real MuPDF vector device', () => {
       send({ type: 'close', docId: 'vectors' })
     } finally { buffer.destroy(); pdf.destroy() }
   })
+})
+
+
+it('uses the exact screen fixture: six crossed squares, drawing endpoints and raster fallback', () => {
+  for (const raster of [false, true]) {
+    const pdf = new mupdf.PDFDocument(Uint8Array.from(vectorSearchSnapPdf(raster)))
+    try {
+      const page = extract(pdf, 0)
+      expect(classifyPage(page)).toBe(raster ? 'raster' : 'vector')
+      if (raster) { expect(page.segmentCount).toBe(0); continue }
+      const result = searchVectorMessage({ type: 'vector-search', id: 1, segments: page.segments, sampleSegments: page.segments, sampleRect: [49,49,61,61], options: { threshold: .85 } })
+      expect(result?.matches).toHaveLength(6)
+      const index = buildEndpointIndex({ type: 'endpoints', id: 1, segments: page.segments, bounds: [0,0,500,500] })
+      expect(findSnap([100.6,400.4], 2, index)?.point).toEqual([100,400])
+    } finally { pdf.destroy() }
+  }
 })

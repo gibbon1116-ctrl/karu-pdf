@@ -1,6 +1,6 @@
 import type { Point, Rect } from './annotations'
 
-/** A only: existing annotation vertices. No PDF geometry or Worker dependency. */
+/** Transferable CSR grid for annotation vertices or drawing endpoints. */
 export interface SnapIndex {
   points: Float64Array
   bounds: Rect
@@ -11,9 +11,16 @@ export interface SnapIndex {
   ids: Uint32Array
   bytes: number
 }
-export interface SnapHit { point: Point; kind: 'vertex' }
+export interface SnapHit { point: Point; kind: 'vertex' | 'drawing-endpoint' }
 export interface SnapAxis { start: Point; direction: Point }
 export const MAX_SNAP_VERTICES = 200_000
+
+export function findPreferredSnap(point: Point, radius: number, vertices: SnapIndex | null, drawing: SnapIndex | null, axis?: SnapAxis): SnapHit | null {
+  const vertex = findSnap(point, radius, vertices, axis)
+  if (vertex) return vertex
+  const endpoint = findSnap(point, radius, drawing, axis)
+  return endpoint ? { ...endpoint, kind: 'drawing-endpoint' } : null
+}
 
 export function buildSnapIndex(points: readonly Point[], bounds: Rect, cellSize = 16): SnapIndex {
   if (!(cellSize > 0) || !Number.isFinite(cellSize) || !bounds.every(Number.isFinite) || bounds[2] < bounds[0] || bounds[3] < bounds[1]) throw Error('Invalid snap grid')

@@ -43,7 +43,7 @@ async function open(page: Page, pageCount = 1) {
         probe.created++
         const send = worker.postMessage.bind(worker), terminate = worker.terminate.bind(worker)
         worker.postMessage = ((message: { type?: string }, transfer: Transferable[]) => {
-          if (message.type === 'search') {
+          if (message.type === 'search' || message.type === 'vector-search') {
             probe.searches++
             // Hold only a selected request to make cancellation deterministic. Other searches are real.
             if (probe.holdAfter !== null && probe.searches >= probe.holdAfter) {
@@ -86,6 +86,7 @@ async function capture(page: Page, viaBar = false) {
   await page.mouse.move(points[0].x, points[0].y); await page.mouse.down()
   await page.mouse.move(points[1].x, points[1].y, { steps: 4 }); await page.mouse.up()
   await expect(panel(page)).toBeVisible()
+  await expect(panel(page).getByRole('slider', { name: '似ている度合い' })).toHaveValue('0.85')
   await expect(panel(page)).not.toHaveAttribute('aria-modal')
   await expect(panel(page).getByRole('img', { name: '探す記号の見本' })).toBeVisible()
   await expect.poll(() => panel(page).getByRole('img').evaluate(img => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
@@ -160,8 +161,8 @@ test('specified pages are searched sequentially and page totals navigate to the 
   await panel(page).getByRole('radio', { name: 'ページを指定', exact: true }).check()
   await panel(page).getByRole('textbox', { name: '探すページ' }).fill('1-2')
   await search(page, 12)
-  await expect(panel(page).getByRole('button', { name: 'ページ 1: 6 件', exact: true })).toBeVisible()
-  await panel(page).getByRole('button', { name: 'ページ 2: 6 件', exact: true }).click()
+  await expect(panel(page).getByRole('button', { name: 'p.1 線で探しました 6 件', exact: true })).toBeVisible()
+  await panel(page).getByRole('button', { name: 'p.2 線で探しました 6 件', exact: true }).click()
   await expect(page.getByTestId('annotation-layer-1')).toBeVisible()
   await expect(page.getByTestId('symbol-search-candidates-1').getByTestId('symbol-search-candidate')).toHaveCount(6)
   await panel(page).getByRole('button', { name: 'すべて選ぶ', exact: true }).click()
@@ -184,7 +185,7 @@ test('closing pending candidates adds nothing to the quantity', async ({ page })
 test('controls, recapture and item/side-tab/document/organize lifecycle clear candidates and dispose search', async ({ page }) => {
   await open(page); await capture(page); await search(page)
   await panel(page).getByRole('slider', { name: '似ている度合い' }).press('ArrowRight')
-  await expect(candidates(page)).toHaveCount(0); await expect(panel(page)).toContainText('0.75')
+  await expect(candidates(page)).toHaveCount(0); await expect(panel(page)).toContainText('0.86')
   await panel(page).getByRole('checkbox', { name: '回転した記号も探す' }).check()
   await panel(page).getByRole('radio', { name: 'ページを指定', exact: true }).check()
   await panel(page).getByRole('textbox', { name: '探すページ' }).fill('1-2')

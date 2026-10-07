@@ -3,7 +3,7 @@ import { searchSymbol, toGray, type GrayImage, type SymbolSearchOptions } from '
 import { SymbolSearchClient, type SymbolSearchRequest } from '../src/client/SymbolSearchClient'
 import { PdfWorkerPool } from '../src/client/PdfWorkerPool'
 import type { SearchImage, WorkerRequest, WorkerResponse } from '../src/worker/protocol'
-import type { SymbolSearchMessage } from '../src/worker/symbolSearch.worker'
+import type { ImageSearchMessage } from '../src/worker/symbolSearchMessages'
 import type { Rect } from '../src/core/annotations'
 
 const defaults: SymbolSearchOptions = { threshold: .8, rotations: true, maxResults: 500 }
@@ -286,7 +286,8 @@ describe('SymbolSearchClient resource lifecycle', () => {
   const install = () => {
     FakeWorker.instances = []; vi.stubGlobal('Worker', FakeWorker)
     vi.stubGlobal('OffscreenCanvas', vi.fn(() => { throw new Error('canvas conversion must not run') }))
-    const pool = { getPageInfo: vi.fn(), renderSearchImage: vi.fn((options: { deviceRect: Rect }): { cancel(): void; promise: Promise<SearchImage> } => {
+    const pool = { extractVectors: vi.fn(() => ({ cancel: vi.fn(), promise: Promise.resolve({ pageIndex: 1, segments: new Float32Array(), segmentCount: 0, truncated: false,
+      stats: { strokePaths: 0, fillPaths: 0, curves: 0, images: 1, imageAreaRatio: 1, textGlyphs: 0, ms: { displayList: 0, walk: 0, total: 0 } } }) })), getPageInfo: vi.fn(), renderSearchImage: vi.fn((options: { deviceRect: Rect }): { cancel(): void; promise: Promise<SearchImage> } => {
       const width = options.deviceRect[2] - options.deviceRect[0], height = options.deviceRect[3] - options.deviceRect[1]
       return { cancel: vi.fn(), promise: Promise.resolve({ width, height, gray: new Uint8Array(width * height) }) }
     }) }
@@ -298,7 +299,7 @@ describe('SymbolSearchClient resource lifecycle', () => {
     expect(FakeWorker.instances).toHaveLength(0); expect(pool.renderSearchImage).not.toHaveBeenCalled()
     const task = client.search(request)
     await vi.waitFor(() => expect(FakeWorker.instances).toHaveLength(1))
-    const worker = FakeWorker.instances[0], message = worker.postMessage.mock.calls[0][0] as SymbolSearchMessage
+    const worker = FakeWorker.instances[0], message = worker.postMessage.mock.calls[0][0] as ImageSearchMessage
     expect(message.options).toMatchObject({ threshold: .7, rotations: false })
     expect(worker.postMessage.mock.calls[0][1]).toEqual([message.page.gray.buffer, message.template.gray.buffer])
     expect(OffscreenCanvas).not.toHaveBeenCalled()
@@ -307,6 +308,7 @@ describe('SymbolSearchClient resource lifecycle', () => {
     const result = await task.promise
     expect(result.candidates[0]).toEqual({ pageIndex: 0, rect: [38 / 3, 24, 58 / 3, 32], center: [16, 28], score: 1, rotation: 90 })
     expect(result.metrics).toMatchObject({ renderScale: 1.5, renderTiles: 2 })
+    expect(pool.extractVectors).toHaveBeenCalledOnce() // Raster sample forces image matching for every target page.
     expect(pool.renderSearchImage).toHaveBeenCalledTimes(2)
     expect(pool.renderSearchImage.mock.calls.map(([options]) => options.deviceRect)).toEqual([[15, 30, 40, 55], [1, 3, 26, 27]])
     expect(pool.getPageInfo).not.toHaveBeenCalled()
@@ -330,6 +332,7 @@ describe('SymbolSearchClient resource lifecycle', () => {
     pool.renderSearchImage.mockImplementation(() => ({ cancel, promise: new Promise<SearchImage>(resolve => { finish = resolve }) }))
     const client = new SymbolSearchClient(pool as unknown as PdfWorkerPool), task = client.search(request)
     const rejected = expect(task.promise).rejects.toThrow('cancelled')
+    await vi.waitFor(() => expect(pool.renderSearchImage).toHaveBeenCalledOnce())
     task.cancel(); await rejected
     expect(cancel).toHaveBeenCalledOnce()
     finish({ width: 1, height: 1, gray: new Uint8Array(1) })
@@ -343,7 +346,7 @@ describe('SymbolSearchClient resource lifecycle', () => {
     const rejected = expect(task.promise).rejects.toThrow('cancelled')
     await expect(client.search(request).promise).rejects.toThrow('search already running')
     await vi.waitFor(() => expect(FakeWorker.instances).toHaveLength(1))
-    const worker = FakeWorker.instances[0], message = worker.postMessage.mock.calls[0][0] as SymbolSearchMessage
+    const worker = FakeWorker.instances[0], message = worker.postMessage.mock.calls[0][0] as ImageSearchMessage
     expect(message.page.width * message.page.height).toBeLessThanOrEqual(16_000_000)
     expect(message.renderScale).toBeLessThan(2)
     expect(pool.getPageInfo).not.toHaveBeenCalled()
@@ -351,12 +354,12 @@ describe('SymbolSearchClient resource lifecycle', () => {
     expect(message.page.width).toBeGreaterThan(160)
     task.cancel(); await rejected; client.dispose()
   })
-  it('passes explicit rotation and threshold options through to the matching Worker', async () => {
+  it('maps UI threshold and passes rotation options through to the matching Worker', async () => {
     const pool = install(), client = new SymbolSearchClient(pool as unknown as PdfWorkerPool)
     const task = client.search({ ...request, options: { rotations: true, threshold: .85 } })
     const rejected = expect(task.promise).rejects.toThrow('cancelled')
     await vi.waitFor(() => expect(FakeWorker.instances).toHaveLength(1))
-    expect((FakeWorker.instances[0].postMessage.mock.calls[0][0] as SymbolSearchMessage).options).toMatchObject({ rotations: true, threshold: .85 })
+    expect((FakeWorker.instances[0].postMessage.mock.calls[0][0] as ImageSearchMessage).options).toMatchObject({ rotations: true, threshold: .7 })
     task.cancel(); await rejected; client.dispose()
   })
 })

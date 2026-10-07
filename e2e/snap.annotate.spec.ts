@@ -64,8 +64,10 @@ test('既存の計測の頂点を図面の端点より優先し、通常の図�
   for (const [i, p] of [[105, 207], [138, 242]].entries()) for (let c = 0; c < 2; c++) expect(line!.line![i][c]).toBeCloseTo(p[c], 3)
   await open(page, true); await expectSnap(page, true)
 })
-test('PDF の線には吸い付かず、頂点の四角は Alt で即座に消える', async ({ page }) => {
+test('図面の端点設定をオフにすると PDF の線には吸い付かず、頂点の四角は Alt で即座に消える', async ({ page }) => {
   await open(page); await drag(page, [100, 200], [172, 200]); await enable(page)
+  await page.getByRole('button', { name: '計測▼', exact: true }).click()
+  await page.getByRole('menuitemcheckbox', { name: '図面の線の端点にも合わせる', exact: true }).click()
   let p = await point(page, 130, 202); await page.mouse.move(p.x, p.y)
   await expect(page.getByTestId('snap-marker-0')).toHaveAttribute('display', 'none')
   p = await point(page, 301, 251); await page.mouse.move(p.x, p.y)
@@ -134,4 +136,16 @@ test('計測以外でも両方の場所で切り替えられ、既定オフと�
   await page.getByRole('button', { name: '数量拾い', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
   await expect(checkbox).not.toBeChecked()
   expect(await page.evaluate(() => localStorage.getItem('karu-pdf:snap'))).toBe('0')
+})
+
+test('図面の端点設定がオンなら PDF の線の端点に丸の印で吸い付く', async ({ page }) => {
+  await open(page); await enable(page)
+  await expect.poll(() => page.getByTestId('snap-marker-0').getAttribute('data-drawing-ready')).toBe('true')
+  const p = await point(page, 100.6, 200.4)
+  await page.mouse.move(p.x, p.y)
+  await expect(page.getByTestId('snap-marker-0')).toHaveAttribute('data-kind', 'drawing-endpoint')
+  await expect(page.getByTestId('snap-marker-0')).toHaveAttribute('display', '')
+  await drag(page, [100.6, 200.4], [220, 250])
+  const a = await page.evaluate(() => window.__karu!.getEditableAnnotations(0).at(-1))
+  expect(a!.vertices![0]).toEqual([100, 200])
 })

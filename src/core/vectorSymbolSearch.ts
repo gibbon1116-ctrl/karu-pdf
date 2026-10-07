@@ -44,14 +44,14 @@ function spatialIndex(segments: Float32Array, size: number) {
   return { cells, offsets, ids }
 }
 
-export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, options: Partial<VectorSymbolOptions> = {}) {
+export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, options: Partial<VectorSymbolOptions> = {}, sampleSegments: Float32Array = segments) {
   const started = performance.now(), width = sampleRect[2] - sampleRect[0], height = sampleRect[3] - sampleRect[1]
   const short = Math.min(width, height), tolerance = options.tolerance ?? Math.min(1, Math.max(.15, short * .04))
   const threshold = options.threshold ?? .85, maxResults = options.maxResults ?? 2000
   if (!sampleRect.every(Number.isFinite) || short <= 0 || !Number.isFinite(tolerance) || tolerance <= 0
     || !Number.isFinite(threshold) || threshold < 0 || threshold > 1 || !Number.isInteger(maxResults) || maxResults < 0
     || (options.region && (!options.region.every(Number.isFinite) || options.region[2] < options.region[0] || options.region[3] < options.region[1]))) throw Error('Invalid vector search options')
-  if (segments.length % 4 || !segments.every(Number.isFinite)) throw Error('Invalid vector segments')
+  if (segments.length % 4 || sampleSegments.length % 4 || !segments.every(Number.isFinite) || !sampleSegments.every(Number.isFinite)) throw Error('Invalid vector segments')
   const inside = (x: number, y: number) => x >= sampleRect[0] - tolerance && x <= sampleRect[2] + tolerance && y >= sampleRect[1] - tolerance && y <= sampleRect[3] + tolerance
   const templateIds: number[] = [], lengths = new Map<number, number[]>()
   let anchor = -1, longest = 0, totalLength = 0
@@ -59,7 +59,10 @@ export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, opt
     const length = Math.hypot(segments[i + 2] - segments[i], segments[i + 3] - segments[i + 1])
     const key = Math.floor(length / tolerance), bucket = lengths.get(key)
     if (bucket) bucket.push(i); else lengths.set(key, [i])
-    if (length > 0 && inside(segments[i], segments[i + 1]) && inside(segments[i + 2], segments[i + 3])) {
+  }
+  for (let i = 0; i < sampleSegments.length; i += 4) {
+    const length = Math.hypot(sampleSegments[i + 2] - sampleSegments[i], sampleSegments[i + 3] - sampleSegments[i + 1])
+    if (length > 0 && inside(sampleSegments[i], sampleSegments[i + 1]) && inside(sampleSegments[i + 2], sampleSegments[i + 3])) {
       templateIds.push(i); totalLength += length
       if (length > longest) { longest = length; anchor = i }
     }
@@ -81,14 +84,14 @@ export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, opt
     }
     return false
   }
-  // Sampling weights sum to each segment's length, independent of its subdivision.
+  // Sampling weights sum to each line's length, independent of its subdivision.
   const samples: Array<[number, number, number]> = []
   for (const i of templateIds) {
-    const dx = segments[i + 2] - segments[i], dy = segments[i + 3] - segments[i + 1], length = Math.hypot(dx, dy)
+    const dx = sampleSegments[i + 2] - sampleSegments[i], dy = sampleSegments[i + 3] - sampleSegments[i + 1], length = Math.hypot(dx, dy)
     const n = Math.max(3, Math.ceil(length / 2) + 1)
-    for (let j = 0; j < n; j++) samples.push([segments[i] + dx * j / (n - 1) - segments[anchor], segments[i + 1] + dy * j / (n - 1) - segments[anchor + 1], length / n])
+    for (let j = 0; j < n; j++) samples.push([sampleSegments[i] + dx * j / (n - 1) - sampleSegments[anchor], sampleSegments[i + 1] + dy * j / (n - 1) - sampleSegments[anchor + 1], length / n])
   }
-  const baseAngle = Math.atan2(segments[anchor + 3] - segments[anchor + 1], segments[anchor + 2] - segments[anchor])
+  const baseAngle = Math.atan2(sampleSegments[anchor + 3] - sampleSegments[anchor + 1], sampleSegments[anchor + 2] - sampleSegments[anchor])
   const corners: Point[] = [[sampleRect[0], sampleRect[1]], [sampleRect[2], sampleRect[1]], [sampleRect[2], sampleRect[3]], [sampleRect[0], sampleRect[3]]]
   const candidates: VectorSymbolMatch[] = []
   let anchorsTried = 0, stopped = false
@@ -104,7 +107,7 @@ export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, opt
         const angle = candidateAngle - baseAngle + direction * Math.PI, cos = Math.cos(angle), sin = Math.sin(angle)
         const ox = segments[i + direction * 2], oy = segments[i + direction * 2 + 1]
         const transform = (x: number, y: number): Point => [ox + cos * x - sin * y, oy + sin * x + cos * y]
-        const transformed = corners.map(p => transform(p[0] - segments[anchor], p[1] - segments[anchor + 1]))
+        const transformed = corners.map(p => transform(p[0] - sampleSegments[anchor], p[1] - sampleSegments[anchor + 1]))
         const rect: Rect = [Math.min(...transformed.map(p => p[0])), Math.min(...transformed.map(p => p[1])), Math.max(...transformed.map(p => p[0])), Math.max(...transformed.map(p => p[1]))]
         const region = options.region
         if (region && (rect[0] < region[0] - 1e-6 || rect[1] < region[1] - 1e-6 || rect[2] > region[2] + 1e-6 || rect[3] > region[3] + 1e-6)) continue

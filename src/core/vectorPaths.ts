@@ -16,7 +16,7 @@ export type PageKind = 'vector' | 'raster' | 'mixed' | 'empty'
 
 export function classifyPage(page: Pick<VectorPage, 'segmentCount' | 'stats'>): PageKind {
   if (page.stats.imageAreaRatio >= .5 && page.segmentCount < 200) return 'raster'
-  if (page.segmentCount >= 200) return page.stats.imageAreaRatio < .2 ? 'vector' : 'mixed'
+  if (page.segmentCount > 0) return page.stats.imageAreaRatio < .2 ? 'vector' : 'mixed'
   return 'empty'
 }
 

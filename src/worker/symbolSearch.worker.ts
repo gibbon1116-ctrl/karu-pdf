@@ -1,27 +1,28 @@
-import { searchSymbol, type SymbolMatch, type SymbolSearchOptions, type SymbolSearchStats } from '../core/symbolSearch'
-import type { SearchImage } from './protocol'
 import { installWorkerExternalSendGuard } from '../security/externalSend'
+import { buildEndpointIndex, searchVectorMessage, type SymbolSearchMessage, type SymbolSearchResponse } from './symbolSearchMessages'
+import { searchSymbol } from '../core/symbolSearch'
 
-export type WorkerSearchOptions = Omit<SymbolSearchOptions, 'shouldStop' | 'onProgress'>
-export interface SymbolSearchMessage {
-  type: 'search'; id: number; page: SearchImage; template: SearchImage; renderScale: number; options: WorkerSearchOptions
-}
-export type SymbolSearchResponse =
-  | { type: 'progress'; id: number; done: number; total: number }
-  | { type: 'error'; id: number; message: string }
-  | { type: 'result'; id: number; matches: SymbolMatch[]; stats: SymbolSearchStats & { workerMs: number }; memory: { pagePixels: number; bytes: number; estimated: true } }
-
-const scope = self as unknown as DedicatedWorkerGlobalScope
+const scope = typeof self !== 'undefined' && typeof document === 'undefined' ? self as unknown as DedicatedWorkerGlobalScope : null
 // The existing guard groups non-PDF pixel Workers under its 'image' source.
-installWorkerExternalSendGuard(scope, 'image')
+if (scope) installWorkerExternalSendGuard(scope, 'image')
 let busy = false
-scope.onmessage = (event: MessageEvent<SymbolSearchMessage>) => {
+if (scope) scope.onmessage = (event: MessageEvent<SymbolSearchMessage>) => {
   const message = event.data
-  if (message.type !== 'search') return
   const started = performance.now()
   try {
     if (busy) throw new Error('search already running')
     busy = true
+    if (message.type === 'vector-search') {
+      scope.postMessage({ type: 'progress', id: message.id, done: 0, total: 1 } satisfies SymbolSearchResponse)
+      scope.postMessage({ type: 'vector-result', id: message.id, result: searchVectorMessage(message) } satisfies SymbolSearchResponse)
+      return
+    }
+    if (message.type === 'endpoints') {
+      const index = buildEndpointIndex(message)
+      scope.postMessage({ type: 'endpoint-result', id: message.id, index, indexMs: performance.now() - started } satisfies SymbolSearchResponse,
+        [index.points.buffer, index.offsets.buffer, index.ids.buffer])
+      return
+    }
     // All pixel arrays are local to this invocation; no image or result cache is retained.
     const page = { width: message.page.width, height: message.page.height, data: message.page.gray }
     const template = { width: message.template.width, height: message.template.height, data: message.template.gray }
