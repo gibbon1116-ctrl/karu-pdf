@@ -795,3 +795,8 @@ button, input { font: inherit; }
   .quantity-master-navigation h3 { flex-basis: 100%; }
   .quantity-master-specs .fixture-presets { max-height: 36vh; }
 }
+
+.scale-region, .scale-region-draft { pointer-events: none; }
+.drawing-scale-region { cursor: crosshair; }
+.scale-region-row { display: flex; align-items: center; gap: 8px; margin-block: 6px; }
+.scale-region-row > span { flex: 1; overflow-wrap: anywhere; }

@@ -5,7 +5,7 @@ import { createContext, useContext, useEffect, useRef, useState, type RefObject 
 import { QuantityDimensionsDialog } from './QuantityDimensionsDialog'
 import type { Point } from '../core/annotations'
 import { cloudPath, type CloudIntensity } from '../core/cloud'
-import { constrainMeasurePoint, measureBounds, measureLabel, measureText, type MeasureKind } from '../core/measure'
+import { pointInScaleRegion, scaleLabel, type PageScale, type ScaleRegion, constrainMeasurePoint, measureBounds, measureLabel, measureText, type MeasureKind } from '../core/measure'
 import type { EditableAnnotation, AnnotationStore } from './AnnotationStore'
 import type { EditorTool } from './AnnotationLayer'
 import type { FormatDefaults } from './formatDefaults'
@@ -66,6 +66,7 @@ export function useMeasurementInteraction(props: Props) {
   const vertexIndex = useRef<SnapIndex | null>(null)
   const scaleInteraction = useContext(ScaleInteractionContext)
   const draftRef = useRef<SVGGElement>(null)
+  const pickedScale = useRef<{ scale: PageScale; region?: ScaleRegion } | null>(null)
   const points = useRef<Point[]>([])
   const cursor = useRef<Point | null>(null)
   const down = useRef<{ id: number; start: Point; hadPoints: boolean } | null>(null)
@@ -126,6 +127,7 @@ export function useMeasurementInteraction(props: Props) {
     return hit.point
   }
   const clear = () => {
+    pickedScale.current = null
     snapMarker.current?.setAttribute('display', 'none'); rawCursor.current = null
     if (!frame.current && !points.current.length && !cursor.current && !down.current && !vertex.current && !draftRef.current?.firstChild) return
     if (frame.current) cancelAnimationFrame(frame.current)
@@ -172,7 +174,7 @@ export function useMeasurementInteraction(props: Props) {
     if (!points.current.length) { draftRef.current?.replaceChildren(); return }
     const kind = tracing ? 'distance' : cloud ? 'area' : quantityItem ? quantityKind : isMeasureTool(props.tool) ? props.tool : 'distance'
     const p = cursor.current ? [...points.current, cursor.current] : points.current
-    const scale = props.store.getScale(props.pageIndex)
+    const scale = pickedScale.current?.scale
     const f = props.defaults[cloud ? 'cloudPolygon' : kind]
     if (cloud) { draw(p, '', 'area', cssColor(f.color), f.fontSize, f.borderWidth, true, f.cloudIntensity, f.fillColor ? cssColor(f.fillColor) : undefined); return }
     if (quantityItem && scale && !tracing) {
@@ -204,16 +206,21 @@ export function useMeasurementInteraction(props: Props) {
     }
     const kind = quantityItem ? quantityKind : isMeasureTool(props.tool) ? props.tool : null
     if (!kind || p.length < (kind === 'area' ? 3 : 2)) return
-    const scale = props.store.getScale(props.pageIndex)
+    const scale = pickedScale.current?.scale
     if (!scale) return
     const f = quantityItem ? { color: quantityItem.style.color, fontSize: quantityItem.style.size, borderWidth: quantityLine(quantityItem).width, opacity: quantityItem.style.opacity } : props.defaults[kind], measure = { ...scale, kind }
     const quantity = quantityItem ? quantityMark(crypto.randomUUID()) : null
     const vertices = p.map(point => [...point] as Point)
+    const startRegion = pickedScale.current?.region
+    const regions = props.store.scaleRegions.get(props.pageIndex)
+    const crosses = startRegion ? vertices.some(point => !pointInScaleRegion(startRegion, point))
+      : !!regions?.length && vertices.some(point => regions.some(region => pointInScaleRegion(region, point)))
     const save = (mark: QuantityMark | null) => {
       const text = mark ? quantityLabel(vertices, scale.mmPerPoint, mark, fixtureCode(quantityItem!), quantityItem!.style.showCode, extraCode) : measureText(vertices, measure)
       const a = props.store.create({ pageIndex: props.pageIndex, kind, quantity: mark ? { ...mark, ...props.store.pickupLocation(props.pageIndex) } : null, quantityDash: quantityItem ? quantityLine(quantityItem).dash : undefined, vertices, measure, text,
         rect: measureBounds(vertices, kind, text, f.fontSize), color: f.color, fontSize: f.fontSize, borderWidth: f.borderWidth, opacity: f.opacity })
       props.store.selectOnly(a.id); props.select(a.id)
+      if (crosses) props.onStatus(`縮尺の範囲をまたいでいます。始点の縮尺（${scaleLabel(scale).replace(/^(縮尺|約) /, '')}）で計算しました`)
     }
     clear()
     if (quantity && quantityDimensions(quantity.method).some(key => !quantity[key])) setPending({ mark: quantity, save })
@@ -249,11 +256,17 @@ export function useMeasurementInteraction(props: Props) {
     }
     if (pending) return true
     if (!enabled) return false
-    if (!tracing && !cloud && !props.store.getScale(props.pageIndex)) { scaleInteraction.request(props.pageIndex); return true }
     window.dispatchEvent(new CustomEvent('karu-pdf:measurement-start', { detail: props.pageIndex }))
     const hadPoints = points.current.length > 0
     const previous = points.current.at(-1)
     const next = resolvePoint(p, event, previous)
+    if (!hadPoints && !tracing && !cloud) {
+      // No region lookup during redraw: retain the first resolved scale until completion.
+      pickedScale.current = props.store.scaleRegions.get(props.pageIndex)?.length
+        ? props.store.scaleAt(props.pageIndex, next)
+        : (() => { const scale = props.store.getScale(props.pageIndex); return scale ? { scale } : null })()
+      if (!pickedScale.current) { scaleInteraction.request(props.pageIndex); return true }
+    }
     if (tracing || props.tool === 'distance') {
       if (!hadPoints) points.current.push(next)
     } else if (!previous || Math.hypot(next[0] - previous[0], next[1] - previous[1]) > .01) points.current.push(next)

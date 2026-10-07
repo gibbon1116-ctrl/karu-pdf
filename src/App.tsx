@@ -29,8 +29,9 @@ import type { HeaderFooterSettings } from './app/headerFooterText'
 import { ScaleDialog } from './app/ScaleDialog'
 import { ScaleInteractionContext, SnapContext } from './editor/MeasurementOverlay'
 import { buildSnapIndex, findSnap } from './core/snap'
-import { scaleLabel } from './core/measure'
-import type { Point } from './core/annotations'
+import { scaleLabel, ratioScale, pointInScaleRegion, MAX_SCALE_REGIONS, type ScaleRegion } from './core/measure'
+import { ScaleRegionInteractionContext } from './editor/AnnotationLayer'
+import type { Point, Rect } from './core/annotations'
 import { ToolRow } from './app/ToolRow'
 import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS, FixtureUiContext, SnapUiContext, ensureSessionFixtures, type SidePanelTab } from './app/documentModel'
 import { allSessionAnnotations } from './app/AnnotationListPanel'
@@ -252,7 +253,8 @@ export default function App() {
   const [page, setPage] = useState(() => tabs.active?.view.page ?? 0)
   const [zoom, setZoom] = useState(() => tabs.active?.view.zoom ?? 1)
   const [drawingDialog, setDrawingDialog] = useState<{ session: DocumentSession; pageIndex: number } | null>(null)
-  const [scaleDialog, setScaleDialog] = useState<{ session: DocumentSession; pageIndex: number; required: boolean } | null>(null)
+  const [scaleDialog, setScaleDialog] = useState<{ session: DocumentSession; pageIndex: number; required: boolean; region?: ScaleRegion } | null>(null)
+  const [scaleRegionDrawing, setScaleRegionDrawing] = useState<{ session: DocumentSession; pageIndex: number } | null>(null)
   const [scaleTracing, setScaleTracing] = useState(false)
   const [scalePoints, setScalePoints] = useState<Point[] | null>(null)
   const [sampleCapture, setSampleCapture] = useState<{ docId: string; busy: boolean; resolve(sample: CountFixtureSample | null): void } | null>(null)
@@ -317,11 +319,14 @@ export default function App() {
   activeRef.current = active
   organizeRef.current = organize
   useSyncExternalStore(active?.annotationStore.subscribe ?? noopSubscribe, active?.annotationStore.getSnapshot ?? zeroSnapshot)
+  useEffect(() => {
+    if (scaleRegionDrawing && scaleRegionDrawing.session !== active) setScaleRegionDrawing(null)
+  }, [active, scaleRegionDrawing])
 
-  const openScale = (pageIndex: number, required = false) => {
+  const openScale = (pageIndex: number, required = false, region?: ScaleRegion) => {
     const session = activeRef.current
     if (!session) return
-    setScaleTracing(false); setScalePoints(null); setScaleDialog({ session, pageIndex, required })
+    setScaleTracing(false); setScalePoints(null); setScaleRegionDrawing(null); setScaleDialog({ session, pageIndex, required, region })
   }
   const scaleTargets = (all: boolean) => {
     if (!scaleDialog) return []
@@ -634,6 +639,7 @@ export default function App() {
       const session = new DocumentSession({ docId, name, byteLength, handle, pageSizes: result.pageSizes, editRestriction: result.editRestriction, view })
       session.fileOutdated = created
       session.annotationStore.loadScales(result.pageScales ?? [])
+      session.annotationStore.loadScaleRegions(result.pageScaleRegions ?? [])
       session.annotationStore.loadDrawingInfos(result.pageDrawingInfos ?? [])
       tabs.add(session)
       activeRef.current = session
@@ -1130,9 +1136,9 @@ export default function App() {
     return inserted
   }, [pool])
 
-  const finishPageLayout = useCallback((session: DocumentSession, result: { pageSizes: typeof session.pageSizes; hasBackup: boolean; pageScales?: (import('./core/measure').PageScale | null)[]; pageDrawingInfos?: (import('./core/drawingInfo').DrawingInfo | null)[] }) => {
+  const finishPageLayout = useCallback((session: DocumentSession, result: { pageSizes: typeof session.pageSizes; hasBackup: boolean; pageScales?: (import('./core/measure').PageScale | null)[]; pageScaleRegions?: Array<[number, ScaleRegion[]]>; pageDrawingInfos?: (import('./core/drawingInfo').DrawingInfo | null)[] }) => {
     const reloadFixtures = session.annotationStore.fixturesReady
-    session.updateAfterPageLayout(result.pageSizes, result.hasBackup, result.pageScales, result.pageDrawingInfos)
+    session.updateAfterPageLayout(result.pageSizes, result.hasBackup, result.pageScales, result.pageDrawingInfos, result.pageScaleRegions)
     activeRef.current = session
     setPage(session.view.page)
     setZoom(session.view.zoom)
@@ -1372,6 +1378,7 @@ export default function App() {
         if (document.querySelector('[role="menu"], dialog[open], [role="dialog"]')) return
         event.preventDefault()
         if (organizing) { discardOrganize(); return }
+        if (scaleRegionDrawing) { setScaleRegionDrawing(null); return }
         if (scaleTracing) { setScaleTracing(false); setScalePoints(null); return }
         const viewer = viewerRef.current
         target?.blur()
@@ -1493,7 +1500,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [comparison, scaleTracing, activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, moveViewHistory, openSidePanel, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, showStatus, tabs, toggleSplit])
+  }, [comparison, scaleTracing, scaleRegionDrawing, activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, moveViewHistory, openSidePanel, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, showStatus, tabs, toggleSplit])
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -1767,6 +1774,18 @@ export default function App() {
           canRedo={active?.annotationStore.canRedo() ?? false}
           onToolChange={(next) => void changeTool(next)}
           onScale={() => openScale(page - 1)}
+          onAddScaleRegion={() => {
+            const session = activeRef.current
+            if (!session) return
+            const pageIndex = page - 1
+            if (session.annotationStore.getScaleRegions(pageIndex).length >= MAX_SCALE_REGIONS) { showStatus('縮尺の範囲は1ページに20個までです'); return }
+            void viewerRef.current?.commitEditor().then(() => {
+              if (activeRef.current !== session) return
+              viewerRef.current?.clearSelection()
+              setScaleDialog(null); setScaleTracing(false); setScalePoints(null)
+              setScaleRegionDrawing({ session, pageIndex }); viewerRef.current?.scrollToPage(pageIndex)
+            })
+          }}
           onUndo={() => { active?.annotationStore.undo(); viewerRef.current?.clearSelection(); refreshTabs() }}
           onRedo={() => { active?.annotationStore.redo(); viewerRef.current?.clearSelection(); refreshTabs() }}
           onZoomIn={() => viewerRef.current?.zoomIn()}
@@ -1818,6 +1837,15 @@ export default function App() {
         >
           <WorkspaceFailureProbe fail={workspaceFailure}>
           <DrawingUiContext.Provider value={{ edit: pageIndex => setDrawingDialog({ session: active, pageIndex }) }}>
+          <ScaleRegionInteractionContext.Provider value={{
+            drawPage: scaleRegionDrawing?.session === active ? scaleRegionDrawing.pageIndex : null,
+            dialogPage: scaleDialog?.session === active ? scaleDialog.pageIndex : null,
+            complete: (rect: Rect) => {
+              if (!scaleRegionDrawing || scaleRegionDrawing.session !== active) return
+              const { session, pageIndex } = scaleRegionDrawing
+              openScale(pageIndex, false, { id: crypto.randomUUID(), rect, scale: ratioScale(20, 'PDF', session.pageSizes[pageIndex]) })
+            },
+          }}>
           <ScaleInteractionContext.Provider value={{ request: i => openScale(i, true), tracePage: scaleTracing ? scaleDialog?.pageIndex ?? null : null, complete: p => { setScalePoints(p); setScaleTracing(false) } }}>
           <SnapContext.Provider value={snapEnabled}>
           <QuantityNavigationContext.Provider value={{ drawingInfo: i => active.annotationStore.getDrawingInfo(i), navigate: (page, rect) => {
@@ -1868,6 +1896,7 @@ export default function App() {
           </QuantityNavigationContext.Provider>
           </SnapContext.Provider>
           </ScaleInteractionContext.Provider>
+          </ScaleRegionInteractionContext.Provider>
           </DrawingUiContext.Provider>
           </WorkspaceFailureProbe>
         </ErrorBoundary>
@@ -1888,11 +1917,26 @@ export default function App() {
           図面の表示: {annotationFilterLabel(active.annotationStore.annotationFilter)}だけ
           <button type="button" onClick={() => active.annotationStore.setDrawingFollowsFilter(false)}>解除</button>
         </span>}
-        {!comparison && active?.annotationStore.getScale(page - 1) && <button type="button" className="status-scale" onClick={() => openScale(page - 1)}>{scaleLabel(active.annotationStore.getScale(page - 1)!)}</button>}
+        {!comparison && active && (active.annotationStore.getScale(page - 1) || active.annotationStore.scaleRegions.get(page - 1)?.length) && <button type="button" className="status-scale" onClick={() => openScale(page - 1)}>
+          {active.annotationStore.getScale(page - 1) ? scaleLabel(active.annotationStore.getScale(page - 1)!) : '縮尺の範囲 ' + active.annotationStore.getScaleRegions(page - 1).length}
+          {active.annotationStore.getScale(page - 1) && !!active.annotationStore.scaleRegions.get(page - 1)?.length && `（範囲 ${active.annotationStore.getScaleRegions(page - 1).length}）`}
+        </button>}
         <span role="status">{runtimeError || status}</span>{/* @single:start */}<span style={{ marginLeft: 'auto', fontSize: '11px' }}>固定・閉域版（HTML）</span>{/* @single:end */}{/* @fixed:start */}<span style={{ marginLeft: 'auto', fontSize: '11px' }}>固定・閉域版</span>{/* @fixed:end */}
       </footer>
       {drawingDialog && <DrawingInfoDialog session={drawingDialog.session} pageIndex={drawingDialog.pageIndex} pool={pool} onClose={() => setDrawingDialog(null)} onSave={info => { drawingDialog.session.annotationStore.setDrawingInfo([drawingDialog.pageIndex], info); setDrawingDialog(null); refreshTabs() }} />}
-      {scaleDialog && <ScaleDialog key={`${scaleDialog.session.docId}:${scaleDialog.pageIndex}`} pageIndex={scaleDialog.pageIndex} size={scaleDialog.session.pageSizes[scaleDialog.pageIndex]} initial={scaleDialog.session.annotationStore.getScale(scaleDialog.pageIndex)} required={scaleDialog.required} tracing={scaleTracing} points={scalePoints}
+      {scaleRegionDrawing?.session === active && <div className="scale-trace-banner" role="status">縮尺の範囲を四角で囲んでください（Esc でやめる）</div>}
+      {scaleDialog && <ScaleDialog key={`${scaleDialog.session.docId}:${scaleDialog.pageIndex}:${scaleDialog.region?.id ?? 'page'}`} pageIndex={scaleDialog.pageIndex} size={scaleDialog.session.pageSizes[scaleDialog.pageIndex]} initial={scaleDialog.region?.scale ?? scaleDialog.session.annotationStore.getScale(scaleDialog.pageIndex)} region={scaleDialog.region} regions={scaleDialog.session.annotationStore.getScaleRegions(scaleDialog.pageIndex)} required={scaleDialog.required} tracing={scaleTracing} points={scalePoints}
+        onEditRegion={region => openScale(scaleDialog.pageIndex, false, region)}
+        countRegionMeasurements={async region => {
+          const session = scaleDialog.session, i = scaleDialog.pageIndex
+          await session.annotationStore.ensurePageLoaded(i, () => pool.listAnnotations(session.docId, i))
+          if (session.annotationStore.getPageAnnotations(i).some(a => a.quantity)) await ensureSessionFixtures(session, pool)
+          return session.annotationStore.getPageAnnotations(i).filter(a => a.measure && a.vertices?.[0] && pointInScaleRegion(region, a.vertices[0])).length
+        }}
+        onDeleteRegion={(region, recalculate) => {
+          const store = scaleDialog.session.annotationStore
+          store.setScaleRegions(scaleDialog.pageIndex, store.getScaleRegions(scaleDialog.pageIndex).filter(r => r.id !== region.id), recalculate); refreshTabs()
+        }}
         onTrace={() => { viewerRef.current?.scrollToPage(scaleDialog.pageIndex); setScaleTracing(true) }}
         onClose={() => { setScaleDialog(null); setScaleTracing(false) }}
         countMeasurements={async all => {
@@ -1900,9 +1944,22 @@ export default function App() {
           for (const i of indices) await session.annotationStore.ensurePageLoaded(i, () => pool.listAnnotations(session.docId, i))
           // Quantity labels carry the item code, so recalculation needs the item list.
           if (indices.some(i => session.annotationStore.getPageAnnotations(i).some(a => a.quantity))) await ensureSessionFixtures(session, pool)
-          return indices.reduce((n, i) => n + session.annotationStore.getPageAnnotations(i).filter(a => a.measure).length, 0)
+          return indices.reduce((n, i) => n + session.annotationStore.getPageAnnotations(i).filter(a => {
+            if (!a.measure || !a.vertices?.[0]) return false
+            return scaleDialog.region ? pointInScaleRegion(scaleDialog.region, a.vertices[0])
+              : !session.annotationStore.scaleAt(i, a.vertices[0])?.region
+          }).length, 0)
         }}
-        onSave={(scale, all, recalculate) => { scaleDialog.session.annotationStore.setScale(scaleTargets(all), scale, recalculate); setScaleDialog(null); setScaleTracing(false); refreshTabs() }} />}
+        onSave={(scale, all, recalculate, label) => {
+          const store = scaleDialog.session.annotationStore
+          if (scaleDialog.region) {
+            const region: ScaleRegion = { id: scaleDialog.region.id, rect: scaleDialog.region.rect, scale, ...(label ? { label } : {}) }
+            const regions = store.getScaleRegions(scaleDialog.pageIndex), index = regions.findIndex(r => r.id === region.id)
+            if (index >= 0) regions[index] = region; else regions.push(region)
+            store.setScaleRegions(scaleDialog.pageIndex, regions, recalculate)
+          } else store.setScale(scaleTargets(all), scale, recalculate)
+          setScaleDialog(null); setScaleTracing(false); refreshTabs()
+        }} />}
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
       <DesktopStepsDialog open={desktopStepsOpen} onClose={() => setDesktopStepsOpen(false)} />
       <ExternalSendAlert />

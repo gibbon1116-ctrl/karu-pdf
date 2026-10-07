@@ -15,7 +15,7 @@ import { inkStrokePoints, mergeInkAnnotationId, simplifyPoints, type PreviousInk
 import { TextSelectionQueue } from './textSelectionQueue'
 import type { TextSelectionMode, TextSelectionResult } from '../core/textSelection'
 import { hitTextLine } from './textHitTest'
-import { MeasurementShape, useMeasurementInteraction } from './MeasurementOverlay'
+import { MeasurementShape, useMeasurementInteraction, isMeasureTool } from './MeasurementOverlay'
 import { cloudPath, rectVertices } from '../core/cloud'
 import { issueColor, issueFontSize } from '../core/issues'
 import { IssueEditor } from './IssueEditor'
@@ -23,6 +23,11 @@ import { CLEAR_EDITOR_SELECTION } from './interaction'
 import { ToolIcon } from '../ui/ToolIcon'
 import { CountMarker, countMarkerData, countSvgPath } from './countMarkers'
 import { countFixtureId } from '../core/counts'
+
+import { scaleLabel } from '../core/measure'
+export const ScaleRegionInteractionContext = createContext<{
+  drawPage: number | null; dialogPage: number | null; complete(rect: Rect): void
+}>({ drawPage: null, dialogPage: null, complete: () => {} })
 
 export type EditorTool = 'select' | 'textSelect' | FormatTool
 
@@ -222,6 +227,17 @@ export function AnnotationLayer(props: Props) {
   const sampleInteraction = useContext(FixtureSampleContext)
   const version = useSyncExternalStore(props.store.subscribe, props.store.getSnapshot)
   const svgRef = useRef<SVGSVGElement>(null)
+  const regionInteraction = useContext(ScaleRegionInteractionContext)
+  const drawingRegion = regionInteraction.drawPage === props.pageIndex
+  const regionDrag = useRef<{ pointerId: number; start: Point } | null>(null)
+  const regionDraft = useRef<SVGRectElement>(null)
+  const regionRect = (start: Point, end: Point): Rect => [Math.max(0, Math.min(start[0], end[0])), Math.max(0, Math.min(start[1], end[1])), Math.min(props.pageSize.width, Math.max(start[0], end[0])), Math.min(props.pageSize.height, Math.max(start[1], end[1]))]
+  const clearRegionDrag = () => {
+    const drag = regionDrag.current, svg = svgRef.current
+    if (drag && svg?.hasPointerCapture(drag.pointerId)) svg.releasePointerCapture(drag.pointerId)
+    regionDrag.current = null; regionDraft.current?.setAttribute('display', 'none')
+  }
+  useEffect(() => { clearRegionDrag(); if (drawingRegion) measurement.cancel(); return clearRegionDrag }, [drawingRegion])
   const measurement = useMeasurementInteraction({ svg: svgRef, store: props.store, pageIndex: props.pageIndex, tool: props.tool, quantityItem: props.store.getCountFixture(props.store.selectedFixtureId), defaults: props.formatDefaults, select: props.onSelect, zoom: props.zoom, version, onStatus: props.onStatus })
   const draftCloudRef = useRef<SVGPathElement>(null)
   const draftRectRef = useRef<SVGRectElement>(null)
@@ -902,10 +918,11 @@ export function AnnotationLayer(props: Props) {
   return <>
     <svg
       ref={svgRef}
-      className={`annotation-layer tool-${props.tool}`}
+      className={`annotation-layer tool-${props.tool}${drawingRegion ? ' drawing-scale-region' : ''}`}
       data-testid={`annotation-layer-${props.pageIndex}`}
       viewBox={`0 0 ${props.pageSize.width} ${props.pageSize.height}`}
       onPointerEnter={(event) => {
+        if (regionInteraction.drawPage !== null) return
         if (!TEXT_MARK_TOOLS.has(props.tool)) return
         pointerPointRef.current = pointInPage(event.currentTarget, event)
         ensureTextLines()
@@ -917,6 +934,15 @@ export function AnnotationLayer(props: Props) {
         event.preventDefault()
         const svg = event.currentTarget
         const start = pointInPage(svg, event)
+        if (regionInteraction.drawPage !== null) {
+          if (drawingRegion) {
+            regionDrag.current = { pointerId: event.pointerId, start }
+            const draft = regionDraft.current
+            draft?.setAttribute('x', String(start[0])); draft?.setAttribute('y', String(start[1])); draft?.setAttribute('width', '0'); draft?.setAttribute('height', '0'); draft?.setAttribute('display', 'block')
+            svg.setPointerCapture(event.pointerId)
+          }
+          return
+        }
         const id = annotationIdFromTarget(event.target) ?? (compactCounts && props.tool === 'select'
           ? orderedAnnotations.findLast(a => a.count && start[0] >= a.rect[0] && start[0] <= a.rect[2] && start[1] >= a.rect[1] && start[1] <= a.rect[3])?.id ?? null : null)
         if (props.tool === 'count') {
@@ -1031,6 +1057,14 @@ export function AnnotationLayer(props: Props) {
         svg.setPointerCapture(event.pointerId)
       }}
       onPointerMove={(event) => {
+        if (regionInteraction.drawPage !== null) {
+          const drag = regionDrag.current
+          if (drag && drag.pointerId === event.pointerId) {
+            const rect = regionRect(drag.start, pointInPage(event.currentTarget, event)), draft = regionDraft.current
+            draft?.setAttribute('x', String(rect[0])); draft?.setAttribute('y', String(rect[1])); draft?.setAttribute('width', String(rect[2] - rect[0])); draft?.setAttribute('height', String(rect[3] - rect[1]))
+          }
+          return
+        }
         if (measurement.pointerMove(event, pointInPage(event.currentTarget, event))) return
         if (TEXT_MARK_TOOLS.has(props.tool)) {
           const point = pointInPage(event.currentTarget, event)
@@ -1053,6 +1087,15 @@ export function AnnotationLayer(props: Props) {
         scheduleDraft(operation)
       }}
       onPointerUp={(event) => {
+        if (regionInteraction.drawPage !== null) {
+          const drag = regionDrag.current
+          if (drag && drag.pointerId === event.pointerId) {
+            const rect = regionRect(drag.start, pointInPage(event.currentTarget, event)); clearRegionDrag()
+            if (rect[2] - rect[0] < 10 || rect[3] - rect[1] < 10) props.onStatus('縮尺の範囲は幅・高さを10pt以上にしてください')
+            else regionInteraction.complete(rect)
+          }
+          return
+        }
         if (measurement.pointerUp(event, pointInPage(event.currentTarget, event))) return
         const operation = dragRef.current
         if (!operation || operation.pointerId !== event.pointerId) return
@@ -1064,8 +1107,9 @@ export function AnnotationLayer(props: Props) {
         finishDrag(true)
       }}
       onPointerLeave={measurement.pointerLeave}
-      onPointerCancel={() => { if (!measurement.cancel()) finishDrag(false) }}
+      onPointerCancel={() => { clearRegionDrag(); if (!measurement.cancel()) finishDrag(false) }}
       onDoubleClick={(event) => {
+        if (regionInteraction.drawPage !== null) return
         if (measurement.doubleClick()) return
         if (props.tool !== 'select') return
         const id = annotationIdFromTarget(event.target) ?? props.selectedId
@@ -1075,6 +1119,15 @@ export function AnnotationLayer(props: Props) {
     >
       <rect className="annotation-surface" x="0" y="0" width={props.pageSize.width} height={props.pageSize.height} />
       {displayItems}
+      {(isMeasureTool(props.tool) || props.tool === 'count' || drawingRegion || regionInteraction.dialogPage === props.pageIndex) && props.store.scaleRegions.get(props.pageIndex)?.map(region => {
+        const [x, y, right, bottom] = region.rect, size = 11 / Math.max(.01, props.zoom * CSS_PX_PER_PT)
+        const label = [region.label, scaleLabel(region.scale).replace(/^(縮尺|約) /, '')].filter(Boolean).join(' ')
+        return <g key={region.id} className="scale-region" pointerEvents="none">
+          <rect x={x} y={y} width={right - x} height={bottom - y} fill="none" stroke="#7a4cc2" strokeWidth="1" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
+          <text className="scale-region-label" x={x + size * .3} y={y + size * 1.3} fontSize={size} fill="#7a4cc2" stroke="white" strokeWidth={size * .4} paintOrder="stroke">{label}</text>
+        </g>
+      })}
+      <rect ref={regionDraft} className="scale-region-draft" display="none" fill="none" stroke="#7a4cc2" strokeWidth="1" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" pointerEvents="none" />
       {measurement.draft}
       <path ref={draftCloudRef} style={{ display: 'none' }} pointerEvents="none" />
       <g ref={textSelectionRef} className="text-selection-quads" aria-hidden="true" />

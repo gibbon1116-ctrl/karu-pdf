@@ -181,12 +181,12 @@ export class DocumentSession {
 
   recordSavedRendering(edits: readonly AnnotationEdit[], errors: readonly { editIndex: number }[]): void {
     const failed = new Set(errors.map(error => error.editIndex))
-    const pages = new Set(edits.flatMap((edit, index) => !failed.has(index) && edit.kind !== 'setDrawingInfo' && edit.kind !== 'setPageScale' && edit.kind !== 'setCountFixtures' ? [edit.pageIndex] : []))
+    const pages = new Set(edits.flatMap((edit, index) => !failed.has(index) && edit.kind !== 'setDrawingInfo' && edit.kind !== 'setPageScale' && edit.kind !== 'setScaleRegions' && edit.kind !== 'setCountFixtures' ? [edit.pageIndex] : []))
     this.savedRevision += 1
     for (const page of pages) this.savedPageRevisions.set(page, this.savedRevision)
   }
 
-  updateAfterPageLayout(pageSizes: PageSize[], canUndoOrganize: boolean, scales?: import('../core/measure').PageScale[] | (import('../core/measure').PageScale | null)[], drawings?: (DrawingInfo | null)[]): void {
+  updateAfterPageLayout(pageSizes: PageSize[], canUndoOrganize: boolean, scales?: import('../core/measure').PageScale[] | (import('../core/measure').PageScale | null)[], drawings?: (DrawingInfo | null)[], regions?: Array<[number, import('../core/measure').ScaleRegion[]]>): void {
     this.cancelDrawingScan()
     this.viewHistory.clear()
     this.savedPageRevisions.clear()
@@ -197,6 +197,7 @@ export class DocumentSession {
     this.pageRevision += 1
     this.annotationStore.reset(true)
     if (scales) this.annotationStore.loadScales(scales)
+    this.annotationStore.loadScaleRegions(regions ?? [])
     if (drawings) this.annotationStore.loadDrawingInfos(drawings)
     this.view.page = Math.min(Math.max(1, this.view.page), pageSizes.length)
     this.view.scrollLeft = 0

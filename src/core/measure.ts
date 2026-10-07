@@ -16,6 +16,28 @@ export interface PageScale extends Omit<MeasureSettings, 'kind'> {
   source: 'ratio' | 'calibration' | 'standard'
   calibration?: { pointsLength: number; actualMm: number }
 }
+export interface ScaleRegion { id: string; rect: Rect; scale: PageScale; label?: string }
+export const MAX_SCALE_REGIONS = 20
+export function validScaleRegion(value: unknown): value is ScaleRegion {
+  const v = value as ScaleRegion | null
+  return !!v && typeof v.id === 'string' && v.id.length > 0 && Array.isArray(v.rect) && v.rect.length === 4
+    && v.rect.every(Number.isFinite) && v.rect[0] >= 0 && v.rect[1] >= 0 && v.rect[2] - v.rect[0] >= 10 && v.rect[3] - v.rect[1] >= 10
+    && validScale(v.scale) && (v.label === undefined || (typeof v.label === 'string' && [...v.label].length <= 40))
+}
+export function pointInScaleRegion(region: ScaleRegion, point: Point): boolean {
+  const [x, y, right, bottom] = region.rect
+  return point[0] >= x && point[0] <= right && point[1] >= y && point[1] <= bottom
+}
+export function resolveScale(page: PageScale | null, regions: readonly ScaleRegion[] | undefined, point: Point): { scale: PageScale; region?: ScaleRegion } | null {
+  if (!regions?.length) return page ? { scale: page } : null
+  let region: ScaleRegion | undefined, area = Infinity
+  for (const candidate of regions) {
+    if (!pointInScaleRegion(candidate, point)) continue
+    const size = (candidate.rect[2] - candidate.rect[0]) * (candidate.rect[3] - candidate.rect[1])
+    if (size <= area) { region = candidate; area = size }
+  }
+  return region ? { scale: region.scale, region } : page ? { scale: page } : null
+}
 export const PT_MM = 25.4 / 72
 export const PAPER_LONG_MM: Record<Exclude<Paper, 'PDF'>, number> = { A0: 1189, A1: 841, A2: 594, A3: 420, A4: 297 }
 export const SCALE_PRESETS = [
@@ -209,6 +231,77 @@ export function invertMatrix(m: readonly number[]): [number, number, number, num
   return [m[3] / d, -m[1] / d, -m[2] / d, m[0] / d, (m[2] * m[5] - m[3] * m[4]) / d, (m[1] * m[4] - m[0] * m[5]) / d]
 }
 
-export function readDocumentScales(doc: PDFDocument): (PageScale | null)[] {
-  return Array.from({ length: doc.countPages() }, (_, i) => { const page = doc.loadPage(i); try { return readPageScale(page) } finally { page.destroy() } })
+export function readDocumentScales(doc: PDFDocument, regionEntries?: Array<[number, ScaleRegion[]]>): (PageScale | null)[] {
+  return Array.from({ length: doc.countPages() }, (_, i) => {
+    const page = doc.loadPage(i)
+    try {
+      if (regionEntries) { const regions = readScaleRegions(page); if (regions.length) regionEntries.push([i, regions]) }
+      return readPageScale(page)
+    } finally { page.destroy() }
+  })
+}
+export function readDocumentScaleMetadata(doc: PDFDocument): { pageScales: (PageScale | null)[]; pageScaleRegions: Array<[number, ScaleRegion[]]> } {
+  const pageScaleRegions: Array<[number, ScaleRegion[]]> = []
+  // Reuse the existing per-page scale read; do not load every page a second time.
+  const pageScales = readDocumentScales(doc, pageScaleRegions)
+  return { pageScales, pageScaleRegions }
+}
+
+// Transform all four corners to support rotated, cropped and UserUnit pages.
+function transformScaleRect(rect: Rect, matrix: readonly number[]): Rect {
+  const p = [[rect[0], rect[1]], [rect[2], rect[1]], [rect[0], rect[3]], [rect[2], rect[3]]].map(p => transformMeasurePoint(p as Point, matrix))
+  return [Math.min(...p.map(p => p[0])), Math.min(...p.map(p => p[1])), Math.max(...p.map(p => p[0])), Math.max(...p.map(p => p[1]))]
+}
+export function readScaleRegions(page: PDFPage): ScaleRegion[] {
+  const obj = page.getObject(), viewports = obj.get('VP'), regions: ScaleRegion[] = []
+  try {
+    for (let i = 0; i < viewports.length && regions.length < MAX_SCALE_REGIONS; i++) {
+      const vp = viewports.get(i)
+      try {
+        const json = stringAt(vp, 'KaruScaleRegion')
+        if (!json) continue
+        try {
+          const value = JSON.parse(json), box = vp.get('BBox')
+          try {
+            if (!box.isArray() || box.length !== 4) continue
+            const numbers: number[] = []
+            for (let j = 0; j < 4; j++) { const n = box.get(j); try { numbers.push(n.isNumber() ? n.asNumber() : NaN) } finally { n.destroy() } }
+            if (!numbers.every(Number.isFinite) || numbers[2] <= numbers[0] || numbers[3] <= numbers[1]) continue
+            const rect = transformScaleRect(numbers as Rect, page.getTransform())
+            const bounds = page.getBounds()
+            const region = { id: value?.id, scale: value?.scale, ...(value?.label !== undefined ? { label: value.label } : {}), rect }
+            if (validScaleRegion(region) && rect[2] <= bounds[2] && rect[3] <= bounds[3] && !regions.some(r => r.id === region.id)) regions.push(region)
+          } finally { box.destroy() }
+        } catch { /* Ignore invalid custom viewport metadata. */ }
+      } finally { vp.destroy() }
+    }
+    return regions
+  } finally { viewports.destroy(); obj.destroy() }
+}
+export function writeScaleRegions(doc: PDFDocument, page: PDFPage, regions: readonly ScaleRegion[]): void {
+  const bounds = page.getBounds()
+  if (regions.length > MAX_SCALE_REGIONS || new Set(regions.map(r => r.id)).size !== regions.length || regions.some(r => !validScaleRegion(r) || r.rect[2] > bounds[2] || r.rect[3] > bounds[3])) throw new Error('縮尺の範囲が不正です（最大20、各辺10pt以上、ページ内）。')
+  const obj = page.getObject(), existing = obj.get('VP'), array = doc.newArray()
+  try {
+    for (let i = 0; i < existing.length; i++) {
+      const vp = existing.get(i), marker = vp.get('KaruScaleRegion')
+      try { if (marker.isNull()) array.push(vp) } finally { marker.destroy(); vp.destroy() }
+    }
+    for (const region of regions) {
+      const vp = doc.newDictionary(), box = doc.newArray(), json = doc.newString(JSON.stringify({ id: region.id, scale: region.scale, ...(region.label !== undefined ? { label: region.label } : {}) }))
+      try {
+        for (const n of transformScaleRect(region.rect, invertMatrix(page.getTransform()))) box.push(n)
+        vp.put('Type', 'Viewport'); vp.put('BBox', box); vp.put('KaruScaleRegion', json)
+        if (region.label) { const name = doc.newString(region.label); try { vp.put('Name', name) } finally { name.destroy() } }
+        // Deliberately omit Measure: older Karu versions must skip this viewport.
+        array.push(vp)
+      } finally { json.destroy(); box.destroy(); vp.destroy() }
+    }
+    if (array.length) obj.put('VP', array); else obj.delete('VP')
+  } finally { array.destroy(); existing.destroy(); obj.destroy() }
+}
+export function readDocumentScaleRegions(doc: PDFDocument): Array<[number, ScaleRegion[]]> {
+  const entries: Array<[number, ScaleRegion[]]> = []
+  for (let i = 0; i < doc.countPages(); i++) { const page = doc.loadPage(i); try { const regions = readScaleRegions(page); if (regions.length) entries.push([i, regions]) } finally { page.destroy() } }
+  return entries
 }

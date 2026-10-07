@@ -29,7 +29,7 @@ import { parseIssue, issueColor, issueFontSize, type Issue } from './issues'
 import { parseCount, type CountMark } from './counts'
 import { writeCountFixtures, type CountFixture } from './countFixtures'
 import { countMarkerData } from '../editor/countMarkers'
-import { createMeasureDictionary, invertMatrix, measureBounds, measureLabel, measureText, pageUnitFactor, readMeasureSettings, transformMeasurePoint, writePageScale, type MeasureKind, type MeasureSettings, type PageScale } from './measure'
+import { createMeasureDictionary, invertMatrix, measureBounds, measureLabel, measureText, pageUnitFactor, readMeasureSettings, transformMeasurePoint, writePageScale, writeScaleRegions, type ScaleRegion, type MeasureKind, type MeasureSettings, type PageScale } from './measure'
 
 export type Rect = [number, number, number, number]
 export type RGB = [number, number, number]
@@ -118,6 +118,7 @@ export type AnnotationEdit =
   | { kind: 'updateIssue'; objNum: number; pageIndex: number; rect: Rect; issue: Issue; text: string; color: RGB }
   | { kind: 'createLegacyChange'; pageIndex: number; data: LegacyChangeData }
   | { kind: 'setDrawingInfo'; pageIndex: number; info: DrawingInfo | null }
+  | { kind: 'setScaleRegions'; pageIndex: number; regions: ScaleRegion[] }
   | { kind: 'setPageScale'; pageIndex: number; scale: PageScale | null }
   | { kind: 'createMeasure'; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number; quantity?: QuantityMark | null; quantityDash?: QuantityLineStyle['dash'] }
   | { kind: 'updateMeasure'; objNum: number; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number; quantity?: QuantityMark | null; quantityDash?: QuantityLineStyle['dash'] }
@@ -1448,6 +1449,10 @@ export function applyEdits(
         pages.set(edit.pageIndex, page)
       }
       if (edit.kind === 'setDrawingInfo') { writeDrawingInfo(doc, page, edit.info); continue }
+      if (edit.kind === 'setScaleRegions') {
+        writeScaleRegions(doc, page, edit.regions)
+        continue
+      }
       if (edit.kind === 'setPageScale') {
         writePageScale(doc, page, edit.scale)
         continue

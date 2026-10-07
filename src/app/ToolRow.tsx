@@ -89,6 +89,7 @@ interface Props {
   canUndo: boolean
   canRedo: boolean
   onScale(): void
+  onAddScaleRegion(): void
   onToolChange(tool: EditorTool): void
   onUndo(): void
   onRedo(): void
@@ -120,6 +121,7 @@ export function ToolRow(props: Props) {
     if (group === 'measure') items.push(
       { type: 'separator' },
       { label: '縮尺の設定…', description: 'このページの縮尺を決める', onSelect: props.onScale },
+      { label: '縮尺の範囲を追加…', description: 'ページの一部に別の縮尺を決める（詳細図など）', onSelect: props.onAddScaleRegion },
       { type: 'separator' },
       { label: 'スナップ（既存の頂点に合わせる）', description: '計測・数量拾い・縮尺のなぞりで、既存の頂点に吸い付く（Alt で一時解除）', checked: snap?.enabled ?? false, onSelect: () => snap?.toggle() },
     )

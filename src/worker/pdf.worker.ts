@@ -9,7 +9,7 @@ import { openDocument, type OpenedDocument } from '../core/mupdfDoc'
 import { renderRegion } from '../core/render'
 import mupdf, { type Pixmap, type DrawDevice } from 'mupdf'
 import { ComparePageCache, renderComparePixels } from './compareRender'
-import { readDocumentScales } from '../core/measure'
+import { readDocumentScaleMetadata } from '../core/measure'
 import { applyEdits, listAnnotations } from '../core/annotations'
 import { readCountFixtures } from '../core/countFixtures'
 import { applyEditsAtomically, applyAndSaveAtomically, pdfOperation } from '../core/editTransaction'
@@ -388,7 +388,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         editRestriction: opened.editRestriction,
         pageSizes: opened.pageSizes,
         pageDrawingInfos: includeMetadata ? readDocumentDrawingInfos(pdf) : [],
-        pageScales: includeMetadata ? readDocumentScales(pdf) : [],
+        ...(includeMetadata ? readDocumentScaleMetadata(pdf) : { pageScales: [], pageScaleRegions: [] }),
         openMs: opened.openMs,
         sizesMs: opened.sizesMs,
       })
@@ -643,7 +643,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         post({
           type: 'pageLayoutApplied', requestId: request.requestId, bytes,
           pageCount: pageSizes.length,
-          pageSizes, pageDrawingInfos: readDocumentDrawingInfos(reopenedDocument), pageScales: readDocumentScales(reopenedDocument),
+          pageSizes, pageDrawingInfos: readDocumentDrawingInfos(reopenedDocument), ...readDocumentScaleMetadata(reopenedDocument),
           hasBackup: true,
           timings: {
             backupMs,
@@ -691,7 +691,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         const bytes = saved.buffer as ArrayBuffer
         post({
           type: request.type === 'applyHeaderFooter' ? 'headerFooterApplied' : 'headerFooterRemoved', requestId: request.requestId, bytes,
-          pageCount: pageSizes.length, pageSizes, pageDrawingInfos: readDocumentDrawingInfos(reopenedDocument), pageScales: readDocumentScales(reopenedDocument), hasBackup: true,
+          pageCount: pageSizes.length, pageSizes, pageDrawingInfos: readDocumentDrawingInfos(reopenedDocument), ...readDocumentScaleMetadata(reopenedDocument), hasBackup: true,
           timings: { backupMs, assembleMs, exportMs, primaryReloadMs, pageMetadataMs, workerTotalMs: performance.now() - workerStarted },
         }, [bytes])
       } catch (error) {
@@ -717,7 +717,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       post({
         type: 'pageLayoutUndone', requestId: request.requestId, bytes,
         pageCount: pageSizes.length,
-        pageSizes, pageDrawingInfos: readDocumentDrawingInfos(restoredDocument), pageScales: readDocumentScales(restoredDocument),
+        pageSizes, pageDrawingInfos: readDocumentDrawingInfos(restoredDocument), ...readDocumentScaleMetadata(restoredDocument),
         hasBackup: false,
         timings: {
           backupMs: 0,

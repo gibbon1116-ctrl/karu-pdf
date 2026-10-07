@@ -8,7 +8,7 @@ import { nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, typ
 import type { Quad } from 'mupdf'
 import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
-import { measureBounds, measureText, type MeasureKind, type MeasureSettings, type PageScale } from '../core/measure'
+import { measureBounds, measureText, resolveScale, pointInScaleRegion, validScaleRegion, MAX_SCALE_REGIONS, type ScaleRegion, type MeasureKind, type MeasureSettings, type PageScale } from '../core/measure'
 import { History, type HistoryStep } from './history'
 import { IssueNumbers, issueColor, issueOrder, parseIssue, type Issue } from '../core/issues'
 import type { CloudIntensity } from '../core/cloud'
@@ -59,7 +59,7 @@ export interface EditableAnnotation {
 
 type ScaleChange = { pageIndex: number; scale: PageScale | null }
 type DrawingChange = { pageIndex: number; info: DrawingInfo | null }
-type HistoryState = AnnotationState[] & { drawings?: DrawingChange[]; scales?: ScaleChange[]; issueMaximum?: number; fixtures?: CountFixture[] }
+type HistoryState = AnnotationState[] & { drawings?: DrawingChange[]; scales?: ScaleChange[]; scaleRegions?: Array<{ pageIndex: number; regions: ScaleRegion[] }>; issueMaximum?: number; fixtures?: CountFixture[] }
 interface AnnotationState extends Omit<EditableAnnotation, 'dirty'> {}
 interface StoredAnnotation extends AnnotationState {
   deleted: boolean
@@ -258,6 +258,9 @@ export class AnnotationStore {
   private readonly drawingDirtyBaselines = new Map<number, DrawingInfo | null>()
   private readonly automaticDrawings = new Map<number, DrawingInfo>()
   private pendingDrawings: Array<DrawingChange & { editIndex: number }> = []
+  readonly scaleRegions = new Map<number, ScaleRegion[]>()
+  private readonly scaleRegionBaselines = new Map<number, ScaleRegion[]>()
+  private pendingScaleRegions: Array<{ pageIndex: number; regions: ScaleRegion[]; editIndex: number }> = []
   private readonly scales = new Map<number, PageScale | null>()
   private readonly scaleBaselines = new Map<number, PageScale | null>()
   private pendingScales: Array<ScaleChange & { editIndex: number }> = []
@@ -338,6 +341,7 @@ export class AnnotationStore {
     this.legacyCountObjects.clear(); this.pendingFixtureSave = null
     this.drawings.clear(); this.drawingBaselines.clear(); this.drawingDirtyBaselines.clear(); this.automaticDrawings.clear(); this.pendingDrawings = []
     this.scales.clear(); this.scaleBaselines.clear(); this.pendingScales = []
+    this.scaleRegions.clear(); this.scaleRegionBaselines.clear(); this.pendingScaleRegions = []
     this.annotations.clear()
     this.baselines.clear()
     this.touchedByPage.clear()
@@ -438,6 +442,37 @@ export class AnnotationStore {
   loadScales(scales: readonly (PageScale | null)[]): void {
     scales.forEach((scale, pageIndex) => { this.scales.set(pageIndex, scale); this.scaleBaselines.set(pageIndex, scale) })
     this.notify()
+  }
+
+  loadScaleRegions(entries: readonly [number, ScaleRegion[]][]): void {
+    this.scaleRegions.clear(); this.scaleRegionBaselines.clear()
+    for (const [i, regions] of entries) { this.scaleRegions.set(i, structuredClone(regions)); this.scaleRegionBaselines.set(i, structuredClone(regions)) }
+    this.notify(false)
+  }
+  getScaleRegions(pageIndex: number): ScaleRegion[] { return structuredClone(this.scaleRegions.get(pageIndex) ?? []) }
+  scaleAt(pageIndex: number, point: Point): ReturnType<typeof resolveScale> {
+    return resolveScale(this.getScale(pageIndex), this.scaleRegions.get(pageIndex), point)
+  }
+  setScaleRegions(pageIndex: number, regions: ScaleRegion[], recalculate: boolean): void {
+    if (regions.length > MAX_SCALE_REGIONS || regions.some(r => !validScaleRegion(r)) || new Set(regions.map(r => r.id)).size !== regions.length) throw new Error('縮尺の範囲が不正です。')
+    const old = this.getScaleRegions(pageIndex), next = structuredClone(regions)
+    if (stableJson(old) === stableJson(next) && !recalculate) return
+    const before: HistoryState = [], after: HistoryState = []
+    before.scaleRegions = [{ pageIndex, regions: old }]; after.scaleRegions = [{ pageIndex, regions: next }]
+    this.scaleRegions.set(pageIndex, next)
+    if (recalculate) for (const a of this.annotations.values()) {
+      const start = a.vertices?.[0]
+      if (a.deleted || a.pageIndex !== pageIndex || !a.measure || !a.vertices || !start || ![...old, ...next].some(r => pointInScaleRegion(r, start))) continue
+      const scale = this.scaleAt(pageIndex, start)?.scale
+      // Removing the last available scale leaves historical values intact.
+      if (!scale) continue
+      const previous = cloneState(a)
+      a.measure = { ...a.measure, mmPerPoint: scale.mmPerPoint, unit: scale.unit, decimals: scale.decimals }
+      a.text = this.quantityText(a); a.rect = measureBounds(a.vertices, a.measure.kind, a.text, a.fontSize)
+      if (samePersisted(previous, a)) continue
+      before.push(previous); this.markTouched(a); a.revision++; after.push(cloneState(a))
+    }
+    this.history.push({ before, after }); this.notify()
   }
 
   getScale(pageIndex: number): PageScale | null { const s = this.scales.get(pageIndex); return s ? { ...s } : null }
@@ -701,6 +736,7 @@ export class AnnotationStore {
       if (!recalculate) continue
       for (const a of this.annotations.values()) {
         if (a.deleted || a.pageIndex !== pageIndex || !a.measure || !a.vertices) continue
+        if (a.vertices[0] && resolveScale(null, this.scaleRegions.get(pageIndex), a.vertices[0])) continue
         const previous = cloneState(a)
         a.measure = { ...a.measure, mmPerPoint: scale.mmPerPoint, unit: scale.unit, decimals: scale.decimals }
         a.text = this.quantityText(a); a.rect = measureBounds(a.vertices, a.measure.kind, a.text, a.fontSize)
@@ -1193,7 +1229,7 @@ export class AnnotationStore {
     const step = this.history.undo()
     if (!step) return
     this.restoreMany(step.before, step.after)
-    this.notify(!!(step.before.length || step.after.length || step.before.fixtures || step.before.scales))
+    this.notify(!!(step.before.length || step.after.length || step.before.fixtures || step.before.scales || step.before.scaleRegions))
   }
 
   updateIssueText(id: string, text: string): void {
@@ -1216,7 +1252,7 @@ export class AnnotationStore {
     const step = this.history.redo()
     if (!step) return
     this.restoreMany(step.after, step.before)
-    this.notify(!!(step.before.length || step.after.length || step.after.fixtures || step.after.scales))
+    this.notify(!!(step.before.length || step.after.length || step.after.fixtures || step.after.scales || step.after.scaleRegions))
   }
 
   touchedObjNums(pageIndex: number): number[] {
@@ -1252,6 +1288,8 @@ export class AnnotationStore {
     const edits = entries.map(({ edit }) => edit)
     this.pendingScales = [...this.scales].filter(([i, scale]) => stableJson(scale) !== stableJson(this.scaleBaselines.get(i) ?? null)).map(([pageIndex, scale], i) => ({ pageIndex, scale: scale ? { ...scale } : null, editIndex: edits.length + i }))
     const result: AnnotationEdit[] = [...edits, ...this.pendingScales.map(({ pageIndex, scale }) => ({ kind: 'setPageScale' as const, pageIndex, scale }))]
+    this.pendingScaleRegions = [...this.scaleRegions].filter(([i, regions]) => stableJson(regions) !== stableJson(this.scaleRegionBaselines.get(i) ?? [])).map(([pageIndex, regions], i) => ({ pageIndex, regions: structuredClone(regions), editIndex: result.length + i }))
+    result.push(...this.pendingScaleRegions.map(({ pageIndex, regions }) => ({ kind: 'setScaleRegions' as const, pageIndex, regions })))
     this.pendingDrawings = [...this.drawings].filter(([i, info]) => stableJson(info) !== stableJson(this.drawingBaselines.get(i) ?? null)).map(([pageIndex, info], i) => ({ pageIndex, info: info ? { ...info } : null, editIndex: result.length + i }))
     result.push(...this.pendingDrawings.map(({ pageIndex, info }) => ({ kind: 'setDrawingInfo' as const, pageIndex, info })))
     this.pendingFixtureSave = null
@@ -1270,6 +1308,8 @@ export class AnnotationStore {
     this.pendingFixtureSave = null
     for (const item of this.pendingScales) if (!failed.has(item.editIndex)) this.scaleBaselines.set(item.pageIndex, item.scale)
     this.pendingScales = []
+    for (const item of this.pendingScaleRegions) if (!failed.has(item.editIndex)) this.scaleRegionBaselines.set(item.pageIndex, structuredClone(item.regions))
+    this.pendingScaleRegions = []
     for (const item of this.pendingDrawings) if (!failed.has(item.editIndex)) { this.drawingBaselines.set(item.pageIndex, item.info); this.drawingDirtyBaselines.set(item.pageIndex, this.automaticDrawings.has(item.pageIndex) ? mergeAutomaticDrawingInfo(item.info, this.automaticDrawings.get(item.pageIndex)!) : item.info) }
     this.pendingDrawings = []
     let createdIndex = 0
@@ -1307,7 +1347,7 @@ export class AnnotationStore {
     const summary: DirtySummary = {
       annotations: this.editEntries().length,
       fixtures: stableJson(this.fixtures) !== this.fixtureBaseline,
-      scales: [...this.scales].filter(([i, scale]) => stableJson(scale) !== stableJson(this.scaleBaselines.get(i) ?? null)).map(([i]) => i).sort((a, b) => a - b),
+      scales: [...new Set([...this.scales].filter(([i, scale]) => stableJson(scale) !== stableJson(this.scaleBaselines.get(i) ?? null)).map(([i]) => i).concat([...this.scaleRegions].filter(([i, regions]) => stableJson(regions) !== stableJson(this.scaleRegionBaselines.get(i) ?? [])).map(([i]) => i)))].sort((a, b) => a - b),
       drawings: [...this.drawings].filter(([i, info]) => stableJson(info) !== stableJson(this.drawingDirtyBaselines.get(i) ?? null)).map(([i]) => i).sort((a, b) => a - b),
     }
     this.dirtyCache = { version: this.version, summary }
@@ -1357,6 +1397,7 @@ export class AnnotationStore {
     if (target.fixtures) this.fixtures = structuredClone(target.fixtures)
     if (target.issueMaximum !== undefined) this.issueNumbers.renumber(target.issueMaximum)
     for (const item of target.scales ?? []) this.scales.set(item.pageIndex, item.scale ? { ...item.scale } : null)
+    for (const item of target.scaleRegions ?? []) this.scaleRegions.set(item.pageIndex, structuredClone(item.regions))
     const targetById = new Map(target.map((state) => [state.id, state]))
     const ids = new Set([...target.map((state) => state.id), ...counterpart.map((state) => state.id)])
     for (const id of ids) {
@@ -1516,7 +1557,7 @@ export class AnnotationStore {
     step: HistoryStep<HistoryState>,
     mapper: (state: AnnotationState) => AnnotationState,
   ): HistoryStep<HistoryState> {
-    return { before: Object.assign(step.before.map(mapper), { drawings: step.before.drawings, scales: step.before.scales, issueMaximum: step.before.issueMaximum, fixtures: step.before.fixtures }), after: Object.assign(step.after.map(mapper), { drawings: step.after.drawings, scales: step.after.scales, issueMaximum: step.after.issueMaximum, fixtures: step.after.fixtures }) }
+    return { before: Object.assign(step.before.map(mapper), { drawings: step.before.drawings, scales: step.before.scales, scaleRegions: step.before.scaleRegions, issueMaximum: step.before.issueMaximum, fixtures: step.before.fixtures }), after: Object.assign(step.after.map(mapper), { drawings: step.after.drawings, scales: step.after.scales, scaleRegions: step.after.scaleRegions, issueMaximum: step.after.issueMaximum, fixtures: step.after.fixtures }) }
   }
 
   private markTouched(annotation: AnnotationState): void {

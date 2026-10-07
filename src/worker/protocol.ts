@@ -330,6 +330,7 @@ export interface OpenResponse {
   editRestriction?: string | null
   pageDrawingInfos?: (DrawingInfo | null)[]
   pageScales?: (PageScale | null)[]
+  pageScaleRegions?: Array<[number, import('../core/measure').ScaleRegion[]]>
   type: 'opened'
   requestId: number
   pageCount: number
@@ -461,6 +462,7 @@ export interface OutputPreparedResponse {
 export interface PageLayoutResponse {
   pageDrawingInfos?: (DrawingInfo | null)[]
   pageScales?: (PageScale | null)[]
+  pageScaleRegions?: Array<[number, import('../core/measure').ScaleRegion[]]>
   type: 'pageLayoutApplied' | 'pageLayoutUndone' | 'headerFooterApplied' | 'headerFooterRemoved'
   requestId: number
   bytes: ArrayBuffer
