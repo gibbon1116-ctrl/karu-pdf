@@ -113,6 +113,37 @@ button, input { font: inherit; }
 .viewer { position: relative; min-width: 0; min-height: 0; overflow: auto; background: #525659; overscroll-behavior: contain; }
 .viewer-slot { display: grid; min-width: 0; min-height: 0; }
 .viewer-slot { position: relative; }
+.quantity-viewer-stack { display: grid; min-width: 0; min-height: 0; overflow: hidden; }
+.quantity-table { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: #fff; border-top: 1px solid #aaa; font-size: 12px; }
+.quantity-table-resizer { flex: 0 0 6px; background: #c0c3c6; cursor: ns-resize; touch-action: none; }
+.quantity-table-resizer:focus-visible { outline: 2px solid #1769aa; outline-offset: -2px; }
+.quantity-table-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px 6px; }
+.quantity-table-toolbar button[aria-pressed="true"] { background: #dcecff; }
+.quantity-table-toolbar input { min-width: 100px; width: 140px; }
+.quantity-table-notice, .quantity-table > p { margin: 2px 6px; }
+.quantity-table-scroll { flex: 1 1 0; min-height: 0; overflow: auto; position: relative; overscroll-behavior: contain; }
+.quantity-table table { table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: inherit; }
+.quantity-table th, .quantity-table td { box-sizing: border-box; height: 32px; max-height: 32px; padding: 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-right: 1px solid #ddd; border-bottom: 1px solid #ddd; background: #fff; }
+.quantity-table thead th { position: sticky; top: 0; height: 56px; z-index: 3; background: #eef0f2; }
+.quantity-table thead span, .quantity-table thead small { display: block; overflow: hidden; text-overflow: ellipsis; }
+.quantity-table thead small { font-weight: normal; }
+.quantity-table .quantity-table-fixed { position: sticky; left: 0; z-index: 2; }
+.quantity-table .quantity-table-fixed-1 { left: 44px; }
+.quantity-table .quantity-table-fixed-2 { left: 144px; }
+.quantity-table .quantity-table-fixed-3 { left: 294px; }
+.quantity-table .quantity-table-fixed-4 { left: 344px; box-shadow: 2px 0 2px #0002; }
+.quantity-table thead .quantity-table-fixed { z-index: 4; }
+.quantity-table-category th, .quantity-table-category td { background: #e6edf5; text-align: left; }
+.quantity-table td button { position: relative; display: block; width: 100%; height: 31px; padding: 0 5px; text-align: right; border: 0; border-radius: 0; background: transparent; font-size: inherit; }
+.quantity-table td button:enabled:hover { background: #dcecff; }
+.quantity-table td button:focus-visible { outline: 2px solid #1769aa; outline-offset: -2px; }
+.quantity-table td button:disabled { color: inherit; }
+.quantity-table-cursor { position: absolute; bottom: 0; right: 3px; font-size: 9px; line-height: 10px; color: #40566e; }
+.quantity-table td button:has(.quantity-table-cursor) { padding-bottom: 9px; }
+.quantity-table td img, .quantity-table td svg { display: block; max-width: 30px; width: 30px; height: 28px; object-fit: contain; }
+.quantity-table .quantity-table-spacer td { height: auto; max-height: none; padding: 0; border: 0; }
+.quantity-pickup-flash { pointer-events: none; transform-box: fill-box; transform-origin: center; animation: quantity-pickup-flash 1.2s ease-out forwards; }
+@keyframes quantity-pickup-flash { from { transform: scale(1); opacity: 1; } to { transform: scale(1.4); opacity: 0; } }
 .pickup-bar-region { position: absolute; inset: 0 auto 0 0; pointer-events: none; z-index: 6; }
 .pickup-bar-anchor { position: absolute; left: 8px; max-width: min(70%, calc(100% - 16px)); pointer-events: auto; font-size: 12px; }
 .pickup-bar-top { top: 8px; }

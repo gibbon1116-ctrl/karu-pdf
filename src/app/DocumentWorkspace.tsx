@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { QuantityTableContext } from './QuantityBreakdown'
+const QuantityTable = lazy(() => import('./QuantityTable'))
 import { SplitView, type SplitController, type SplitWorkspaceProps } from './SplitView'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { RenderScheduler } from '../client/RenderScheduler'
@@ -60,6 +62,35 @@ interface Props {
 }
 
 export function DocumentWorkspace(props: Props) {
+  const [tableOpen, setTableOpen] = useState(false), [tableHeight, setTableHeight] = useState(40)
+  const panelActions = useRef<{ breakdown(id: string): void; csv(): void } | null>(null)
+  const pendingPanelAction = useRef<((actions: NonNullable<typeof panelActions.current>) => void) | null>(null)
+  const closeTable = useCallback(() => {
+    setTableOpen(false)
+    document.querySelector<HTMLButtonElement>('[aria-label="集計表を開く"]')?.focus()
+  }, [])
+  const tableControls = useMemo(() => ({
+    open: () => {
+      try {
+        const stored = localStorage.getItem('karu-pdf:quantity-table-height'), n = stored === null ? 40 : Number(stored)
+        setTableHeight(Number.isFinite(n) ? Math.max(20, Math.min(70, n)) : 40)
+      } catch { setTableHeight(40) }
+      setTableOpen(true)
+    },
+    showBreakdown: (id: string) => {
+      if (panelActions.current) panelActions.current.breakdown(id)
+      else pendingPanelAction.current = actions => actions.breakdown(id)
+    },
+    showCsv: () => {
+      if (panelActions.current) panelActions.current.csv()
+      else pendingPanelAction.current = actions => actions.csv()
+    },
+    bindPanel: (actions: NonNullable<typeof panelActions.current>) => {
+      panelActions.current = actions
+      const pending = pendingPanelAction.current; pendingPanelAction.current = null; pending?.(actions)
+      return () => { if (panelActions.current === actions) panelActions.current = null }
+    },
+  }), [])
   const viewerSlotRef = useRef<HTMLDivElement>(null)
   const splitControllerRef = useRef<SplitController>(null)
   const renderErrorRef = useRef(props.onRenderError)
@@ -127,6 +158,7 @@ export function DocumentWorkspace(props: Props) {
   )
 
   return (
+    <QuantityTableContext.Provider value={tableControls}>
     <div className={`document-workspace${props.showThumbnails ? '' : ' thumbnails-hidden'}${props.showFormat ? '' : ' format-hidden'}`}>
       {props.showThumbnails && <SidePanel
         session={props.session}
@@ -155,6 +187,7 @@ export function DocumentWorkspace(props: Props) {
           props.viewerRef.current?.scrollToPosition(annotation.pageIndex, annotation.rect[0], annotation.rect[1])
         }}
       />}
+      <div className="quantity-viewer-stack" style={{ gridTemplateRows: tableOpen ? `minmax(0, ${100 - tableHeight}fr) minmax(0, ${tableHeight}fr)` : 'minmax(0, 1fr)' }}>
       <div ref={viewerSlotRef} className={props.split ? 'viewer-slot split-view' : 'viewer-slot'} style={props.split ? { gridTemplateColumns: `minmax(0, ${props.split.settings.ratio}fr) 6px minmax(0, ${1 - props.split.settings.ratio}fr)` } : undefined}>
       <Viewer
         readOnly={!!props.session.editRestriction}
@@ -200,6 +233,10 @@ export function DocumentWorkspace(props: Props) {
       {!props.session.editRestriction && (props.tool === 'count' || props.session.annotationStore.selectedPickupsOnly()) &&
         <div className="pickup-bar-region" style={{ width: props.split ? `calc((100% - 6px) * ${props.split.settings.ratio})` : '100%' }}><PickupBar key={props.session.docId} session={props.session} /></div>}
       </div>
+      {tableOpen && <Suspense fallback={<div role="status">集計表を読み込んでいます…</div>}>
+        <QuantityTable session={props.session} pool={props.pool} height={tableHeight} onHeightChange={setTableHeight} onClose={closeTable} />
+      </Suspense>}
+      </div>
       {props.showFormat && !props.session.editRestriction && <FormatPanel
         selected={selected}
         tool={props.tool}
@@ -210,5 +247,6 @@ export function DocumentWorkspace(props: Props) {
       />}
       {props.debug && <DebugPanel pool={props.pool} cache={scheduler.cache} />}
     </div>
+    </QuantityTableContext.Provider>
   )
 }

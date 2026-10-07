@@ -213,6 +213,18 @@ export interface DirtySummary {
 }
 
 export class AnnotationStore {
+  private flashTarget: string | null = null
+  private flashTimer: ReturnType<typeof setTimeout> | null = null
+  flashVersion = 0
+  get flashId(): string | null { return this.flashTarget }
+  /** Selection feedback only: never dirty, indexed, added to history or saved. */
+  flashPickup(id: string): void {
+    if (this.flashTimer !== null) clearTimeout(this.flashTimer)
+    this.flashTarget = id; this.flashVersion++; this.notify(false)
+    this.flashTimer = setTimeout(() => {
+      this.flashTimer = null; this.flashTarget = null; this.notify(false)
+    }, 1500)
+  }
   private filter: Readonly<AnnotationFilter> = DEFAULT_ANNOTATION_FILTER
   private followsFilter = false
   private readonly drawingFilterReleaseListeners = new Set<(reason: DrawingFilterReleaseReason) => void>()

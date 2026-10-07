@@ -265,6 +265,8 @@ export function AnnotationLayer(props: Props) {
     ),
   ), [props.docId, props.pageIndex, props.pool])
   const annotations = props.store.getPageAnnotations(props.pageIndex).filter(a => props.store.isShownOnDrawing(a))
+  const flash = props.store.flashId ? props.store.get(props.store.flashId) : undefined
+  const flashPadding = 8 / (props.zoom * 96 / 72)
   const selectedIds = new Set(props.store.selectedIds())
   const orderedAnnotations = frontOrder(annotations, selectedIds)
   const hasSelection = selectedIds.size > 0
@@ -1137,6 +1139,13 @@ export function AnnotationLayer(props: Props) {
       <rect ref={resizePreviewRef} className="annotation-resize-preview" x="0" y="0" width="0" height="0" />
       <line ref={linePreviewRef} className="annotation-line-preview" x1="0" y1="0" x2="0" y2="0" />
       <line ref={calloutPreviewRef} className="annotation-line-preview" x1="0" y1="0" x2="0" y2="0" />
+      {flash?.pageIndex === props.pageIndex && <rect key={props.store.flashVersion}
+        className="quantity-pickup-flash" data-testid="quantity-pickup-flash" data-flash-id={flash.id}
+        x={flash.rect[0] - flashPadding} y={flash.rect[1] - flashPadding}
+        width={Math.max(0, flash.rect[2] - flash.rect[0]) + 2 * flashPadding}
+        height={Math.max(0, flash.rect[3] - flash.rect[1]) + 2 * flashPadding}
+        rx={flashPadding} fill="none" stroke="#ff8a00" strokeWidth={3}
+        vectorEffect="non-scaling-stroke" pointerEvents="none" aria-hidden="true" />}
     </svg>
     {measurement.dialog}
     {sampleInteraction?.selection?.docId === props.docId && <FixtureSampleSelection pageSize={props.pageSize} pageIndex={props.pageIndex} complete={sampleInteraction.selection.complete} />}

@@ -4,7 +4,7 @@ import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { countHex, fixtureCode, nextCountStyle, nextQuantityLineStyle, quantityKind, quantityLine, QUANTITY_UNITS, type FixturePreset, type CountFixture, type QuantityLineAppearance } from '../core/countFixtures'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 import { ensureSessionFixtures, FixtureUiContext, SnapUiContext, type DocumentSession } from './documentModel'
-import QuantityBreakdown from './QuantityBreakdown'
+import QuantityBreakdown, { QuantityTableContext } from './QuantityBreakdown'
 import { floorFromDrawingName } from '../core/location'
 import { annotationFilterLabel } from '../editor/annotationFilter'
 import { groupFixtures, moveCategory, moveFixture, stepFixture } from './fixtureOrder'
@@ -17,6 +17,7 @@ const FixturePresetDialog = lazy(() => import('./FixturePresetDialog'))
 
 export default function FixturePanel({ session, pool }: { session: DocumentSession; pool: PdfWorkerPool }) {
   const store = session.annotationStore, ui = useContext(FixtureUiContext)
+  const table = useContext(QuantityTableContext)
   const snap = useContext(SnapUiContext)
   const version = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [breakdownId, setBreakdownId] = useState<string | null>(null), [csvOpen, setCsvOpen] = useState(false)
@@ -141,6 +142,8 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   return <section className={`fixture-panel fixture-panel-${mode}${store.drawingHidesCounts() ? ' drawing-hides-counts' : ''}`} aria-label="数量拾い" data-testid="fixture-panel">
     <div className="fixture-panel-controls">
     <div className="fixture-panel-heading"><h2>数量拾い</h2><button type="button" aria-pressed={!managing} onClick={() => changeMode('pickup')}>拾う</button><button type="button" aria-pressed={managing} onClick={() => changeMode('manage')}>管理</button></div>
+    <button type="button" aria-label="集計表を開く" onClick={() => table?.open()}
+      ref={button => button ? table?.bindPanel({ breakdown: setBreakdownId, csv: () => setCsvOpen(true) }) : undefined}>集計表</button>
     {(managing || session.drawingScanning || drawingStatus.includes('失敗')) && <p className="fixture-drawing-status" aria-live="polite" data-testid="drawing-scan-status" title={drawingStatus}>{drawingStatus}</p>}
     {managing && <button type="button" disabled={session.drawingScanning} onClick={() => void session.scanDrawingInfos(pool, true)}>図面番号・図面名称を読み直す</button>}
     {store.drawingHidesCounts() && <div className="fixture-drawing-filter-warning" role="status">
