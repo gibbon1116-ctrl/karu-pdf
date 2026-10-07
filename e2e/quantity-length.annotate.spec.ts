@@ -24,7 +24,7 @@ async function open(page: Page) {
   await expect(page.getByTestId('annotation-layer-0')).toBeVisible()
 }
 async function addCable(page: Page) {
-  await page.getByRole('button', { name: '数量拾い', exact: true }).click()
+  await page.getByRole('button', { name: '数量拾い', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
   await expect(page.getByRole('tab', { name: '数量', exact: true })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByTestId('fixture-panel').getByRole('heading', { name: '数量拾い' })).toBeVisible()
   await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
@@ -83,7 +83,7 @@ test('length pickup: scale, addition, Undo, vertices, visibility, CSV, save and 
   await download.delete()
   const saved = await page.evaluate(async () => [...(await window.__karu!.saveToBytes())!])
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '再読込.pdf'), saved)
-  await page.getByRole('tab', { name: '数量', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
   await expect(value(page)).toHaveText('5.08')
   await expect(label(page)).toHaveText('CV 5.08 m')
   await page.getByRole('tab', { name: '書き込み', exact: true }).click()

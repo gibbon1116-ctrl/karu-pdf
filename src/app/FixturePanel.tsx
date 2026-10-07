@@ -8,6 +8,7 @@ import QuantityBreakdown from './QuantityBreakdown'
 import { floorFromDrawingName } from '../core/location'
 import { annotationFilterLabel } from '../editor/annotationFilter'
 import { groupFixtures, moveCategory, moveFixture, stepFixture } from './fixtureOrder'
+import { RecentFixtures } from './fixtureQuickList'
 const QuantityCsvExportDialog = lazy(() => import('./CsvExportDialog').then(m => ({ default: m.QuantityCsvExportDialog })))
 const FixtureDialog = lazy(() => import('./FixtureDialog'))
 const FixturePresetDialog = lazy(() => import('./FixturePresetDialog'))
@@ -17,6 +18,14 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   const snap = useContext(SnapUiContext)
   const version = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [breakdownId, setBreakdownId] = useState<string | null>(null), [csvOpen, setCsvOpen] = useState(false)
+  const [mode, setMode] = useState<'pickup' | 'manage'>(() => {
+    try { return localStorage.getItem('karu-pdf:fixture-panel-mode') === 'manage' ? 'manage' : 'pickup' } catch { return 'pickup' }
+  })
+  const managing = mode === 'manage'
+  const changeMode = (value: 'pickup' | 'manage') => {
+    setMode(value); setSampleHover(null); dragging.current = null; setDropTarget(null)
+    try { localStorage.setItem('karu-pdf:fixture-panel-mode', value) } catch { /* Optional preference storage. */ }
+  }
   const closeBreakdown = useRef(() => setBreakdownId(null)).current
   const [search, setSearch] = useState(''), [collapsed, setCollapsed] = useState(new Set<string>()), [error, setError] = useState('')
   const [dialog, setDialog] = useState<{ initial: CountFixture; editing: boolean; duplicate?: boolean } | null>(null)
@@ -41,7 +50,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   const groups = useMemo(() => groupFixtures(fixtures), [fixtures])
   const categories = useMemo(() => groups.map(g => ({ ...g, items: g.items.filter(f => `${fixtureCode(f)} ${f.name}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())) })).filter(g => g.items.length), [groups, search])
   const canEdit = store.fixturesReady && !session.editRestriction && !busy
-  const canReorder = canEdit && search.length === 0
+  const canReorder = managing && canEdit && search.length === 0
   const reorderTitle = search.length ? '検索中は並べ替えできません' : 'ドラッグして並べ替え'
   const selectedItems = categories.find(g => g.category === selected?.category)?.items ?? []
   const selectedIndex = selectedItems.findIndex(f => f.id === selected?.id)
@@ -126,11 +135,11 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     if (window.showSaveFilePicker) { const handle = await window.showSaveFilePicker({ suggestedName: name }); const writable = await handle.createWritable(); await writable.write(blob); await writable.close() }
     else { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 0) }
   }
-  return <section className={`fixture-panel${store.drawingHidesCounts() ? ' drawing-hides-counts' : ''}`} aria-label="数量拾い" data-testid="fixture-panel">
+  return <section className={`fixture-panel fixture-panel-${mode}${store.drawingHidesCounts() ? ' drawing-hides-counts' : ''}`} aria-label="数量拾い" data-testid="fixture-panel">
     <div className="fixture-panel-controls">
-    <h2>数量拾い</h2>
-    <p aria-live="polite" data-testid="drawing-scan-status">{drawingStatus}</p>
-    <button type="button" disabled={session.drawingScanning} onClick={() => void session.scanDrawingInfos(pool, true)}>図面番号・図面名称を読み直す</button>
+    <div className="fixture-panel-heading"><h2>数量拾い</h2><button type="button" aria-pressed={!managing} onClick={() => changeMode('pickup')}>拾う</button><button type="button" aria-pressed={managing} onClick={() => changeMode('manage')}>管理</button></div>
+    {(managing || session.drawingScanning || drawingStatus.includes('失敗')) && <p className="fixture-drawing-status" aria-live="polite" data-testid="drawing-scan-status" title={drawingStatus}>{drawingStatus}</p>}
+    {managing && <button type="button" disabled={session.drawingScanning} onClick={() => void session.scanDrawingInfos(pool, true)}>図面番号・図面名称を読み直す</button>}
     {store.drawingHidesCounts() && <div className="fixture-drawing-filter-warning" role="status">
       <p>書き込みタブの絞り込み（{annotationFilterLabel(store.annotationFilter)}）で、図面に数量拾いの印を出していません。</p>
       <button type="button" onClick={() => store.setDrawingFollowsFilter(false)}>図面への反映をやめる</button>
@@ -145,6 +154,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       <div className="fixture-action-row">
       <button disabled={!canEdit || fixtures.length >= 1000} onClick={() => setDialog({ editing: false, initial: { id: crypto.randomUUID(), name: '', code: '', category: selected?.category ?? groups[0]?.category ?? 'その他', style: nextCountStyle(fixtures), order: nextOrder } })}>項目を追加</button>
       <button disabled={!canEdit} onClick={() => setPreset(true)}>標準マスタから追加</button>
+      {managing && <>
       <button disabled={!canEdit || !selected || fixtures.length >= 1000} onClick={() => {
         if (!selected) return
         try {
@@ -167,8 +177,9 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
         if (!window.confirm(parts.length ? `${parts.join('、')}ます。よろしいですか？` : `${selected.name}を削除しますか？`)) return
         store.setCountFixtures(fixtures.filter(f => f.id !== selected.id), [selected.id]); store.selectFixture(null)
       }}>削除</button>
+      </>}
       </div>
-      <div className="fixture-action-row">
+      {managing && <div className="fixture-action-row">
       <button disabled={!canEdit} onClick={() => {
         setBusy(true); setError('')
         void Promise.all((ui?.documents ?? []).filter(d => d !== session).map(async d => ({ name: d.name, fixtures: d.annotationStore.fixturesReady ? d.annotationStore.getCountFixtures() : await pool.getCountFixtures(d.docId) })))
@@ -177,8 +188,9 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       <button disabled={!store.fixturesReady || busy} onClick={() => setCsvOpen(true)}>数量をCSVに書き出す</button>
       <button disabled={!canEdit || !selected || selectedIndex <= 0} title={selectedIndex === 0 ? '分類の先頭です。分類ごと動かすときは、分類の見出しをドラッグします' : undefined} onClick={() => step(-1)}>上へ</button>
       <button disabled={!canEdit || !selected || selectedIndex < 0 || selectedIndex === selectedItems.length - 1} title={selectedIndex === selectedItems.length - 1 ? '分類の末尾です。分類ごと動かすときは、分類の見出しをドラッグします' : undefined} onClick={() => step(1)}>下へ</button>
-      </div>
+      </div>}
     </div>
+    {!managing && <RecentFixtures fixtures={fixtures} ids={store.recentFixtureIds} onSelect={id => { setSelectedCategory(null); store.selectFixture(id); ui?.select() }} />}
     <fieldset className="current-location"><legend>現在の場所</legend>
       <label>階<LocationInput value={store.currentFloor} label="現在の階" list="pickup-floors" commit={v => store.setCurrentLocation('floor', v)} /></label>
       {inferredFloor && !store.currentFloor && <small>（図面名から: {inferredFloor}）</small>}
@@ -187,33 +199,35 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       <datalist id="pickup-rooms">{locations.rooms.map(r => <option key={r} value={r} />)}</datalist>
     </fieldset>
     <label>名称・略号で検索<input type="search" value={search} onChange={e => setSearch(e.currentTarget.value)} /></label>
+    {managing && <>
     <label><input type="checkbox" checked={store.onlySelectedFixture} onChange={e => store.setOnlySelectedFixture(e.currentTarget.checked)} />選択中の項目だけ表示</label>
     <label><input type="checkbox" checked={store.showQuantityValues} onChange={e => store.setShowQuantityValues(e.currentTarget.checked)} />図面に長さ・面積・体積の数値を表示</label>
     <label title="計測・数量拾い・縮尺のなぞりで、既存の頂点に吸い付く（Alt で一時解除）"><input type="checkbox" checked={snap?.enabled ?? false} onChange={() => snap?.toggle()} />スナップ（既存の頂点に合わせる）</label>
     <button onClick={() => store.showAllFixtures()}>すべて表示</button>
+    </>}
     {status && <p role="status">{status}</p>}
     {error && <p role="alert">{error}</p>}
     </div>
     <div className="fixture-groups" onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null) }} onScroll={() => setSampleHover(null)}>
-      <div className="fixture-list-heading"><span>表示</span><span>印</span><span>見本</span><span>略号</span><span>名称</span><span>この図面</span><span>全図面</span></div>
+      <div className="fixture-list-heading">{managing ? <><span>表示</span><span>印</span><span>見本</span><span>略号</span><span>名称</span></> : <span>項目</span>}<span>この図面</span><span>全図面</span></div>
       {categories.map(({ category, items: list }) => <section key={category}>
       <div className={`fixture-category${selectedCategory === category ? ' selected' : ''}${dropClass('category', category)}`} onDragOver={event => dragOver(event, 'category', category)} onDrop={event => drop(event, 'category', category)}><button draggable={canReorder} title={reorderTitle} onDragStart={event => startDrag(event, 'category', category)} onDragEnd={endDrag} aria-expanded={!collapsed.has(category)} onClick={() => { setSelectedCategory(category); setCollapsed(previous => { const next = new Set(previous); if (next.has(category)) next.delete(category); else next.add(category); return next }) }}>{category}（{list.length}）</button>
-        <button aria-label={`${category}の表示切替`} aria-pressed={list.every(f => store.isFixtureVisible(f.id))} onClick={() => store.setFixtureVisible(fixtures.filter(f => f.category === category).map(f => f.id), !list.every(f => store.isFixtureVisible(f.id)))}><Eye visible={list.every(f => store.isFixtureVisible(f.id))} /></button>
+        {managing && <button aria-label={`${category}の表示切替`} aria-pressed={list.every(f => store.isFixtureVisible(f.id))} onClick={() => store.setFixtureVisible(fixtures.filter(f => f.category === category).map(f => f.id), !list.every(f => store.isFixtureVisible(f.id)))}><Eye visible={list.every(f => store.isFixtureVisible(f.id))} /></button>}
       </div>
       {!collapsed.has(category) && <ul>{list.map(f => <li key={f.id} className={(f.id === selected?.id ? 'selected' : '') + dropClass('fixture', f.id)} data-fixture-id={f.id} draggable={canReorder} title={reorderTitle}
         onDragStart={event => startDrag(event, 'fixture', f.id)} onDragEnd={endDrag} onDragOver={event => dragOver(event, 'fixture', f.id)} onDrop={event => drop(event, 'fixture', f.id)}
         onClick={event => { if (!(event.target as HTMLElement).closest('button')) { setSelectedCategory(null); store.selectFixture(f.id); ui?.select() } }}
         onMouseEnter={event => {
-          if (dragging.current || !f.sample || quantityKind(f) !== 'count') return
+          if (!managing || dragging.current || !f.sample || quantityKind(f) !== 'count') return
           const rect = event.currentTarget.getBoundingClientRect()
           setSampleHover({ fixture: f, left: Math.max(8, Math.min(window.innerWidth - 176, rect.right + 8)), top: Math.max(8, Math.min(window.innerHeight - 176, rect.top)) })
         }} onMouseLeave={() => setSampleHover(null)}>
-        <span className="fixture-grip" aria-hidden="true">⠿</span>
-        <button aria-label={`${fixtureCode(f)} ${f.name}の表示切替`} aria-pressed={store.isFixtureVisible(f.id)} onClick={() => store.setFixtureVisible([f.id], !store.isFixtureVisible(f.id))}><Eye visible={store.isFixtureVisible(f.id)} /></button>
+        {managing && <><span className="fixture-grip" aria-hidden="true">⠿</span>
+        <button aria-label={`${fixtureCode(f)} ${f.name}の表示切替`} aria-pressed={store.isFixtureVisible(f.id)} onClick={() => store.setFixtureVisible([f.id], !store.isFixtureVisible(f.id))}><Eye visible={store.isFixtureVisible(f.id)} /></button></>}
         <button className="fixture-row" aria-label={`${fixtureCode(f)} ${f.name}`.trim()} aria-pressed={f.id === selected?.id} onClick={() => { setSelectedCategory(null); store.selectFixture(f.id); ui?.select() }}>
           {quantityKind(f) === 'count' ? <svg className="fixture-swatch" viewBox="-14 -14 28 28" aria-hidden="true"><CountMarker style={{ ...f.style, size: 24, opacity: 1 }} showCode={false} /></svg> : <QuantitySwatch fixture={f} />}
-          <span className="fixture-sample-cell">{quantityKind(f) === 'count' && f.sample && <img className="fixture-sample-thumbnail" src={`data:image/png;base64,${f.sample.png}`} alt={`${f.name}の見本`} draggable={false} />}</span>
-          <span className="fixture-row-code" title={f.code}>{f.code}{' '}</span><span className="fixture-row-name" title={f.name}>{f.name}{f.spec && <span className="fixture-row-spec"> {f.spec}</span>}{quantityKind(f) !== 'count' && <span className="fixture-row-unit">{QUANTITY_UNITS[quantityKind(f)]}</span>}</span><span className="fixture-row-count" title={`表示中の図面: ${format(f, pageTotal(f.id))}${unit(f)}`}>{format(f, pageTotal(f.id))}</span>
+          {managing && <span className="fixture-sample-cell">{quantityKind(f) === 'count' && f.sample && <img className="fixture-sample-thumbnail" src={`data:image/png;base64,${f.sample.png}`} alt={`${f.name}の見本`} draggable={false} />}</span>}
+          <span className="fixture-row-code" title={fixtureCode(f)}>{managing ? f.code : fixtureCode(f)}{' '}</span><span className="fixture-row-name" title={`${f.name}${f.spec ? ` ${f.spec}` : ''}`}>{f.name}{managing && f.spec && <span className="fixture-row-spec"> {f.spec}</span>}{quantityKind(f) !== 'count' && <span className="fixture-row-unit">{QUANTITY_UNITS[quantityKind(f)]}</span>}</span><span className="fixture-row-count" title={`表示中の図面: ${format(f, pageTotal(f.id))}${unit(f)}`}>{format(f, pageTotal(f.id))}</span>
         </button>
         <button className="fixture-total-button fixture-row-count" disabled={total(f.id) === 0} aria-label={`${fixtureCode(f)} ${f.name}の全図面の内訳`} title={`全図面: ${format(f, total(f.id))}${unit(f)}`} onClick={() => setBreakdownId(f.id)}>{format(f, total(f.id))}</button>
       </li>)}</ul>}

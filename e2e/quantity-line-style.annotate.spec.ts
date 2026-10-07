@@ -16,7 +16,7 @@ async function open(page: Page, fixtures: CountFixture[] = []) {
   await page.waitForFunction(() => !!window.__karu)
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '線の提案.pdf'), pdf(fixtures))
   await expect(page.getByTestId('annotation-layer-0')).toBeVisible()
-  await page.getByRole('button', { name: '数量拾い', exact: true }).click()
+  await page.getByRole('button', { name: '数量拾い', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
   await expect(page.getByTestId('fixture-panel').getByRole('heading', { name: '数量拾い' })).toBeVisible()
 }
 async function savedFixtures(page: Page) {
@@ -111,7 +111,7 @@ test('PDF imports preserve free appearances and reassign collisions across kinds
   ]
   await open(page, source)
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '読込先.pdf'), pdf([base]))
-  await page.getByRole('tab', { name: '数量', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
   await page.getByRole('button', { name: '他のPDFから読み込む', exact: true }).click()
   await page.getByRole('dialog', { name: '他のPDFから読み込む', exact: true }).getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
   const imported = await savedFixtures(page)

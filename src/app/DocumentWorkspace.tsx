@@ -10,6 +10,7 @@ import { BitmapCache } from '../viewer/BitmapCache'
 import { Viewer, type ViewerHandle } from '../viewer/Viewer'
 import type { DocumentSession, SidePanelTab } from './documentModel'
 import { FormatPanel } from './FormatPanel'
+import PickupBar from './PickupBar'
 import { SidePanel } from './SidePanel'
 import type { SearchHighlightState } from './SearchPanel'
 import { OrganizeView, type ExtractOptions, type OrganizeSourceInfo } from '../organize/OrganizeView'
@@ -196,6 +197,8 @@ export function DocumentWorkspace(props: Props) {
       {props.split && <SplitView {...props.split} left={props.session} pool={props.pool} scheduler={scheduler}
         leftRef={props.viewerRef} containerRef={viewerSlotRef} controllerRef={splitControllerRef}
         formatDefaults={props.formatDefaults} onStatus={props.onStatus} />}
+      {!props.session.editRestriction && (props.tool === 'count' || props.session.annotationStore.selectedPickupsOnly()) &&
+        <div className="pickup-bar-region" style={{ width: props.split ? `calc((100% - 6px) * ${props.split.settings.ratio})` : '100%' }}><PickupBar key={props.session.docId} session={props.session} /></div>}
       </div>
       {props.showFormat && !props.session.editRestriction && <FormatPanel
         selected={selected}

@@ -1349,6 +1349,19 @@ export default function App() {
         event.preventDefault(); showStatus(activeRef.current.editRestriction); return
       }
       const organizing = organizeRef.current
+      if (event.key === '[' || event.key === ']') {
+        if (isInput || target?.closest('[contenteditable="true"]') || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.isComposing || organizing || document.querySelector('[role="menu"], dialog[open], [role="dialog"]')) return
+        const session = activeRef.current
+        if (!session || session.editRestriction || !session.annotationStore.fixturesReady) return
+        event.preventDefault()
+        // Load the picker only on demand; use the same grouped order as the bar.
+        void import('./app/fixtureQuickList').then(({ adjacentPickupFixture }) => {
+          if (activeRef.current !== session || organizeRef.current) return
+          const next = adjacentPickupFixture(session.annotationStore, event.key === '[' ? -1 : 1)
+          if (next) { session.annotationStore.selectFixture(next.id); void changeTool('count') }
+        })
+        return
+      }
       if (event.altKey && !event.ctrlKey && !event.metaKey && !event.isComposing && !isActiveTextEditorComposing() && !isInput && !organizing && !document.querySelector('[role="menu"], dialog[open], [role="dialog"]') && (key === 'arrowleft' || key === 'arrowright') && target?.closest('.viewer')) {
         event.preventDefault(); moveViewHistory(key === 'arrowleft' ? 'back' : 'forward'); return
       }

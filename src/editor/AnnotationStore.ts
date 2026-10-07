@@ -224,6 +224,11 @@ export class AnnotationStore {
   fixturesReady = false
   get fixturesLoading(): boolean { return this.fixtureLoading !== null }
   selectedFixtureId: string | null = null
+  private recentFixtures: readonly string[] = []
+  get recentFixtureIds(): readonly string[] { return this.recentFixtures }
+  private rememberFixture(id: string): void {
+    this.recentFixtures = [id, ...this.recentFixtures.filter(previous => previous !== id)].slice(0, 8)
+  }
   private readonly hiddenFixtures = new Set<string>()
   onlySelectedFixture = false
   showQuantityValues = true
@@ -316,6 +321,7 @@ export class AnnotationStore {
   canRedo = (): boolean => this.history.canRedo
 
   reset(preserveFixtureVisibility = false): void {
+    if (!preserveFixtureVisibility) this.recentFixtures = []
     this.index = null; this.visibleCountCache = null
     this.fixtures = []; this.fixtureBaseline = '[]'; this.fixtureLoading = null; this.fixturesReady = false
     if (!preserveFixtureVisibility) { this.currentFloor = ''; this.currentRoom = ''; this.selectedFixtureId = null; this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.showQuantityValues = true }
@@ -457,7 +463,7 @@ export class AnnotationStore {
     })().finally(() => { if (generation === this.generation) this.fixtureLoading = null })
     return this.fixtureLoading
   }
-  selectFixture(id: string | null): void { this.selectedFixtureId = id; this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false) }
+  selectFixture(id: string | null): void { this.selectedFixtureId = id; if (id !== null) this.rememberFixture(id); this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false) }
   isFixtureVisible(id: string): boolean { return !this.hiddenFixtures.has(id) && (!this.onlySelectedFixture || id === this.selectedFixtureId) }
   isCountVisible(mark: CountMark | null | undefined, quantity?: QuantityMark | null): boolean { return quantity ? [quantity.itemId, ...(quantity.extra ?? []).map(e => e.itemId)].some(id => this.isFixtureVisible(id)) : !mark || this.isFixtureVisible(countFixtureId(mark)) }
   setFixtureVisible(ids: readonly string[], visible: boolean): void {
@@ -561,6 +567,7 @@ export class AnnotationStore {
     const appearance = (f: CountFixture | undefined) => f ? stableJson([f.name, f.code, f.spec, f.style, f.line]) : ''
     const changed = new Set(fixtures.filter(f => appearance(f) !== appearance(this.getCountFixture(f.id))).map(f => f.id))
     this.fixtures = structuredClone(fixtures)
+    this.recentFixtures = this.recentFixtures.filter(id => fixtures.some(f => f.id === id))
     for (const a of this.annotations.values()) if (!a.deleted && (a.count || a.quantity)) {
       const id = a.quantity?.itemId ?? countFixtureId(a.count!)
       const routeIds = [id, ...(a.quantity?.extra ?? []).map(e => e.itemId)]
@@ -828,6 +835,8 @@ export class AnnotationStore {
     if (annotation.quantity) this.revealCountFixture(annotation.quantity.itemId)
     if (annotation.count) this.revealCountFixture(countFixtureId(annotation.count))
     this.annotations.set(id, annotation)
+    if (input.quantity) this.rememberFixture(input.quantity.itemId)
+    else if (input.count) this.rememberFixture(countFixtureId(input.count))
     if (annotation.issue) this.issueNumbers.observe(annotation.issue.number)
     if (input.deferHistory) this.pendingCreations.add(id)
     else this.history.push({ before: [], after: [cloneState(annotation)] })

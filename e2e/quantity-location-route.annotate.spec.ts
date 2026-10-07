@@ -14,7 +14,7 @@ async function click(page:Page,p:number,x:number,y:number,shift=false){
 async function open(page:Page){
  await page.goto('/karu-pdf/?test=1&workers=2&warm=0');await page.waitForFunction(()=>!!window.__karu)
  await page.evaluate(b=>window.__karu!.openBytes(b,'場所経路.pdf'),blankPdf());await page.evaluate(()=>window.__karu!.setZoom(1))
- await page.getByRole('tab',{name:'数量',exact:true}).click();await expect(page.getByRole('button',{name:'項目を追加',exact:true})).toBeEnabled()
+ await page.getByRole('tab',{name:'数量',exact:true}).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click();await expect(page.getByRole('button',{name:'項目を追加',exact:true})).toBeEnabled()
 }
 async function add(page:Page,code:string,name:string,spec:string,length=false,scope?:'all'|'noSlack'|'rise'){
  await page.getByTestId('fixture-panel').getByRole('button',{name:'項目を追加',exact:true}).click()
@@ -89,7 +89,7 @@ test('locations, drawing-name fallback, bulk Undo, shared route, spec duplicatio
   expect(readCountFixtures(doc).map(f=>[f.code,f.spec,f.aggregation])).toEqual([['LED','300W','location'],['CV','38sq-3C','document'],['EM-CE','5.5sq-3C','document'],['EM-CE','14sq-3C','document']])
   expect(listAnnotations(doc,0).find(a=>a.quantity)?.quantity).toMatchObject({count:2,extra:[{count:1}],room:'事務室'})
  }finally{doc.destroy()}
- await page.evaluate(b=>window.__karu!.openBytes(b,'再読込.pdf'),saved);await page.getByRole('tab',{name:'数量',exact:true}).click()
+ await page.evaluate(b=>window.__karu!.openBytes(b,'再読込.pdf'),saved);await page.getByRole('tab',{name:'数量',exact:true}).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
  await expect(row(page,'CV 38sq-3C 幹線ケーブル').locator('..').locator('.fixture-row-count').last()).toHaveText('5.08')
  expect((await marks(page,0)).every(m=>m?.version===2&&m.floor==='1階'&&m.room==='事務室')).toBe(true)
  expect((await marks(page,1))[0]).toMatchObject({floor:'2階',room:'事務室'})
@@ -134,7 +134,7 @@ test('route scopes, separate rise/slack, defaults, Undo and saved quantities', a
   expect(listAnnotations(doc,0).find(a=>a.quantity)?.quantity).toMatchObject({addM:3,slackM:1,extra:[{count:1,scope:'rise'}]})
   expect(listAnnotations(doc,0).find(a=>a.quantity)?.contents).toBe('CV 38sq-3C, PF28（立上り）  2.54+3.00+余1.00=6.54 m')
  } finally {doc.destroy()}
- await page.evaluate(b=>window.__karu!.openBytes(b,'範囲再読込.pdf'),saved);await page.getByRole('tab',{name:'数量',exact:true}).click()
+ await page.evaluate(b=>window.__karu!.openBytes(b,'範囲再読込.pdf'),saved);await page.getByRole('tab',{name:'数量',exact:true}).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
  await expect(total('CV 38sq-3C 幹線ケーブル')).toHaveText('6.54');await expect(total('PF28 立上り電線管')).toHaveText('3.00')
  // The same PF fixture defaults to rise when used as the main item on a new route.
  await row(page,'PF28 立上り電線管').click();await click(page,0,100,380);await click(page,0,172,380);await page.keyboard.press('Enter')

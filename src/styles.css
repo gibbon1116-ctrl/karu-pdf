@@ -112,6 +112,28 @@ button, input { font: inherit; }
 .document-workspace.thumbnails-hidden.format-hidden { grid-template-columns: minmax(0, 1fr); }
 .viewer { position: relative; min-width: 0; min-height: 0; overflow: auto; background: #525659; overscroll-behavior: contain; }
 .viewer-slot { display: grid; min-width: 0; min-height: 0; }
+.viewer-slot { position: relative; }
+.pickup-bar-region { position: absolute; inset: 0 auto 0 0; pointer-events: none; z-index: 6; }
+.pickup-bar-anchor { position: absolute; left: 8px; max-width: min(70%, calc(100% - 16px)); pointer-events: auto; font-size: 12px; }
+.pickup-bar-top { top: 8px; }
+.pickup-bar-bottom { bottom: 8px; }
+.pickup-bar { display: flex; align-items: center; gap: 3px; height: 32px; box-sizing: border-box; padding: 2px 4px; border: 1px solid #b5bdc7; border-radius: 4px; background: rgba(255,255,255,.94); box-shadow: 0 1px 4px #0002; white-space: nowrap; }
+.pickup-bar > button { flex: 0 0 auto; padding: 0 3px; min-width: 22px; height: 26px; font-size: 12px; }
+.pickup-bar > .pickup-bar-current { display: flex; align-items: center; gap: 3px; flex: 0 5 auto; min-width: 0; overflow: hidden; }
+.pickup-bar-current > span { min-width: 0; max-width: 22em; overflow: hidden; text-overflow: ellipsis; }
+.pickup-bar .fixture-swatch, .fixture-recent .fixture-swatch, .fixture-quick-list .fixture-swatch { width: 20px; height: 20px; }
+/* The quantities matter more than the long formal name: the name gives way first. */
+.pickup-bar-totals { display: flex; gap: 8px; flex: 0 0 auto; font-variant-numeric: tabular-nums; font-size: 12px; }
+.pickup-bar-totals strong { font-size: 13px; }
+.fixture-quick-list { position: absolute; left: 0; top: calc(100% + 4px); width: min(360px, 100%); box-sizing: border-box; max-height: min(360px, calc(100dvh - 120px)); display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid #b5bdc7; border-radius: 4px; background: white; box-shadow: 0 2px 8px #0002; }
+.pickup-bar-bottom .fixture-quick-list { top: auto; bottom: calc(100% + 4px); }
+.fixture-quick-list input { width: 100%; box-sizing: border-box; min-height: 28px; }
+.fixture-quick-options { overflow: auto; min-height: 0; }
+.fixture-quick-heading { font-weight: bold; background: #eef3f9; padding: 4px; }
+.fixture-quick-options button { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 28px; text-align: left; border: 0; background: transparent; }
+.fixture-quick-options button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fixture-quick-options button[aria-selected="true"] { background: #dcecff; }
+.fixture-quick-list p { margin: 4px 0; }
 .viewer-slot.split-view { grid-template-rows: minmax(0, 1fr); }
 .split-divider { background: #c0c3c6; cursor: ew-resize; touch-action: none; }
 .split-divider:focus-visible { outline: 2px solid #1769aa; outline-offset: -2px; }
@@ -614,6 +636,22 @@ button, input { font: inherit; }
 }
 
 .fixture-row-unit { margin-left: .35em; font-size: .8em; color: #666; }
+.fixture-panel-heading { display: flex; align-items: center; gap: 4px; }
+.fixture-panel-heading h2 { flex: 1; }
+.fixture-panel-heading button { padding: 2px 6px; font-size: 12px; }
+.fixture-panel-heading button[aria-pressed="true"] { background: #dcecff; border-color: #0068b7; }
+.fixture-panel-pickup .fixture-drawing-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 2px 0; font-size: 11px; }
+.fixture-recent { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; font-size: 11px; }
+.fixture-recent button { display: flex; align-items: center; gap: 2px; min-width: 0; max-width: 100%; height: 24px; padding: 0 3px; font-size: 11px; }
+.fixture-recent button > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fixture-panel-pickup .current-location { flex-wrap: nowrap; align-items: center; margin: 4px 0; padding: 2px 4px; min-width: 0; font-size: 11px; gap: 4px; }
+.fixture-panel-pickup .current-location label, .fixture-panel-pickup .current-location .location-input { min-width: 0; }
+.fixture-panel-pickup .current-location input { width: 66px; }
+.fixture-panel-pickup .current-location legend { float: left; padding: 0; white-space: nowrap; }
+.fixture-panel-pickup .current-location > small { display: none; }
+.fixture-panel-pickup .fixture-list-heading { grid-template-columns: minmax(0, 1fr) 34px 40px; padding-left: 0; }
+.fixture-panel-pickup .fixture-groups li { height: 28px; }
+.fixture-panel-pickup .fixture-row { grid-template-columns: 22px minmax(38px, .7fr) minmax(0, 1fr) 34px; }
 .quantity-preview { display: flex; align-items: center; gap: 8px; }
 .quantity-input-unit { display: flex; align-items: center; gap: 6px; }
 .quantity-input-unit input { flex: 1; min-width: 0; }

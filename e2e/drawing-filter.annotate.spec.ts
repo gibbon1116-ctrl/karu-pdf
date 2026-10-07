@@ -94,20 +94,20 @@ test('一覧に連動した図面表示・選択・解除・保存と項目の�
   const from = await point(page, 20, 20), to = await point(page, 310, 260)
   await page.mouse.move(from.x, from.y); await page.mouse.down(); await page.mouse.move(to.x, to.y, { steps: 6 }); await page.mouse.up()
   expect(await page.evaluate(() => window.__karu!.getSelectedAnnotationIds())).toEqual([openIssue.id])
-  await page.getByRole('tab', { name: '数量', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
   await expect(page.getByTestId('fixture-panel')).toContainText('書き込みタブの絞り込み（指摘・未回答）で、図面に数量拾いの印を出していません。')
   await expect(page.getByRole('button', { name: '図面への反映をやめる', exact: true })).toBeVisible()
   await page.getByRole('tab', { name: '書き込み', exact: true }).click()
   await expect(page.getByLabel('書き込みの種類')).toHaveValue('issue')
   await expect(page.getByLabel('状態で絞り込み')).toHaveValue('open'); await expect(toggle).toBeChecked()
-  await page.getByRole('tab', { name: '数量', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
   await page.getByRole('button', { name: '図面への反映をやめる', exact: true }).click()
   for (const a of counts) await expect(layer.locator(`g[data-annotation-id="${a.id}"]`)).toHaveCount(1)
   await expect(footer.locator('.drawing-filter-status')).toHaveCount(0)
   await page.getByRole('tab', { name: '書き込み', exact: true }).click(); await expect(toggle).not.toBeChecked()
 
   await follow(page)
-  await page.getByRole('tab', { name: '数量', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
   await page.getByRole('button', { name: '項目A', exact: true }).click()
   await expect(page.getByRole('button', { name: '数量拾い', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await expect(footer).toContainText('図面の絞り込みを解除しました（数量拾いの印を数えるため）')
@@ -149,7 +149,7 @@ test('一覧に連動した図面表示・選択・解除・保存と項目の�
   expect(reopened.filter(a => a.issue)).toHaveLength(2); expect(reopened.filter(a => a.count)).toHaveLength(2)
   expect(reopened.filter(a => a.kind === 'square')).toHaveLength(1); expect(reopened.filter(a => a.kind === 'freetext')).toHaveLength(2)
 
-  await page.getByRole('tab', { name: '数量', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
   const fixtureA = page.getByTestId('fixture-panel').locator('li[data-fixture-id]').filter({ has: page.getByRole('button', { name: '項目A', exact: true }) })
   await fixtureA.getByRole('button', { name: /の表示切替$/ }).click()
   await expect(fixtureA.getByRole('button', { name: /の表示切替$/ })).toHaveAttribute('aria-pressed', 'false')
@@ -169,12 +169,12 @@ test('一覧に連動した図面表示・選択・解除・保存と項目の�
 
 test('項目・分類の表示、すべて表示、選択中だけ表示で反映を解除する', async ({ page }) => {
   await open(page)
-  await page.getByRole('tab', { name: '数量', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
   const fixtureA = page.getByTestId('fixture-panel').locator('li[data-fixture-id]').filter({ has: page.getByRole('button', { name: '項目A', exact: true }) })
   await expect(fixtureA).toBeVisible()
   for (const action of ['項目', '分類', 'すべて', '選択中'] as const) {
     await follow(page)
-    await page.getByRole('tab', { name: '数量', exact: true }).click()
+    await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
     if (action === '項目' || action === '分類') {
       const eye = action === '項目' ? fixtureA.getByRole('button', { name: /の表示切替$/ }) : page.getByRole('button', { name: 'その他の表示切替', exact: true })
       await eye.click() // Hide; the drawing filter should remain active.

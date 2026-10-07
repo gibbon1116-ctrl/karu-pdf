@@ -23,7 +23,7 @@ test('図面情報の全ページ読取と読取中スクロールを各PDFで�
       }
       state.frame = requestAnimationFrame(tick)
     })
-    await page.getByRole('tab', { name: '数量', exact: true }).click()
+    await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
     await expect(page.getByTestId('drawing-scan-status')).toContainText('読み取りました', { timeout: 180_000 })
     const result = await page.evaluate(() => {
       const w = window as Window & { __drawingFrames?: { samples: number[]; frame: number } }, state = w.__drawingFrames!
