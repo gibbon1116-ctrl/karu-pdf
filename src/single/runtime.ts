@@ -55,8 +55,9 @@ export function createSingleWorker(kind: 'pdf' | 'image' | 'symbol-search'): Wor
       } catch (error) { worker.postMessage({ type: 'single-font-response', name, error: String(error) }) }
     }
   })
-  // The symbol search Worker only matches pixels; it needs neither MuPDF nor fonts.
-  if (kind !== 'symbol-search') worker.postMessage({ type: 'single-init', module: __singleWasm })
+  // Every embedded Worker's bootstrap requires single-init first (see scripts/single-worker.mjs),
+  // even the symbol search Worker, which never uses the MuPDF module it is handed.
+  worker.postMessage({ type: 'single-init', module: __singleWasm })
   return worker
 }
 

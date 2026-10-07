@@ -1,5 +1,6 @@
 /* @single:start */import { createSingleWorker } from '../single/runtime'
 /* @single:end */import type { Point, Rect } from '../core/annotations'
+export const SYMBOL_SEARCH_STALL_MS = 60_000
 import type { SymbolSearchOptions } from '../core/symbolSearch'
 import type { SearchImage } from '../worker/protocol'
 import type { PdfWorkerPool } from './PdfWorkerPool'
@@ -106,7 +107,15 @@ export class SymbolSearchClient {
           width: (rect[2] - rect[0]) * renderScale, height: (rect[3] - rect[1]) * renderScale } }
       const worker = this.worker ??= /* @single:start */createSingleWorker('symbol-search') ?? /* @single:end */new Worker(new URL('../worker/symbolSearch.worker.ts', import.meta.url), { type: 'module' })
       const transferred = performance.now()
+      // The Worker reports progress every few dozen rows; silence for this long means it died
+      // (e.g. a failed bootstrap that never reaches onerror), so fail instead of waiting forever.
+      let lastHeard = performance.now()
+      const watchdog = setInterval(() => {
+        if (run.done) { clearInterval(watchdog); return }
+        if (performance.now() - lastHeard > SYMBOL_SEARCH_STALL_MS) { clearInterval(watchdog); fail(new Error('照合が応答しなくなったため中止しました。もう一度探してください。')) }
+      }, 1000)
       worker.onmessage = (event: MessageEvent<SymbolSearchResponse>) => {
+        lastHeard = performance.now()
         if (run.done || event.data.id !== run.id) return
         const response = event.data
         if (response.type === 'progress') { onProgress?.('search', response.done, response.total); return }
