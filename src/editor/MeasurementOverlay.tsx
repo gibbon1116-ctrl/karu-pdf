@@ -21,8 +21,8 @@ export const ScaleInteractionContext = createContext<{
 export const isMeasureTool = (tool: string): tool is MeasureKind => tool === 'distance' || tool === 'perimeter' || tool === 'area'
 const cssColor = (c: readonly number[]) => `rgb(${c.map(n => n * 255).join(' ')})`
 
-export function MeasurementShape({ points, kind, text, fontSize, color, width, opacity, dash, showText = true }: {
-  points: Point[]; kind: MeasureKind; text: string; fontSize: number; color: string; width: number; opacity: number; dash?: QuantityLineStyle['dash']; showText?: boolean
+export function MeasurementShape({ points, kind, text, fontSize, color, width, opacity, dash, showText = true, showFill = true, haloWidth }: {
+  points: Point[]; kind: MeasureKind; text: string; fontSize: number; color: string; width: number; opacity: number; dash?: QuantityLineStyle['dash']; showText?: boolean; showFill?: boolean; haloWidth?: number
 }) {
   const label = measureLabel(points, kind, fontSize)
   const coords = points.map(p => p.join(',')).join(' ')
@@ -31,11 +31,16 @@ export function MeasurementShape({ points, kind, text, fontSize, color, width, o
     const a = Math.atan2(points[1][1] - points[0][1], points[1][0] - points[0][0]), dx = -Math.sin(a) * 5, dy = Math.cos(a) * 5
     ticks = points.map(p => `M${p[0] - dx},${p[1] - dy}L${p[0] + dx},${p[1] + dy}`).join(' ')
   }
-  return <g opacity={opacity} className="measurement-shape">
-    {kind === 'area' ? <><polygon points={coords} fill={color} fillOpacity=".15" /><polygon points={coords} fill="none" stroke={color} strokeWidth={width} strokeDasharray={quantityDashes(dash, width).join(' ')} /></> : <polyline points={coords} fill="none" stroke={color} strokeWidth={width} strokeDasharray={quantityDashes(dash, width).join(' ')} />}
+  return <>
+    {haloWidth !== undefined && <g className="annotation-selection-halo" fill="none" stroke="#fff" opacity={.85} strokeWidth={haloWidth} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none">
+      {kind === 'area' ? <polygon points={coords} /> : <polyline points={coords} />}
+      {ticks && <path d={ticks} />}
+    </g>}
+    <g opacity={opacity} className="measurement-shape">
+    {kind === 'area' ? <>{showFill && <polygon points={coords} fill={color} fillOpacity=".15" />}<polygon points={coords} fill="none" stroke={color} strokeWidth={width} strokeDasharray={quantityDashes(dash, width).join(' ')} /></> : <polyline points={coords} fill="none" stroke={color} strokeWidth={width} strokeDasharray={quantityDashes(dash, width).join(' ')} />}
     {ticks && <path d={ticks} fill="none" stroke={color} strokeWidth={width} strokeDasharray={quantityDashes(dash, width).join(' ')} />}
     {showText && <text className="measurement-label" x={label.anchor[0]} y={label.anchor[1] + fontSize * .3} transform={`rotate(${label.angle * 180 / Math.PI} ${label.anchor.join(' ')})`} textAnchor="middle" fontSize={fontSize} fill={color} stroke="white" strokeWidth="3" paintOrder="stroke" strokeLinejoin="round">{text}</text>}
-  </g>
+  </g></>
 }
 
 interface Props {

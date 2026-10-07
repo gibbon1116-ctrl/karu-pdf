@@ -1,7 +1,7 @@
 import { fixtureCode } from '../core/countFixtures'
 import { quantityMethod } from '../core/countFixtures'
 import { constrainLinePoint, arrowHeadSize } from '../core/lineGeometry'
-import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { Quad } from 'mupdf'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import type { CountFixtureSample } from '../core/countFixtures'
@@ -25,6 +25,55 @@ import { CountMarker, countMarkerData, countSvgPath } from './countMarkers'
 import { countFixtureId } from '../core/counts'
 
 export type EditorTool = 'select' | 'textSelect' | FormatTool
+
+/** Display-only stable partition. Never mutate the store's creation/save order. */
+export function frontOrder<T extends { id: string }>(items: readonly T[], selected: ReadonlySet<string>): readonly T[] {
+  if (selected.size === 0) return items
+  const back: T[] = [], front: T[] = []
+  for (const item of items) (selected.has(item.id) ? front : back).push(item)
+  return back.concat(front)
+}
+
+export function canOverlaySelectedAnnotation(annotation: Pick<EditableAnnotation, 'kind' | 'opacity'>): boolean {
+  return annotation.opacity >= .99 && SELECTED_OVERLAY_KINDS.has(annotation.kind)
+}
+const SELECTED_OVERLAY_KINDS = new Set<Kind>(['line', 'arrow', 'square', 'circle', 'ink', 'cloudSquare', 'cloudPolygon', 'distance', 'perimeter', 'area', 'symbol'])
+const SELECTED_HALO_KINDS = new Set<Kind>(['line', 'arrow', 'square', 'circle', 'ink', 'highlight', 'textHighlight', 'cloudSquare', 'cloudPolygon', 'distance', 'perimeter', 'area'])
+
+/** The halo is outside the original stroke when that stroke remains in the PDF bitmap. */
+function SelectionHalo({ annotation: a, zoom, hollow, maskId, pageSize }: {
+  annotation: EditableAnnotation; zoom: number; hollow: boolean; maskId: string; pageSize: PageSize
+}) {
+  const [x0, y0, x1, y1] = a.rect
+  const geometry = <>
+    {(a.kind === 'cloudSquare' || a.kind === 'cloudPolygon') && <path d={cloudPath(a.vertices ?? rectVertices(a.rect), a.cloudIntensity ?? 1, a.borderWidth)} />}
+    {a.measure && a.vertices && (a.measure.kind === 'area'
+      ? <polygon points={a.vertices.map(p => p.join(',')).join(' ')} />
+      : <polyline points={a.vertices.map(p => p.join(',')).join(' ')} />)}
+    {a.measure?.kind === 'distance' && a.vertices && (() => {
+      const points = a.vertices
+      if (points.length < 2) return null
+      const angle = Math.atan2(points[1][1] - points[0][1], points[1][0] - points[0][0])
+      const dx = -Math.sin(angle) * 5, dy = Math.cos(angle) * 5
+      return <path d={points.map(p => `M${p[0] - dx},${p[1] - dy}L${p[0] + dx},${p[1] + dy}`).join(' ')} />
+    })()}
+    {a.line && <line x1={a.line[0][0]} y1={a.line[0][1]} x2={a.line[1][0]} y2={a.line[1][1]} />}
+    {a.kind === 'arrow' && a.line && <polyline points={arrowHead(a.line, arrowHeadSize(a.arrowHeadSize, a.borderWidth))} />}
+    {(a.kind === 'ink' || a.kind === 'highlight') && a.inkList?.map((stroke, i) => <polyline key={i} points={stroke.map(p => p.join(',')).join(' ')} />)}
+    {a.kind === 'square' && a.borderColor && <rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} />}
+    {a.kind === 'circle' && a.borderColor && <ellipse cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} rx={(x1 - x0) / 2} ry={(y1 - y0) / 2} />}
+    {a.kind === 'textHighlight' && a.quads?.map((quad, i) => <polygon key={i} points={quadPoints(quad)} />)}
+  </>
+  // The original width scales normally; only the additional 4 CSS px stay constant.
+  const width = a.borderWidth + 4 / Math.max(.01, zoom * CSS_PX_PER_PT)
+  return <g className="annotation-selection-halo" fill="none" strokeLinecap="round" strokeLinejoin="round" pointerEvents="none">
+    {hollow && <defs><mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width={pageSize.width} height={pageSize.height}>
+      <rect width={pageSize.width} height={pageSize.height} fill="white" />
+      <g fill={a.kind === 'textHighlight' || a.measure?.kind === 'area' || a.interiorColor ? 'black' : 'none'} stroke="black" strokeWidth={a.borderWidth}>{geometry}</g>
+    </mask></defs>}
+    <g stroke="#fff" opacity={.85} strokeWidth={width} mask={hollow ? `url(#${maskId})` : undefined}>{geometry}</g>
+  </g>
+}
 const TEXT_SELECTION_START = 'karu-pdf:text-selection-start'
 const MULTI_CLICK_MS = 500
 const MULTI_CLICK_DISTANCE = 4
@@ -201,6 +250,8 @@ export function AnnotationLayer(props: Props) {
   ), [props.docId, props.pageIndex, props.pool])
   const annotations = props.store.getPageAnnotations(props.pageIndex).filter(a => props.store.isShownOnDrawing(a))
   const selectedIds = new Set(props.store.selectedIds())
+  const orderedAnnotations = frontOrder(annotations, selectedIds)
+  const hasSelection = selectedIds.size > 0
   const singleSelection = selectedIds.size === 1
   const touched = useMemo(() => new Set(props.store.touchedObjNums(props.pageIndex)), [version, props.pageIndex, props.store])
   const visibleCount = annotations.filter(a => a.count).length
@@ -314,8 +365,12 @@ export function AnnotationLayer(props: Props) {
         Math.max(...rects.map((rect) => rect[2])), Math.max(...rects.map((rect) => rect[3])),
       ]
       const distance = event.shiftKey ? 10 : 1
+      const startingMovement = operation.dx === 0 && operation.dy === 0
       operation.dx = Math.max(-bounds[0], Math.min(props.pageSize.width - bounds[2], operation.dx + direction[0] * distance))
       operation.dy = Math.max(-bounds[1], Math.min(props.pageSize.height - bounds[3], operation.dy + direction[1] * distance))
+      if (startingMovement && (operation.dx !== 0 || operation.dy !== 0)) {
+        for (const id of operation.ids) props.store.touch(id)
+      }
       for (const element of operation.elements) element.setAttribute('transform', `translate(${operation.dx} ${operation.dy})`)
       window.clearTimeout(operation.timer)
       operation.timer = window.setTimeout(flushNudge, 150)
@@ -545,6 +600,8 @@ export function AnnotationLayer(props: Props) {
       return
     }
     if (!commit) return
+    // A click only changes selection. Touch/edit begins after actual movement.
+    if (!operation.moved && ['move', 'resize', 'line-end', 'callout-point'].includes(operation.mode)) return
 
     const dx = operation.latest[0] - operation.start[0]
     const dy = operation.latest[1] - operation.start[1]
@@ -727,7 +784,10 @@ export function AnnotationLayer(props: Props) {
     }
     const fixture = props.store.fixtureForCount(annotation.count)
     if (compactCounts && annotation.count && (fixture || annotation.symbol === 'circle') && !(singleSelection && selectedIds.has(annotation.id))) return null
-    const visible = !!fixture && !!annotation.count || !!annotation.quantity && props.store.fixturesReady && !!props.store.getCountFixture(annotation.quantity.itemId) || !!annotation.issue && annotation.issue.recordKind !== 'change' || annotation.objNum === null || touched.has(annotation.objNum)
+    const selected = hasSelection && selectedIds.has(annotation.id)
+    const normallyVisible = !!fixture && !!annotation.count || !!annotation.quantity && props.store.fixturesReady && !!props.store.getCountFixture(annotation.quantity.itemId) || !!annotation.issue && annotation.issue.recordKind !== 'change' || annotation.objNum === null || touched.has(annotation.objNum)
+    const selectedOverlay = !normallyVisible && selected && canOverlaySelectedAnnotation(annotation)
+    const visible = normallyVisible || selectedOverlay
     const [x0, y0, x1, y1] = annotation.rect
     const handleSize = 8 / Math.max(0.01, props.zoom * CSS_PX_PER_PT)
     const positions: Array<{ handle: ResizeHandle; x: number; y: number }> = annotation.count ? [] : allResizeHandles(annotation.kind)
@@ -758,12 +818,13 @@ export function AnnotationLayer(props: Props) {
     return (
       <g key={annotation.id} data-annotation-id={annotation.id} data-symbol={annotation.symbol ?? undefined} className="annotation-item" data-issue-number={annotation.issue?.number}>
         {annotation.issue && <title>{annotation.text}</title>}
+        {selected && !annotation.count && SELECTED_HALO_KINDS.has(annotation.kind) && !(visible && annotation.measure && annotation.opacity >= .99) && <SelectionHalo annotation={annotation} zoom={props.zoom} hollow={!visible || annotation.opacity < .99 || annotation.kind === 'highlight' || annotation.kind === 'textHighlight'} maskId={`selection-halo-${props.docId}-${annotation.id}`} pageSize={props.pageSize} />}
         {visible && (annotation.kind === 'cloudSquare' || annotation.kind === 'cloudPolygon') && <path className="annotation-cloud" d={cloudPath(annotation.vertices ?? rectVertices(annotation.rect), annotation.cloudIntensity ?? 1, annotation.borderWidth)} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} opacity={annotation.opacity} />}
         {visible && annotation.issue && <g className="annotation-issue" fill={color(issueColor(annotation.issue, annotation.color))}>
           <circle cx={(x0+x1)/2} cy={(y0+y1)/2} r={(x1-x0)*.45} fill="white" stroke={color(issueColor(annotation.issue, annotation.color))} strokeWidth={(x1-x0)*.06} />
           <text x={(x0+x1)/2} y={(y0+y1)/2 + issueFontSize(annotation.issue.number, x1-x0)*.3} textAnchor="middle" fontFamily="KaruBIZUDGothic" fontSize={issueFontSize(annotation.issue.number, x1-x0)}>{annotation.issue.number}</text>
         </g>}
-        {visible && annotation.measure && annotation.vertices && <MeasurementShape points={annotation.vertices} kind={annotation.measure.kind} text={annotation.quantity ? props.store.quantityText(annotation) : annotation.text} fontSize={annotation.fontSize} color={color(annotation.color)} width={annotation.borderWidth} opacity={annotation.opacity} dash={annotation.quantityDash} showText={!annotation.quantity || props.store.showQuantityValues} />}
+        {visible && annotation.measure && annotation.vertices && <MeasurementShape points={annotation.vertices} kind={annotation.measure.kind} text={annotation.quantity ? props.store.quantityText(annotation) : annotation.text} fontSize={annotation.fontSize} color={color(annotation.color)} width={annotation.borderWidth} opacity={annotation.opacity} dash={annotation.quantityDash} showText={!annotation.quantity || props.store.showQuantityValues} showFill={!selectedOverlay} haloWidth={selected && annotation.opacity >= .99 ? annotation.borderWidth + 4 / Math.max(.01, props.zoom * CSS_PX_PER_PT) : undefined} />}
         {visible && annotation.kind === 'square' && <rect className="annotation-square" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && annotation.kind === 'circle' && <ellipse className="annotation-shape" cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} rx={(x1 - x0) / 2} ry={(y1 - y0) / 2} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && line && <>
@@ -814,6 +875,30 @@ export function AnnotationLayer(props: Props) {
     )
   }
 
+  const renderCountGroups = (front: boolean) => [...countPaths].map(([key, group]) =>
+    hasSelection && group.selected !== front ? null : <g key={key} data-testid="count-batch" data-selected={group.selected} opacity={group.opacity} pointerEvents="none">
+      {group.bright && <path d={group.outline.join(' ')} fill="none" stroke="#404040" strokeWidth={1.8} />}
+      <path d={group.fills.join(' ')} fill={group.stroke} />
+      <path d={group.outline.join(' ') + ' ' + group.strokes.join(' ')} fill="none" stroke={group.stroke} strokeWidth={.8} strokeLinejoin="round" />
+      {group.selected && <path d={group.outline.join(' ')} fill="none" stroke="#006cff" strokeWidth={1.2} />}
+    </g>)
+  const renderCountCodes = (front: boolean) => compactCounts && visibleCount <= 1000 && <g key={`count-codes-${front}`} pointerEvents="none">{orderedAnnotations.filter(a => a.count && !(singleSelection && selectedIds.has(a.id)) && (!hasSelection || selectedIds.has(a.id) === front)).map(a => {
+    const f = props.store.fixtureForCount(a.count)
+    if (!f?.style.showCode || !f.code) return null
+    const data = countMarkerData(f.style, (a.rect[0] + a.rect[2]) / 2, (a.rect[1] + a.rect[3]) / 2)
+    return <text key={a.id} x={data.code.x} y={data.code.y} fontSize={data.code.size} fontFamily="KaruBIZUDGothic" fill={data.bright ? '#404040' : data.color} opacity={data.opacity}>{f.code}</text>
+  })}</g>
+
+  // Keep one flat keyed sibling list so selecting/reordering preserves the DOM
+  // nodes captured by a drag, rather than remounting them in a separate layer.
+  const displayItems: ReactNode[] = !hasSelection ? orderedAnnotations.map(renderAnnotation)
+    : orderedAnnotations.map(a => selectedIds.has(a.id) ? null : renderAnnotation(a))
+  displayItems.push(...renderCountGroups(false), renderCountCodes(false))
+  if (hasSelection) {
+    displayItems.push(...renderCountGroups(true), renderCountCodes(true))
+    for (const a of orderedAnnotations) if (selectedIds.has(a.id)) displayItems.push(renderAnnotation(a))
+  }
+
   return <>
     <svg
       ref={svgRef}
@@ -833,7 +918,7 @@ export function AnnotationLayer(props: Props) {
         const svg = event.currentTarget
         const start = pointInPage(svg, event)
         const id = annotationIdFromTarget(event.target) ?? (compactCounts && props.tool === 'select'
-          ? annotations.findLast(a => a.count && start[0] >= a.rect[0] && start[0] <= a.rect[2] && start[1] >= a.rect[1] && start[1] <= a.rect[3])?.id ?? null : null)
+          ? orderedAnnotations.findLast(a => a.count && start[0] >= a.rect[0] && start[0] <= a.rect[2] && start[1] >= a.rect[1] && start[1] <= a.rect[3])?.id ?? null : null)
         if (props.tool === 'count') {
           props.store.prepareCountTool()
         }
@@ -869,24 +954,20 @@ export function AnnotationLayer(props: Props) {
             return
           }
           if (calloutPoint && annotation?.kind === 'callout') {
-            props.store.touch(id!)
             props.onSelect(id)
             if (calloutPreviewRef.current) calloutPreviewRef.current.style.display = 'block'
             dragRef.current = { pointerId: event.pointerId, mode: 'callout-point', start, latest: start, id, element: null, frame: 0, moved: false, shift: false, ctrl: false, stopMeasurement: beginDragFrameMeasurement() }
           } else if (lineHandle && annotation?.line) {
-            props.store.touch(id!)
             props.onSelect(id)
             if (linePreviewRef.current) linePreviewRef.current.style.display = 'block'
             dragRef.current = { pointerId: event.pointerId, mode: 'line-end', start, latest: start, id, element: null, frame: 0, moved: false, shift: false, ctrl: false, lineHandle, originalLine: annotation.line, stopMeasurement: beginDragFrameMeasurement() }
           } else if (resizeHandle && annotation) {
-            props.store.touch(id!)
             props.onSelect(id)
             if (resizePreviewRef.current) resizePreviewRef.current.style.display = 'block'
             dragRef.current = { pointerId: event.pointerId, mode: 'resize', start, latest: start, id, element: null, frame: 0, moved: false, shift: false, ctrl: false, resizeHandle, originalRect: annotation.rect, annotationKind: annotation.kind, stopMeasurement: beginDragFrameMeasurement() }
           } else if (id) {
             if (!props.store.isSelected(id)) props.store.selectOnly(id)
             const ids = props.store.selectedIds().filter(selectedId => !props.store.get(selectedId)?.legacyChange)
-            for (const selectedId of ids) props.store.touch(selectedId)
             props.onSelect(id)
             if (annotation && (annotation.legacyChange || isTextMarkup(annotation.kind))) return
             const pageIds = new Set(annotations.map((item) => item.id))
@@ -963,7 +1044,12 @@ export function AnnotationLayer(props: Props) {
         operation.shift = event.shiftKey
         operation.ctrl = event.ctrlKey
         if (operation.mode === 'ink') operation.points?.push(operation.latest)
-        if (Math.abs(operation.latest[0] - operation.start[0]) >= 2 || Math.abs(operation.latest[1] - operation.start[1]) >= 2) operation.moved = true
+        if (Math.abs(operation.latest[0] - operation.start[0]) >= 2 || Math.abs(operation.latest[1] - operation.start[1]) >= 2) {
+          if (!operation.moved && operation.id && ['move', 'resize', 'line-end', 'callout-point'].includes(operation.mode)) {
+            for (const id of operation.ids ?? [operation.id]) props.store.touch(id)
+          }
+          operation.moved = true
+        }
         scheduleDraft(operation)
       }}
       onPointerUp={(event) => {
@@ -983,24 +1069,12 @@ export function AnnotationLayer(props: Props) {
         if (measurement.doubleClick()) return
         if (props.tool !== 'select') return
         const id = annotationIdFromTarget(event.target) ?? props.selectedId
-        const annotation = id ? props.store.touch(id) : undefined
-        if (annotation && !annotation.legacyChange && (annotation.kind === 'issue' || annotation.kind === 'freetext' || annotation.kind === 'callout')) { props.onSelect(annotation.id); props.onEdit(annotation.id) }
+        const annotation = id ? props.store.get(id) : undefined
+        if (annotation && !annotation.legacyChange && (annotation.kind === 'issue' || annotation.kind === 'freetext' || annotation.kind === 'callout')) { props.store.touch(annotation.id); props.onSelect(annotation.id); props.onEdit(annotation.id) }
       }}
     >
       <rect className="annotation-surface" x="0" y="0" width={props.pageSize.width} height={props.pageSize.height} />
-      {annotations.map(renderAnnotation)}
-      {[...countPaths].map(([key, group]) => <g key={key} data-testid="count-batch" opacity={group.opacity} pointerEvents="none">
-        {group.bright && <path d={group.outline.join(' ')} fill="none" stroke="#404040" strokeWidth={1.8} />}
-        <path d={group.fills.join(' ')} fill={group.stroke} />
-        <path d={group.outline.join(' ') + ' ' + group.strokes.join(' ')} fill="none" stroke={group.stroke} strokeWidth={.8} strokeLinejoin="round" />
-        {group.selected && <path d={group.outline.join(' ')} fill="none" stroke="#006cff" strokeWidth={1.2} />}
-      </g>)}
-      {compactCounts && visibleCount <= 1000 && <g pointerEvents="none">{annotations.filter(a => a.count && !(singleSelection && selectedIds.has(a.id))).map(a => {
-        const f = props.store.fixtureForCount(a.count)
-        if (!f?.style.showCode || !f.code) return null
-        const data = countMarkerData(f.style, (a.rect[0] + a.rect[2]) / 2, (a.rect[1] + a.rect[3]) / 2)
-        return <text key={a.id} x={data.code.x} y={data.code.y} fontSize={data.code.size} fontFamily="KaruBIZUDGothic" fill={data.bright ? '#404040' : data.color} opacity={data.opacity}>{f.code}</text>
-      })}</g>}
+      {displayItems}
       {measurement.draft}
       <path ref={draftCloudRef} style={{ display: 'none' }} pointerEvents="none" />
       <g ref={textSelectionRef} className="text-selection-quads" aria-hidden="true" />
