@@ -78,6 +78,16 @@ declare global {
     __karu?: {
       getExternalSendRecords: typeof getExternalSendRecords
       snapVertexProbe(pageIndex: number, count?: number): unknown
+      vectorProbe(pageIndex: number): Promise<{
+        kind: import('./core/vectorPaths').PageKind; segmentCount: number; truncated: boolean
+        stats: import('./core/vectorPaths').VectorPage['stats']; transferBytes: number
+        endpointCount: number; endpointIndexMs: number
+        snapQuery: { p50: number; p95: number; max: number }
+      }>
+      vectorSymbolSearch(request: { pageIndex: number; sampleRect: Rect; threshold?: number; rotations?: boolean }): Promise<{
+        matches: import('./core/vectorSymbolSearch').VectorSymbolMatch[]; extractMs: number; searchMs: number
+        template: { segments: number; length: number }
+      }>
       seedSnapPerfVertices(pageIndex: number): void
       getMetrics: typeof getMetrics
       setZoom(zoom: number, anchor?: { x: number; y: number }): void
@@ -1560,6 +1570,37 @@ export default function App() {
   useEffect(() => {
     if (new URLSearchParams(location.search).get('test') !== '1') return
     window.__karu = {
+      vectorProbe: async pageIndex => {
+        const session = tabs.active, size = session?.pageSizes[pageIndex]
+        if (!session || !size) throw Error('No page')
+        const { classifyPage, segmentEndpoints } = await import('./core/vectorPaths')
+        performance.mark('karu-vector-extract-start')
+        const page = await pool.extractVectors({ docId: session.docId, pageIndex }).promise
+        performance.mark('karu-vector-extract-end')
+        const endpoints = segmentEndpoints(page.segments)
+        const start = performance.now(), index = buildSnapIndex(endpoints, [0, 0, size.width, size.height]), endpointIndexMs = performance.now() - start
+        const samples: number[] = []
+        // Same timer-resolution compensation as snapVertexProbe: 1000 batches
+        // of 100 queries, reporting time per query (including an empty page).
+        for (let i = 0; i < 1000; i++) {
+          const p = endpoints[i % endpoints.length] ?? [0, 0], t = performance.now()
+          for (let n = 0; n < 100; n++) findSnap([p[0] + .3, p[1] + .3], 1.5, index)
+          samples.push((performance.now() - t) / 100)
+        }
+        samples.sort((a, b) => a - b)
+        return { kind: classifyPage(page), segmentCount: page.segmentCount, truncated: page.truncated, stats: page.stats,
+          transferBytes: page.segments.byteLength, endpointCount: endpoints.length, endpointIndexMs,
+          snapQuery: { p50: samples[499], p95: samples[949], max: samples[999] } }
+      },
+      vectorSymbolSearch: async request => {
+        const session = tabs.active
+        if (!session?.pageSizes[request.pageIndex]) throw Error('No page')
+        const { vectorSymbolSearch } = await import('./core/vectorSymbolSearch')
+        const start = performance.now(), page = await pool.extractVectors({ docId: session.docId, pageIndex: request.pageIndex }).promise
+        const extractMs = performance.now() - start
+        const result = vectorSymbolSearch(page.segments, request.sampleRect, { threshold: request.threshold, rotations: request.rotations })
+        return { matches: result.matches, extractMs, searchMs: result.stats.ms, template: result.template }
+      },
       // SPEC-06h-1: test-only, demand-loaded, disposable visual-search prototype.
       ...(() => {
         const run = async (request: import('./client/SymbolSearchClient').SymbolSearchRequest, afterMs?: number) => {

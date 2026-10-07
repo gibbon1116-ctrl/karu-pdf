@@ -49,6 +49,19 @@ export interface RenderRequest {
 }
 
 export interface SearchImage { width: number; height: number; gray: Uint8Array }
+export interface ExtractVectorsRequest {
+  type: 'extractVectors'
+  jobId: number
+  docId: string
+  pageIndex: number
+  priority: 4
+}
+export interface VectorsExtractedResponse {
+  type: 'vectorsExtracted'
+  jobId: number
+  page?: import('../core/vectorPaths').VectorPage
+  cancelled?: true
+}
 export interface RenderSearchImageRequest {
   type: 'renderSearchImage'
   jobId: number
@@ -292,6 +305,7 @@ export type WorkerRequest =
   | OpenRequest
   | RenderRequest
   | RenderSearchImageRequest
+  | ExtractVectorsRequest
   | CancelJobsRequest
   | ReprioritizeRequest
   | StatsRequest
@@ -538,6 +552,7 @@ export type WorkerResponse =
   | StartedResponse
   | RenderResponse
   | SearchImageResponse
+  | VectorsExtractedResponse
   | StatsResponse
   | ListAnnotationsResponse
   | AllAnnotationsProgressResponse

@@ -1,4 +1,5 @@
 import type { DrawingInfo } from '../core/drawingInfo'
+import type { VectorPage } from '../core/vectorPaths'
 import { receiveWorkerSendNotice, type WorkerSendNotice } from '../security/externalSend'
 /* @single:start */import { createSingleWorker } from '../single/runtime'
 /* @single:end */import type { PageScale } from '../core/measure'
@@ -227,6 +228,10 @@ export class PdfWorkerPool {
   readonly primaryWorkerIndex = 0
   private readonly slots: WorkerSlot[]
   private readonly pendingRenders = new Map<number, Pending>()
+  private readonly pendingVectors = new Map<number, {
+    docId: string; slot: WorkerSlot; cancelled: boolean; started: boolean
+    resolve(page: VectorPage): void; reject(error: Error): void
+  }>()
   private readonly pendingSearchImages = new Map<number, {
     docId: string; slot: WorkerSlot; cancelled: boolean
     resolve(image: SearchImage): void; reject(error: Error): void
@@ -373,6 +378,26 @@ export class PdfWorkerPool {
   }): RenderTask {
     const slot = this.slotForPage(options.docId, options.pageIndex)
     return this.startRender(slot, 'render', options)
+  }
+
+  extractVectors(options: { docId: string; pageIndex: number }): { promise: Promise<VectorPage>; cancel(): void } {
+    const renderSlots = this.slots.length > 1 ? this.slots.slice(1) : this.slots
+    const available = renderSlots.filter(slot => slot.documents.has(options.docId))
+    if (!available.length) return { promise: Promise.reject(new Error('PDF が開かれていません。')), cancel() {} }
+    const slot = available.reduce((a, b) => a.queueLength <= b.queueLength ? a : b)
+    const jobId = this.nextId++
+    slot.queueLength++
+    const promise = new Promise<VectorPage>((resolve, reject) => {
+      this.pendingVectors.set(jobId, { docId: options.docId, slot, cancelled: false, started: false, resolve, reject })
+      slot.worker.postMessage({ type: 'extractVectors', jobId, ...options, priority: 4 })
+    })
+    return { promise, cancel: () => {
+      const pending = this.pendingVectors.get(jobId)
+      if (!pending || pending.cancelled || pending.started) return
+      pending.cancelled = true
+      pending.reject(new CancelledRenderError())
+      slot.worker.postMessage({ type: 'cancelJobs', docId: options.docId, jobIds: [jobId] })
+    } }
   }
 
   renderSearchImage(options: {
@@ -824,7 +849,7 @@ export class PdfWorkerPool {
   }
 
   isIdle(): boolean {
-    return this.pendingSearchImages.size === 0 && this.pendingRenders.size === 0 && this.slots.every((slot) => slot.queueLength === 0)
+    return this.pendingVectors.size === 0 && this.pendingSearchImages.size === 0 && this.pendingRenders.size === 0 && this.slots.every((slot) => slot.queueLength === 0)
   }
 
   destroy(): void {
@@ -833,6 +858,8 @@ export class PdfWorkerPool {
       slot.worker.terminate()
     }
     const error = new Error('Worker pool は破棄されました。')
+    for (const pending of this.pendingVectors.values()) pending.reject(error)
+    this.pendingVectors.clear()
     for (const pending of this.pendingSearchImages.values()) pending.reject(error)
     for (const pending of this.pendingRenders.values()) pending.reject(error)
     for (const pending of this.pendingRequests.values()) pending.reject(error)
@@ -930,6 +957,17 @@ export class PdfWorkerPool {
   }
 
   private onMessage(slot: WorkerSlot, message: WorkerResponse): void {
+    if (message.type === 'vectorsExtracted') {
+      const pending = this.pendingVectors.get(message.jobId)
+      if (!pending) return
+      this.pendingVectors.delete(message.jobId)
+      pending.slot.queueLength = Math.max(0, pending.slot.queueLength - 1)
+      if (pending.cancelled) return
+      if (message.cancelled) pending.reject(new CancelledRenderError())
+      else if (message.page) pending.resolve(message.page)
+      else pending.reject(new Error('ベクターを取得できませんでした。'))
+      return
+    }
     if (message.type === 'searchImageRendered') {
       const pending = this.pendingSearchImages.get(message.jobId)
       if (!pending) return
@@ -946,6 +984,8 @@ export class PdfWorkerPool {
       return
     }
     if (message.type === 'started') {
+      const vector = this.pendingVectors.get(message.jobId)
+      if (vector) vector.started = true
       const pending = this.pendingRenders.get(message.jobId)
       if (pending) {
         pending.workerStarted = true
@@ -1007,6 +1047,12 @@ export class PdfWorkerPool {
     if (message.type === 'error') {
       const error = new Error(message.message)
       if (message.jobId !== undefined) {
+        const vector = this.pendingVectors.get(message.jobId)
+        if (vector) {
+          this.pendingVectors.delete(message.jobId)
+          vector.slot.queueLength = Math.max(0, vector.slot.queueLength - 1)
+          if (!vector.cancelled) vector.reject(error)
+        }
         const searchImage = this.pendingSearchImages.get(message.jobId)
         if (searchImage) {
           this.pendingSearchImages.delete(message.jobId)
@@ -1040,6 +1086,12 @@ export class PdfWorkerPool {
   private failWorker(slot: WorkerSlot, error: Error): void {
     slot.markFailed(error)
     console.error(`PDF Worker ${slot.index} failed`, error)
+    for (const [jobId, pending] of this.pendingVectors) {
+      if (pending.slot === slot) {
+        pending.reject(error)
+        this.pendingVectors.delete(jobId)
+      }
+    }
     for (const [jobId, pending] of this.pendingSearchImages) {
       if (pending.slot === slot) {
         pending.reject(error)
