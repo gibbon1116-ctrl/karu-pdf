@@ -146,6 +146,18 @@ export class DocumentSession {
     return this.annotationStore.isDirty() || this.fileOutdated
   }
 
+  dirtyDescription(): string {
+    const summary = this.annotationStore.dirtySummary()
+    const parts: string[] = []
+    const pages = (indices: number[]) => `${indices.slice(0, 5).map(i => i + 1).join('・')}ページ${indices.length > 5 ? ` ほか ${indices.length - 5} ページ` : ''}`
+    if (summary.annotations > 0) parts.push(`書き込み・数量の拾い ${summary.annotations}件`)
+    if (summary.fixtures) parts.push('数量拾いの項目')
+    if (summary.scales.length) parts.push(`縮尺（${pages(summary.scales)}）`)
+    if (summary.drawings.length) parts.push(`図面番号・図面名称（${pages(summary.drawings)}）`)
+    if (this.fileOutdated) parts.push('ページの編集・まだ保存していない文書')
+    return parts.join('、')
+  }
+
   nextSaveMode(): SaveMode {
     return this.incrementalSaveCount > MAX_INCREMENTAL_SAVES
       || this.incrementalGrowth > MAX_INCREMENTAL_GROWTH

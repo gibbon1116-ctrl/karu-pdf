@@ -24,7 +24,7 @@ export function DocumentTabs({ documents, activeDocId, onActivate, onClose, onOp
             aria-current={document.docId === activeDocId ? 'page' : undefined}
             onClick={() => onActivate(document.docId)}
           >
-            <span>{document.name}</span>{document.dirty && <span aria-label="未保存"> ●</span>}
+            <span>{document.name}</span>{document.dirty && <span aria-label="未保存" title={document.dirtyDescription()}> ●</span>}
           </button>
           <button
             type="button"

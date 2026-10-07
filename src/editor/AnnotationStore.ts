@@ -1,4 +1,5 @@
 import { QuantityIndex } from '../core/quantityIndex'
+import { stableJson } from '../core/stableJson'
 import { floorFromDrawingName, normalizeFloor } from '../core/location'
 import { mergeAutomaticDrawingInfo, type DrawingInfo } from '../core/drawingInfo'
 import { validRouteScope, type RouteScope, validRouteCount, quantityLabel, quantityDimensions, type QuantityMark } from '../core/quantity'
@@ -151,7 +152,7 @@ function persistedState(state: AnnotationState): unknown {
 }
 
 function samePersisted(left: AnnotationState, right: AnnotationState): boolean {
-  return JSON.stringify(persistedState(left)) === JSON.stringify(persistedState(right))
+  return stableJson(persistedState(left)) === stableJson(persistedState(right))
 }
 
 function bounds(points: readonly Point[]): Rect {
@@ -204,6 +205,13 @@ function mapPoint(point: Point, from: Rect, to: Rect): Point {
   ]
 }
 
+export interface DirtySummary {
+  annotations: number
+  fixtures: boolean
+  scales: number[]
+  drawings: number[]
+}
+
 export class AnnotationStore {
   private filter: Readonly<AnnotationFilter> = DEFAULT_ANNOTATION_FILTER
   private followsFilter = false
@@ -249,6 +257,7 @@ export class AnnotationStore {
   currentFloor = ''
   currentRoom = ''
   private version = 0
+  private dirtyCache: { version: number; summary: DirtySummary } | null = null
   private generation = 0
   private lastNudge: { key: string; step: HistoryStep<HistoryState>; at: number } | null = null
 
@@ -396,6 +405,7 @@ export class AnnotationStore {
   getDrawingInfo(pageIndex: number): DrawingInfo | null { const info = this.drawings.get(pageIndex); return info ? { ...info } : null }
   getAutomaticDrawingInfo(pageIndex: number): DrawingInfo | null { return this.automaticDrawings.get(pageIndex) ?? null }
   setDrawingInfo(pageIndices: readonly number[], info: DrawingInfo): void {
+    if (pageIndices.every(pageIndex => stableJson(this.getDrawingInfo(pageIndex)) === stableJson(info))) return
     const before: HistoryState = [], after: HistoryState = []
     before.drawings = pageIndices.map(pageIndex => ({ pageIndex, info: this.getDrawingInfo(pageIndex) }))
     after.drawings = pageIndices.map(pageIndex => ({ pageIndex, info: { ...info } }))
@@ -441,7 +451,7 @@ export class AnnotationStore {
       serializeCountFixtures(nextFixtures)
       this.fixtures = nextFixtures
       this.legacyCountObjects.clear(); for (const id of legacyIds) this.legacyCountObjects.add(id)
-      this.fixtureBaseline = JSON.stringify(this.fixtures)
+      this.fixtureBaseline = stableJson(this.fixtures)
       this.fixturesReady = true
       this.notify()
     })().finally(() => { if (generation === this.generation) this.fixtureLoading = null })
@@ -502,7 +512,7 @@ export class AnnotationStore {
       if (!f || quantityMethod(f) !== 'polyline' || ids.has(e.itemId) || !validRouteCount(e.count) || (e.scope !== undefined && !validRouteScope(e.scope))) return
       ids.add(e.itemId)
     }
-    if ((q.count ?? 1) === count && JSON.stringify(q.extra ?? []) === JSON.stringify(extra) && (q.scope ?? 'all') === scope) return
+    if ((q.count ?? 1) === count && stableJson(q.extra ?? []) === stableJson(extra) && (q.scope ?? 'all') === scope) return
     this.mutate(id, a => {
       a.quantity = { ...q, scope: scope === 'all' ? undefined : scope, count: count === 1 ? undefined : count, extra: extra.length ? extra.map(e => ({ ...e, scope: e.scope === 'all' ? undefined : e.scope })) : undefined }
       a.text = this.quantityText(a); a.rect = measureBounds(a.vertices!, a.measure!.kind, a.text, a.fontSize)
@@ -544,10 +554,11 @@ export class AnnotationStore {
     return result
   }
   setCountFixtures(fixtures: CountFixture[], removeIds: readonly string[] = []): void {
+    if (!removeIds.length && stableJson(fixtures) === stableJson(this.fixtures)) return
     serializeCountFixtures(fixtures)
     const before: HistoryState = [], after: HistoryState = []
     before.fixtures = this.getCountFixtures(); after.fixtures = structuredClone(fixtures)
-    const appearance = (f: CountFixture | undefined) => f ? JSON.stringify([f.name, f.code, f.spec, f.style, f.line]) : ''
+    const appearance = (f: CountFixture | undefined) => f ? stableJson([f.name, f.code, f.spec, f.style, f.line]) : ''
     const changed = new Set(fixtures.filter(f => appearance(f) !== appearance(this.getCountFixture(f.id))).map(f => f.id))
     this.fixtures = structuredClone(fixtures)
     for (const a of this.annotations.values()) if (!a.deleted && (a.count || a.quantity)) {
@@ -639,18 +650,23 @@ export class AnnotationStore {
 
   setScale(pageIndices: readonly number[], scale: PageScale, recalculate: boolean): void {
     const before: HistoryState = [], after: HistoryState = []
-    before.scales = pageIndices.map(pageIndex => ({ pageIndex, scale: this.getScale(pageIndex) }))
-    after.scales = pageIndices.map(pageIndex => ({ pageIndex, scale: { ...scale } }))
+    const changedPages = pageIndices.filter(pageIndex => stableJson(this.getScale(pageIndex)) !== stableJson(scale))
+    before.scales = changedPages.map(pageIndex => ({ pageIndex, scale: this.getScale(pageIndex) }))
+    after.scales = changedPages.map(pageIndex => ({ pageIndex, scale: { ...scale } }))
     for (const pageIndex of pageIndices) {
-      this.scales.set(pageIndex, { ...scale })
+      if (changedPages.includes(pageIndex)) this.scales.set(pageIndex, { ...scale })
       if (!recalculate) continue
       for (const a of this.annotations.values()) {
         if (a.deleted || a.pageIndex !== pageIndex || !a.measure || !a.vertices) continue
-        before.push(cloneState(a)); a.measure = { ...a.measure, mmPerPoint: scale.mmPerPoint, unit: scale.unit, decimals: scale.decimals }
+        const previous = cloneState(a)
+        a.measure = { ...a.measure, mmPerPoint: scale.mmPerPoint, unit: scale.unit, decimals: scale.decimals }
         a.text = this.quantityText(a); a.rect = measureBounds(a.vertices, a.measure.kind, a.text, a.fontSize)
+        if (samePersisted(previous, a)) continue
+        before.push(previous)
         this.markTouched(a); a.revision++; after.push(cloneState(a))
       }
     }
+    if (!changedPages.length && !before.length) return
     this.history.push({ before, after }); this.notify()
   }
 
@@ -1168,15 +1184,18 @@ export class AnnotationStore {
   toEdits(): AnnotationEdit[] {
     // Migration is a save operation, never a side effect of opening the PDF.
     const dirty = this.isDirty()
+    let normalized = false
     if (dirty) for (const a of this.annotations.values()) {
       if (a.deleted || a.legacyChange || !a.issue || a.issue.recordKind === 'change') continue
       const color = issueColor(a.issue, a.color)
-      if (a.color.some((component, i) => component !== color[i])) a.color = color
+      if (a.color.some((component, i) => component !== color[i])) { a.color = color; normalized = true }
     }
     if (this.fixturesReady && dirty) for (const id of this.legacyCountObjects) {
       const a = this.annotations.get(id), f = this.fixtureForCount(a?.count)
-      if (a && !a.deleted && a.count?.version === 1 && f) this.applyFixtureToMark(a, f)
+      if (a && !a.deleted && a.count?.version === 1 && f) { this.applyFixtureToMark(a, f); normalized = true }
     }
+    // These save-time corrections do not go through notify().
+    if (normalized) this.dirtyCache = null
     const entries = this.editEntries()
     this.pendingEdits = entries.map(({ annotation, edit }) => ({
       id: annotation.id,
@@ -1186,13 +1205,13 @@ export class AnnotationStore {
       edit,
     }))
     const edits = entries.map(({ edit }) => edit)
-    this.pendingScales = [...this.scales].filter(([i, scale]) => JSON.stringify(scale) !== JSON.stringify(this.scaleBaselines.get(i) ?? null)).map(([pageIndex, scale], i) => ({ pageIndex, scale: scale ? { ...scale } : null, editIndex: edits.length + i }))
+    this.pendingScales = [...this.scales].filter(([i, scale]) => stableJson(scale) !== stableJson(this.scaleBaselines.get(i) ?? null)).map(([pageIndex, scale], i) => ({ pageIndex, scale: scale ? { ...scale } : null, editIndex: edits.length + i }))
     const result: AnnotationEdit[] = [...edits, ...this.pendingScales.map(({ pageIndex, scale }) => ({ kind: 'setPageScale' as const, pageIndex, scale }))]
-    this.pendingDrawings = [...this.drawings].filter(([i, info]) => JSON.stringify(info) !== JSON.stringify(this.drawingBaselines.get(i) ?? null)).map(([pageIndex, info], i) => ({ pageIndex, info: info ? { ...info } : null, editIndex: result.length + i }))
+    this.pendingDrawings = [...this.drawings].filter(([i, info]) => stableJson(info) !== stableJson(this.drawingBaselines.get(i) ?? null)).map(([pageIndex, info], i) => ({ pageIndex, info: info ? { ...info } : null, editIndex: result.length + i }))
     result.push(...this.pendingDrawings.map(({ pageIndex, info }) => ({ kind: 'setDrawingInfo' as const, pageIndex, info })))
     this.pendingFixtureSave = null
-    if (this.fixturesReady && (JSON.stringify(this.fixtures) !== this.fixtureBaseline || entries.some(e => e.annotation.count))) {
-      this.pendingFixtureSave = { editIndex: result.length, json: JSON.stringify(this.fixtures) }
+    if (this.fixturesReady && (stableJson(this.fixtures) !== this.fixtureBaseline || entries.some(e => e.annotation.count))) {
+      this.pendingFixtureSave = { editIndex: result.length, json: stableJson(this.fixtures) }
       result.push({ kind: 'setCountFixtures', pageIndex: 0, fixtures: this.getCountFixtures() })
     }
     return result
@@ -1234,7 +1253,20 @@ export class AnnotationStore {
   }
 
   isDirty(): boolean {
-    return [...this.drawings].some(([i, info]) => JSON.stringify(info) !== JSON.stringify(this.drawingDirtyBaselines.get(i) ?? null)) || JSON.stringify(this.fixtures) !== this.fixtureBaseline || this.editEntries().length > 0 || [...this.scales].some(([i, scale]) => JSON.stringify(scale) !== JSON.stringify(this.scaleBaselines.get(i) ?? null))
+    const summary = this.dirtySummary()
+    return summary.annotations > 0 || summary.fixtures || summary.scales.length > 0 || summary.drawings.length > 0
+  }
+
+  dirtySummary(): DirtySummary {
+    if (this.dirtyCache?.version === this.version) return this.dirtyCache.summary
+    const summary: DirtySummary = {
+      annotations: this.editEntries().length,
+      fixtures: stableJson(this.fixtures) !== this.fixtureBaseline,
+      scales: [...this.scales].filter(([i, scale]) => stableJson(scale) !== stableJson(this.scaleBaselines.get(i) ?? null)).map(([i]) => i).sort((a, b) => a - b),
+      drawings: [...this.drawings].filter(([i, info]) => stableJson(info) !== stableJson(this.drawingDirtyBaselines.get(i) ?? null)).map(([i]) => i).sort((a, b) => a - b),
+    }
+    this.dirtyCache = { version: this.version, summary }
+    return summary
   }
 
   private mutate(id: string, change: (annotation: StoredAnnotation) => void): void {

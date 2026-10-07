@@ -3,6 +3,7 @@ import { DrawingInfoDialog } from './app/DrawingInfoDialog'
 import { DrawingUiContext } from './app/documentModel'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { DocumentTabs } from './app/DocumentTabs'
+import { commitFocusedField } from './app/pendingInput'
 import { DocumentWorkspace } from './app/DocumentWorkspace'
 import { loadSplitSettings, saveSplitSettings, type SplitSettings } from './app/SplitView'
 import { prepareSplitDisplays } from './app/splitRendering'
@@ -356,7 +357,7 @@ export default function App() {
     updateSplit({ ...split, enabled: true, rightId: right.docId, rightName: right.name,
       synced: right === left ? false : remembered ? split.synced : true })
   }, [split, tabs, updateSplit])
-  const refreshRecent = useCallback(() => void loadRecentFiles().then(setRecent), [])
+  const refreshRecent = useCallback(() => loadRecentFiles().then(setRecent), [])
   const showStatus = useCallback((message: string) => {
     setStatus(message)
     window.clearTimeout(statusTimerRef.current)
@@ -700,13 +701,14 @@ export default function App() {
   }, [openHandle])
 
   const closeDocument = useCallback(async (docId: string, confirmDirty = true) => {
+    commitFocusedField()
     const documents = tabs.list()
     const index = documents.findIndex((document) => document.docId === docId)
     const session = documents[index]
     if (!session) return
     if (organizeRef.current?.docId === docId && !discardOrganize(confirmDirty)) return
     if (activeRef.current?.docId === docId) await viewerRef.current?.commitEditor()
-    if (confirmDirty && session.dirty && !window.confirm('未保存の変更があります。保存せずに閉じますか？')) return
+    if (confirmDirty && session.dirty && !window.confirm(`「${session.name}」に保存していない変更があります（${session.dirtyDescription()}）。\n保存せずに閉じますか？`)) return
     if (activeRef.current?.docId === docId) {
       persistView(session)
       const next = documents[index + 1] ?? documents[index - 1] ?? null
@@ -740,6 +742,7 @@ export default function App() {
   }, [])
 
   const saveToBytes = useCallback(async (): Promise<{ bytes: Uint8Array; result: ApplyAndSaveResult } | null> => {
+    commitFocusedField()
     const session = activeRef.current
     if (!session || !beginSave()) return null
     try {
@@ -765,6 +768,7 @@ export default function App() {
   }, [beginSave, endSave, pool, refreshTabs, showStatus, split.enabled])
 
   const saveDocument = useCallback(async (saveAs: boolean) => {
+    commitFocusedField()
     const session = activeRef.current
     if (!session || !beginSave()) return
     setError('')
@@ -789,18 +793,24 @@ export default function App() {
       if (handle) {
         await writePdf(handle, result.bytes)
         session.rebindToFile(handle, handle.name ?? session.name, result.bytes.byteLength)
-        await saveLastOpenedHandle(handle, session.name)
-        persistView(session)
-        if (split.rightId === session.docId) updateSplit({ ...split, rightName: session.name })
-        refreshRecent()
+        session.fileOutdated = false
       } else {
         downloadPdf(result.bytes, session.name)
+        session.fileOutdated = false
       }
-      session.fileOutdated = false
       viewerRef.current?.clearSelection()
       refreshTabs()
-      if (result.errors.length > 0) throw new Error(result.errors.map((item) => item.message).join(' / '))
-      showStatus(saveMessage(result))
+      const postSaveFailures: string[] = []
+      const recordFailure = (reason: unknown) => postSaveFailures.push(reason instanceof Error ? reason.message : String(reason))
+      if (handle) {
+        try { await saveLastOpenedHandle(handle, session.name) } catch (reason) { recordFailure(reason) }
+        try { persistView(session) } catch (reason) { recordFailure(reason) }
+        try { if (split.rightId === session.docId) updateSplit({ ...split, rightName: session.name }) } catch (reason) { recordFailure(reason) }
+        try { await refreshRecent() } catch (reason) { recordFailure(reason) }
+      }
+      showStatus(postSaveFailures.length
+        ? `保存しました（最近使ったファイルの記録に失敗しました: ${postSaveFailures.join(' / ')}）`
+        : saveMessage(result))
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === 'AbortError') return
       setError(`保存できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
@@ -997,6 +1007,7 @@ export default function App() {
   }, [])
 
   const applyPendingEdits = useCallback(async (session: DocumentSession) => {
+    commitFocusedField()
     await viewerRef.current?.commitEditor()
     const wasDirty = session.dirty
     const edits = session.annotationStore.toEdits()
@@ -1473,14 +1484,18 @@ export default function App() {
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      commitFocusedField()
+      const dirtyDocuments = tabs.list().filter(session => session.dirty)
+      if (dirtyDocuments.length) {
+        event.preventDefault()
+        event.returnValue = ''
+        showStatus(`保存していない変更があるPDF: ${dirtyDocuments.map(session => session.name).join('、')}`)
+      }
       persistView()
-      if (!tabs.list().some((session) => session.dirty)) return
-      event.preventDefault()
-      event.returnValue = ''
     }
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [persistView, tabs])
+  }, [persistView, showStatus, tabs])
 
   useEffect(() => {
     if (new URLSearchParams(location.search).get('test') !== '1') return
@@ -1689,6 +1704,7 @@ export default function App() {
           onPaste={pasteAnnotations}
           onDuplicate={duplicateAnnotations}
           onClearSelection={() => viewerRef.current?.clearSelection()}
+          dirtyDescription={active?.dirtyDescription() ?? ''}
           onDeleteSelection={() => { active?.annotationStore.removeMany(active.annotationStore.selectedIds()); refreshTabs() }}
           onToggleThumbnails={() => updatePanels({ ...panels, thumbnails: !panels.thumbnails })}
           onOpenSidePanel={(tab) => openSidePanel(tab)}

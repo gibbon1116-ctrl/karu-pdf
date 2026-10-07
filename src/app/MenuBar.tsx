@@ -16,6 +16,7 @@ interface Props {
   onViewForward(): void
   fileName: string | null
   dirty: boolean
+  dirtyDescription: string
   hasDocument: boolean
   saving: boolean
   organizing: boolean
@@ -141,7 +142,7 @@ export function MenuBar(props: Props) {
       </Dropdown>)}
       <span className="menu-file-name" title={props.fileName ?? ''}>
         {props.editRestriction && <span role="status" title={props.editRestriction}>閲覧専用: {props.editRestriction} </span>}
-        {props.fileName ?? 'PDF未選択'}{props.dirty && <span aria-label="未保存"> ●</span>}
+        {props.fileName ?? 'PDF未選択'}{props.dirty && <span aria-label="未保存" title={props.dirtyDescription}> ●</span>}
       </span>
     </header>
     <dialog ref={aboutRef} className="about-dialog" aria-labelledby="about-title" onCancel={() => setAboutOpen(false)} onClose={() => setAboutOpen(false)}>
