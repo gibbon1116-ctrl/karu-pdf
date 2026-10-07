@@ -30,8 +30,9 @@ const names = {
 }
 async function addPresets(page: Page) {
  await page.getByRole('button', { name: '数量拾い', exact: true }).click()
- await page.getByRole('button', { name: '見本から追加', exact: true }).click()
- const dialog = page.getByRole('dialog', { name: '見本から追加' })
+ await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
+ await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
+ const dialog = page.getByRole('dialog', { name: '標準マスタから追加' })
  await dialog.getByLabel('見本の分野').selectOption('仮設・土工')
  await expect(dialog.getByText('仮設／内部足場 内部足場（囲む）（面積・m²）', { exact: true })).toBeVisible()
  await expect(dialog.getByText('土工／根切り 根切り（囲む×深さ）（体積・m³）', { exact: true })).toBeVisible()

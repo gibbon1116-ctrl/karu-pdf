@@ -236,7 +236,8 @@ export function businessCases(url: string) {
   test('試用版の数量拾いを配布形態ごとに保存できる', async ({page}) => {
     await open(page,url)
     await page.getByRole('tab',{name:'数量',exact:true}).click()
-    await page.getByRole('button',{name:'見本から追加',exact:true}).click()
+    await page.getByRole('button',{name:'標準マスタから追加',exact:true}).click()
+    await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
     await page.getByRole('button',{name:'選んだ項目を追加',exact:true}).click()
     await page.getByRole('button',{name:'DL ダウンライト',exact:true}).click()
     await page.getByRole('button', { name: '数量拾い', exact: true }).click()

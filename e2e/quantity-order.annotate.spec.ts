@@ -19,8 +19,9 @@ async function open(page: Page, presets = true) {
   await expect(page.getByTestId('annotation-layer-0')).toBeVisible()
   await page.getByRole('button', { name: '数量拾い', exact: true }).click()
   if (presets) {
-    await page.getByRole('button', { name: '見本から追加', exact: true }).click()
-    await page.getByRole('dialog', { name: '見本から追加' }).getByRole('button', { name: '選んだ項目を追加' }).click()
+    await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
+    await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
+  await page.getByRole('dialog', { name: '標準マスタから追加' }).getByRole('button', { name: '選んだ項目を追加' }).click()
   }
 }
 const panel = (page: Page) => page.getByTestId('fixture-panel')

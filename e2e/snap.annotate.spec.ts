@@ -84,8 +84,9 @@ test('PDF の線には吸い付かず、頂点の四角は Alt で即座に消�
 test('既存の数量拾いの頂点へ距離計測が吸い付く', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: '数量拾い', exact: true }).click()
-  await page.getByRole('button', { name: '見本から追加', exact: true }).click()
-  await page.getByRole('dialog', { name: '見本から追加' }).getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
+  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
+  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
+  await page.getByRole('dialog', { name: '標準マスタから追加' }).getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
   await page.getByRole('button', { name: 'CV ケーブル（CV）', exact: true }).click()
   for (const [x, y] of [[103, 204], [140, 240]]) { const p = await point(page, x, y); await page.mouse.click(p.x, p.y) }
   await page.keyboard.press('Enter')

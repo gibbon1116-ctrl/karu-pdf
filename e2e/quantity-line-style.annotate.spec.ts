@@ -35,8 +35,9 @@ const warning = (dialog: Locator) => dialog.getByRole('status').filter({ hasText
 
 test('six length presets and three successive suggestions have distinct appearances, with collision warnings retained', async ({ page }) => {
   await open(page)
-  await page.getByRole('button', { name: '見本から追加', exact: true }).click()
-  const presets = page.getByRole('dialog', { name: '見本から追加', exact: true })
+  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
+  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
+  const presets = page.getByRole('dialog', { name: '標準マスタから追加', exact: true })
   await presets.getByLabel('見本の分野', { exact: true }).selectOption('機械設備')
   const labels = presets.locator('.fixture-presets > label')
   for (const label of await labels.all()) if (!(await label.innerText()).includes('（長さ・m）')) await label.getByRole('checkbox').uncheck()

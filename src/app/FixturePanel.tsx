@@ -100,7 +100,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   const dropClass = (kind: 'fixture' | 'category', id: string) => dropTarget?.kind === kind && dropTarget.id === id ? ` fixture-drop-${dropTarget.side}` : ''
   const nextOrder = fixtures.reduce((n, f) => Math.max(n, f.order + 1), 0)
   const saveFixture = (f: CountFixture) => { store.setCountFixtures(dialog?.editing ? fixtures.map(p => p.id === f.id ? f : p) : [...fixtures, f]); store.selectFixture(f.id); setDialog(null) }
-  const addMany = (items: Array<FixturePreset | CountFixture>) => {
+  const addMany = (items: Array<FixturePreset | CountFixture>, selectAdded = false) => {
     try {
       const next = [...fixtures]
       let order = nextOrder
@@ -110,11 +110,16 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
         let appearance: QuantityLineAppearance | undefined
         if (isLine && (!imported || next.some(f => quantityKind(f) !== 'count' && countHex(f.style.color) === countHex(item.style.color) && quantityLine(f).width === quantityLine(item).width && quantityLine(f).dash === quantityLine(item).dash))) appearance = nextQuantityLineStyle(next)
         const style = imported ? structuredClone(item.style) : nextCountStyle(isLine ? [] : next)
-        next.push({ ...item, id: crypto.randomUUID(), order: order++, style: appearance ? { ...style, color: appearance.color } : style, ...(appearance ? { line: appearance.line } : {}) })
+        const { category, code, spec, name, kind, method, defaults, aggregation } = item
+        const data = imported ? item : { category, code, spec, name, kind, method, defaults, aggregation }
+        next.push({ ...data, id: crypto.randomUUID(), order: order++, style: appearance ? { ...style, color: appearance.color } : style, ...(appearance ? { line: appearance.line } : {}) })
       }
-      if (next.length !== fixtures.length) store.setCountFixtures(next)
+      if (next.length !== fixtures.length) {
+        store.setCountFixtures(next)
+        if (selectAdded) { setSelectedCategory(null); store.selectFixture(next[fixtures.length].id); setStatus(`${next.length - fixtures.length}件を追加しました`) }
+      }
       setError('')
-    } catch (reason) { setError(String(reason)) }
+    } catch (reason) { setError(String(reason)); if (selectAdded) throw reason }
   }
   const csv = async (value: string, name: string) => {
     const blob = new Blob([value], { type: 'text/csv;charset=utf-8' })
@@ -139,7 +144,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     <div className="fixture-actions">
       <div className="fixture-action-row">
       <button disabled={!canEdit || fixtures.length >= 1000} onClick={() => setDialog({ editing: false, initial: { id: crypto.randomUUID(), name: '', code: '', category: selected?.category ?? groups[0]?.category ?? 'その他', style: nextCountStyle(fixtures), order: nextOrder } })}>項目を追加</button>
-      <button disabled={!canEdit} onClick={() => setPreset(true)}>見本から追加</button>
+      <button disabled={!canEdit} onClick={() => setPreset(true)}>標準マスタから追加</button>
       <button disabled={!canEdit || !selected || fixtures.length >= 1000} onClick={() => {
         if (!selected) return
         try {
@@ -218,7 +223,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     <Suspense fallback={<p>画面を開いています…</p>}>
       {csvOpen && <QuantityCsvExportDialog index={index} fixtures={fixtures} pdfName={session.name} pageIndex={pageIndex} onExport={csv} onClose={() => setCsvOpen(false)} />}
       {dialog && <FixtureDialog initial={dialog.initial} fixtures={fixtures} editing={dialog.editing} duplicate={dialog.duplicate} hasMarks={dialog.editing && store.fixtureMarkCount(dialog.initial.id) > 0} onSave={saveFixture} onClose={() => setDialog(null)} />}
-      {preset && <FixturePresetDialog onAdd={addMany} onClose={() => setPreset(false)} />}
+      {preset && <FixturePresetDialog fixtures={fixtures} onAdd={items => addMany(items, true)} onClose={() => setPreset(false)} />}
       {sources && <FixturePresetDialog sources={sources} onAdd={addMany} onClose={() => setSources(null)} />}
     </Suspense>
   </section>

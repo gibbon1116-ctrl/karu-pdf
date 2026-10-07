@@ -321,7 +321,8 @@ test('crops original drawing without annotations, keeps drafts on Esc, and prese
 
 test('changes suggestions repeatedly while retaining size, opacity, code display and duplication fields', async ({ page }) => {
   await open(page)
-  await page.getByRole('button', { name: '見本から追加', exact: true }).click()
+  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
+  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
   await page.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
   await expect(page.getByTestId('fixture-panel').locator('li[data-fixture-id]')).toHaveCount(41)
   await page.getByRole('button', { name: '項目を追加', exact: true }).click()
@@ -380,7 +381,8 @@ test('fixture layout keeps counts and add actions in view at 1440x900 and restor
   expect(await page.evaluate(() => localStorage.getItem('karu-pdf:side-panel-width'))).toBe('260')
   await page.getByRole('tab', { name: '数量', exact: true }).click()
 
-  await page.getByRole('button', { name: '見本から追加', exact: true }).click()
+  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
+  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
   await page.getByLabel('見本の分野', { exact: true }).selectOption('電気設備')
   await page.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
   await select(page, 'DL ダウンライト')
@@ -409,7 +411,8 @@ test('fixture layout keeps counts and add actions in view at 1440x900 and restor
 
 test('presets count across pages, visibility excludes hit testing, and quantity CSV includes zero fixtures', async ({ page }) => {
   await open(page)
-  await page.getByRole('button', { name: '見本から追加', exact: true }).click()
+  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
+  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
   await page.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
   await select(page, 'DL ダウンライト'); await clickPoint(page, 0, 80, 90); await clickPoint(page, 0, 130, 90)
   await expect(page.getByTestId('fixture-panel')).toContainText('表示中の図面（p.1）: 2個 ／ 全図面: 2個')
@@ -487,7 +490,8 @@ test('custom style, duplication, bulk editing, multiple reassignment, undo, and 
 
 test('imports another open PDF without duplicate names/codes and keeps fixture deletion undoable', async ({ page }) => {
   await open(page)
-  await page.getByRole('button', { name: '見本から追加', exact: true }).click()
+  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
+  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
   await page.getByLabel('見本の分野', { exact: true }).selectOption('建築')
   await page.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
   await select(page, 'DS 片開き戸'); await clickPoint(page, 0, 90, 90)
@@ -514,9 +518,10 @@ test('requires a fixture and warns for same-fixture clicks within 3mm without dr
   await clickPoint(page, 0, 100, 100)
   expect(await page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter(a => a.count).length)).toBe(0)
   await expect(page.getByRole('status')).toContainText('数量拾いの一覧で項目を選んでください')
-  await page.getByRole('button', { name: '見本から追加', exact: true }).click()
+  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
+  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
   await page.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
   await select(page, 'DL ダウンライト'); await clickPoint(page, 0, 100, 100); await clickPoint(page, 0, 103, 100)
-  await expect(page.getByRole('status')).toContainText('近くに同じ数量拾いの印があります')
+  await expect(page.locator('.status-bar [role="status"]')).toContainText('近くに同じ数量拾いの印があります')
   await expect(page.getByTestId('fixture-panel')).toContainText('全図面: 2個')
 })

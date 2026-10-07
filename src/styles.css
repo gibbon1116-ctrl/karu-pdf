@@ -672,3 +672,27 @@ button, input { font: inherit; }
 .quantity-breakdown-total { text-align: right; font-weight: bold; }
 
 .fixture-panel { position: relative; }
+
+/* Standard quantity master: loaded and displayed only from its dialog. */
+.quantity-master-dialog { width: min(1120px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); overflow: auto; box-sizing: border-box; }
+.quantity-master-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.quantity-master-tabs [aria-selected="true"], .quantity-master-navigation [aria-pressed="true"] { background: #e5f0ff; color: #163d70; border-color: #3972b6; font-weight: bold; }
+.quantity-master-search { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.quantity-master-search input { flex: 1; min-width: 0; }
+.quantity-master-browser { display: grid; grid-template-columns: 120px 180px 140px minmax(0, 1fr); gap: 12px; }
+.quantity-master-navigation { display: flex; flex-direction: column; gap: 4px; max-height: 52vh; overflow: auto; }
+.quantity-master-navigation h3, .quantity-master-specs h3 { margin: 0 0 8px; font-size: 14px; }
+.quantity-master-navigation button { text-align: left; overflow-wrap: anywhere; flex-shrink: 0; }
+.quantity-master-specs { min-width: 0; }
+.quantity-master-specs .fixture-presets { max-height: 46vh; overflow: auto; }
+.quantity-master-specs .fixture-presets label { align-items: flex-start; overflow-wrap: anywhere; }
+.quantity-master-specs input[type="checkbox"] { flex-shrink: 0; }
+.quantity-master-selection-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.quantity-master-search-results { grid-template-columns: minmax(0, 1fr); }
+.quantity-master-added { color: #506050; font-size: 12px; }
+@media (max-width: 760px) {
+  .quantity-master-browser { grid-template-columns: minmax(0, 1fr); }
+  .quantity-master-navigation { flex-direction: row; flex-wrap: wrap; max-height: none; overflow: visible; }
+  .quantity-master-navigation h3 { flex-basis: 100%; }
+  .quantity-master-specs .fixture-presets { max-height: 36vh; }
+}
