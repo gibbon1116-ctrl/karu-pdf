@@ -6,7 +6,8 @@ const digest = (bytes, encoding = 'hex') => createHash('sha256').update(bytes).d
 export function verifySingle(file) {
   const html = fs.readFileSync(file, 'utf8'), scripts = [...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)]
   const executable = scripts.filter(s => !s[1].includes('type='))
-  if (scripts.length !== 7 || executable.length !== 1 || /<script[^>]+src=|<link[^>]+(?:preload|stylesheet)|<base\b/.test(html)) throw new Error('Unexpected HTML resource or script')
+  // One executable program plus embedded data blocks; 1.4.0 adds the symbol search Worker (7 → 8).
+  if (scripts.length !== 8 || executable.length !== 1 || /<script[^>]+src=|<link[^>]+(?:preload|stylesheet)|<base\b/.test(html)) throw new Error('Unexpected HTML resource or script')
   const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1]
   const scriptHash = digest(executable[0][2], 'base64')
   const expected = `default-src 'none'; script-src 'sha256-${scriptHash}' 'wasm-unsafe-eval'; worker-src blob:; connect-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; object-src 'none'; base-uri 'none'; form-action 'none'`
