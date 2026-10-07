@@ -137,7 +137,7 @@ export default function FixtureDialog({ initial, fixtures, editing, duplicate = 
       {error && <p role="alert">{error}</p>}
       </div>
       <div className="fixture-dialog-appearance">
-      <button type="button" onClick={() => {
+      <button type="button" title="線の色・線種・線幅の組合せを提案します（経路に載せる項目の組合せは「よく使う構成」）" onClick={() => {
         try {
           if (length) {
             const current = { color: value.style.color, line: quantityLine(value) }

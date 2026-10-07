@@ -21,8 +21,8 @@ export const ScaleInteractionContext = createContext<{
 export const isMeasureTool = (tool: string): tool is MeasureKind => tool === 'distance' || tool === 'perimeter' || tool === 'area'
 const cssColor = (c: readonly number[]) => `rgb(${c.map(n => n * 255).join(' ')})`
 
-export function MeasurementShape({ points, kind, text, fontSize, color, width, opacity, dash, showText = true, showFill = true, haloWidth }: {
-  points: Point[]; kind: MeasureKind; text: string; fontSize: number; color: string; width: number; opacity: number; dash?: QuantityLineStyle['dash']; showText?: boolean; showFill?: boolean; haloWidth?: number
+export function MeasurementShape({ points, kind, text, fontSize, color, width, opacity, dash, showText = true, showFill = true, haloWidth, routeComposition }: {
+  points: Point[]; kind: MeasureKind; text: string; fontSize: number; color: string; width: number; opacity: number; dash?: QuantityLineStyle['dash']; showText?: boolean; showFill?: boolean; haloWidth?: number; routeComposition?: { count: number; title: string }
 }) {
   const label = measureLabel(points, kind, fontSize)
   const coords = points.map(p => p.join(',')).join(' ')
@@ -40,6 +40,10 @@ export function MeasurementShape({ points, kind, text, fontSize, color, width, o
     {kind === 'area' ? <>{showFill && <polygon points={coords} fill={color} fillOpacity=".15" />}<polygon points={coords} fill="none" stroke={color} strokeWidth={width} strokeDasharray={quantityDashes(dash, width).join(' ')} /></> : <polyline points={coords} fill="none" stroke={color} strokeWidth={width} strokeDasharray={quantityDashes(dash, width).join(' ')} />}
     {ticks && <path d={ticks} fill="none" stroke={color} strokeWidth={width} strokeDasharray={quantityDashes(dash, width).join(' ')} />}
     {showText && <text className="measurement-label" x={label.anchor[0]} y={label.anchor[1] + fontSize * .3} transform={`rotate(${label.angle * 180 / Math.PI} ${label.anchor.join(' ')})`} textAnchor="middle" fontSize={fontSize} fill={color} stroke="white" strokeWidth="3" paintOrder="stroke" strokeLinejoin="round">{text}</text>}
+    {routeComposition && points[0] && <g className="route-composition-badge" pointerEvents="none" transform={`translate(${points[0].join(' ')})`}>
+      <title>{routeComposition.title}</title><rect x={-fontSize * .6} y={-fontSize * .6} width={fontSize * 1.2} height={fontSize * 1.2} rx={fontSize * .2} fill={color} />
+      <text textAnchor="middle" dominantBaseline="central" fontSize={fontSize * .85} fill="white">{routeComposition.count}</text>
+    </g>}
   </g></>
 }
 
@@ -71,7 +75,8 @@ export function useMeasurementInteraction(props: Props) {
   const cloud = props.tool === 'cloudPolygon'
   const quantityItem = props.tool === 'count' && props.quantityItem && quantityMethod(props.quantityItem) !== 'click' ? props.quantityItem : undefined
   const quantityKind = quantityItem && quantityPoints(quantityMethod(quantityItem) as QuantityMark['method']) === 'polygon' ? 'area' : 'perimeter'
-  const quantityMark = (id = 'draft'): QuantityMark => ({ version: 1, id, itemId: quantityItem!.id, method: quantityMethod(quantityItem!) as QuantityMark['method'], ...quantityItem?.defaults, ...(quantityMethod(quantityItem!) === 'polyline' && quantityItem?.routeScope && quantityItem.routeScope !== 'all' ? { scope: quantityItem.routeScope } : {}) })
+  const quantityMark = (id = 'draft'): QuantityMark => ({ version: 1, id, itemId: quantityItem!.id, method: quantityMethod(quantityItem!) as QuantityMark['method'], ...quantityItem?.defaults, ...(quantityMethod(quantityItem!) === 'polyline' ? { ...(quantityItem?.routeScope && quantityItem.routeScope !== 'all' ? { scope: quantityItem.routeScope } : {}), ...props.store.routeTemplateItems(quantityItem!.id) } : {}) })
+  const extraCode = (id: string) => { const f = props.store.getCountFixture(id); return f ? fixtureCode(f) : id }
   const [pending, setPending] = useState<{ mark: QuantityMark; save(mark: QuantityMark): void } | null>(null)
   const constrain = (start: Point, end: Point, shift: boolean): Point => {
     if (!shift || !(quantityItem || vertex.current?.original.quantity)) return constrainMeasurePoint(start, end, shift)
@@ -172,7 +177,7 @@ export function useMeasurementInteraction(props: Props) {
     if (cloud) { draw(p, '', 'area', cssColor(f.color), f.fontSize, f.borderWidth, true, f.cloudIntensity, f.fillColor ? cssColor(f.fillColor) : undefined); return }
     if (quantityItem && scale && !tracing) {
       const line = quantityLine(quantityItem)
-      draw(p, quantityLabel(p, scale.mmPerPoint, quantityMark(), fixtureCode(quantityItem), quantityItem.style.showCode), kind, cssColor(quantityItem.style.color), quantityItem.style.size, line.width, true, undefined, undefined, line.dash, quantityItem.style.opacity); return
+      draw(p, quantityLabel(p, scale.mmPerPoint, quantityMark(), fixtureCode(quantityItem), quantityItem.style.showCode, extraCode), kind, cssColor(quantityItem.style.color), quantityItem.style.size, line.width, true, undefined, undefined, line.dash, quantityItem.style.opacity); return
     }
     draw(p, tracing ? 'なぞって合わせる' : scale ? measureText(p, { ...scale, kind }) : '', kind, cssColor(f.color), f.fontSize, f.borderWidth, true)
   }
@@ -205,7 +210,7 @@ export function useMeasurementInteraction(props: Props) {
     const quantity = quantityItem ? quantityMark(crypto.randomUUID()) : null
     const vertices = p.map(point => [...point] as Point)
     const save = (mark: QuantityMark | null) => {
-      const text = mark ? quantityLabel(vertices, scale.mmPerPoint, mark, fixtureCode(quantityItem!), quantityItem!.style.showCode) : measureText(vertices, measure)
+      const text = mark ? quantityLabel(vertices, scale.mmPerPoint, mark, fixtureCode(quantityItem!), quantityItem!.style.showCode, extraCode) : measureText(vertices, measure)
       const a = props.store.create({ pageIndex: props.pageIndex, kind, quantity: mark ? { ...mark, ...props.store.pickupLocation(props.pageIndex) } : null, quantityDash: quantityItem ? quantityLine(quantityItem).dash : undefined, vertices, measure, text,
         rect: measureBounds(vertices, kind, text, f.fontSize), color: f.color, fontSize: f.fontSize, borderWidth: f.borderWidth, opacity: f.opacity })
       props.store.selectOnly(a.id); props.select(a.id)

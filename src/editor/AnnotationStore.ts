@@ -224,8 +224,16 @@ export class AnnotationStore {
   fixturesReady = false
   get fixturesLoading(): boolean { return this.fixtureLoading !== null }
   selectedFixtureId: string | null = null
+  routeTemplate: { itemId: string; extra: NonNullable<QuantityMark['extra']>; count: number; scope?: RouteScope; name: string } | null = null
+  setRouteTemplate(t: AnnotationStore['routeTemplate']): void { this.routeTemplate = t ? structuredClone(t) : null; this.notify(false) }
+  routeTemplateItems(itemId: string): Partial<Pick<QuantityMark, 'count' | 'scope' | 'extra'>> {
+    const t = this.routeTemplate, f = this.getCountFixture(itemId)
+    if (!t || t.itemId !== itemId || !f || quantityMethod(f) !== 'polyline') return {}
+    return { count: t.count, scope: t.scope, extra: t.extra.filter(e => { const f = this.getCountFixture(e.itemId); return f && quantityMethod(f) === 'polyline' }).map(e => ({ ...e })) }
+  }
   private recentFixtures: readonly string[] = []
   get recentFixtureIds(): readonly string[] { return this.recentFixtures }
+  rememberRouteFixture(id: string): void { this.rememberFixture(id); this.notify(false) }
   private rememberFixture(id: string): void {
     this.recentFixtures = [id, ...this.recentFixtures.filter(previous => previous !== id)].slice(0, 8)
   }
@@ -321,6 +329,7 @@ export class AnnotationStore {
   canRedo = (): boolean => this.history.canRedo
 
   reset(preserveFixtureVisibility = false): void {
+    if (!preserveFixtureVisibility) this.routeTemplate = null
     if (!preserveFixtureVisibility) this.recentFixtures = []
     this.index = null; this.visibleCountCache = null
     this.fixtures = []; this.fixtureBaseline = '[]'; this.fixtureLoading = null; this.fixturesReady = false
@@ -463,7 +472,7 @@ export class AnnotationStore {
     })().finally(() => { if (generation === this.generation) this.fixtureLoading = null })
     return this.fixtureLoading
   }
-  selectFixture(id: string | null): void { this.selectedFixtureId = id; if (id !== null) this.rememberFixture(id); this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false) }
+  selectFixture(id: string | null): void { if (id !== this.routeTemplate?.itemId) this.routeTemplate = null; this.selectedFixtureId = id; if (id !== null) this.rememberFixture(id); this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false) }
   isFixtureVisible(id: string): boolean { return !this.hiddenFixtures.has(id) && (!this.onlySelectedFixture || id === this.selectedFixtureId) }
   isCountVisible(mark: CountMark | null | undefined, quantity?: QuantityMark | null): boolean { return quantity ? [quantity.itemId, ...(quantity.extra ?? []).map(e => e.itemId)].some(id => this.isFixtureVisible(id)) : !mark || this.isFixtureVisible(countFixtureId(mark)) }
   setFixtureVisible(ids: readonly string[], visible: boolean): void {
@@ -524,6 +533,33 @@ export class AnnotationStore {
       a.text = this.quantityText(a); a.rect = measureBounds(a.vertices!, a.measure!.kind, a.text, a.fontSize)
     })
     this.pruneHiddenSelection()
+  }
+  setRouteItems(id: string, items: ReadonlyArray<{ itemId: string; count: number; scope?: RouteScope }>): void {
+    this.addFixturesAndSetRouteItems([], id, items)
+  }
+  addFixturesAndSetRouteItems(newFixtures: readonly CountFixture[], id: string, items: ReadonlyArray<{ itemId: string; count: number; scope?: RouteScope }>): void {
+    const a = this.annotations.get(id), q = a?.quantity
+    if (!a || a.deleted || a.legacyChange || q?.method !== 'polyline' || !items.length || items.length > 11) return
+    const fixtures = [...this.getCountFixtures(), ...newFixtures]
+    if (new Set(fixtures.map(f => f.id)).size !== fixtures.length) return
+    const ids = new Set<string>()
+    for (const e of items) {
+      const f = fixtures.find(f => f.id === e.itemId)
+      if (!f || quantityMethod(f) !== 'polyline' || ids.has(e.itemId) || !validRouteCount(e.count) || e.scope !== undefined && !validRouteScope(e.scope)) return
+      ids.add(e.itemId)
+    }
+    if (newFixtures.length) serializeCountFixtures(fixtures)
+    const normalized = items.map(e => ({ itemId: e.itemId, count: e.count, scope: e.scope === 'all' ? undefined : e.scope }))
+    const current = [{ itemId: q.itemId, count: q.count ?? 1, scope: q.scope }, ...(q.extra ?? [])].map(e => ({ ...e, scope: e.scope === 'all' ? undefined : e.scope }))
+    if (!newFixtures.length && stableJson(current) === stableJson(normalized)) return
+    const before: HistoryState = [cloneState(a)], after: HistoryState = []
+    if (newFixtures.length) { before.fixtures = this.getCountFixtures(); after.fixtures = structuredClone(fixtures); this.fixtures = structuredClone(fixtures) }
+    const [main, ...extra] = normalized
+    a.quantity = { ...q, itemId: main.itemId, count: main.count === 1 ? undefined : main.count, scope: main.scope, extra: extra.length ? extra : undefined }
+    if (main.itemId !== q.itemId) this.applyFixtureToQuantity(a, this.getCountFixture(main.itemId)!)
+    else { a.text = this.quantityText(a); a.rect = measureBounds(a.vertices!, a.measure!.kind, a.text, a.fontSize) }
+    this.markTouched(a); a.revision++; after.push(cloneState(a))
+    this.history.push({ before, after }); this.pruneHiddenSelection(); this.notify()
   }
   fixtureRemovalCounts(id: string): { deleted: number; detached: number } {
     let deleted = 0, detached = 0

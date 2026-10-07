@@ -124,8 +124,9 @@ async function createCaseA(page: Page) {
     await format(page).getByLabel(label, { exact: true }).fill(value)
     await format(page).getByLabel(label, { exact: true }).press('Enter')
   }
-  await format(page).getByLabel('長さの項目を選ぶ', { exact: true }).selectOption({ label: 'PF28 電線管' })
-  await format(page).getByRole('button', { name: 'この経路に足す', exact: true }).click()
+  await format(page).getByRole('button', { name: '線要素を追加', exact: true }).click()
+  await format(page).getByLabel('線要素を検索', { exact: true }).fill('PF28')
+  await format(page).getByRole('dialog', { name: '線要素を追加', exact: true }).getByRole('button', { name: 'PF28', exact: true }).first().click()
   await format(page).getByLabel('PF28の範囲', { exact: true }).selectOption('rise')
   await addItem(page, 'LED', '照明器具')
   await page.getByTestId('fixture-panel').getByRole('button', { name: 'LED 照明器具', exact: true }).click()

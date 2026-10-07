@@ -184,6 +184,8 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     const fixture = quantity ? store.getCountFixture(quantity.itemId) : activeSelection?.count ? store.fixtureForCount(activeSelection.count) : store.getCountFixture(store.selectedFixtureId)
     return <aside className="format-panel" aria-label="書式" data-testid="format-panel">
       <h2>数量拾い</h2>{pickupError && <p role="alert">{pickupError}</p>}
+      {/* What is loaded on the route comes first; item details and location follow. */}
+      {quantity?.method === 'polyline' && activeSelection?.measure && activeSelection.vertices && store.selectedIds().length === 1 && <RouteItems annotation={activeSelection} store={store} />}
       {fixture ? <><p>{fixtureCode(fixture)} {fixture.name}</p>{quantityMethod(fixture) === 'click' ? <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + fixture.style.size * (1 + .7 * fixtureCode(fixture).length))} 50`} aria-label="印の見本"><CountMarker style={fixture.style} code={fixtureCode(fixture)} /></svg> : <QuantitySwatch fixture={fixture} />}
         <button onClick={() => fixtureUi?.edit(fixture.id)}>項目を編集…</button></> : <button onClick={() => fixtureUi?.open()}>数量拾いの一覧で項目を選んでください</button>}
       {store.selectedPickupsOnly() && <PickupLocation key={store.selectedIds().join(',') + ':' + store.getSnapshot()} store={store} />}
@@ -191,11 +193,9 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
         {!fixture && <option value="">項目を選んでください</option>}{store.getCountFixtures().filter(f => quantityMethod(f) === (quantity?.method ?? 'click')).map(f => <option key={f.id} value={f.id}>{fixtureCode(f)} {f.name}</option>)}
       </select></label>}
       {quantity && activeSelection?.measure && activeSelection.vertices && store.selectedIds().length === 1 && <>
-        <p>{quantityPoints(quantity.method) === 'polygon' ? '面積' : quantity.method === 'polyline' ? '平面の長さ' : '長さ'}　{(quantityPoints(quantity.method) === 'polygon' ? polygonArea(activeSelection.vertices) * activeSelection.measure.mmPerPoint ** 2 / 1e6 : polylineLength(activeSelection.vertices) * activeSelection.measure.mmPerPoint / 1000).toFixed(2)} {quantityPoints(quantity.method) === 'polygon' ? 'm²' : 'm'}</p>
-        {quantity.method === 'polyline' && <RouteItems annotation={activeSelection} store={store} />}
-        {quantity.method === 'polyline' && <><QuantityValueInput label="立上り・立下り" key={activeSelection.id + "addM"} value={quantity.addM ?? 0} commit={n => store.updateQuantityAdd(activeSelection.id, n)} /><QuantityValueInput label="余長・その他" key={activeSelection.id + "slackM"} value={quantity.slackM ?? 0} commit={n => store.updateQuantityValues(activeSelection.id, { slackM: n })} /></>}
+        {quantity.method !== 'polyline' && <p>{quantityPoints(quantity.method) === 'polygon' ? '面積' : '長さ'}　{(quantityPoints(quantity.method) === 'polygon' ? polygonArea(activeSelection.vertices) * activeSelection.measure.mmPerPoint ** 2 / 1e6 : polylineLength(activeSelection.vertices) * activeSelection.measure.mmPerPoint / 1000).toFixed(2)} {quantityPoints(quantity.method) === 'polygon' ? 'm²' : 'm'}</p>}
         {quantityDimensions(quantity.method).map(key => <QuantityValueInput key={activeSelection.id + key} label={QUANTITY_DIMENSIONS[key]} value={quantity[key] ?? 0} commit={n => store.updateQuantityValues(activeSelection.id, { [key]: n })} />)}
-        <p>この拾い　{quantityLabel(activeSelection.vertices, activeSelection.measure.mmPerPoint, quantity, '', false)}</p>
+        {quantity.method !== 'polyline' && <p>この拾い　{quantityLabel(activeSelection.vertices, activeSelection.measure.mmPerPoint, quantity, '', false)}</p>}
       </>}
     </aside>
   }

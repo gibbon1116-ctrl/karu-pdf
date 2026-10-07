@@ -684,12 +684,72 @@ button, input { font: inherit; }
 .current-location input { width: 100px; }
 .location-input { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .location-input input { min-width: 0; max-width: 100%; }
-.route-items { min-width: 0; }
-.route-item { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
-.route-item input { width: 50px; }
-.route-item > span:first-of-type { flex: 1; min-width: 100px; }
-.route-items select { max-width: 100%; }
-.route-item select { flex: 1 1 100%; min-width: 0; }
+.route-items { min-width: 0; position: relative; font-size: 12px; }
+.route-heading { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 3px; margin-bottom: 6px; }
+.route-heading > button { grid-column: 2; justify-self: end; font-size: 11px; padding: 2px 4px; }
+.route-heading > strong { font-size: 13px; }
+.route-lengths { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-bottom: 3px; }
+.route-lengths > span { flex-basis: 100%; }
+.route-lengths > div { flex: 1; min-width: 80px; }
+.route-lengths label { display: flex; align-items: center; gap: 2px; margin: 0; font-size: 0; }
+.route-lengths label::before { font-size: 11px; white-space: nowrap; }
+.route-rise label::before { content: '立上り'; }
+.route-slack label::before { content: '＋余長'; }
+.route-lengths .quantity-input-unit { font-size: 11px; min-width: 0; gap: 1px; }
+.route-lengths input { width: 46px; padding: 2px 1px; font-size: 12px; box-sizing: border-box; appearance: textfield; }
+.route-lengths input::-webkit-inner-spin-button, .route-count input::-webkit-inner-spin-button { appearance: none; margin: 0; }
+.route-full-length { display: block; margin-bottom: 6px; color: #555; }
+.route-item { display: block; border: 1px solid #ccd0d4; border-left: 3px solid transparent; padding: 4px 2px; margin-bottom: 4px; background: #fff; border-radius: 3px; }
+.route-item-heading { display: flex; align-items: flex-start; gap: 3px; min-width: 0; }
+.route-role { flex: 0 0 auto; border-radius: 2px; padding: 1px 3px; font-size: 10px; border: 1px solid #b5bdc7; }
+.route-item .fixture-swatch { flex: 0 0 16px; width: 16px; height: 16px; }
+/* The code (what is loaded) is never truncated; the long formal name gives way. */
+.route-item-identity { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.route-item-identity strong { font-size: 13px; overflow-wrap: anywhere; }
+.route-item-identity small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: #666; }
+.route-item-heading button { flex: 0 0 auto; padding: 1px 3px; font-size: 11px; min-width: 20px; }
+.route-item-values { display: flex; align-items: center; gap: 3px; height: 28px; margin-top: 3px; min-width: 0; font-variant-numeric: tabular-nums; }
+.route-item-values select { flex: 0 1 52px; width: 52px; min-width: 40px; min-height: 24px; padding: 1px 0; font-size: 11px; }
+.route-count { display: flex; flex: 0 0 64px; align-items: center; gap: 1px; }
+.route-count button { padding: 0; width: 18px; min-width: 18px; height: 24px; font-size: 12px; }
+.route-count input { width: 28px; min-width: 0; padding: 2px 0; text-align: center; font-size: 13px; appearance: textfield; box-sizing: border-box; }
+.route-item-length { min-width: 0; flex: 1; font-size: 11px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.route-add { width: 100%; padding: 5px; font-size: 12px; }
+.route-status { font-size: 11px; color: #63510c; margin-top: 3px; }
+@keyframes route-item-added { from { background-color: #fff0a8; } to { background-color: #fff; } }
+.route-item-added { animation: route-item-added 2.5s ease-out; }
+@media (prefers-reduced-motion: reduce) { .route-item-added { animation: none; background-color: #fff0a8; } }
+.line-picker, .route-sets-dialog { box-sizing: border-box; padding: 6px; background: #fff; border: 1px solid #aab6c3; border-radius: 4px; box-shadow: 0 2px 8px #0002; z-index: 30; font-size: 11px; }
+.route-items .line-picker, .route-sets-dialog { margin: 4px 0; }
+.line-picker input, .route-sets-dialog input { width: 100%; min-width: 0; box-sizing: border-box; }
+.line-picker-results { max-height: min(340px, 45dvh); overflow-y: auto; }
+.line-picker h4, .line-picker h5, .route-sets-dialog h4 { margin: 6px 0 3px; font-size: 11px; }
+.line-picker h5 { color: #667788; font-size: 10px; }
+.line-picker-results button { display: flex; align-items: center; gap: 3px; width: 100%; text-align: left; min-height: 28px; padding: 3px; font-size: 11px; }
+.line-picker-results button.active { outline: 2px solid #1769aa; outline-offset: -2px; }
+.line-picker-results small { flex: 1; min-width: 0; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; color: #666; }
+.line-picker-results .fixture-swatch { width: 20px; height: 20px; flex: 0 0 20px; }
+.route-set { padding-bottom: 5px; margin-bottom: 5px; border-bottom: 1px solid #ddd; }
+.route-set > button:first-child { display: flex; flex-direction: column; align-items: flex-start; width: 100%; }
+.route-set small { max-width: 100%; text-align: left; overflow-wrap: anywhere; }
+.route-sets-dialog button { font-size: 10px; padding: 3px; }
+.route-sets-dialog label { margin: 4px 0; }
+.route-sets-dialog { max-height: 50dvh; overflow-y: auto; }
+.fixture-route-sets { padding: 4px 0; }
+.fixture-route-sets h3 { margin: 3px 0; font-size: 12px; }
+.fixture-route-sets button { max-width: 100%; margin: 2px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pickup-route, .pickup-template { background: rgba(255,255,255,.95); border: 1px solid #b5bdc7; border-top: 0; padding: 3px; border-radius: 0 0 4px 4px; box-sizing: border-box; min-width: 0; position: relative; }
+.pickup-route-row { display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 10px; overflow: hidden; }
+.pickup-route-row > span, .pickup-route-row > button { flex: 0 0 auto; }
+.pickup-route-row > button, .pickup-template button { padding: 1px 4px; }
+.pickup-route-chip { display: inline-flex; align-items: center; gap: 2px; border: 1px solid #ccd0d4; border-radius: 3px; padding: 2px; background: white; font-size: 10px; white-space: nowrap; }
+.pickup-route-chip .fixture-swatch { width: 16px; height: 16px; }
+.pickup-route-chip button { font-size: 11px; padding: 0 2px; min-width: 17px; height: 20px; }
+.pickup-route-measure { visibility: hidden; position: absolute; display: flex; left: 0; top: 0; height: 0; overflow: hidden; pointer-events: none; }
+.pickup-route .line-picker { position: absolute; left: 0; top: calc(100% + 4px); width: min(360px, 100%); }
+.pickup-bar-bottom .pickup-route .line-picker { top: auto; bottom: calc(100% + 4px); }
+.pickup-template { display: flex; align-items: center; justify-content: space-between; gap: 4px; font-size: 11px; }
+.route-composition-badge { pointer-events: none; }
 
 /* Quantity totals remain separate buttons from the item selection button. */
 .fixture-row { grid-template-columns: 22px 24px 48px minmax(0, 1fr) 34px; }

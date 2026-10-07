@@ -1,8 +1,12 @@
-import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { fixtureCode, quantityKind, QUANTITY_UNITS } from '../core/countFixtures'
 import { FixtureUiContext, type DocumentSession } from './documentModel'
 import FixtureQuickList, { FixtureSwatch, pickupFixtureId } from './fixtureQuickList'
 import { groupFixtures } from './fixtureOrder'
+import LinePicker, { changeRouteCount, routeEntries, routeHighlighted, useRouteFeedback } from './LinePicker'
+import { scopeSuffix } from './routeSets'
+import { QuantitySwatch } from '../editor/countMarkers'
+import type { AnnotationStore, EditableAnnotation } from '../editor/AnnotationStore'
 
 export default function PickupBar({ session }: { session: DocumentSession }) {
   const store = session.annotationStore, ui = useContext(FixtureUiContext)
@@ -46,6 +50,50 @@ export default function PickupBar({ session }: { session: DocumentSession }) {
         try { localStorage.setItem('karu-pdf:pickup-bar-position', nextPosition) } catch { /* Optional preference storage. */ }
       }}>{position === 'top' ? '↓' : '↑'}</button>
     </div>
+    {store.routeTemplate && <div className="pickup-template">構成: {store.routeTemplate.name}<button type="button" aria-label="構成を外す" onClick={() => store.setRouteTemplate(null)}>×</button></div>}
+    {store.selectedIds().length === 1 && store.get(store.selectedIds()[0])?.quantity?.method === 'polyline' && <PickupRoute key={store.selectedIds()[0]} store={store} annotation={store.get(store.selectedIds()[0])!} />}
     {open && <FixtureQuickList fixtures={fixtures} recentIds={store.recentFixtureIds} onSelect={select} onClose={() => setOpen(false)} onDismiss={() => { setOpen(false); chooser.current?.focus() }} />}
+  </div>
+}
+
+function PickupRoute({ store, annotation: a }: { store: AnnotationStore; annotation: EditableAnnotation }) {
+  const entries = routeEntries(a), feedback = useRouteFeedback(store)
+  const [open, setOpen] = useState(false), [visible, setVisible] = useState(entries.length)
+  const close = useCallback(() => setOpen(false), [])
+  const root = useRef<HTMLDivElement>(null), measure = useRef<HTMLDivElement>(null), summary = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    const fit = () => {
+      if (!root.current || !measure.current || !summary.current) return
+      const widths = Array.from(measure.current.children).map(e => e.getBoundingClientRect().width + 4)
+      // Measure against the bar's own maximum (70% of the drawing area), not the first row's
+      // current width, or the second row could never grow past the first row.
+      const region = root.current.closest<HTMLElement>('.pickup-bar-region')
+      const maxWidth = region ? Math.min(region.clientWidth * .7, region.clientWidth - 16) : root.current.clientWidth
+      const available = maxWidth - summary.current.getBoundingClientRect().width - 40
+      const total = widths.reduce((n, w) => n + w, 0)
+      let count = widths.length, used = 0
+      if (total > available) { count = 0; for (const width of widths) { if (used + width > available - 52) break; used += width; count++ } }
+      setVisible(count)
+    }
+    fit(); const observer = new ResizeObserver(fit); if (root.current) observer.observe(root.current)
+    return () => observer.disconnect()
+  }, [a, entries.length])
+  const chip = (e: typeof entries[number], measuring = false) => {
+    const f = store.getCountFixture(e.itemId), code = f ? fixtureCode(f) : e.itemId
+    const added = routeHighlighted(feedback, a.id, e.itemId)
+    return <span key={e.itemId} className={`pickup-route-chip${added ? ' route-item-added' : ''}`} title={code + scopeSuffix(e.scope)}>
+      {f && <QuantitySwatch fixture={f} />}<strong>{code}</strong><span>×{e.count}{scopeSuffix(e.scope)}</span>
+      <button type="button" tabIndex={measuring ? -1 : undefined} aria-label={'拾いバーの' + code + 'の条数を減らす'} disabled={e.count <= 1} onClick={() => changeRouteCount(store, a, e.itemId, e.count - 1)}>−</button>
+      <button type="button" tabIndex={measuring ? -1 : undefined} aria-label={'拾いバーの' + code + 'の条数を増やす'} disabled={e.count >= 99} onClick={() => changeRouteCount(store, a, e.itemId, e.count + 1)}>+</button>
+    </span>
+  }
+  return <div className="pickup-route" ref={root}>
+    <div className="pickup-route-row"><span ref={summary}>{entries.length}種類・{entries.reduce((n, e) => n + e.count, 0)}条</span>
+      {entries.slice(0, visible).map(e => chip(e))}{visible < entries.length && <span className="pickup-route-more" title={entries.slice(visible).map(e => { const f = store.getCountFixture(e.itemId); return (f ? fixtureCode(f) : e.itemId) + '×' + e.count + scopeSuffix(e.scope) }).join('、')}>ほか {entries.length - visible}</span>}
+      <button type="button" aria-label="拾いバーで線要素を追加" aria-expanded={open} onClick={() => setOpen(v => !v)}>＋</button>
+    </div>
+    <div ref={measure} className="pickup-route-measure" aria-hidden="true">{entries.map(e => chip(e, true))}</div>
+    {open && <LinePicker store={store} annotation={a} onClose={close} />}
+    <span className="visually-hidden" aria-live="polite">{feedback.routeId === a.id ? feedback.message : ''}</span>
   </div>
 }

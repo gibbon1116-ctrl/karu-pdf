@@ -9,6 +9,8 @@ import { floorFromDrawingName } from '../core/location'
 import { annotationFilterLabel } from '../editor/annotationFilter'
 import { groupFixtures, moveCategory, moveFixture, stepFixture } from './fixtureOrder'
 import { RecentFixtures } from './fixtureQuickList'
+import { useRouteSets } from './RouteItems'
+import { resolveRouteSet, routeSetSummary } from './routeSets'
 const QuantityCsvExportDialog = lazy(() => import('./CsvExportDialog').then(m => ({ default: m.QuantityCsvExportDialog })))
 const FixtureDialog = lazy(() => import('./FixtureDialog'))
 const FixturePresetDialog = lazy(() => import('./FixturePresetDialog'))
@@ -22,6 +24,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     try { return localStorage.getItem('karu-pdf:fixture-panel-mode') === 'manage' ? 'manage' : 'pickup' } catch { return 'pickup' }
   })
   const managing = mode === 'manage'
+  const routeSets = useRouteSets()
   const changeMode = (value: 'pickup' | 'manage') => {
     setMode(value); setSampleHover(null); dragging.current = null; setDropTarget(null)
     try { localStorage.setItem('karu-pdf:fixture-panel-mode', value) } catch { /* Optional preference storage. */ }
@@ -191,6 +194,13 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       </div>}
     </div>
     {!managing && <RecentFixtures fixtures={fixtures} ids={store.recentFixtureIds} onSelect={id => { setSelectedCategory(null); store.selectFixture(id); ui?.select() }} />}
+    {!managing && routeSets.length > 0 && <section className="fixture-route-sets" aria-label="よく使う構成"><h3>よく使う構成</h3>{routeSets.slice(0, 5).map(set => <button type="button" key={set.id} disabled={!canEdit} title={routeSetSummary(set)} onClick={() => {
+      try {
+        const result = resolveRouteSet(set, store.getCountFixtures()), [main, ...extra] = result.items
+        if (result.newFixtures.length) store.setCountFixtures([...store.getCountFixtures(), ...result.newFixtures])
+        store.selectFixture(main.itemId); ui?.select(); store.setRouteTemplate({ ...main, extra, name: set.name }); setSelectedCategory(null); setError('')
+      } catch (reason) { setError(String(reason)) }
+    }}>{set.name}</button>)}</section>}
     <fieldset className="current-location"><legend>現在の場所</legend>
       <label>階<LocationInput value={store.currentFloor} label="現在の階" list="pickup-floors" commit={v => store.setCurrentLocation('floor', v)} /></label>
       {inferredFloor && !store.currentFloor && <small>（図面名から: {inferredFloor}）</small>}
