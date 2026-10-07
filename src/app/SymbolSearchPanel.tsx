@@ -6,8 +6,8 @@ import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import type { SymbolSearchClient } from '../client/SymbolSearchClient'
 import type { DocumentSession } from './documentModel'
 
-export const SymbolSearchContext = createContext<{ start(session: DocumentSession, fixtureId: string): void } | null>(null)
-export interface SymbolSearchSelection { session: DocumentSession; fixtureId: string; sample: CountFixtureSample; rect: Rect }
+import type { SymbolSearchSelection } from './symbolSearchContext'
+export { SymbolSearchContext, type SymbolSearchSelection } from './symbolSearchContext'
 
 /** User-facing pages are one-based; the client receives sorted, unique zero-based pages. */
 export function parseSymbolSearchPages(text: string, pageCount: number): number[] {

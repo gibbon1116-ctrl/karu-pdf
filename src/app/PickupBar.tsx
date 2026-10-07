@@ -7,7 +7,7 @@ import LinePicker, { changeRouteCount, routeEntries, routeHighlighted, useRouteF
 import { scopeSuffix } from './routeSets'
 import { QuantitySwatch } from '../editor/countMarkers'
 import type { AnnotationStore, EditableAnnotation } from '../editor/AnnotationStore'
-import { SymbolSearchContext } from './SymbolSearchPanel'
+import { SymbolSearchContext } from './symbolSearchContext'
 
 export default function PickupBar({ session }: { session: DocumentSession }) {
   const store = session.annotationStore, ui = useContext(FixtureUiContext)

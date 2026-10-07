@@ -11,7 +11,7 @@ import type { DocumentViewState } from './app/documentModel'
 import type { ViewPosition } from './viewer/viewSync'
 import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
 import { HelpDialog } from './app/HelpDialog'
-import SymbolSearchPanel, { SymbolSearchContext, type SymbolSearchSelection } from './app/SymbolSearchPanel'
+import { SymbolSearchContext, type SymbolSearchSelection } from './app/symbolSearchContext'
 import { DesktopPromptBanner, DesktopStepsDialog, installedMessage, useInstallApp } from './app/InstallAppUi'
 import { ExternalSendAlert } from './app/ExternalSendAlert'
 import { getExternalSendRecords } from './security/externalSend'
@@ -71,6 +71,7 @@ import { registerPwa } from './pwa'
 import './styles.css'
 
 const FixtureDialog = lazy(() => import('./app/FixtureDialog'))
+const SymbolSearchPanel = lazy(() => import('./app/SymbolSearchPanel'))
 
 declare global {
   interface Window {
@@ -1932,9 +1933,9 @@ export default function App() {
             settings: split, documents, views: rightViewsRef.current, positions: rightPositionsRef.current, onChange: updateSplit, onSwap: swapSplit,
           } : null}
           />
-          {symbolSearch?.session === active && !organize && <SymbolSearchPanel key={`${active.docId}:${symbolSearch.fixtureId}`} selection={symbolSearch} pool={pool}
+          {symbolSearch?.session === active && !organize && <Suspense fallback={null}><SymbolSearchPanel key={`${active.docId}:${symbolSearch.fixtureId}`} selection={symbolSearch} pool={pool}
             onClose={closeSymbolSearch} onRecapture={() => startSymbolSearch(active, symbolSearch.fixtureId)}
-            onPage={index => viewerRef.current?.scrollToPage(index)} onStatus={showStatus} registerDispose={registerSymbolSearchDispose} />}
+            onPage={index => viewerRef.current?.scrollToPage(index)} onStatus={showStatus} registerDispose={registerSymbolSearchDispose} /></Suspense>}
           </FixtureUiContext.Provider>
           </QuantityNavigationContext.Provider>
           </SnapContext.Provider>

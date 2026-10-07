@@ -11,7 +11,7 @@ import { groupFixtures, moveCategory, moveFixture, stepFixture } from './fixture
 import { RecentFixtures } from './fixtureQuickList'
 import { useRouteSets } from './RouteItems'
 import { resolveRouteSet, routeSetSummary } from './routeSets'
-import { SymbolSearchContext } from './SymbolSearchPanel'
+import { SymbolSearchContext } from './symbolSearchContext'
 const QuantityCsvExportDialog = lazy(() => import('./CsvExportDialog').then(m => ({ default: m.QuantityCsvExportDialog })))
 const FixtureDialog = lazy(() => import('./FixtureDialog'))
 const FixturePresetDialog = lazy(() => import('./FixturePresetDialog'))
