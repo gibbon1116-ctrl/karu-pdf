@@ -34,7 +34,7 @@ export default defineConfig(({ mode }) => {
         while (/@(?:fixed|pages|single|server):start/.test(code)) code = code.replace(/(?:\{)?\/\* @(fixed|pages|single|server):start \*\/(?:\})?([\s\S]*?)(?:\{)?\/\* @\1:end \*\/(?:\})?/g,
           (_all, region: string, body: string) => (region === 'server' ? !single : region === 'single' ? single : region === 'fixed' ? fixed : !fixed && !single) ? body : '')
         if (single && id.endsWith('.css')) code = code.replace(/@font-face\s*\{[^}]*\}/g, '')
-        if (single) code = code.replace(/new Worker\(new URL\('\.\.\/worker\/(?:pdf|image)\.worker\.ts', import\.meta\.url\), \{ type: 'module' \}\)/g, 'undefined')
+        if (single) code = code.replace(/new Worker\(new URL\('\.\.\/worker\/(?:pdf|image|symbolSearch)\.worker\.ts', import\.meta\.url\), \{ type: 'module' \}\)/g, 'undefined')
         if (fixed && id.endsWith('.css')) code = code.replaceAll('/karu-pdf/', base)
         return code
       },

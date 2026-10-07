@@ -12,7 +12,7 @@ if (programs.length !== 1 || files.filter(f => f.endsWith('.js')).length !== 1) 
 const program = fs.readFileSync(programs[0], 'utf8').replaceAll('import.meta.resolve', 'undefined').replaceAll('import.meta.url', 'self.location.href')
 if (/\bimport\s*(?:\(|["'{*])|\bexport\s/.test(program)) throw new Error('Unexpected ESM in application bundle')
 const escapeScript = value => value.replace(/<\/script/gi, '<\\/script')
-const workers = { pdf: await bundleWorker('src/worker/pdf.worker.ts'), image: await bundleWorker('src/worker/image.worker.ts') }
+const workers = { pdf: await bundleWorker('src/worker/pdf.worker.ts'), image: await bundleWorker('src/worker/image.worker.ts'), 'symbol-search': await bundleWorker('src/worker/symbolSearch.worker.ts') }
 const binary = {
   wasm: fs.readFileSync('node_modules/mupdf/dist/mupdf-wasm.wasm'),
   'font-BIZUDGothic': fs.readFileSync('public/fonts/BIZUDGothic-Regular.ttf'),

@@ -1,4 +1,5 @@
-import type { Point, Rect } from '../core/annotations'
+/* @single:start */import { createSingleWorker } from '../single/runtime'
+/* @single:end */import type { Point, Rect } from '../core/annotations'
 import type { SymbolSearchOptions } from '../core/symbolSearch'
 import type { SearchImage } from '../worker/protocol'
 import type { PdfWorkerPool } from './PdfWorkerPool'
@@ -103,7 +104,7 @@ export class SymbolSearchClient {
       const input = request.options ?? {}, options: WorkerSearchOptions = { threshold: input.threshold ?? .7, rotations: input.rotations ?? false,
         maxResults: input.maxResults ?? 500, region: input.region ?? { x: rect[0] * renderScale - searchDevice[0], y: rect[1] * renderScale - searchDevice[1],
           width: (rect[2] - rect[0]) * renderScale, height: (rect[3] - rect[1]) * renderScale } }
-      const worker = this.worker ??= new Worker(new URL('../worker/symbolSearch.worker.ts', import.meta.url), { type: 'module' })
+      const worker = this.worker ??= /* @single:start */createSingleWorker('symbol-search') ?? /* @single:end */new Worker(new URL('../worker/symbolSearch.worker.ts', import.meta.url), { type: 'module' })
       const transferred = performance.now()
       worker.onmessage = (event: MessageEvent<SymbolSearchResponse>) => {
         if (run.done || event.data.id !== run.id) return

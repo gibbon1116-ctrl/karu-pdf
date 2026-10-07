@@ -35,7 +35,7 @@ export function ensureFont(name: FontName): Promise<void> {
   }
   return pending
 }
-export function createSingleWorker(kind: 'pdf' | 'image'): Worker {
+export function createSingleWorker(kind: 'pdf' | 'image' | 'symbol-search'): Worker {
   const code = document.getElementById(`single-worker-${kind}`)?.textContent
   if (!code) throw new Error('埋め込み Worker がありません')
   const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))
@@ -55,7 +55,8 @@ export function createSingleWorker(kind: 'pdf' | 'image'): Worker {
       } catch (error) { worker.postMessage({ type: 'single-font-response', name, error: String(error) }) }
     }
   })
-  worker.postMessage({ type: 'single-init', module: __singleWasm })
+  // The symbol search Worker only matches pixels; it needs neither MuPDF nor fonts.
+  if (kind !== 'symbol-search') worker.postMessage({ type: 'single-init', module: __singleWasm })
   return worker
 }
 
