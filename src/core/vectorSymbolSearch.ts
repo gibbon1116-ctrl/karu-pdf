@@ -51,7 +51,7 @@ function clippedLine(a: Float32Array, i: number, r: Rect): Rect | null {
 const lineBounds = (a: ArrayLike<number>, i: number, t: number): Rect =>
   [Math.min(a[i], a[i + 2]) - t, Math.min(a[i + 1], a[i + 3]) - t, Math.max(a[i], a[i + 2]) + t, Math.max(a[i + 1], a[i + 3]) + t]
 
-/** Endpoint graph for bent wiring. Mid-segment contacts are stops, not graph edges.
+/** Endpoint graph for bent wiring. Contacts in the middle of a line are stops, not graph edges.
  * Non-bridge edges belong to closed rings and are protected even at junctions. */
 function boundaryWiring(lines: Float32Array, widths: Float32Array, rect: Rect, tol: number, seeds: Set<number>, neighbors: (r: Rect) => Set<number>) {
   const count = lines.length / 2, parent = Array.from({ length: count }, (_, i) => i)
