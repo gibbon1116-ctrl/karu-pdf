@@ -99,7 +99,7 @@ export function refreshReview(current: readonly string[], cursor: ReviewCursor):
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\sekisan-07f`
+- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
 - 変更してよいファイル: `src/app/QuantityTable.tsx`、`src/app/QuantityBreakdown.tsx`、新規 `src/app/reviewCursor.ts`、`tests/`、`e2e/`
 - 変更しないファイル: 上以外。
 
