@@ -126,7 +126,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\sekisan-07d`
+- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
 - 変更してよいファイル:
   - `src/app/QuantityTable.tsx`、`src/app/QuantityBreakdown.tsx`、`src/app/annotationCsv.ts`、`src/app/CsvExportDialog.tsx`、`src/app/HelpDialog.tsx`
   - `src/core/quantityIndex.ts`（集計の補助を足すだけ。entry の作り方は変えない）

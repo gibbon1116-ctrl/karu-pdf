@@ -39,7 +39,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\sekisan-07d`
+- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
 - 変更してよいファイル: `src/app/QuantityTable.tsx`、`tests/`（試験の追加だけ。既存の期待値は変えない）
 - 変更しないファイル: 上以外。
 
