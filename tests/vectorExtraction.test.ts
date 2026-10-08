@@ -39,7 +39,135 @@ async function runNext() {
   await new Promise(resolve => setTimeout(resolve, 0))
 }
 
+const mixedContents = '10 20 m 30 20 l S 40 30 10 10 re f '
+  + 'BT /F0 10 Tf 10 50 Td (ABC) Tj ET BT 1 Tr /F0 10 Tf 10 70 Td (DE) Tj ET '
+  + 'q 10 0 0 10 60 20 cm /Im0 Do Q q 10 0 0 10 80 20 cm /Mask0 Do Q'
+
+function documentWithCallbackResources(contents = mixedContents) {
+  const pdf = new mupdf.PDFDocument(), font = new mupdf.Font('Helvetica')
+  const fontObject = pdf.addSimpleFont(font)
+  const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, 1, 1], false)
+  pixmap.clear(128)
+  const image = new mupdf.Image(pixmap), imageObject = pdf.addImage(image)
+  const maskObject = pdf.addStream(Uint8Array.of(0x80), {
+    Type: 'XObject', Subtype: 'Image', Width: 1, Height: 1, ImageMask: true, BitsPerComponent: 1,
+  })
+  try {
+    const page = pdf.addPage([0, 0, 200, 100], 0,
+      { Font: { F0: fontObject }, XObject: { Im0: imageObject, Mask0: maskObject } }, contents)
+    try { pdf.insertPage(-1, page) }
+    finally { page.destroy() }
+    return pdf
+  } catch (error) {
+    pdf.destroy()
+    throw error
+  } finally {
+    maskObject.destroy(); imageObject.destroy(); image.destroy(); pixmap.destroy(); fontObject.destroy(); font.destroy()
+  }
+}
+
+function trackCallbackDestruction() {
+  type Wrapper = { pointer: number; destroy(): void }
+  const prototypes: Record<string, Wrapper> = {
+    Path: mupdf.Path.prototype, StrokeState: mupdf.StrokeState.prototype,
+    ColorSpace: mupdf.ColorSpace.prototype, Text: mupdf.Text.prototype, Image: mupdf.Image.prototype,
+  }
+  const released: Record<string, Wrapper[]> = Object.fromEntries(Object.keys(prototypes).map(name => [name, []]))
+  const spies = Object.entries(prototypes).map(([name, prototype]) => {
+    const destroy = prototype.destroy
+    return vi.spyOn(prototype, 'destroy').mockImplementation(function(this: Wrapper) {
+      released[name].push(this)
+      destroy.call(this)
+    })
+  })
+  return {
+    released,
+    reset: () => { for (const values of Object.values(released)) values.length = 0 },
+    restore: () => { for (const spy of spies) spy.mockRestore() },
+  }
+}
+
 describe('real MuPDF vector device', () => {
+  it.each([false, true])('destroys every callback wrapper before returning (annotated temporary list: %s)', annotated => {
+    const pdf = documentWithCallbackResources(), cache = new DisplayListCache(pdf)
+    if (annotated) {
+      const page = pdf.loadPage(0), annotation = page.createAnnotation('Square')
+      try { annotation.setRect([100, 40, 120, 60]); annotation.update() }
+      finally { annotation.destroy(); page.destroy() }
+    }
+    // Prebuild the cache so only extraction callback wrappers are counted.
+    const cachedList = cache.get(0), get = vi.spyOn(cache, 'get')
+    const tracked = trackCallbackDestruction()
+    const expectedCounts: Record<string, number> = { Path: 2, StrokeState: 2, ColorSpace: 5, Text: 2, Image: 2 }
+    const assertReleased = () => {
+      for (const [name, values] of Object.entries(tracked.released)) {
+        expect(values).toHaveLength(expectedCounts[name])
+        expect(new Set(values).size).toBe(values.length)
+        for (const value of values) expect(value.pointer).toBe(0)
+      }
+    }
+    const destroyList = mupdf.DisplayList.prototype.destroy
+    const listSpy = vi.spyOn(mupdf.DisplayList.prototype, 'destroy').mockImplementation(function(this: import('mupdf').DisplayList) {
+      // Packed paths must be released before a temporary list is destroyed.
+      assertReleased()
+      destroyList.call(this)
+    })
+    try {
+      for (let run = 0; run < 2; run++) {
+        tracked.reset()
+        const result = extract(pdf, 0, cache)
+        expect(result.segmentCount).toBe(5)
+        expect(Array.from(result.segments)).toEqual([
+          10, 80, 30, 80, 40, 70, 50, 70, 50, 70, 50, 60,
+          50, 60, 40, 60, 40, 60, 40, 70,
+        ])
+        expect(result.stats.strokePaths).toBe(1)
+        expect(result.stats.fillPaths).toBe(1)
+        expect(result.stats.textGlyphs).toBe(5)
+        expect(result.stats.images).toBe(2)
+        expect(result.stats.imageAreaRatio).toBeCloseTo(.01)
+        expect(tracked.released.Path).toHaveLength(result.stats.strokePaths + result.stats.fillPaths)
+        expect(tracked.released.StrokeState).toHaveLength(result.stats.strokePaths + 1) // strokeText
+        expect(tracked.released.ColorSpace).toHaveLength(result.stats.strokePaths + result.stats.fillPaths + 3) // both text callbacks + mask
+        expect(tracked.released.Text).toHaveLength(2)
+        expect(tracked.released.Image).toHaveLength(result.stats.images)
+        assertReleased()
+        expect(cache.count).toBe(1)
+        expect(cachedList.pointer).not.toBe(0)
+      }
+      expect(get).toHaveBeenCalledTimes(annotated ? 0 : 2)
+      expect(listSpy).toHaveBeenCalledTimes(annotated ? 2 : 0)
+    } finally {
+      listSpy.mockRestore(); tracked.restore(); get.mockRestore(); cache.destroy(); pdf.destroy()
+    }
+  })
+  it.each([
+    { name: 'strokePath', contents: '10 20 m 30 20 l S', path: true, stroke: true },
+    { name: 'fillPath', contents: '40 30 10 10 re f', path: true, stroke: false },
+    { name: 'fillText', contents: 'BT /F0 10 Tf 10 50 Td (ABC) Tj ET', path: false, stroke: false },
+    { name: 'strokeText', contents: 'BT 1 Tr /F0 10 Tf 10 70 Td (DE) Tj ET', path: false, stroke: true },
+  ])('destroys callback wrappers when $name walking throws', ({ contents, path, stroke }) => {
+    const pdf = documentWithCallbackResources(contents), cache = new DisplayListCache(pdf)
+    const cachedList = cache.get(0), tracked = trackCallbackDestruction()
+    const failure = new Error('injected walk failure')
+    const walk = vi.spyOn(path ? mupdf.Path.prototype : mupdf.Text.prototype, 'walk')
+      .mockImplementation(() => { throw failure })
+    try {
+      expect(() => extract(pdf, 0, cache)).toThrow(failure)
+      expect(tracked.released.Path).toHaveLength(path ? 1 : 0)
+      expect(tracked.released.Text).toHaveLength(path ? 0 : 1)
+      expect(tracked.released.StrokeState).toHaveLength(stroke ? 1 : 0)
+      expect(tracked.released.ColorSpace).toHaveLength(1)
+      for (const values of Object.values(tracked.released)) {
+        for (const value of values) expect(value.pointer).toBe(0)
+      }
+      expect(cachedList.pointer).not.toBe(0)
+      walk.mockRestore()
+      expect(extract(pdf, 0, cache).stats[path ? (stroke ? 'strokePaths' : 'fillPaths') : 'textGlyphs']).toBeGreaterThan(0)
+    } finally {
+      walk.mockRestore(); tracked.restore(); cache.destroy(); pdf.destroy()
+    }
+  })
   it('extracts transformed re/closed lines, drops tiny segments, and closes fill subpaths', () => {
     const pdf = documentWith('q 2 0 0 3 5 7 cm 1 2 4 5 re S Q 20 20 m 20.01 20 l 20 20 l S 30 30 m 40 30 l 35 40 l f')
     try {

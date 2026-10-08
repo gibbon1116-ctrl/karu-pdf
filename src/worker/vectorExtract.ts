@@ -81,12 +81,31 @@ export function extractVectorPage(document: import('mupdf').Document, pageIndex:
     stats.ms.displayList = performance.now() - displayStarted
     const walkStarted = performance.now()
     device = new mupdf.Device({
-      strokePath: (path, _stroke, m) => { stats.strokePaths++; walkPath(path, m, false) },
-      fillPath: (path, _evenOdd, m) => { stats.fillPaths++; walkPath(path, m, true) },
-      fillImage: (_image, m) => image(m),
-      fillImageMask: (_image, m) => image(m),
-      fillText: text,
-      strokeText: text,
+      // Release callback wrappers while display-list storage is still alive.
+      strokePath: (path, stroke, m, colorspace) => {
+        try { stats.strokePaths++; walkPath(path, m, false) }
+        finally { path.destroy(); stroke.destroy(); colorspace.destroy() }
+      },
+      fillPath: (path, _evenOdd, m, colorspace) => {
+        try { stats.fillPaths++; walkPath(path, m, true) }
+        finally { path.destroy(); colorspace.destroy() }
+      },
+      fillImage: (value, m) => {
+        try { image(m) }
+        finally { value.destroy() }
+      },
+      fillImageMask: (value, m, colorspace) => {
+        try { image(m) }
+        finally { value.destroy(); colorspace.destroy() }
+      },
+      fillText: (value, _m, colorspace) => {
+        try { text(value) }
+        finally { value.destroy(); colorspace.destroy() }
+      },
+      strokeText: (value, stroke, _m, colorspace) => {
+        try { text(value) }
+        finally { value.destroy(); stroke.destroy(); colorspace.destroy() }
+      },
       // Clip paths, shades and clip-only text/images do not add geometry.
     })
     list.run(device, mupdf.Matrix.identity)
