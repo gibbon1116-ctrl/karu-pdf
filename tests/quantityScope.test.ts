@@ -24,7 +24,12 @@ it('calculates all three scopes for every route item and both CSVs', () => {
   expect(QuantityIndex.build([annotation({ ...mark, cond: { slack: null } })], fixtures).total('cv')).toBeCloseTo(24.7)
   for (const type of ['summary', 'detail'] as const) {
     const csv = createQuantityCsv(index, fixtures, 0, type)
-    for (const value of ['26.70', '3.00', '12.35']) expect(csv).toContain(value)
+    const [header, ...rows] = csv.trim().replace(/^\uFEFF/, '').split('\r\n').map(row => row.split(','))
+    const valueColumn = header.indexOf(type === 'summary' ? '全図面の合計' : '数量')
+    for (const fixture of fixtures) {
+      const sum = rows.filter(row => row[1] === fixture.code).reduce((n, row) => n + Number(row[valueColumn]), 0)
+      expect(sum).toBeCloseTo(index.total(fixture.id))
+    }
   }
 })
 it('labels the full route while adding item scope suffixes', () => {

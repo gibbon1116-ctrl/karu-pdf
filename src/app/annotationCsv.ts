@@ -1,5 +1,5 @@
 import { groupFixtures } from './fixtureOrder'
-import { QuantityIndex, compareFloors } from '../core/quantityIndex'
+import { QuantityIndex, compareFloors, quantityPartLabel } from '../core/quantityIndex'
 import type { DrawingInfo } from '../core/drawingInfo'
 import { quantityValue } from '../core/quantity'
 import { quantityAggregation, quantityKind, QUANTITY_UNITS } from '../core/countFixtures'
@@ -125,31 +125,49 @@ export function createIssueCsv(annotations: readonly EditableAnnotation[]): stri
 export function issueCsvFileName(pdfName: string): string { return pdfName.replace(/\.pdf$/i, '') + '_指摘一覧.csv' }
 
 export type QuantityCsvType = 'summary' | 'detail'
-export const QUANTITY_DETAIL_HEADER = ['分類', '略号', '名称', '規格', '種別', '単位', '集計方式', '階', '部屋', 'ページ番号', '図面番号', '図面名称', '数量', '拾いの件数']
+export const QUANTITY_DETAIL_HEADER = ['分類', '略号', '名称', '規格', '施工条件', '区間', '種別', '単位', '集計方式', '階', '部屋', 'ページ番号', '図面番号', '図面名称', '数量', '拾いの件数']
+export const QUANTITY_SUMMARY_HEADER = ['分類', '略号', '名称', '規格', '施工条件', '集計区分', '種別', '単位', '集計方式', '平面', '立上り・立下り', 'その他の加算', '全図面の合計']
 export function quantityCsvFileName(pdfName: string, type: QuantityCsvType): string {
   return pdfName.replace(/\.pdf$/i, '') + (type === 'detail' ? '_数量明細.csv' : '_数量集計.csv')
 }
 export function createQuantityCsv(index: QuantityIndex, fixtures: readonly CountFixture[], currentPageIndex: number, type: QuantityCsvType, drawingInfo: (page: number) => DrawingInfo | null = () => null): string {
   const ordered = groupFixtures(fixtures).flatMap(g => g.items)
   const pages = [...new Set(ordered.flatMap(f => index.pagesOf(f.id)))].sort((a, b) => a - b)
-  const header = type === 'detail' ? QUANTITY_DETAIL_HEADER : ['分類', '略号', '名称', '規格', '種別', '単位', '集計方式', '全図面の合計', `表示中の図面（p.${currentPageIndex + 1}）`, ...pages.map(p => `p.${p + 1}${drawingInfo(p)?.number ? ' ' + drawingInfo(p)!.number : ''}`)]
+  const header = type === 'detail' ? QUANTITY_DETAIL_HEADER : [...QUANTITY_SUMMARY_HEADER, `表示中の図面（p.${currentPageIndex + 1}）`, ...pages.map(p => `p.${p + 1}${drawingInfo(p)?.number ? ' ' + drawingInfo(p)!.number : ''}`)]
   const rows: (string | number)[][] = []
   for (const f of ordered) {
     const kind = quantityKind(f), format = (n: number) => kind === 'count' ? n : n.toFixed(2)
-    const base = [f.category, f.code, f.name, f.spec ?? '', { count: '個数', length: '長さ', area: '面積', volume: '体積' }[kind], QUANTITY_UNITS[kind], quantityAggregation(f) === 'location' ? '場所別' : '全図面']
+    const base = [f.category, f.code, f.name, f.spec ?? '']
+    const metadata = [{ count: '個数', length: '長さ', area: '面積', volume: '体積' }[kind], QUANTITY_UNITS[kind], quantityAggregation(f) === 'location' ? '場所別' : '全図面']
     if (type === 'summary') {
-      const byPage = index.byPage(f.id)
-      rows.push([...base, format(index.total(f.id)), format(byPage.get(currentPageIndex) ?? 0), ...pages.map(p => format(byPage.get(p) ?? 0))])
-    } else {
-      const groups = new Map<string, { page: number; floor: string; room: string; value: number; ids: Set<string> }>()
+      const conditions = index.byCondition(f.id), conditionPages = new Map<string, Map<number, number>>()
       for (const e of index.entries(f.id)) {
-        const floor = e.floor ?? '', room = e.room ?? '', key = JSON.stringify([e.pageIndex, floor, room])
-        const g = groups.get(key) ?? { page: e.pageIndex, floor, room, value: 0, ids: new Set<string>() }
+        const key = e.condition ?? '', byPage = conditionPages.get(key) ?? new Map<number, number>()
+        byPage.set(e.pageIndex, (byPage.get(e.pageIndex) ?? 0) + e.value); conditionPages.set(key, byPage)
+      }
+      const parts = (total: { plan: number; rise: number; slack: number }) => kind === 'length'
+        ? [format(total.plan), format(total.rise), format(total.slack)] : ['', '', '']
+      const addRow = (condition: string, section: string, total: { total: number; plan: number; rise: number; slack: number }, byPage: Map<number, number>) => {
+        rows.push([...base, condition, section, ...metadata, ...parts(total), format(total.total), format(byPage.get(currentPageIndex) ?? 0), ...pages.map(p => format(byPage.get(p) ?? 0))])
+      }
+      if (!conditions.size) addRow('', '施工条件別', { total: index.total(f.id), plan: 0, rise: 0, slack: 0 }, index.byPage(f.id))
+      for (const [condition, total] of conditions) addRow(condition, '施工条件別', total, conditionPages.get(condition)!)
+      if (conditions.size >= 2) {
+        const total = { total: index.total(f.id), plan: 0, rise: 0, slack: 0 }
+        for (const value of conditions.values()) { total.plan += value.plan; total.rise += value.rise; total.slack += value.slack }
+        addRow('', '材料計', total, index.byPage(f.id))
+      }
+    } else {
+      const groups = new Map<string, { condition: string; part: string; page: number; floor: string; room: string; value: number; ids: Set<string> }>()
+      for (const e of index.entries(f.id)) {
+        const condition = e.condition ?? '', part = kind === 'length' && e.part ? quantityPartLabel(e.part) : ''
+        const floor = e.floor ?? '', room = e.room ?? '', key = JSON.stringify([condition, part, e.pageIndex, floor, room])
+        const g = groups.get(key) ?? { condition, part, page: e.pageIndex, floor, room, value: 0, ids: new Set<string>() }
         g.value += e.value; g.ids.add(e.annotationId); groups.set(key, g)
       }
       for (const g of [...groups.values()].sort((a, b) => a.page - b.page || compareFloors(a.floor, b.floor) || a.room.localeCompare(b.room, 'ja'))) {
         const info = drawingInfo(g.page)
-        rows.push([...base, g.floor, g.room, g.page + 1, info?.number ?? '', info?.name ?? '', format(g.value), g.ids.size])
+        rows.push([...base, g.condition, g.part, ...metadata, g.floor, g.room, g.page + 1, info?.number ?? '', info?.name ?? '', format(g.value), g.ids.size])
       }
     }
   }
