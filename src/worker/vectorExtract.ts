@@ -10,15 +10,17 @@ export function extractVectorPage(document: import('mupdf').Document, pageIndex:
   const started = performance.now(), page = document.loadPage(pageIndex)
   let list: import('mupdf').DisplayList | undefined, device: import('mupdf').Device | undefined
   let ownsList = true
-  const capacity = 400_000, output = new Float32Array(capacity * 4)
+  const capacity = 400_000, output = new Float32Array(capacity * 4), widths = new Float32Array(capacity)
+  let currentWidth = 0
   let count = 0, truncated = false
-  const stats: VectorPage['stats'] = { strokePaths: 0, fillPaths: 0, curves: 0, images: 0, imageAreaRatio: 0, textGlyphs: 0, ms: { displayList: 0, walk: 0, total: 0 } }
+  const stats: VectorPage['stats'] = { strokePaths: 0, fillPaths: 0, whiteFills: 0, curves: 0, images: 0, imageAreaRatio: 0, textGlyphs: 0, ms: { displayList: 0, walk: 0, total: 0 } }
   try {
     const bounds = page.getBounds(), area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1])
     const transform = (x: number, y: number, m: import('mupdf').Matrix): [number, number] => [m[0] * x + m[2] * y + m[4] - bounds[0], m[1] * x + m[3] * y + m[5] - bounds[1]]
     const add = (a: number[], b: number[]) => {
       if (truncated || !a.every(Number.isFinite) || !b.every(Number.isFinite) || Math.hypot(a[0] - b[0], a[1] - b[1]) < .05) return
       if (count >= capacity) { truncated = true; return }
+      widths[count] = currentWidth
       output.set([a[0], a[1], b[0], b[1]], count++ * 4)
     }
     const walkPath = (path: import('mupdf').Path, m: import('mupdf').Matrix, fill: boolean) => {
@@ -83,11 +85,23 @@ export function extractVectorPage(document: import('mupdf').Document, pageIndex:
     device = new mupdf.Device({
       // Release callback wrappers while display-list storage is still alive.
       strokePath: (path, stroke, m, colorspace) => {
-        try { stats.strokePaths++; walkPath(path, m, false) }
+        try {
+          stats.strokePaths++
+          currentWidth = stroke.getLineWidth() * Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2]))
+          walkPath(path, m, false)
+        }
         finally { path.destroy(); stroke.destroy(); colorspace.destroy() }
       },
-      fillPath: (path, _evenOdd, m, colorspace) => {
-        try { stats.fillPaths++; walkPath(path, m, true) }
+      fillPath: (path, _evenOdd, m, colorspace, color) => {
+        try {
+          stats.fillPaths++
+          // MuPDF returns float32 color components: compare against the same
+          // representation so PDF's exact .95/.05 boundary stays inclusive.
+          const white = (color.length === 1 || color.length === 3) ? color.every(v => v >= Math.fround(.95))
+            : color.length === 4 && color.every(v => v <= Math.fround(.05))
+          if (white) stats.whiteFills++
+          else { currentWidth = 0; walkPath(path, m, true) }
+        }
         finally { path.destroy(); colorspace.destroy() }
       },
       fillImage: (value, m) => {
@@ -112,7 +126,7 @@ export function extractVectorPage(document: import('mupdf').Document, pageIndex:
     device.close()
     stats.ms.walk = performance.now() - walkStarted
     const segments = output.slice(0, count * 4)
-    return { pageIndex, segments, segmentCount: count, truncated, stats }
+    return { pageIndex, segments, widths: widths.slice(0, count), segmentCount: count, truncated, stats }
   } finally {
     device?.destroy(); if (ownsList) list?.destroy(); page.destroy()
     stats.ms.total = performance.now() - started

@@ -261,7 +261,7 @@ async function execute(job: QueuedRequest): Promise<void> {
       if (!entry) throw new Error('PDF が開かれていません。')
       const page = extractVectorPage(entry.opened.document, job.pageIndex, entry.displayLists)
       processedCount++
-      post({ type: 'vectorsExtracted', jobId: job.jobId, page }, [page.segments.buffer as ArrayBuffer])
+      post({ type: 'vectorsExtracted', jobId: job.jobId, page }, [page.segments.buffer as ArrayBuffer, page.widths.buffer as ArrayBuffer])
     } catch (error) {
       post({ type: 'error', jobId: job.jobId, message: error instanceof Error ? error.message : String(error) })
     }

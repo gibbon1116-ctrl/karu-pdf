@@ -20,7 +20,7 @@ describe('visual search count marks', () => {
     const store = await setup(), dirty = store.dirtySummary()
     store.beginSymbolCandidates('led', sampleRect)
     store.appendSymbolCandidates([
-      {...candidate(40,50),confidence:'high',imageScore:.9}, {...candidate(80,50),confidence:'check',imageScore:.2},
+      {...candidate(40,50),confidence:'high',imageScore:.9,extra:.05}, {...candidate(80,50),confidence:'check',imageScore:.2,extra:.6},
       {...candidate(120,50),confidence:'high',imageScore:.95}, candidate(160,50), {...candidate(200,50),confidence:'high',imageScore:.8},
     ])
     store.toggleSymbolCandidate(store.symbolCandidates![1].id)
@@ -28,7 +28,7 @@ describe('visual search count marks', () => {
     store.createCountMarks('led',[{pageIndex:0,center:[120,50]}])
     store.chooseHighConfidenceCandidates()
     expect(store.symbolCandidates?.map(c=>c.state)).toEqual(['chosen','chosen','counted','pending','chosen'])
-    expect(store.symbolCandidates?.[0]).toMatchObject({confidence:'high',imageScore:.9})
+    expect(store.symbolCandidates?.[0]).toMatchObject({confidence:'high',imageScore:.9,extra:.05})
     store.undo(); expect(store.dirtySummary()).toEqual(dirty)
     expect(store.toEdits()).toEqual([]); expect(store.canUndo()).toBe(false)
   })

@@ -286,8 +286,8 @@ describe('SymbolSearchClient resource lifecycle', () => {
   const install = () => {
     FakeWorker.instances = []; vi.stubGlobal('Worker', FakeWorker)
     vi.stubGlobal('OffscreenCanvas', vi.fn(() => { throw new Error('canvas conversion must not run') }))
-    const pool = { extractVectors: vi.fn(() => ({ cancel: vi.fn(), promise: Promise.resolve({ pageIndex: 1, segments: new Float32Array(), segmentCount: 0, truncated: false,
-      stats: { strokePaths: 0, fillPaths: 0, curves: 0, images: 1, imageAreaRatio: 1, textGlyphs: 0, ms: { displayList: 0, walk: 0, total: 0 } } }) })), getPageInfo: vi.fn(), renderSearchImage: vi.fn((options: { deviceRect: Rect }): { cancel(): void; promise: Promise<SearchImage> } => {
+    const pool = { extractVectors: vi.fn(() => ({ cancel: vi.fn(), promise: Promise.resolve({ pageIndex: 1, segments: new Float32Array(), widths: new Float32Array(), segmentCount: 0, truncated: false,
+      stats: { strokePaths: 0, fillPaths: 0, whiteFills: 0, curves: 0, images: 1, imageAreaRatio: 1, textGlyphs: 0, ms: { displayList: 0, walk: 0, total: 0 } } }) })), getPageInfo: vi.fn(), renderSearchImage: vi.fn((options: { deviceRect: Rect }): { cancel(): void; promise: Promise<SearchImage> } => {
       const width = options.deviceRect[2] - options.deviceRect[0], height = options.deviceRect[3] - options.deviceRect[1]
       return { cancel: vi.fn(), promise: Promise.resolve({ width, height, gray: new Uint8Array(width * height) }) }
     }) }

@@ -31,8 +31,8 @@ function extraction() {
   const request = worker.requests.find(r => r.type === 'extractVectors')!
   return { worker, request }
 }
-const result: VectorPage = { pageIndex: 0, segments: new Float32Array([0, 0, 10, 0]), segmentCount: 1, truncated: false,
-  stats: { strokePaths: 1, fillPaths: 0, curves: 0, images: 0, imageAreaRatio: 0, textGlyphs: 0, ms: { displayList: 0, walk: 0, total: 0 } } }
+const result: VectorPage = { pageIndex: 0, segments: new Float32Array([0, 0, 10, 0]), widths: new Float32Array([.5]), segmentCount: 1, truncated: false,
+  stats: { strokePaths: 1, fillPaths: 0, whiteFills: 0, curves: 0, images: 0, imageAreaRatio: 0, textGlyphs: 0, ms: { displayList: 0, walk: 0, total: 0 } } }
 afterEach(() => { pool?.destroy(); workers.length = 0; vi.unstubAllGlobals() })
 describe('vector request pool lifecycle', () => {
   it('requests only explicitly, uses a rendering worker and lower priority, then releases queue accounting', async () => {

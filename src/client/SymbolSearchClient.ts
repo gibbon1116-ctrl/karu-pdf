@@ -13,7 +13,7 @@ export interface SymbolSearchRequest {
   searchRect?: Rect; options?: Partial<SymbolSearchOptions>; verify?: boolean
 }
 export interface SymbolCandidate { pageIndex: number; rect: Rect; center: Point; score: number; rotation: number
-  confidence?: 'high' | 'check'; imageScore?: number }
+  confidence?: 'high' | 'check'; imageScore?: number; extra?: number }
 // Image similarity only grades line matches; it never removes them. On real drawings the
 // correct line matches scored 0.17-1.00 (median 0.70; text and lines crossing the symbol pull
 // it down) while the wrong ones scored 0.16-0.30, so the bar sits well below whole-page image
@@ -117,7 +117,7 @@ export class SymbolSearchClient {
         if (target.kind === 'vector' || target.kind === 'mixed') {
           onProgress?.('vector', 0, 1)
           const response = await vectorWorkerTask({ type: 'vector-search', id: run.id, segments: target.segments,
-            sampleSegments: samplePage.segments, sampleRect: request.sampleRect,
+            sampleSegments: samplePage.segments, sampleWidths: samplePage.widths, sampleRect: request.sampleRect,
             options: { threshold: request.options?.threshold ?? .85, rotations: request.options?.rotations ?? false,
               maxResults: request.options?.maxResults ?? 500, region: rect } }, run.abort.signal,
             () => { lastHeard = performance.now(); onProgress?.('vector', 0, 1) })
@@ -125,24 +125,26 @@ export class SymbolSearchClient {
           if (response.type !== 'vector-result') throw Error('Invalid vector response')
           if (response.result) {
             vector = response.result; vectorFinished = performance.now()
-            vectorBytes = target.segments.byteLength + samplePage.segments.byteLength
+            vectorBytes = target.segments.byteLength + samplePage.segments.byteLength + samplePage.widths.byteLength
             if (request.verify === false || vector.matches.length === 0) {
-              finishVector(vector.matches.map(m => ({ ...m, pageIndex: request.pageIndex, rotation: m.angle })))
+              finishVector(vector.matches.map(m => ({ ...m, pageIndex: request.pageIndex, rotation: m.angle,
+                confidence: m.extra <= .4 ? 'high' : 'check' })))
               return
             }
           }
         }
       }
-      const requestedRenderScale = 24 / Math.max(request.sampleRect[2] - request.sampleRect[0], request.sampleRect[3] - request.sampleRect[1])
+      const sampleRect = vector?.template.rect ?? request.sampleRect
+      const requestedRenderScale = 24 / Math.max(sampleRect[2] - sampleRect[0], sampleRect[3] - sampleRect[1])
       let renderScale = requestedRenderScale
-      const count = (scale: number) => Math.max(...[rect!, request.sampleRect].map(bounds => { const d = deviceRect(bounds, scale); return (d[2] - d[0]) * (d[3] - d[1]) }))
+      const count = (scale: number) => Math.max(...[rect!, sampleRect].map(bounds => { const d = deviceRect(bounds, scale); return (d[2] - d[0]) * (d[3] - d[1]) }))
       if (count(renderScale) > MAX_PIXELS) {
         let lo = 0, hi = renderScale
         for (let i = 0; i < 52; i++) { const mid = (lo + hi) / 2; if (count(mid) <= MAX_PIXELS) lo = mid; else hi = mid }
         renderScale = lo
       }
       if (!Number.isFinite(renderScale) || renderScale <= 0) throw new Error('invalid render scale')
-      const searchDevice = deviceRect(rect, renderScale), sampleDevice = deviceRect(request.sampleRect, renderScale)
+      const searchDevice = deviceRect(rect, renderScale), sampleDevice = deviceRect(sampleRect, renderScale)
       const renderTiles = 2 // Kept in the metrics schema: one page crop and one sample.
       let rendered = 0
       const renderStarted = performance.now()
@@ -176,7 +178,7 @@ export class SymbolSearchClient {
           if (response.type === 'error') { fail(new Error(response.message)); return }
           if (response.type !== 'verify-result' || response.scores.length !== result.matches.length) { fail(new Error('Invalid verify response')); return }
           finishVector(result.matches.map((m, i) => ({ ...m, pageIndex: request.pageIndex, rotation: m.angle,
-            imageScore: response.scores[i], confidence: imageConfidence(response.scores[i], request.options?.threshold ?? .85) })),
+            imageScore: response.scores[i], confidence: m.extra <= .4 ? imageConfidence(response.scores[i], request.options?.threshold ?? .85) : 'check' })),
             { renderScale, requestedRenderScale, pagePixels: page.width * page.height, renderMs: verifyRenderMs, verifyMs: response.verifyMs, bytes: verifyBytes })
         }
         worker.onerror = event => { event.preventDefault(); fail(new Error(event.message || 'symbol verification Worker failed')) }

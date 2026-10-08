@@ -40,6 +40,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('')
   const [progress, setProgress] = useState({ page: 0, total: 1, stage: '描画中', fraction: 0 })
   const [methods, setMethods] = useState<Record<number, 'vector' | 'image'>>({})
+  const [templateSummary, setTemplateSummary] = useState<{ segments: number; removed: number } | null>(null)
   const [completedPages, setCompletedPages] = useState<number[]>([]), [searchPageCount, setSearchPageCount] = useState(0)
   const client = useRef<SymbolSearchClient | null>(null), task = useRef<{ cancel(): void } | null>(null)
   const generation = useRef(0), alive = useRef(false)
@@ -57,7 +58,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
     return completedPages.map(page => [page, counts.get(page) ?? 0] as const)
   }, [store, version, completedPages])
   const stop = () => { generation.current++; task.current?.cancel(); task.current = null; setBusy(false) }
-  const invalidate = () => { stop(); store.clearSymbolCandidates(); setCompletedPages([]); setMethods({}); setMessage('条件を変えました。「探す」を押してください'); setError('') }
+  const invalidate = () => { stop(); store.clearSymbolCandidates(); setCompletedPages([]); setMethods({}); setTemplateSummary(null); setMessage('条件を変えました。「探す」を押してください'); setError('') }
   useLayoutEffect(() => {
     alive.current = true
     // Mount only during explicit search, outside the scrolling surface. No ordinary-view observer.
@@ -79,7 +80,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
     stop()
     const run = generation.current
     const current = () => alive.current && generation.current === run && store.selectedFixtureId === fixtureId
-    store.beginSymbolCandidates(fixtureId, rect); setBusy(true); setMessage(''); setError(''); setCompletedPages([]); setSearchPageCount(pages.length)
+    store.beginSymbolCandidates(fixtureId, rect); setBusy(true); setMessage(''); setError(''); setCompletedPages([]); setSearchPageCount(pages.length); setTemplateSummary(null)
     setProgress({ page: 1, total: pages.length, stage: '描画中', fraction: 0 })
     try {
       if (!client.current) {
@@ -101,6 +102,8 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
         task.current = next
         const result = await next.promise
         if (!current()) return
+        const template = result.vectorDetails?.template
+        if (template?.cleaned) setTemplateSummary({ segments: template.segments, removed: template.removed.wiring + template.removed.other })
         setMethods(methods => ({ ...methods, [pageIndex]: result.method })); task.current = null; store.appendSymbolCandidates(result.candidates); setCompletedPages(done => [...done, pageIndex])
       }
       if (current()) { setProgress(p => ({ ...p, fraction: 1 })); setMessage('検索が終わりました。候補を確認して選んでください') }
@@ -141,6 +144,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
       : <button type="button" onClick={() => void search()}>探す</button>}
     {candidates && <>
       <p aria-live="polite">候補 {candidates.length} 件{confidenceSummary(candidates)}（拾い済み {counted} 件）</p>
+      {templateSummary && <p>見本の線 {templateSummary.segments} 本（配線・文字とみて {templateSummary.removed} 本を除きました）</p>}
       {searchPageCount === 1 && completedPages.length > 0 && <p>{methods[completedPages[0]] === 'vector' ? '線の情報で探しました' : '画像で探しました（線の情報が無いページ）'}</p>}
       {searchPageCount > 1 && <div className="symbol-search-pages">{pageCounts.map(([page, count]) => <button key={page} type="button" onClick={() => onPage(page)}>p.{page + 1} {methods[page] === 'vector' ? '線で探しました' : '画像で探しました（線の情報が無いページ）'} {count} 件{confidenceSummary(candidates.filter(c => c.pageIndex === page))}</button>)}</div>}
       <div className="symbol-search-actions"><button type="button" onClick={() => store.chooseSymbolCandidates(true)}>すべて選ぶ</button><button type="button" onClick={() => store.chooseSymbolCandidates(false)}>すべて外す</button></div>

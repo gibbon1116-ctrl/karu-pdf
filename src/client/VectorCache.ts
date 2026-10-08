@@ -39,7 +39,8 @@ export function vectorWorkerTask(message: VectorSearchMessage | EndpointMessage,
       const segments = message.segments.slice()
       if (message.type === 'vector-search') {
         const sampleSegments = message.sampleSegments.slice()
-        worker.postMessage({ ...message, segments, sampleSegments }, [segments.buffer, sampleSegments.buffer])
+        const sampleWidths = message.sampleWidths.slice()
+        worker.postMessage({ ...message, segments, sampleSegments, sampleWidths }, [segments.buffer, sampleSegments.buffer, sampleWidths.buffer])
       } else worker.postMessage({ ...message, segments }, [segments.buffer])
       } catch (error) { finish(error instanceof Error ? error : new Error(String(error))) }
   })
@@ -57,7 +58,7 @@ export class VectorCache {
   reportUnavailable(pageIndex: number): boolean { if (this.unavailable.has(pageIndex)) return false; this.unavailable.add(pageIndex); return true }
   peekEndpoint(pageIndex: number): SnapIndex | null { return this.entries.get(pageIndex)?.value?.endpointIndex ?? null }
   get size(): number { return [...this.entries.values()].filter(e => e.value).length }
-  get bytes(): number { return [...this.entries.values()].reduce((sum, e) => sum + (e.value?.segments.byteLength ?? 0) + (e.value?.endpointIndex?.bytes ?? 0), 0) }
+  get bytes(): number { return [...this.entries.values()].reduce((sum, e) => sum + (e.value?.segments.byteLength ?? 0) + (e.value?.widths.byteLength ?? 0) + (e.value?.endpointIndex?.bytes ?? 0), 0) }
   constructor(private docId: string) {}
   clear(): void {
     for (const e of this.entries.values()) { e.cancel(); e.endpointAbort?.abort() }

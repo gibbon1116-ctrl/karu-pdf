@@ -1156,7 +1156,8 @@ export function AnnotationLayer(props: Props) {
         onPointerDown={e => { e.preventDefault(); e.stopPropagation() }} onPointerUp={e => { e.preventDefault(); e.stopPropagation() }}
         onDoubleClick={e => { e.preventDefault(); e.stopPropagation() }} onClick={e => { e.preventDefault(); e.stopPropagation(); props.store.toggleSymbolCandidate(c.id) }}
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); props.store.toggleSymbolCandidate(c.id) } }}>
-        <title>{c.imageScore === undefined ? `似ている度合い ${c.score.toFixed(2)}` : `線 ${c.score.toFixed(2)}・画像 ${c.imageScore.toFixed(2)}`}</title>
+        <title>{c.extra === undefined ? `似ている度合い ${c.score.toFixed(2)}`
+          : `線 ${c.score.toFixed(2)}・余分な線 ${Math.round(c.extra * 100)}%${c.imageScore === undefined ? '' : `・画像 ${c.imageScore.toFixed(2)}`}`}</title>
         <rect x={c.rect[0]} y={c.rect[1]} width={c.rect[2] - c.rect[0]} height={c.rect[3] - c.rect[1]} vectorEffect="non-scaling-stroke" />
         {c.state === 'pending' && c.confidence === 'check' && <text className="symbol-search-question" x={c.rect[2]} y={c.rect[1]} textAnchor="end"
           fontSize={Math.min(c.rect[2] - c.rect[0], c.rect[3] - c.rect[1]) * .65}>?</text>}

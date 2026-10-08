@@ -178,6 +178,37 @@ describe('real MuPDF vector device', () => {
       expect(result.stats.fillPaths).toBe(1)
       expect(result.truncated).toBe(false)
       expect(result.segments.byteLength).toBe(result.segmentCount * 16)
+      expect(result.widths).toHaveLength(result.segmentCount)
+      expect(Array.from(result.widths.slice(0, 4))).toEqual(Array(4).fill(Math.fround(Math.sqrt(6))))
+      expect(Array.from(result.widths.slice(4))).toEqual([0, 0, 0])
+    } finally { pdf.destroy() }
+  })
+  it.each(['1 g', '1 1 1 rg', '0 0 0 0 k', '.95 g', '.95 .95 .95 rg', '.05 .05 .05 .05 k'])('omits white fill %s and releases its callback wrappers', color => {
+    const pdf = documentWith(`${color} 10 10 20 20 re f`), tracked = trackCallbackDestruction()
+    try {
+      const page = extract(pdf, 0)
+      expect(page.segmentCount).toBe(0); expect(page.widths).toHaveLength(0)
+      expect(page.stats).toMatchObject({ fillPaths: 1, whiteFills: 1 })
+      expect(classifyPage(page)).toBe('empty')
+      expect(tracked.released.Path).toHaveLength(1); expect(tracked.released.ColorSpace).toHaveLength(1)
+      for (const values of Object.values(tracked.released)) for (const value of values) expect(value.pointer).toBe(0)
+    } finally { tracked.restore(); pdf.destroy() }
+  })
+  it.each(['.94 g', '.94 1 1 rg', '0 0 .06 0 k'])('keeps nonwhite fill %s with zero widths', color => {
+    const pdf = documentWith(`${color} 10 10 20 20 re f`)
+    try {
+      const page = extract(pdf, 0)
+      expect(page.segmentCount).toBe(4); expect(page.stats.whiteFills).toBe(0)
+      expect(Array.from(page.widths)).toEqual([0, 0, 0, 0])
+    } finally { pdf.destroy() }
+  })
+  it('scales stroke widths by the absolute CTM determinant, including reflection', () => {
+    const pdf = documentWith('q 2 0 1 -3 0 100 cm .7 w 1 2 4 5 re S Q .42 w 30 30 m 40 30 l S')
+    try {
+      const page = extract(pdf, 0)
+      expect(page.widths).toHaveLength(page.segmentCount)
+      expect(Array.from(page.widths.slice(0, 4))).toEqual(Array(4).fill(Math.fround(.7 * Math.sqrt(6))))
+      expect(page.widths[4]).toBeCloseTo(.42)
     } finally { pdf.destroy() }
   })
   it.each([0, 90, 180, 270] as const)('uses displayed page coordinates for /Rotate %i, excluding annotations', rotate => {
@@ -246,6 +277,8 @@ describe('real MuPDF vector device', () => {
       expect(result.segmentCount).toBe(400_000)
       expect(result.truncated).toBe(true)
       expect(result.segments.byteLength).toBe(6_400_000)
+      expect(result.widths).toHaveLength(400_000)
+      expect(result.widths.byteLength).toBe(1_600_000)
     } finally { pdf.destroy() }
   }, 30_000)
   it('prioritizes display rendering, cancels queued extraction, and transfers the array', async () => {
@@ -267,10 +300,12 @@ describe('real MuPDF vector device', () => {
       expect(response.message.type).toBe('vectorsExtracted')
       if (response.message.type === 'vectorsExtracted') {
         expect(response.message.page!.segmentCount).toBe(4)
-        expect(response.transfer).toEqual([response.message.page!.segments.buffer])
+        expect(response.transfer).toEqual([response.message.page!.segments.buffer, response.message.page!.widths.buffer])
         const delivered = structuredClone(response.message, { transfer: response.transfer })
         expect(response.message.page!.segments.byteLength).toBe(0)
         expect(delivered.page!.segments.byteLength).toBe(64)
+        expect(response.message.page!.widths.byteLength).toBe(0)
+        expect(delivered.page!.widths.byteLength).toBe(16)
       }
       send({ type: 'close', docId: 'vectors' })
     } finally { buffer.destroy(); pdf.destroy() }
@@ -285,7 +320,7 @@ it('uses the exact screen fixture: six crossed squares, drawing endpoints and ra
       const page = extract(pdf, 0)
       expect(classifyPage(page)).toBe(raster ? 'raster' : 'vector')
       if (raster) { expect(page.segmentCount).toBe(0); continue }
-      const result = searchVectorMessage({ type: 'vector-search', id: 1, segments: page.segments, sampleSegments: page.segments, sampleRect: [49,49,61,61], options: { threshold: .85 } })
+      const result = searchVectorMessage({ type: 'vector-search', id: 1, segments: page.segments, sampleSegments: page.segments, sampleWidths: page.widths, sampleRect: [49,49,61,61], options: { threshold: .85 } })
       expect(result?.matches).toHaveLength(6)
       const index = buildEndpointIndex({ type: 'endpoints', id: 1, segments: page.segments, bounds: [0,0,500,500] })
       expect(findSnap([100.6,400.4], 2, index)?.point).toEqual([100,400])

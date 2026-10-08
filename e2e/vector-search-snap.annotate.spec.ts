@@ -70,10 +70,10 @@ test('線で6個を探し、横切る線を許容し、対角線の無い四角�
   expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count).length)).toBe(0)
 })
 
-test('画像の確認をオフにすると線の候補に確度を付けず、設定を保持する',async({page})=>{
+test('画像の確認をオフにしても線の候補に確度を付け、設定を保持する',async({page})=>{
   await open(page);await search(page,false)
   const candidates=page.getByTestId('symbol-search-candidate');await expect(candidates).toHaveCount(6)
-  for(const candidate of await candidates.all()) await expect(candidate).not.toHaveAttribute('data-confidence',/./)
+  for(const candidate of await candidates.all()) await expect(candidate).toHaveAttribute('data-confidence',/^(high|check)$/)
   expect(await page.evaluate(()=>localStorage.getItem('karu-pdf:symbol-search-verify'))).toBe('false')
 })
 test('画像だけのページでは画像で探す',async({page})=>{

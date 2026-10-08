@@ -3,7 +3,7 @@ import { classifyPage, segmentEndpoints, type VectorPage } from '../src/core/vec
 import { buildSnapIndex, findSnap } from '../src/core/snap'
 
 const page = (segmentCount: number, imageAreaRatio: number): Pick<VectorPage, 'segmentCount' | 'stats'> => ({ segmentCount,
-  stats: { strokePaths: 0, fillPaths: 0, curves: 0, images: 0, imageAreaRatio, textGlyphs: 0, ms: { displayList: 0, walk: 0, total: 0 } } })
+  stats: { strokePaths: 0, fillPaths: 0, whiteFills: 0, curves: 0, images: 0, imageAreaRatio, textGlyphs: 0, ms: { displayList: 0, walk: 0, total: 0 } } })
 describe('vector page classification', () => {
   it.each([[200, .1999, 'vector'], [200, .2, 'mixed'], [199, .5, 'raster'], [199, .4999, 'mixed'], [0, 0, 'empty'], [200, .5, 'mixed']] as const)('%i lines, image ratio %f → %s', (count, ratio, kind) => {
     expect(classifyPage(page(count, ratio))).toBe(kind)

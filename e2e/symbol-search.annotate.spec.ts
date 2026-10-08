@@ -4,11 +4,16 @@ import mupdf from 'mupdf'
 const centers = [[80, 140], [160, 140], [80, 240], [160, 240], [80, 340], [160, 340]] as const
 type Probe = { created: number; terminated: number; searches: number; holdAfter: number | null; release: (() => void) | null }
 type ProbeWindow = Window & { __visualSearchProbe: Probe }
-function symbolPdf(pageCount = 1) {
+function symbolPdf(pageCount = 1, withHatching = false) {
   const doc = new mupdf.PDFDocument()
   try {
     // These are PDF page contents, not annotations. Circle + cross, diameter 12 pt.
-    const symbols = centers.map(([x, y]) => {
+    const symbols = centers.map(([x, y], index) => {
+      if (withHatching) {
+        const left = x - 1.5, top = y - 9.5
+        const hatch = index < 3 ? '' : [0,1,2,3,4].map(d => `${left} ${top+d} m ${left+3} ${top+19-d} l S`).join('\n')
+        return `${left} ${top} 3 19 re S ${hatch}`
+      }
       const r = 6, k = r * .5522847498
       return `${x + r} ${y} m ${x + r} ${y + k} ${x + k} ${y + r} ${x} ${y + r} c
         ${x - k} ${y + r} ${x - r} ${y + k} ${x - r} ${y} c
@@ -30,7 +35,7 @@ const candidates = (page: Page, state?: string) => state ? page.locator(`[data-t
 const quantity = (page: Page) => page.getByTestId('fixture-panel')
 const marks = (page: Page) => page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter(a => a.count).length)
 
-async function open(page: Page, pageCount = 1) {
+async function open(page: Page, pageCount = 1, withHatching = false) {
   await page.addInitScript(() => {
     const scope = window as unknown as ProbeWindow
     scope.__visualSearchProbe = { created: 0, terminated: 0, searches: 0, holdAfter: null, release: null }
@@ -60,7 +65,7 @@ async function open(page: Page, pageCount = 1) {
   })
   await page.goto('/karu-pdf/?test=1&workers=2&warm=0')
   await page.waitForFunction(() => !!window.__karu)
-  await page.evaluate(bytes => window.__karu!.openBytes(bytes, '同じ記号の試験.pdf'), symbolPdf(pageCount))
+  await page.evaluate(bytes => window.__karu!.openBytes(bytes, '同じ記号の試験.pdf'), symbolPdf(pageCount, withHatching))
   await page.evaluate(() => window.__karu!.setZoom(1))
   await expect(page.getByTestId('annotation-layer-0')).toBeVisible()
   await page.getByRole('tab', { name: '数量', exact: true }).click()
@@ -114,7 +119,7 @@ test('actual matching, candidate choice, one-step undo/redo, counted candidates 
   for (const [x, y] of foundCenters) expect(centers.some(([cx, cy]) => Math.hypot(x - cx, y - cy) < 2)).toBe(true)
   for (let i = 0; i < 3; i++) await candidates(page, 'pending').first().click()
   await expect(candidates(page, 'chosen')).toHaveCount(3)
-  await expect(candidates(page).first().locator('title')).toContainText(/線 [0-9.]+・画像 [0-9.]+/)
+  await expect(candidates(page).first().locator('title')).toContainText(/線 [0-9.]+・余分な線 [0-9]+%・画像 [0-9.]+/)
   await panel(page).getByRole('button', { name: '選んだ 3 件を数量へ追加', exact: true }).click()
   expect(await marks(page)).toBe(3)
   await expect(quantity(page)).toContainText('全図面: 3個')
@@ -243,4 +248,27 @@ test('ordinary viewing, zoom, scrolling and manual pickup never create the match
   expect(await page.evaluate(() => (window as unknown as ProbeWindow).__visualSearchProbe.created)).toBe(0)
   expect(await page.evaluate(() => performance.getEntriesByType('resource').filter(e => /symbolSearch[.-]worker/.test(e.name)).length)).toBe(0)
   await expect(candidates(page)).toHaveCount(0)
+})
+
+
+test('斜線入りも候補に残し、画像の確認がオフでも要確認に分ける', async ({ page }) => {
+  await open(page, 1, true); await capture(page)
+  await panel(page).getByRole('checkbox', { name: '画像でも確認する', exact: true }).uncheck()
+  await search(page)
+  const high = page.locator('[data-testid="symbol-search-candidate"][data-confidence="high"]')
+  const check = page.locator('[data-testid="symbol-search-candidate"][data-confidence="check"]')
+  await expect(high).toHaveCount(3); await expect(check).toHaveCount(3)
+  for (const candidate of await check.all()) {
+    const y = await candidate.locator('rect').evaluate(el => {
+      const r = el as SVGRectElement; return r.y.baseVal.value + r.height.baseVal.value / 2
+    })
+    expect(y).toBeGreaterThanOrEqual(240)
+    await expect(candidate.locator('title')).toContainText(/線 [0-9.]+・余分な線 [0-9]+%/)
+    await expect(candidate.locator('title')).not.toContainText('画像')
+  }
+  await panel(page).getByRole('button', { name: '確度の高い候補を選ぶ', exact: true }).click()
+  await expect(candidates(page, 'chosen')).toHaveCount(3)
+  for (const candidate of await high.all()) await expect(candidate).toHaveAttribute('data-state', 'chosen')
+  for (const candidate of await check.all()) await expect(candidate).toHaveAttribute('data-state', 'pending')
+  expect(await marks(page)).toBe(0)
 })
