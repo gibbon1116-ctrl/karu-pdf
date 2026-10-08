@@ -4,7 +4,7 @@ export interface VectorPage {
   pageIndex: number
   /** x1,y1,x2,y2 in displayed page points, including /Rotate. */
   segments: Float32Array
-  /** One displayed stroke width per segment; fill outlines have width zero. */
+  /** One displayed stroke width per line in `segments`; fill outlines have width zero. */
   widths: Float32Array
   segmentCount: number
   truncated: boolean
