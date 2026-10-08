@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { parseQuantityMark, serializeQuantityMark, routeMembers, routeRises, riseCondition, routePortions, routeMemberLength, conditionScope, withRouteScope, quantityLabel, type QuantityMark, type RouteConditions } from '../src/core/quantity'
+import { parseQuantityMark, serializeQuantityMark, routeMembers, routeRises, riseCondition, routePortions, routeMemberLength, conditionScope, withRouteScope, conditionShortName, conditionSuffix, quantityLabel, type QuantityMark, type RouteConditions } from '../src/core/quantity'
 import { parseCount } from '../src/core/counts'
 import { QuantityIndex } from '../src/core/quantityIndex'
 import { nextCountStyle, type CountFixture } from '../src/core/countFixtures'
@@ -19,6 +19,51 @@ async function setup(q: QuantityMark = { ...base, addM: 3, slackM: 1 }) {
   return { store, id: a.id }
 }
 afterEach(() => vi.unstubAllGlobals())
+
+it('maps every listed construction condition to its short name', () => {
+  const shortNames: Record<string, string> = {
+    '管内配線': '管内',
+    '合成樹脂管内配線（PF・CD・FEP）': 'PF管内',
+    'ケーブルラック配線': 'ラック',
+    '二重天井内・二重床内・ピット内・トラフ内配線': '天井内等',
+    'ダクト内配線': 'ダクト内',
+    'サドル止め（コンクリート）': 'サドル',
+    'サドル止め・ステープル止め（木造）': 'ステープル',
+    '地中管路内': '地中',
+    '架空（ちょう架）': '架空',
+    '隠ぺい配管': '隠ぺい',
+    '露出配管': '露出',
+    'コンクリート埋込配管': '埋込',
+    '地中埋設': '地中',
+    '屋内一般配管': '屋内一般',
+    '機械室・便所配管': '機械室',
+    '屋外配管（架空・暗渠内・共同溝内）': '屋外',
+    '屋外露出配管': '屋外露出',
+    '地中配管': '地中',
+    '屋内露出（一般居室・廊下）': '屋内露出',
+    '屋内隠ぺい（天井内・パイプシャフト）': '隠ぺい',
+    '機械室・書庫・倉庫': '機械室',
+    '屋外露出・浴室・厨房': '屋外露出',
+    '隠ぺい（埋込）': '埋込',
+  }
+  for (const [name, short] of Object.entries(shortNames)) expect(conditionShortName(name)).toBe(short)
+})
+
+it('removes both parenthesis styles and caps unknown names at eight characters', () => {
+  expect(conditionShortName('配線（天井内）(点検口)')).toBe('配線')
+  expect(conditionShortName('12345678')).toBe('12345678')
+  expect(conditionShortName('1234（注記）56789')).toBe('1234567…')
+  expect(conditionShortName('toString')).toBe('toString')
+})
+
+it('prints short route conditions, deduplicates their short names, and keeps full suffixes by default', () => {
+  const line: [number, number][] = [[0, 0], [10, 0]]
+  const different: RouteConditions = { plan: '二重天井内・二重床内・ピット内・トラフ内配線', rise: '管内配線' }
+  expect(conditionSuffix(different)).toBe('（二重天井内・二重床内・ピット内・トラフ内配線／管内配線）')
+  expect(quantityLabel(line, 1000, { ...base, cond: different }, 'CV', true)).toBe('CV（天井内等／管内） 10.00 m')
+  const sameShortName: RouteConditions = { plan: '地中管路内', rise: '地中配管' }
+  expect(quantityLabel(line, 1000, { ...base, cond: sameShortName }, 'CV', true)).toBe('CV（地中） 10.00 m')
+})
 
 it.each(['all', 'noSlack', 'rise'] as const)('migrates legacy %s and extra scopes without inventing conditions', scope => {
   const q = parse({ ...base, addM: 3, slackM: 1, count: 2, scope, extra: [{ itemId: 'pf', count: 3, scope: 'rise' }, { itemId: 'rack', count: 1, scope: 'noSlack' }] })!

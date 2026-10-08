@@ -198,14 +198,45 @@ export function quantityLabel(points: readonly Point[], mmPerPoint: number, mark
     case 'lengthWidthDepth': label = `${length}×W${dimension('widthM')}×D${dimension('depthM')}=${value} m³`; break
   }
   if (mark.method === 'polyline' && ((mark.count ?? 1) !== 1 || mark.extra?.length)) {
-    const codes = routeMembers(mark).map((e, i) => (i === 0 ? code : extraCode(e.itemId)) + conditionSuffix(e.cond) + (e.count === 1 ? '' : '×' + e.count)).join(', ')
+    const codes = routeMembers(mark).map((e, i) => (i === 0 ? code : extraCode(e.itemId)) + conditionSuffix(e.cond, true) + (e.count === 1 ? '' : '×' + e.count)).join(', ')
     return showCode && codes ? codes + '  ' + label : label
   }
-  return showCode && code ? `${code}${mark.method === 'polyline' ? conditionSuffix(mark.cond) : ''} ${label}` : label
+  return showCode && code ? `${code}${mark.method === 'polyline' ? conditionSuffix(mark.cond, true) : ''} ${label}` : label
 }
-export function conditionSuffix(cond: RouteConditions = {}): string {
+const CONDITION_SHORT_NAMES: Record<string, string> = {
+  '管内配線': '管内',
+  '合成樹脂管内配線（PF・CD・FEP）': 'PF管内',
+  'ケーブルラック配線': 'ラック',
+  '二重天井内・二重床内・ピット内・トラフ内配線': '天井内等',
+  'ダクト内配線': 'ダクト内',
+  'サドル止め（コンクリート）': 'サドル',
+  'サドル止め・ステープル止め（木造）': 'ステープル',
+  '地中管路内': '地中',
+  '架空（ちょう架）': '架空',
+  '隠ぺい配管': '隠ぺい',
+  '露出配管': '露出',
+  'コンクリート埋込配管': '埋込',
+  '地中埋設': '地中',
+  '屋内一般配管': '屋内一般',
+  '機械室・便所配管': '機械室',
+  '屋外配管（架空・暗渠内・共同溝内）': '屋外',
+  '屋外露出配管': '屋外露出',
+  '地中配管': '地中',
+  '屋内露出（一般居室・廊下）': '屋内露出',
+  '屋内隠ぺい（天井内・パイプシャフト）': '隠ぺい',
+  '機械室・書庫・倉庫': '機械室',
+  '屋外露出・浴室・厨房': '屋外露出',
+  '隠ぺい（埋込）': '埋込',
+}
+export function conditionShortName(name: string): string {
+  if (Object.prototype.hasOwnProperty.call(CONDITION_SHORT_NAMES, name)) return CONDITION_SHORT_NAMES[name]
+  const plain = name.replace(/（[^）]*）|\([^)]*\)/g, '').trim()
+  return plain.length > 8 ? plain.slice(0, 7) + '…' : plain
+}
+export function conditionSuffix(cond: RouteConditions = {}, short = false): string {
   if (cond.plan === null) return '（立上り）'
-  const names = [...new Set([cond.plan, ...(Array.isArray(cond.rise) ? cond.rise : [cond.rise])].filter((v): v is string => typeof v === 'string'))]
+  const values = [cond.plan, ...(Array.isArray(cond.rise) ? cond.rise : [cond.rise])].filter((v): v is string => typeof v === 'string')
+  const names = [...new Set(short ? values.map(conditionShortName) : values)]
   return names.length ? '（' + names.join('／') + '）' : ''
 }
 export function quantityDashes(dash: QuantityLineStyle['dash'] = 'solid', width = 1.5): number[] {
