@@ -142,6 +142,11 @@ button, input { font: inherit; }
 .quantity-table td button:has(.quantity-table-cursor) { padding-bottom: 9px; }
 .quantity-table td img, .quantity-table td svg { display: block; max-width: 30px; width: 30px; height: 28px; object-fit: contain; }
 .quantity-table .quantity-table-spacer td { height: auto; max-height: none; padding: 0; border: 0; }
+.quantity-table-condition td, .quantity-table-condition th { background: #f4f7fa; }
+.quantity-table-condition .quantity-table-fixed-4 { position: sticky; }
+.quantity-table-condition .quantity-table-fixed-4 > button { height: 20px; line-height: 20px; }
+.quantity-table-parts { display: block; height: 11px; line-height: 11px; font-size: 9px; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.quantity-table .quantity-table-fixed-2 > button { display: inline-block; width: 20px; height: 28px; padding: 0; text-align: center; vertical-align: middle; }
 .quantity-pickup-flash { pointer-events: none; transform-box: fill-box; transform-origin: center; animation: quantity-pickup-flash 1.2s ease-out forwards; }
 @keyframes quantity-pickup-flash { from { transform: scale(1); opacity: 1; } to { transform: scale(1.4); opacity: 0; } }
 .quantity-pickup-flash-path { fill: none; stroke: #ff8a00; stroke-linecap: round; stroke-linejoin: round; animation-name: quantity-pickup-flash-path; }

@@ -137,7 +137,7 @@ test('exports summary/detail CSV with metadata, values, locations and mark count
   for (const detail of [false, true]) {
     await page.getByRole('button', { name: '数量をCSVに書き出す', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: '数量をCSVに書き出す', exact: true })
-    if (detail) await dialog.getByRole('radio', { name: '明細（項目・ページ・場所ごと）', exact: true }).check()
+    if (detail) await dialog.getByRole('radio', { name: '明細（項目・施工条件・区間・ページ・場所ごと）', exact: true }).check()
     const pending = page.waitForEvent('download')
     await dialog.getByRole('button', { name: '書き出す', exact: true }).click()
     const download = await pending, stream = await download.createReadStream(), chunks: Buffer[] = []
@@ -147,14 +147,14 @@ test('exports summary/detail CSV with metadata, values, locations and mark count
     expect(csv.charCodeAt(0)).toBe(0xFEFF)
     if (detail) {
       expect(csv).toContain('階,部屋,ページ番号,図面番号,図面名称,数量,拾いの件数')
-      expect(csv).toContain('電気,EM-CE,ケーブル（EM-CE）,3C-5.5sq,長さ,m,全図面,,,2,E-102,2階 幹線設備平面図,20.00,2')
+      expect(csv).toContain('電気,EM-CE,ケーブル（EM-CE）,3C-5.5sq,,平面,長さ,m,全図面,,,2,E-102,2階 幹線設備平面図,20.00,2')
       expect(csv).toContain('場所別,1階,事務室,1,E-101,1階 幹線設備平面図,24,24')
       expect(csv).toContain('場所別,1階,会議室,1,E-101,1階 幹線設備平面図,8,8')
     } else {
       expect(csv).toContain('p.1 E-101,p.2 E-102,p.3 E-103')
       expect(csv).not.toContain('p.4')
-      expect(csv).toContain('電気,EM-CE,ケーブル（EM-CE）,3C-5.5sq,長さ,m,全図面,100.00,30.00,30.00,20.00,50.00')
-      expect(csv).toContain('土工,根切り,根切り,,体積,m³,全図面,100.00,30.00,30.00,20.00,50.00')
+      expect(csv).toContain('電気,EM-CE,ケーブル（EM-CE）,3C-5.5sq,,施工条件別,長さ,m,全図面,100.00,0.00,0.00,100.00,30.00,30.00,20.00,50.00')
+      expect(csv).toContain('土工,根切り,根切り,,,施工条件別,体積,m³,全図面,,,,100.00,30.00,30.00,20.00,50.00')
     }
     await download.delete()
   }

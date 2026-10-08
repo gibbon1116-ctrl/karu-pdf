@@ -24,6 +24,13 @@ export interface QuantityEntry {
   value: number; routeCount?: number; part?: RoutePart; riseIndex?: number; condition?: string
 }
 export interface ConditionTotal { plan: number; rise: number; slack: number; other: number; total: number; annotationIds: Set<string> }
+export function quantityPartLabel(part: RoutePart): string {
+  return { plan: '平面', rise: '立上り・立下り', slack: 'その他の加算' }[part]
+}
+export function quantityPartSummary(total: Pick<ConditionTotal, 'plan' | 'rise' | 'slack'>, includeSlack = true): string {
+  return (['plan', 'rise', ...(includeSlack ? ['slack' as const] : [])] as const)
+    .filter(part => total[part] !== 0).map(part => `${quantityPartLabel(part)} ${total[part].toFixed(1)}`).join(' ／ ')
+}
 interface IndexedAnnotation {
   id: string; pageIndex: number; deleted?: boolean; count?: CountMark | null; quantity?: QuantityMark | null
   vertices?: readonly Point[] | null; measure?: { mmPerPoint: number } | null

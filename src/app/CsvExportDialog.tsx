@@ -63,9 +63,11 @@ export function QuantityCsvExportDialog({ index, fixtures, pdfName, pageIndex, o
   return <dialog ref={dialog} className="csv-export-dialog" aria-label="数量をCSVに書き出す" onCancel={onClose}>
     <h2>数量をCSVに書き出す</h2>
     <fieldset><legend>書き出す種類</legend>
-      <label><input type="radio" name="quantity-csv" checked={type === 'summary'} onChange={() => setType('summary')} />集計（項目ごとの全図面の合計）</label>
-      <label><input type="radio" name="quantity-csv" checked={type === 'detail'} onChange={() => setType('detail')} />明細（項目・ページ・場所ごと）</label>
+      <label><input type="radio" name="quantity-csv" checked={type === 'summary'} onChange={() => setType('summary')} />集計（項目・施工条件ごとの全図面の合計）</label>
+      <label><input type="radio" name="quantity-csv" checked={type === 'detail'} onChange={() => setType('detail')} />明細（項目・施工条件・区間・ページ・場所ごと）</label>
     </fieldset>
+    <p>集計には「施工条件」「集計区分」「平面」「立上り・立下り」「その他の加算」、明細には「施工条件」「区間」の列が加わります。条件が複数ある項目は材料計も出します。集計の合計は「施工条件別」の行を足して確かめてください（材料計を重ねて足すと二重になります）。</p>
+    <p>長さ・面積・体積は従来どおり小数2桁で書き出します。行ごとに丸めるため、端数のある数量では明細や条件別の行を足した値と材料全体の合計に丸め差が出る場合があります。</p>
     {error && <p role="alert">{error}</p>}
     <div className="dialog-actions"><button disabled={saving} onClick={onClose}>閉じる</button><button disabled={saving} onClick={() => {
       setSaving(true); setError('')
