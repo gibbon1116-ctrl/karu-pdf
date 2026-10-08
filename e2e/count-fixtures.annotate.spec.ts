@@ -447,10 +447,10 @@ test('presets count across pages, visibility excludes hit testing, and quantity 
   const download = await pending
   expect(download.suggestedFilename()).toBe('項目試験_数量集計.csv')
   const csv = await fs.readFile((await download.path())!, 'utf8')
-  expect(csv).toContain('分類,略号,名称,規格,種別,単位,集計方式,全図面の合計,表示中の図面（p.1）,p.1,p.2\r\n')
-  expect(csv).toContain('照明器具,DL,ダウンライト,,個数,個,場所別,2,2,2,0\r\n')
-  expect(csv).toContain('コンセント,C2,コンセント（2口）,,個数,個,場所別,2,1,1,1\r\n')
-  expect(csv).toContain('照明器具,BL,ベースライト（直付）,,個数,個,場所別,0,0,0,0\r\n')
+  expect(csv).toContain('分類,略号,名称,規格,施工条件,集計区分,種別,単位,集計方式,平面,立上り・立下り,その他の加算,全図面の合計,表示中の図面（p.1）,p.1,p.2\r\n')
+  expect(csv).toContain('照明器具,DL,ダウンライト,,,施工条件別,個数,個,場所別,,,,2,2,2,0\r\n')
+  expect(csv).toContain('コンセント,C2,コンセント（2口）,,,施工条件別,個数,個,場所別,,,,2,1,1,1\r\n')
+  expect(csv).toContain('照明器具,BL,ベースライト（直付）,,,施工条件別,個数,個,場所別,,,,0,0,0,0\r\n')
 })
 
 test('custom style, duplication, bulk editing, multiple reassignment, undo, and save/reopen', async ({ page }) => {

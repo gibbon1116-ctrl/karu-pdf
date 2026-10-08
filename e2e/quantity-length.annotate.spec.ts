@@ -80,7 +80,7 @@ test('length pickup: scale, addition, Undo, vertices, visibility, CSV, save and 
   expect(download.suggestedFilename()).toBe('数量試験_数量集計.csv')
   const stream = await download.createReadStream(), chunks: Buffer[] = []
   for await (const chunk of stream!) chunks.push(chunk)
-  expect(Buffer.concat(chunks).toString('utf8')).toContain('電線・ケーブル,CV,ケーブル（CV）,,長さ,m,全図面,5.08,5.08,5.08')
+  expect(Buffer.concat(chunks).toString('utf8')).toMatch(/電線・ケーブル,CV,ケーブル（CV）,,,施工条件別,長さ,m,全図面,[\d.]+,[\d.]+,[\d.]+,5\.08,5\.08,5\.08/)
   await download.delete()
   const saved = await page.evaluate(async () => [...(await window.__karu!.saveToBytes())!])
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '再読込.pdf'), saved)

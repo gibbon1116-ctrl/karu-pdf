@@ -31,7 +31,7 @@ async function drawingPdf(unset = false, extraRack = false) {
       rect: [80, a.y, 80 + a.length * 10, a.y + 1], vertices: [[80, a.y], [80 + a.length * 10, a.y]],
       measure: { kind: 'perimeter', unit: 'mm', decimals: null, mmPerPoint: 100 },
       quantity: { version: 1, id: 'r' + i, itemId: 'cv', method: 'polyline', floor: '1階', room: '事務室',
-        ...(a.condition ? { rises: [{ m: 2 }, { m: 3 }], cond: { plan: a.condition, rise: a.condition } } : {}) } })
+        ...(a.condition ? { rises: [{ m: 2 }, { m: 3 }], cond: { plan: a.condition, rise: a.condition } } : { cond: {} }) } })
     store.create({ kind: 'symbol', pageIndex: 0, rect: [80, 400, 90, 410],
       count: { version: 2, id: 'old', fixtureId: 'old' } })
     expect(applyEdits(doc, store.toEdits(), { BIZUDGothic: font }).errors).toEqual([])
@@ -101,12 +101,11 @@ test('unset filter excludes items without candidates and without unset entries',
 })
 
 test('assigning a condition in the format panel removes the unset row on index update', async ({ page }) => {
-  test.fixme(true, 'SPEC-07cの部分別施工条件の書式欄がこのworktreeに未導入。結合時に有効化しラベルを確認する。')
   await open(page, true)
   await page.getByRole('button', { name: '集計表を開く', exact: true }).click()
   await table(page).getByRole('checkbox', { name: '未設定だけ', exact: true }).check()
   await conditionRow(page, '').locator('button[data-column-key="1"]').click()
-  await page.getByTestId('format-panel').getByLabel('平面の施工条件', { exact: true }).selectOption({ label: 'ケーブルラック配線' })
+  await page.getByTestId('format-panel').locator('.route-item').first().getByLabel('平面', { exact: true }).selectOption('value:ケーブルラック配線')
   await expect(table(page).locator('tr[data-fixture-id]')).toHaveCount(0)
   await expect(table(page).getByText('該当する項目はありません', { exact: true })).toBeVisible()
 })

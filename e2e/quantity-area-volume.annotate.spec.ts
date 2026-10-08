@@ -107,10 +107,10 @@ test('four area/volume methods: prompts, format Undo, totals, CSV and PDF reload
  for await (const chunk of stream!) chunks.push(chunk)
  const csv = Buffer.concat(chunks).toString('utf8')
  for (const row of [
-  '仮設,内部足場,内部足場（囲む）,,面積,m²,全図面,6.45,6.45,6.45',
-  '仮設,外部足場,外部足場（長さ×高さ）,,面積,m²,全図面,8.89,8.89,8.89',
-  '土工,根切り,根切り（囲む×深さ）,,体積,m³,全図面,7.74,7.74,7.74',
-  '土工,溝掘削,ケーブル・配管の溝掘削（長さ×幅×深さ）,,体積,m³,全図面,1.22,1.22,1.22',
+  '仮設,内部足場,内部足場（囲む）,,,施工条件別,面積,m²,全図面,,,,6.45,6.45,6.45',
+  '仮設,外部足場,外部足場（長さ×高さ）,,,施工条件別,面積,m²,全図面,,,,8.89,8.89,8.89',
+  '土工,根切り,根切り（囲む×深さ）,,,施工条件別,体積,m³,全図面,,,,7.74,7.74,7.74',
+  '土工,溝掘削,ケーブル・配管の溝掘削（長さ×幅×深さ）,,,施工条件別,体積,m³,全図面,,,,1.22,1.22,1.22',
  ]) expect(csv).toContain(row)
  await download.delete()
  const expectedLabels = await labels(page).allTextContents()
