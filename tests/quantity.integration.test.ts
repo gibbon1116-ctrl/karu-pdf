@@ -4,7 +4,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest'
 import { applyEdits, listAnnotations, type AnnotationEdit, type Point } from '../src/core/annotations'
 import { createFontResource, type FontResource } from '../src/core/fontMetrics'
 import { nextCountStyle, readCountFixtures, type CountFixture } from '../src/core/countFixtures'
-import { quantityLabel, type QuantityMark } from '../src/core/quantity'
+import { quantityLabel, parseQuantityMark, serializeQuantityMark, type QuantityMark } from '../src/core/quantity'
 import { applyPageLayout } from '../src/core/pageOps'
 import { AnnotationStore } from '../src/editor/AnnotationStore'
 
@@ -181,7 +181,7 @@ it('round-trips specifications, aggregation, mark locations and all items of a s
   const saved=reopen(doc)
   try {
    expect(readCountFixtures(saved)).toEqual(fixtures)
-   const info=listAnnotations(saved,0);expect(info[0].quantity).toEqual(q);expect(info[0].contents).toBe(route.text)
+   const info=listAnnotations(saved,0);expect(info[0].quantity).toEqual({ ...q, cond: {}, rises: [{ m: 3 }], extra: [{ itemId: 'em', count: 1, cond: {} }] });expect(info[0].contents).toBe(route.text)
    expect(listAnnotations(saved,1)[0].count).toEqual(count)
    const store=new AnnotationStore();await store.ensureCountFixtures(async()=>readCountFixtures(saved),async()=>{for(let p=0;p<2;p++)await store.ensurePageLoaded(p,async()=>listAnnotations(saved,p))})
    expect(store.quantityIndex().total('cv')).toBeCloseTo(24.7);expect(store.quantityIndex().total('em')).toBeCloseTo(12.35)
@@ -211,7 +211,7 @@ it('saves scoped routes as version 1 JSON, Contents and exact item totals after 
  const pf: CountFixture = { ...fixture, id: 'pf', name: '立上り電線管', code: 'PF28', order: 1, routeScope: 'rise', defaults: { addM: 3, slackM: 1 } }
  const rack: CountFixture = { ...fixture, id: 'rack', code: 'CR', order: 2, routeScope: 'noSlack' }
  const fixtures = [{ ...fixture, spec: '38sq-3C' }, pf, rack]
- const q: QuantityMark = { version: 1, id: 'route', itemId: 'cv', method: 'polyline', addM: 3, slackM: 1, count: 2, extra: [{ itemId: 'pf', count: 1, scope: 'rise' }, { itemId: 'rack', count: 1, scope: 'noSlack' }] }
+ const q: QuantityMark = { version: 1, id: 'route', itemId: 'cv', method: 'polyline', addM: 3, slackM: 1, count: 2, extra: [{ itemId: 'pf', count: 1, cond: { plan: null, slack: null } }, { itemId: 'rack', count: 1, cond: { slack: null } }] }
  const text = quantityLabel(points, measure.mmPerPoint, q, 'CV 38sq-3C', true, id => id === 'pf' ? 'PF28' : 'CR')
  const doc = blank()
  try {
@@ -220,8 +220,8 @@ it('saves scoped routes as version 1 JSON, Contents and exact item totals after 
   try {
    expect(readCountFixtures(saved)).toEqual(fixtures)
    const info = listAnnotations(saved, 0)[0]
-   expect(info.quantity).toEqual(q)
-   expect(info.contents).toBe('CV 38sq-3C×2, PF28（立上り）, CR（平面＋立上り）  9.35+3.00+余1.00=13.35 m')
+   expect(info.quantity).toEqual({ ...q, cond: {}, rises: [{ m: 3 }] })
+   expect(info.contents).toBe('CV 38sq-3C×2, PF28（立上り）, CR  9.35+3.00+余1.00=13.35 m')
    const store = new AnnotationStore()
    await store.ensureCountFixtures(async () => readCountFixtures(saved), async () => { await store.ensurePageLoaded(0, async () => listAnnotations(saved, 0)) })
    expect(store.quantityIndex().total('cv')).toBeCloseTo(26.7)
@@ -229,19 +229,64 @@ it('saves scoped routes as version 1 JSON, Contents and exact item totals after 
    expect(store.quantityIndex().total('rack')).toBeCloseTo(12.35)
    // A legacy addM-only mark in the same PDF keeps its original quantity and text.
    const old = listAnnotations(saved, 1)[0]
-   expect(old.quantity).toEqual({ version: 1, id: 'plus', itemId: 'cv', method: 'polyline', addM: 3 })
+   expect(old.quantity).toEqual({ version: 1, id: 'plus', itemId: 'cv', method: 'polyline', addM: 3, cond: {}, rises: [{ m: 3 }] })
    expect(old.contents).toBe('CV 9.35+3.00=12.35 m')
    const page = saved.loadPage(0), annotations = page.getAnnotations(), object = annotations[0].getObject(), raw = object.get('KaruQuantity'), contents = object.get('Contents')
    try {
-    expect(raw.asString()).toBe('{"version":1,"id":"route","itemId":"cv","method":"polyline","addM":3,"slackM":1,"count":2,"extra":[{"itemId":"pf","count":1,"scope":"rise"},{"itemId":"rack","count":1,"scope":"noSlack"}]}')
+    expect(JSON.parse(raw.asString())).toEqual({ version: 1, id: 'route', itemId: 'cv', method: 'polyline', addM: 3, slackM: 1, count: 2, extra: [{ itemId: 'pf', count: 1, cond: { plan: null, slack: null }, scope: 'rise' }, { itemId: 'rack', count: 1, cond: { slack: null }, scope: 'noSlack' }] })
     expect(contents.asString()).toBe(text)
    } finally { contents.destroy(); raw.destroy(); object.destroy(); annotations.forEach(a => a.destroy()); page.destroy() }
    store.updateRoute(store.getPageAnnotations(0)[0].id, 2, q.extra!, 'rise')
    expect(applyEdits(saved, store.toEdits(), { BIZUDGothic: font }).errors).toEqual([])
    const again = reopen(saved)
    try {
-    expect(listAnnotations(again, 0)[0].quantity).toMatchObject({ scope: 'rise', slackM: 1, extra: q.extra })
+    expect(listAnnotations(again, 0)[0].quantity).toMatchObject({ cond: { plan: null, slack: null }, slackM: 1, extra: q.extra })
     expect(listAnnotations(again, 0)[0].contents).toContain('CV 38sq-3C（立上り）×2')
+   } finally { again.destroy() }
+  } finally { saved.destroy() }
+ } finally { doc.destroy() }
+})
+
+it('saves and reloads per-rise conditions, excluded portions, area/count conditions and clean baselines', async () => {
+ const led: CountFixture = { ...fixture, id: 'led', kind: 'count', method: 'click', defaults: undefined, line: undefined, order: 1 }
+ const area: CountFixture = { ...fixture, id: 'area', kind: 'area', method: 'polygon', defaults: undefined, order: 2 }
+ const q = parseQuantityMark(JSON.stringify({ version: 1, id: 'conditions', itemId: 'cv', method: 'polyline', count: 2, rises: [{ m: 2, at: 0 }, { m: 0 }], slackM: 1, cond: { plan: 'ラック', rise: ['管内', null], slack: null } }))!
+ q.cond!.rise = ['管内', undefined]
+ const polygon: QuantityMark = { version: 1, id: 'area', itemId: 'area', method: 'polygon', condition: '屋外' }
+ const count = { version: 2 as const, id: 'led', fixtureId: 'led', condition: '壁付' }
+ const doc = blank()
+ try {
+  expect(applyEdits(doc, [{ kind: 'setCountFixtures', pageIndex: 0, fixtures: [fixture, led, area] },
+   { ...edit(), quantity: q, text: quantityLabel(points, measure.mmPerPoint, q, 'CV', true) },
+   { ...edit(), vertices: [[0, 0], [10, 0], [10, 10], [0, 10]], measure: { ...measure, kind: 'area' }, quantity: polygon },
+   { kind: 'createSymbol', pageIndex: 1, rect: [100, 100, 110, 110], symbol: 'circle', color: [1, 0, 0], count, countFixture: led }
+  ], { BIZUDGothic: font }).errors).toEqual([])
+  const saved = reopen(doc)
+  try {
+   expect(listAnnotations(saved, 0)[0].quantity).toStrictEqual(q)
+   expect(listAnnotations(saved, 0)[1].quantity).toStrictEqual(polygon)
+   expect(listAnnotations(saved, 1)[0].count).toStrictEqual(count)
+   const store = new AnnotationStore()
+   await store.ensureCountFixtures(async () => readCountFixtures(saved), async () => {
+    for (let p = 0; p < 2; p++) await store.ensurePageLoaded(p, async () => listAnnotations(saved, p))
+   })
+   expect(store.isDirty()).toBe(false)
+   const id = store.getPageAnnotations(0)[0].id
+   // The zero rise keeps its quantity/text, yet null versus unset must affect dirty state/history.
+   store.setRouteCondition([id], 'cv', 'rise', null, 1)
+   expect(store.isDirty()).toBe(true)
+   store.undo(); expect(store.isDirty()).toBe(false)
+   store.redo(); expect(store.isDirty()).toBe(true)
+   const expected = store.get(id)!.quantity!
+   expect(parseQuantityMark(serializeQuantityMark(expected))).toStrictEqual(expected)
+   const edits = store.toEdits(), result = applyEdits(saved, edits, { BIZUDGothic: font })
+   expect(result.errors).toEqual([]); store.markApplied(result)
+   expect(store.isDirty()).toBe(false)
+   const again = reopen(saved)
+   try {
+    expect(listAnnotations(again, 0)[0].quantity).toStrictEqual(expected)
+    expect(listAnnotations(again, 0)[1].quantity!.condition).toBe('屋外')
+    expect(listAnnotations(again, 1)[0].count).toMatchObject({ condition: '壁付' })
    } finally { again.destroy() }
   } finally { saved.destroy() }
  } finally { doc.destroy() }

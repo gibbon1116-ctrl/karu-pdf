@@ -40,7 +40,7 @@ describe('quantity calculations and parsing', () => {
   })
   it('rejects malformed, unknown and out of range metadata', () => {
     const good = mark('polyline', { addM: 3 })
-    expect(parseQuantityMark(JSON.stringify(good))).toEqual(good)
+    expect(parseQuantityMark(JSON.stringify(good))).toEqual({ ...good, cond: {}, rises: [{ m: 3 }] })
     for (const raw of [null, '{', ' '.repeat(401), JSON.stringify({ ...good, version: 2 }), JSON.stringify({ ...good, id: '' }), JSON.stringify({ ...good, itemId: 'x'.repeat(81) }), JSON.stringify({ ...good, method: 'click' }), JSON.stringify({ ...good, method: 'unknown' })]) expect(parseQuantityMark(raw)).toBeNull()
     for (const key of ['addM', 'heightM', 'widthM', 'depthM']) for (const n of [-1, 1001, null, '3']) expect(parseQuantityMark(JSON.stringify({ ...good, [key]: n }))).toBeNull()
     expect(parseQuantityMark(JSON.stringify(mark('polyline', { addM: 1000 })))).not.toBeNull()
@@ -78,7 +78,7 @@ it('keeps totals, edits, copy identities, styles and visibility in the existing 
 
 it('round-trips route/location metadata and validates optional fields', () => {
  const q = mark('polyline', { floor: '1階', room: '事務室', count: 2, extra: [{ itemId: 'em', count: 1 }] })
- expect(parseQuantityMark(JSON.stringify(q))).toEqual(q)
+ expect(parseQuantityMark(JSON.stringify(q))).toEqual({ ...q, cond: {}, extra: q.extra!.map(e => ({ ...e, cond: {} })) })
  for (const value of [0, 100, 1.5, '2', null]) {
   expect(parseQuantityMark(JSON.stringify({ ...q, count: value }))).toBeNull()
   expect(parseQuantityMark(JSON.stringify({ ...q, extra: [{ itemId: 'em', count: value }] }))).toBeNull()
@@ -88,9 +88,9 @@ it('round-trips route/location metadata and validates optional fields', () => {
  for (const key of ['floor', 'room']) expect(parseQuantityMark(JSON.stringify({ ...q, [key]: 'x'.repeat(41) }))).toBeNull()
  const max = mark('polyline', { id: 'a'.repeat(80), itemId: 'b'.repeat(80), floor: '階'.repeat(40), room: '室'.repeat(40), count: 99, extra: Array.from({ length: 10 }, (_, i) => ({ itemId: String(i).repeat(80), count: 99 })) })
  expect(JSON.stringify(max).length).toBeGreaterThan(400)
- expect(parseQuantityMark(JSON.stringify(max))).toEqual(max)
+ expect(parseQuantityMark(JSON.stringify(max))).toEqual({ ...max, cond: {}, extra: max.extra!.map(e => ({ ...e, cond: {} })) })
  expect(parseQuantityMark(' '.repeat(2001))).toBeNull()
- expect(parseQuantityMark(JSON.stringify(mark('polyline')))).toEqual(mark('polyline'))
+ expect(parseQuantityMark(JSON.stringify(mark('polyline')))).toEqual({ ...mark('polyline'), cond: {} })
 })
 it('labels shared routes with specifications, counts, additions and unchanged one-item format', () => {
  const points: Point[] = [[0,0],[9.35,0]], q = mark('polyline', { addM: 3, count: 2, extra: [{ itemId: 'pf', count: 1 }] })

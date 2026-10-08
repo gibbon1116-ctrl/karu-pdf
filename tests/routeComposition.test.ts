@@ -16,19 +16,19 @@ async function setup() {
 afterEach(() => vi.unstubAllGlobals())
 it('promotes the main item, applies its appearance and undoes/redoes once', async () => {
   const { store, id } = await setup(), before = store.get(id)!
-  store.setRouteItems(id, [{ itemId: 'line1', count: 2, scope: 'rise' }, { itemId: 'line0', count: 3, scope: 'noSlack' }])
-  expect(store.get(id)).toMatchObject({ color: [0, 0, 1], borderWidth: 3, quantityDash: 'dotted', quantity: { itemId: 'line1', count: 2, scope: 'rise', extra: [{ itemId: 'line0', count: 3, scope: 'noSlack' }], addM: 3, slackM: 1 } })
+  store.setRouteItems(id, [{ itemId: 'line1', count: 2, cond: { plan: null, slack: null } }, { itemId: 'line0', count: 3, cond: { slack: null } }])
+  expect(store.get(id)).toMatchObject({ color: [0, 0, 1], borderWidth: 3, quantityDash: 'dotted', quantity: { itemId: 'line1', count: 2, cond: { plan: null, slack: null }, extra: [{ itemId: 'line0', count: 3, cond: { slack: null } }], addM: 3, slackM: 1 } })
   expect(store.quantityIndex().total('line1')).toBe(6)
   store.undo(); expect(store.get(id)?.quantity).toEqual(before.quantity); expect(store.get(id)?.color).toEqual(before.color)
   store.redo(); expect(store.get(id)?.quantity?.itemId).toBe('line1')
 })
-it('rejects duplicates, twelve entries, invalid counts/scopes and non-length items without history', async () => {
+it('rejects duplicates, twelve entries, invalid counts/conditions and non-length items without history', async () => {
   for (const items of [
     [{ itemId: 'line0', count: 1 }, { itemId: 'line0', count: 2 }],
     fixtures.map(f => ({ itemId: f.id, count: 1 })),
     [{ itemId: 'line0', count: 0 }], [{ itemId: 'line0', count: 100 }], [{ itemId: 'line0', count: 1.5 }],
     [{ itemId: 'missing', count: 1 }], [],
-    [{ itemId: 'line0', count: 1, scope: 'invalid' as 'all' }],
+    [{ itemId: 'line0', count: 1, cond: { plan: ' padded ' } }],
   ]) {
     const { store, id } = await setup(), before = store.get(id)?.quantity
     store.setRouteItems(id, items); expect(store.get(id)?.quantity).toEqual(before)
@@ -39,22 +39,22 @@ it('rejects duplicates, twelve entries, invalid counts/scopes and non-length ite
   store.setRouteItems(id, [{ itemId: 'count', count: 1 }]); expect(store.get(id)?.quantity?.itemId).toBe('line0')
   store.undo(); expect(store.getCountFixture('count')).toBeUndefined()
 })
-it('allows eleven entries and 99 strands and treats default scopes as unchanged', async () => {
+it('allows eleven entries and 99 strands and treats default conditions as unchanged', async () => {
   const { store, id } = await setup()
-  const items = fixtures.slice(0, 11).map(f => ({ itemId: f.id, count: 99, scope: 'all' as const }))
+  const items = fixtures.slice(0, 11).map(f => ({ itemId: f.id, count: 99, cond: {} }))
   store.setRouteItems(id, items); expect(store.get(id)?.quantity?.extra).toHaveLength(10)
-  store.setRouteItems(id, items.map(e => ({ ...e, scope: undefined })))
+  store.setRouteItems(id, items.map(e => ({ ...e, cond: {} })))
   store.undo(); expect(store.get(id)?.quantity?.extra).toBeUndefined()
-  store.setRouteItems(id, [{ itemId: 'line0', count: 1, scope: 'all' }])
+  store.setRouteItems(id, [{ itemId: 'line0', count: 1, cond: {} }])
   store.undo(); expect(store.get(id)).toBeUndefined()
 })
 it('adds catalog items and replaces a route in one atomic history step', async () => {
   const { store, id } = await setup(), appearance = nextQuantityLineStyle(fixtures)
   const newFixture: CountFixture = { ...fixtures[0], id: 'new', order: 12, code: 'PF28', name: '管', style: { ...fixtures[0].style, color: appearance.color }, line: appearance.line }
-  store.addFixturesAndSetRouteItems([newFixture], id, [{ itemId: 'new', count: 2, scope: 'rise' }, { itemId: 'line0', count: 1 }])
+  store.addFixturesAndSetRouteItems([newFixture], id, [{ itemId: 'new', count: 2, cond: { plan: null, slack: null } }, { itemId: 'line0', count: 1 }])
   expect(store.getCountFixture('new')).toBeDefined(); expect(store.get(id)?.quantity?.itemId).toBe('new')
   store.undo(); expect(store.getCountFixture('new')).toBeUndefined(); expect(store.get(id)?.quantity).toMatchObject({ itemId: 'line0' }); expect(store.get(id)?.quantity?.extra).toBeUndefined()
-  store.redo(); expect(store.getCountFixture('new')).toBeDefined(); expect(store.get(id)?.quantity).toMatchObject({ itemId: 'new', count: 2, scope: 'rise', extra: [{ itemId: 'line0', count: 1 }] })
+  store.redo(); expect(store.getCountFixture('new')).toBeDefined(); expect(store.get(id)?.quantity).toMatchObject({ itemId: 'new', count: 2, cond: { plan: null, slack: null }, extra: [{ itemId: 'line0', count: 1 }] })
 })
 it('does not add fixtures when the proposed route is invalid', async () => {
   const { store, id } = await setup()
@@ -64,23 +64,23 @@ it('does not add fixtures when the proposed route is invalid', async () => {
 it('uses the template for a new route, filters deleted items and clears on another fixture', async () => {
   const { store } = await setup()
   store.selectFixture('line0')
-  store.setRouteTemplate({ itemId: 'line0', count: 2, scope: 'noSlack', extra: [{ itemId: 'line1', count: 3, scope: 'rise' }, { itemId: 'deleted', count: 1 }], name: '幹線A' })
+  store.setRouteTemplate({ itemId: 'line0', count: 2, cond: { slack: null }, extra: [{ itemId: 'line1', count: 3, cond: { plan: null, slack: null } }, { itemId: 'deleted', count: 1 }], name: '幹線A' })
   const template = store.routeTemplateItems('line0')
-  expect(template).toEqual({ count: 2, scope: 'noSlack', extra: [{ itemId: 'line1', count: 3, scope: 'rise' }] })
+  expect(template).toEqual({ count: 2, cond: { slack: null }, extra: [{ itemId: 'line1', count: 3, cond: { plan: null, slack: null } }] })
   const a = store.create({ pageIndex: 0, kind: 'perimeter', rect: [0, 0, 72, 20], vertices: [[0, 0], [72, 0]], measure: { kind: 'perimeter', unit: 'mm', decimals: null, mmPerPoint: 1000 }, quantity: { version: 1, id: 'new', itemId: 'line0', method: 'polyline', ...template } })
-  expect(a.quantity).toMatchObject({ count: 2, extra: [{ itemId: 'line1', count: 3, scope: 'rise' }] })
+  expect(a.quantity).toMatchObject({ count: 2, extra: [{ itemId: 'line1', count: 3, cond: { plan: null, slack: null } }] })
   store.selectFixture('line0'); expect(store.routeTemplate).not.toBeNull()
-  store.selectFixture('line1'); expect(store.routeTemplate).toBeNull(); expect(store.routeTemplateItems('line1')).toEqual({})
+  store.selectFixture('line1'); expect(store.routeTemplate).toBeNull(); expect(store.routeTemplateItems('line1')).toEqual({ cond: { plan: null, slack: null } })
   store.setRouteTemplate({ itemId: 'missing', count: 1, extra: [], name: '欠損' }); expect(store.routeTemplateItems('missing')).toEqual({})
 })
-const set: RouteSet = { id: 'set', name: '幹線A', items: [{ code: 'L0', spec: '5.5sq', name: '線0', category: '別分類', count: 2 }, { code: 'PF28', name: '管', category: '電線管', count: 1, scope: 'rise' }, { code: 'IV', spec: '14sq', name: '接地線', category: '電線', count: 1 }] }
+const set: RouteSet = { id: 'set', name: '幹線A', items: [{ code: 'L0', spec: '5.5sq', name: '線0', category: '別分類', count: 2 }, { code: 'PF28', name: '管', category: '電線管', count: 1, cond: { plan: null, slack: null } }, { code: 'IV', spec: '14sq', name: '接地線', category: '電線', count: 1 }] }
 function storage() {
   const values = new Map<string, string>()
   vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) })
   return values
 }
 it('saves and loads route sets, caps at 50 and safely handles corrupt/unavailable storage', () => {
-  const values = storage(); saveRouteSets([set]); expect(loadRouteSets()).toEqual([set])
+  const values = storage(); saveRouteSets([set]); expect(loadRouteSets()).toEqual([{ ...set, items: set.items.map(e => ({ ...e, cond: e.cond ?? {} })) }])
   saveRouteSets(Array.from({ length: 51 }, (_, i) => ({ ...set, id: String(i) }))); expect(loadRouteSets()).toHaveLength(50)
   for (const invalid of ['{', 'null', '{}', '[{"id":"broken"}]']) { values.set('karu-pdf:route-sets', invalid); expect(loadRouteSets()).toEqual([]) }
   vi.stubGlobal('localStorage', { getItem: () => { throw new Error('blocked') }, setItem: () => { throw new Error('quota') } })
@@ -88,8 +88,8 @@ it('saves and loads route sets, caps at 50 and safely handles corrupt/unavailabl
 })
 it('matches code/spec/name only for length items and allocates distinct appearances for missing ones', () => {
   const result = resolveRouteSet(set, fixtures)
-  expect(result.items[0]).toEqual({ itemId: 'line0', count: 2, scope: undefined }); expect(result.newFixtures).toHaveLength(2)
-  expect(result.items[1]).toMatchObject({ count: 1, scope: 'rise' })
+  expect(result.items[0]).toEqual({ itemId: 'line0', count: 2, cond: {} }); expect(result.newFixtures).toHaveLength(2)
+  expect(result.items[1]).toMatchObject({ count: 1, cond: { plan: null, slack: null } })
   const all = [...fixtures]
   for (const f of result.newFixtures) { expect(all.some(existing => sameFixtureAppearance(existing, f))).toBe(false); all.push(f) }
   const wrongSpec = { ...fixtures[0], spec: '14sq' }, wrongName = { ...fixtures[0], name: '別名' }, count = { ...fixtures[0], kind: 'count' as const, method: 'click' as const }

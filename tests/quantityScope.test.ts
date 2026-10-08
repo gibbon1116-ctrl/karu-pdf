@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { parseQuantityMark, quantityLabel, quantityValue, routeLength, type QuantityMark } from '../src/core/quantity'
+import { parseQuantityMark, quantityLabel, quantityValue, routeMemberLength, type QuantityMark } from '../src/core/quantity'
 import { nextCountStyle, parseCountFixtures, serializeCountFixtures, FIXTURE_PRESETS, type CountFixture } from '../src/core/countFixtures'
 import { QuantityIndex } from '../src/core/quantityIndex'
 import { AnnotationStore } from '../src/editor/AnnotationStore'
@@ -7,21 +7,21 @@ import { createQuantityCsv } from '../src/app/annotationCsv'
 import type { Point } from '../src/core/annotations'
 
 const points: Point[] = [[0, 0], [9.35, 0]]
-const mark: QuantityMark = { version: 1, id: 'route', itemId: 'cv', method: 'polyline', addM: 3, slackM: 1, count: 2, extra: [{ itemId: 'pf', count: 1, scope: 'rise' }, { itemId: 'rack', count: 1, scope: 'noSlack' }] }
+const mark: QuantityMark = { version: 1, id: 'route', itemId: 'cv', method: 'polyline', addM: 3, slackM: 1, count: 2, extra: [{ itemId: 'pf', count: 1, cond: { plan: null, slack: null } }, { itemId: 'rack', count: 1, cond: { slack: null } }] }
 const fixtures: CountFixture[] = ['cv', 'pf', 'rack'].map((id, order) => ({ id, order, code: id, name: id, category: '例', kind: 'length', method: 'polyline', style: nextCountStyle([]) }))
 const annotation = (q = mark) => ({ id: 'route', pageIndex: 0, vertices: points, measure: { mmPerPoint: 1000 }, quantity: q })
 
 it('calculates all three scopes for every route item and both CSVs', () => {
-  expect(routeLength(9.35, mark)).toBeCloseTo(13.35)
-  expect(routeLength(9.35, mark, 'noSlack')).toBeCloseTo(12.35)
-  expect(routeLength(9.35, mark, 'rise')).toBe(3)
+  expect(routeMemberLength(9.35, mark)).toBeCloseTo(13.35)
+  expect(routeMemberLength(9.35, mark, { slack: null })).toBeCloseTo(12.35)
+  expect(routeMemberLength(9.35, mark, { plan: null, slack: null })).toBe(3)
   const index = QuantityIndex.build([annotation()], fixtures)
   expect(index.total('cv')).toBeCloseTo(26.70)
   expect(index.total('pf')).toBe(3)
   expect(index.total('rack')).toBeCloseTo(12.35)
-  expect(index.entries('pf')[0]).toMatchObject({ scope: 'rise', routeCount: 1, value: 3 })
-  expect(QuantityIndex.build([annotation({ ...mark, scope: 'rise' })], fixtures).total('cv')).toBe(6)
-  expect(QuantityIndex.build([annotation({ ...mark, scope: 'noSlack' })], fixtures).total('cv')).toBeCloseTo(24.7)
+  expect(index.entries('pf')[0]).toMatchObject({ part: 'rise', riseIndex: 0, routeCount: 1, value: 3 })
+  expect(QuantityIndex.build([annotation({ ...mark, cond: { plan: null, slack: null } })], fixtures).total('cv')).toBe(6)
+  expect(QuantityIndex.build([annotation({ ...mark, cond: { slack: null } })], fixtures).total('cv')).toBeCloseTo(24.7)
   for (const type of ['summary', 'detail'] as const) {
     const csv = createQuantityCsv(index, fixtures, 0, type)
     for (const value of ['26.70', '3.00', '12.35']) expect(csv).toContain(value)
@@ -31,19 +31,19 @@ it('labels the full route while adding item scope suffixes', () => {
   const q = { ...mark, extra: mark.extra!.slice(0, 1) }
   expect(quantityLabel(points, 1000, q, 'CV 38sq-3C', true, () => 'PF28')).toBe('CV 38sq-3C×2, PF28（立上り）  9.35+3.00+余1.00=13.35 m')
   expect(quantityLabel(points, 1000, { ...q, addM: 0 }, '', false)).toBe('9.35+余1.00=10.35 m')
-  expect(quantityLabel(points, 1000, { ...mark, count: undefined, extra: undefined, scope: 'noSlack' }, 'CR', true)).toBe('CR（平面＋立上り） 9.35+3.00+余1.00=13.35 m')
-  expect(quantityValue(points, 1000, { ...mark, scope: 'rise' })).toBeCloseTo(13.35)
+  expect(quantityLabel(points, 1000, { ...mark, count: undefined, extra: undefined, cond: { slack: null } }, 'CR', true)).toBe('CR 9.35+3.00+余1.00=13.35 m')
+  expect(quantityValue(points, 1000, { ...mark, cond: { plan: null, slack: null } })).toBeCloseTo(13.35)
 })
 it('keeps old route values and labels, omits zero slack and default scopes', () => {
   const old = { version: 1 as const, id: 'old', itemId: 'cv', method: 'polyline' as const, addM: 3 }
-  expect(parseQuantityMark(JSON.stringify(old))).toEqual(old)
+  expect(parseQuantityMark(JSON.stringify(old))).toEqual({ ...old, cond: {}, rises: [{ m: 3 }] })
   expect(quantityValue(points, 1000, old)).toBeCloseTo(12.35)
   expect(quantityLabel(points, 1000, old, 'CV', true)).toBe('CV 9.35+3.00=12.35 m')
   expect(QuantityIndex.build([annotation(old)], fixtures).total('cv')).toBeCloseTo(12.35)
-  expect(parseQuantityMark(JSON.stringify({ ...old, slackM: 0, scope: 'all', extra: [{ itemId: 'pf', count: 1, scope: 'all' }] }))).toEqual({ ...old, extra: [{ itemId: 'pf', count: 1 }] })
+  expect(parseQuantityMark(JSON.stringify({ ...old, slackM: 0, cond: {}, extra: [{ itemId: 'pf', count: 1, cond: {} }] }))).toEqual({ ...old, cond: {}, rises: [{ m: 3 }], extra: [{ itemId: 'pf', count: 1, cond: {} }] })
 })
 it('validates new route fields only for polylines', () => {
-  expect(parseQuantityMark(JSON.stringify(mark))).toEqual(mark)
+  expect(parseQuantityMark(JSON.stringify(mark))).toEqual({ ...mark, cond: {}, rises: [{ m: 3 }] })
   for (const scope of ['invalid', '', null, 1]) {
     expect(parseQuantityMark(JSON.stringify({ ...mark, scope }))).toBeNull()
     expect(parseQuantityMark(JSON.stringify({ ...mark, extra: [{ itemId: 'pf', count: 1, scope }] }))).toBeNull()
@@ -77,15 +77,15 @@ it('updates slack and both item scopes with Undo, copy and main-item promotion',
   expect(store.get(a.id)?.quantity?.slackM).toBe(1)
   store.updateRoute(a.id, 2, mark.extra!, 'rise'); expect(store.quantityIndex().total('cv')).toBe(6)
   store.undo(); expect(store.quantityIndex().total('cv')).toBeCloseTo(26.7)
-  store.updateRoute(a.id, 2, [{ itemId: 'pf', count: 1, scope: 'noSlack' }]); expect(store.quantityIndex().total('pf')).toBeCloseTo(12.35)
+  store.updateRoute(a.id, 2, [{ itemId: 'pf', count: 1, cond: { slack: null } }]); expect(store.quantityIndex().total('pf')).toBeCloseTo(12.35)
   store.undo(); expect(store.quantityIndex().total('pf')).toBe(3)
-  expect(store.reassignCounts([a.id], 'pf')).toContain('範囲が異なる')
+  expect(store.reassignCounts([a.id], 'pf')).toContain('施工条件または数える部分が異なる')
   store.selectOnly(a.id)
   const [copy] = store.pasteAnnotations(store.copySelected(), 1, { width: 500, height: 500 }, 10)
   expect(store.get(copy)?.quantity).toMatchObject({ slackM: 1, extra: mark.extra })
   store.undo()
   store.setCountFixtures(fixtures.slice(1), ['cv'])
-  expect(store.get(a.id)?.quantity).toMatchObject({ itemId: 'pf', scope: 'rise', slackM: 1 })
+  expect(store.get(a.id)?.quantity).toMatchObject({ itemId: 'pf', cond: { plan: null, slack: null }, slackM: 1 })
   expect(store.quantityIndex().total('pf')).toBe(3)
   store.undo(); expect(store.quantityIndex().total('cv')).toBeCloseTo(26.7)
   store.updateQuantityValues(a.id, { slackM: 0 }); expect(store.get(a.id)?.quantity).not.toHaveProperty('slackM')

@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { fixtureCode, nextCountStyle, nextQuantityLineStyle, quantityMethod, type CountFixture } from '../core/countFixtures'
+import { routeMembers, conditionScope, conditionsFromScope } from '../core/quantity'
 import type { MasterEntry } from '../core/quantityMaster'
 import type { AnnotationStore, EditableAnnotation } from '../editor/AnnotationStore'
 import { QuantitySwatch } from '../editor/countMarkers'
 import { groupFixtures } from './fixtureOrder'
 import { scopeShort } from './routeSets'
 
-export const routeEntries = (a: EditableAnnotation) => [{ itemId: a.quantity!.itemId, count: a.quantity!.count ?? 1, scope: a.quantity!.scope }, ...(a.quantity!.extra ?? [])]
+// Scope is a derived display projection for PickupBar (which remains unchanged in 07a).
+export const routeEntries = (a: EditableAnnotation) => routeMembers(a.quantity!).map(e => ({ ...e, scope: conditionScope(e.cond) }))
 type Feedback = { routeId: string; message: string; serial: number; highlights: Readonly<Record<string, number>> }
 const empty: Feedback = { routeId: '', message: '', serial: 0, highlights: {} }
 const feedback = new WeakMap<AnnotationStore, Feedback>(), listeners = new WeakMap<AnnotationStore, Set<() => void>>()
@@ -68,13 +70,13 @@ export default function LinePicker({ store, annotation, onClose }: { store: Anno
         newFixtures = [f]
       }
       if (entries.some(e => e.itemId === f.id)) return
-      const next = [...entries, { itemId: f.id, count: 1, scope: f.routeScope }]
+      const next = [...entries, { itemId: f.id, count: 1, cond: structuredClone(store.lastRouteConditions.get(f.id) ?? conditionsFromScope(f.routeScope)) }]
       if (newFixtures.length) store.addFixturesAndSetRouteItems(newFixtures, annotation.id, next)
       else store.setRouteItems(annotation.id, next)
       if (!store.get(annotation.id)?.quantity?.extra?.some(e => e.itemId === f.id)) return
       // Selecting a picker result must leave the current drawing tool and template intact.
       store.rememberRouteFixture(f.id)
-      announceRoute(store, annotation.id, f.id, `${fixtureCode(f)} を足しました（1条・${scopeShort(f.routeScope)}）`); onClose()
+      announceRoute(store, annotation.id, f.id, `${fixtureCode(f)} を足しました（1条・${scopeShort(conditionScope(next[next.length - 1].cond))}）`); onClose()
     } catch (reason) { setError(String(reason)) }
   }
   const candidates: Array<CountFixture | MasterEntry> = [...recent, ...groups.flatMap(g => g.items), ...master].filter(f => !('id' in f) || !entries.some(e => e.itemId === f.id))

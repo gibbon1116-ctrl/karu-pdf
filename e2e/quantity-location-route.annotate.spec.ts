@@ -121,7 +121,7 @@ test('route scopes, separate rise/slack, defaults, Undo and saved quantities', a
  await expect(total('PF28 立上り電線管')).toHaveText('3.00');await expect(total('CV 38sq-3C 幹線ケーブル')).toHaveText('6.54')
  await expect(page.locator('.measurement-label')).toHaveText('CV 38sq-3C, PF28（立上り）  2.54+3.00+余1.00=6.54 m')
  await format.getByLabel('PF28の範囲',{exact:true}).selectOption('noSlack');await expect(total('PF28 立上り電線管')).toHaveText('5.54')
- await expect(page.locator('.measurement-label')).toContainText('PF28（平面＋立上り）')
+ await expect(page.locator('.measurement-label')).toHaveText('CV 38sq-3C, PF28  2.54+3.00+余1.00=6.54 m')
  await page.keyboard.press('Control+z');await expect(total('PF28 立上り電線管')).toHaveText('3.00')
  await selectRoute()
  await format.getByLabel('CV 38sq-3Cの範囲',{exact:true}).selectOption('rise');await expect(total('CV 38sq-3C 幹線ケーブル')).toHaveText('3.00')
@@ -134,7 +134,7 @@ test('route scopes, separate rise/slack, defaults, Undo and saved quantities', a
  const doc=new mupdf.PDFDocument(new Uint8Array(saved))
  try {
   expect(readCountFixtures(doc).find(f=>f.code==='PF28')?.routeScope).toBe('rise')
-  expect(listAnnotations(doc,0).find(a=>a.quantity)?.quantity).toMatchObject({addM:3,slackM:1,extra:[{count:1,scope:'rise'}]})
+  expect(listAnnotations(doc,0).find(a=>a.quantity)?.quantity).toMatchObject({addM:3,slackM:1,extra:[{count:1,cond:{plan:null,slack:null}}]})
   expect(listAnnotations(doc,0).find(a=>a.quantity)?.contents).toBe('CV 38sq-3C, PF28（立上り）  2.54+3.00+余1.00=6.54 m')
  } finally {doc.destroy()}
  await page.evaluate(b=>window.__karu!.openBytes(b,'範囲再読込.pdf'),saved);await page.getByRole('tab',{name:'数量',exact:true}).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
@@ -142,7 +142,7 @@ test('route scopes, separate rise/slack, defaults, Undo and saved quantities', a
  // The same PF fixture defaults to rise when used as the main item on a new route.
  await row(page,'PF28 立上り電線管').click();await click(page,0,100,380);await click(page,0,172,380);await page.keyboard.press('Enter')
  await expect(format.getByLabel('PF28の範囲',{exact:true})).toHaveValue('rise')
- expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.quantity).at(-1)?.quantity)).toMatchObject({scope:'rise',slackM:1})
+ expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.quantity).at(-1)?.quantity)).toMatchObject({cond:{plan:null,slack:null},slackM:1})
  await expect(total('PF28 立上り電線管')).toHaveText('3.00')
  await format.getByLabel('立上り・立下り',{exact:true}).fill('2');await format.getByLabel('立上り・立下り',{exact:true}).press('Enter')
  await expect(total('PF28 立上り電線管')).toHaveText('5.00')

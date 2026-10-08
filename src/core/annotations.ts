@@ -1,6 +1,6 @@
 import { fixtureCode } from './countFixtures'
 import { writeDrawingInfo, type DrawingInfo } from './drawingInfo'
-import { parseQuantityMark, quantityPoints, quantityDashes, type QuantityMark } from './quantity'
+import { parseQuantityMark, serializeQuantityMark, quantityPoints, quantityDashes, type QuantityMark } from './quantity'
 import { QUANTITY_DASHES, type QuantityLineStyle } from './countFixtures'
 import { arrowHeadSize } from './lineGeometry'
 import mupdf, {
@@ -1530,9 +1530,9 @@ export function applyEdits(
           setPdfString(doc, object, 'KaruMeasure', JSON.stringify(edit.measure))
           setPdfNumber(doc, object, 'KaruMeasureFontSize', edit.fontSize)
           if (edit.quantity) {
-            const mark = parseQuantityMark(JSON.stringify(edit.quantity))
+            const mark = parseQuantityMark(serializeQuantityMark(edit.quantity))
             if (!mark || (quantityPoints(mark.method) === 'polygon' ? type !== 'Polygon' : type !== 'PolyLine')) throw new Error('数量拾いの値が不正です。')
-            setPdfString(doc, object, 'KaruQuantity', JSON.stringify(mark))
+            setPdfString(doc, object, 'KaruQuantity', serializeQuantityMark(mark))
             if (edit.quantityDash && edit.quantityDash !== 'solid') setPdfString(doc, object, 'KaruQuantityDash', edit.quantityDash)
             else object.delete('KaruQuantityDash')
           } else { object.delete('KaruQuantity'); object.delete('KaruQuantityDash') }

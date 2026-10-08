@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { countHex, fixtureCode } from '../core/countFixtures'
-import { routeLength, ROUTE_SCOPES, type RouteScope } from '../core/quantity'
+import { routeMemberLength, withRouteScope, ROUTE_SCOPES, type RouteScope, type RouteConditions } from '../core/quantity'
 import { polylineLength } from '../core/measure'
 import type { AnnotationStore, EditableAnnotation } from '../editor/AnnotationStore'
 import { QuantitySwatch } from '../editor/countMarkers'
@@ -13,26 +13,34 @@ export function useRouteSets() { useSyncExternalStore(subscribeRouteSets, routeS
 export function RouteItems({ annotation: a, store }: { annotation: EditableAnnotation; store: AnnotationStore }) {
   const q = a.quantity!, routes = routeEntries(a), feedback = useRouteFeedback(store)
   const [picker, setPicker] = useState(false), [sets, setSets] = useState(false)
+  // Keep names while the temporary scope selector disables and re-enables a part.
+  const scopeConditions = useRef(new Map<string, RouteConditions>())
   const closePicker = useCallback(() => setPicker(false), [])
-  useEffect(() => { setPicker(false); setSets(false) }, [a.id])
+  useEffect(() => { setPicker(false); setSets(false); scopeConditions.current.clear() }, [a.id])
   const planM = polylineLength(a.vertices!) * a.measure!.mmPerPoint / 1000
-  const commit = (i: number, changes: { count?: number; scope?: RouteScope }) => store.setRouteItems(a.id, routes.map((e, j) => j === i ? { ...e, ...changes } : e))
+  const commit = (i: number, changes: { count?: number; cond?: RouteConditions }) => store.setRouteItems(a.id, routes.map((e, j) => j === i ? { ...e, ...changes } : e))
+  const commitScope = (i: number, scope: RouteScope) => {
+    const e = routes[i], key = a.id + ':' + e.itemId
+    const counted = withRouteScope(e.cond, 'all', scopeConditions.current.get(key))
+    scopeConditions.current.set(key, counted)
+    commit(i, { cond: withRouteScope(counted, scope) })
+  }
   return <section className="route-items" aria-label="経路構成">
     <div className="route-heading"><strong>経路構成</strong><span>{routes.length}種類・{routes.reduce((n, e) => n + e.count, 0)}条</span><button type="button" onClick={() => { setPicker(false); setSets(v => !v) }} aria-expanded={sets}>よく使う構成</button></div>
     {sets && <RouteSetsDialog annotation={a} store={store} onClose={() => setSets(false)} />}
     <div className="route-lengths"><span>平面 {planM.toFixed(2)} m ＋</span>
       <div className="route-rise"><QuantityValueInput label="立上り・立下り" key={a.id + 'addM'} value={q.addM ?? 0} commit={n => store.updateQuantityAdd(a.id, n)} /></div>
       <div className="route-slack"><QuantityValueInput label="余長・その他" key={a.id + 'slackM'} value={q.slackM ?? 0} commit={n => store.updateQuantityValues(a.id, { slackM: n })} /></div>
-    </div><small className="route-full-length">全長 {routeLength(planM, q).toFixed(2)} m</small>
+    </div><small className="route-full-length">全長 {routeMemberLength(planM, q).toFixed(2)} m</small>
     {routes.map((e, i) => {
-      const f = store.getCountFixture(e.itemId), code = f ? fixtureCode(f) : e.itemId, length = routeLength(planM, q, e.scope)
+      const f = store.getCountFixture(e.itemId), code = f ? fixtureCode(f) : e.itemId, length = routeMemberLength(planM, q, e.cond)
       const highlighted = routeHighlighted(feedback, a.id, e.itemId)
       return <div className={`route-item${i === 0 ? ' route-item-main' : ''}${highlighted ? ' route-item-added' : ''}`} key={a.id + e.itemId} style={i === 0 && f ? { borderLeftColor: countHex(f.style.color) } : undefined}>
         <div className="route-item-heading"><span className="route-role" style={i === 0 && f ? { background: countHex(f.style.color), color: 'white' } : undefined}>{i === 0 ? '主' : '追加'}</span>
           {f && <QuantitySwatch fixture={f} />}<span className="route-item-identity" title={code + ' ' + (f?.name ?? '')}><strong>{code}</strong><small title={f?.name}>{f?.name}</small></span>
           {i > 0 && <><button type="button" aria-label={code + 'を主にする'} title="主にする" onClick={() => { store.setRouteItems(a.id, [e, ...routes.filter(x => x.itemId !== e.itemId)]); announceRoute(store, a.id, e.itemId, `${code} を主にしました`) }}>主に</button><button type="button" aria-label={code + 'を外す'} title="外す" onClick={() => { store.setRouteItems(a.id, routes.filter(x => x.itemId !== e.itemId)); announceRoute(store, a.id, null, `${code} を外しました（Ctrl+Z で戻せます）`) }}>×</button></>}
         </div>
-        <div className="route-item-values"><select aria-label={code + 'の範囲'} title={ROUTE_SCOPES[e.scope ?? 'all']} value={e.scope ?? 'all'} onChange={event => commit(i, { scope: event.currentTarget.value as RouteScope })}>{Object.entries(ROUTE_SCOPES).map(([scope, label]) => <option key={scope} value={scope} title={label}>{scopeShort(scope as RouteScope)}</option>)}</select>
+        <div className="route-item-values"><select aria-label={code + 'の範囲'} title={e.scope === 'custom' ? '個別' : ROUTE_SCOPES[e.scope]} value={e.scope} onChange={event => commitScope(i, event.currentTarget.value as RouteScope)}>{e.scope === 'custom' && <option value="custom">個別</option>}{Object.entries(ROUTE_SCOPES).map(([scope, label]) => <option key={scope} value={scope} title={label}>{scopeShort(scope as RouteScope)}</option>)}</select>
           <RouteCount value={e.count} code={code} commit={n => changeRouteCount(store, a, e.itemId, n)} />
           <span className="route-item-length" title={`${length.toFixed(2)}×${e.count}`}>= {(length * e.count).toFixed(2)} m</span>
         </div>
@@ -62,7 +70,7 @@ export function RouteCount({ value, code, commit }: { value: number; code: strin
 
 function RouteSetsDialog({ store, annotation: a, onClose }: { store: AnnotationStore; annotation: EditableAnnotation; onClose(): void }) {
   const sets = useRouteSets(), root = useRef<HTMLDivElement>(null)
-  const currentItems = routeEntries(a).flatMap(e => { const f = store.getCountFixture(e.itemId); return f ? [{ code: f.code, spec: f.spec, name: f.name, category: f.category, count: e.count, scope: e.scope }] : [] })
+  const currentItems = routeEntries(a).flatMap(e => { const f = store.getCountFixture(e.itemId); return f ? [{ code: f.code, spec: f.spec, name: f.name, category: f.category, count: e.count, cond: e.cond }] : [] })
   const [name, setName] = useState(() => routeSetSummary({ items: currentItems }).slice(0, 40)), [renaming, setRenaming] = useState<string | null>(null), [rename, setRename] = useState(''), [error, setError] = useState('')
   useEffect(() => {
     const outside = (e: PointerEvent) => { if (!root.current?.contains(e.target as Node)) onClose() }

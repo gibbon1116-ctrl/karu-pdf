@@ -153,7 +153,7 @@ test('よく使う構成を別の経路と新しい経路に使い、解除・�
   await format(page).getByLabel('EM-CE 5.5sq-3Cの条数', { exact: true }).press('Enter')
   await format(page).getByLabel('PF28の範囲', { exact: true }).selectOption('rise')
   const composition = (await routes(page))[0]
-  const itemsOf = (q: typeof composition) => ({ itemId: q.itemId, count: q.count ?? 1, scope: q.scope ?? 'all', extra: q.extra })
+  const itemsOf = (q: typeof composition) => ({ itemId: q.itemId, count: q.count ?? 1, cond: q.cond ?? {}, extra: q.extra })
   await format(page).getByRole('button', { name: 'よく使う構成', exact: true }).click()
   const sets = page.getByRole('dialog', { name: 'よく使う構成', exact: true })
   await expect(sets.getByText('この経路の構成を登録', { exact: true })).toBeVisible()
@@ -162,6 +162,10 @@ test('よく使う構成を別の経路と新しい経路に使い、解除・�
   await expect(sets.getByRole('button', { name: '幹線A', exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
   await row(page, 'EM-CE 5.5sq-3C', 'ケーブル').click(); await draw(page, 300)
+  await expect(format(page).locator('.route-item')).toHaveCount(3)
+  // Last composition is inherited; make a different route to test saved-set Undo.
+  await format(page).getByRole('button', { name: 'PF28を外す', exact: true }).click()
+  await format(page).getByRole('button', { name: 'IV 5.5sqを外す', exact: true }).click()
   await expect(format(page).locator('.route-item')).toHaveCount(1)
   await format(page).getByRole('button', { name: 'よく使う構成', exact: true }).click()
   await sets.getByRole('button', { name: '幹線A', exact: true }).click()
@@ -176,7 +180,7 @@ test('よく使う構成を別の経路と新しい経路に使い、解除・�
   await expect(format(page).locator('.route-item')).toHaveCount(3)
   await page.getByRole('button', { name: '構成を外す', exact: true }).click()
   await expect(page.locator('.pickup-template')).toHaveCount(0)
-  await draw(page, 440); expect((await routes(page))[3].extra).toBeUndefined(); expect((await routes(page))[3].count ?? 1).toBe(1)
+  await draw(page, 440); expect(itemsOf((await routes(page))[3])).toEqual(itemsOf(composition))
 
   const bytes = await saveBytes(page)
   await page.reload(); await open(page, bytes)

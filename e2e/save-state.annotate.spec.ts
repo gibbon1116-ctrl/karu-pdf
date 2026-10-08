@@ -170,7 +170,7 @@ test('A: saved shared route/count closes without tab or beforeunload dialogs', a
   await save(page)
   expect(await page.evaluate(() => window.__saveStateFiles.files['A.pdf'].closes)).toBe(1)
   const annotations = readSaved(await savedBytes(page))
-  expect(annotations.find(a => a.quantity)?.quantity).toMatchObject({ count: 2, addM: 3, slackM: 1, extra: [{ count: 1, scope: 'rise' }] })
+  expect(annotations.find(a => a.quantity)?.quantity).toMatchObject({ count: 2, addM: 3, slackM: 1, extra: [{ count: 1, cond: { plan: null, slack: null } }] })
   expect(annotations.filter(a => a.count)).toHaveLength(1)
   const dialogs: string[] = []
   page.on('dialog', dialog => { dialogs.push(dialog.type()); void dialog.dismiss() })
