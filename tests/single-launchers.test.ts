@@ -115,4 +115,4 @@ it.skipIf(process.platform !== 'win32')('ZIP のローカル・中央ヘッダ�
     expect(fs.readdirSync(destination).sort()).toEqual([...names].sort())
     for (const name of names) expect(fs.readFileSync(path.join(destination, name))).toEqual(fs.readFileSync(path.join('scripts/launchers', name)))
   } finally { fs.rmSync(temporary, { recursive: true, force: true }) }
-})
+}, 30_000) // PowerShell Expand-Archive can exceed 5 s while the full suite loads the machine.
