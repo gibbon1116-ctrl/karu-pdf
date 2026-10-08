@@ -34,6 +34,9 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
   const [host, setHost] = useState<HTMLElement | null>(null)
   const [scope, setScope] = useState<'current' | 'specified' | 'all'>('current'), [pagesText, setPagesText] = useState('')
   const [rotations, setRotations] = useState(false), [threshold, setThreshold] = useState(.85)
+  const [verify, setVerify] = useState(() => {
+    try { return localStorage.getItem('karu-pdf:symbol-search-verify') !== 'false' } catch { return true }
+  })
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('')
   const [progress, setProgress] = useState({ page: 0, total: 1, stage: '描画中', fraction: 0 })
   const [methods, setMethods] = useState<Record<number, 'vector' | 'image'>>({})
@@ -43,6 +46,11 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
   const candidates = store.symbolCandidates
   const chosen = candidates?.filter(c => c.state === 'chosen') ?? []
   const counted = candidates?.filter(c => c.state === 'counted').length ?? 0
+  const confidenceSummary = (items: typeof store.symbolCandidates) => {
+    const high = items?.filter(c => c.confidence === 'high').length ?? 0
+    const check = items?.filter(c => c.confidence === 'check').length ?? 0
+    return high + check ? `（確度高 ${high} 件・要確認 ${check} 件）` : ''
+  }
   const pageCounts = useMemo(() => {
     const counts = new Map<number, number>()
     for (const c of store.symbolCandidates ?? []) counts.set(c.pageIndex, (counts.get(c.pageIndex) ?? 0) + 1)
@@ -85,10 +93,10 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
         // Existing marks must be known before counted classification, including off-screen pages.
         await store.ensurePageLoaded(pageIndex, () => pool.listAnnotations(session.docId, pageIndex))
         if (!current()) return
-        const next = client.current.search({ docId: session.docId, pageIndex, samplePageIndex: sample.pageIndex, sampleRect: rect,
+        const next = client.current.search({ docId: session.docId, pageIndex, samplePageIndex: sample.pageIndex, sampleRect: rect, verify,
           options: { threshold, rotations, maxResults: 500 } }, (stage, done, total) => {
-          if (current()) setProgress({ page: i + 1, total: pages.length, stage: stage === 'render' ? '描画中' : '照合中',
-            fraction: (i + (stage === 'render' ? .5 * done / Math.max(1, total) : .5 + .5 * done / Math.max(1, total))) / pages.length })
+          if (current()) setProgress({ page: i + 1, total: pages.length, stage: stage === 'render' ? '描画中' : stage === 'vector' ? '線で照合中' : stage === 'verify' ? '画像で確認中' : '照合中',
+            fraction: (i + (stage === 'render' ? .5 * done / Math.max(1, total) : stage === 'vector' ? .2 + .3 * done / Math.max(1, total) : .5 + .5 * done / Math.max(1, total))) / pages.length })
         })
         task.current = next
         const result = await next.promise
@@ -121,6 +129,10 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
       {scope === 'specified' && <input aria-label="探すページ" placeholder="1-3, 5" value={pagesText} onChange={e => { invalidate(); setPagesText(e.target.value) }} />}
     </fieldset>
     <label><input type="checkbox" checked={rotations} onChange={e => { invalidate(); setRotations(e.target.checked) }} />回転した記号も探す</label>
+    <label title="線で探した候補だけを画像でも確認します。線の情報が無いページの画像検索には関係しません。"><input type="checkbox" checked={verify}
+      onChange={e => { const enabled = e.target.checked; invalidate(); setVerify(enabled)
+        try { localStorage.setItem('karu-pdf:symbol-search-verify', String(enabled)) } catch { /* Keep the in-memory preference. */ }
+      }} />画像でも確認する</label>
     <label className="symbol-search-threshold">似ている度合い <output>{threshold.toFixed(2)}</output>
       <input type="range" aria-label="似ている度合い" min="0.55" max="0.98" step="0.01" value={threshold}
         onChange={e => { invalidate(); setThreshold(Number(e.target.value)) }} /></label>
@@ -128,10 +140,12 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
       <p role="status">ページ {progress.page} / {progress.total}・{progress.stage}</p><progress aria-label="検索の進み" value={progress.fraction} max={1} /></>
       : <button type="button" onClick={() => void search()}>探す</button>}
     {candidates && <>
-      <p aria-live="polite">候補 {candidates.length} 件（拾い済み {counted} 件）</p>
+      <p aria-live="polite">候補 {candidates.length} 件{confidenceSummary(candidates)}（拾い済み {counted} 件）</p>
       {searchPageCount === 1 && completedPages.length > 0 && <p>{methods[completedPages[0]] === 'vector' ? '線の情報で探しました' : '画像で探しました（線の情報が無いページ）'}</p>}
-      {searchPageCount > 1 && <div className="symbol-search-pages">{pageCounts.map(([page, count]) => <button key={page} type="button" onClick={() => onPage(page)}>p.{page + 1} {methods[page] === 'vector' ? '線で探しました' : '画像で探しました（線の情報が無いページ）'} {count} 件</button>)}</div>}
+      {searchPageCount > 1 && <div className="symbol-search-pages">{pageCounts.map(([page, count]) => <button key={page} type="button" onClick={() => onPage(page)}>p.{page + 1} {methods[page] === 'vector' ? '線で探しました' : '画像で探しました（線の情報が無いページ）'} {count} 件{confidenceSummary(candidates.filter(c => c.pageIndex === page))}</button>)}</div>}
       <div className="symbol-search-actions"><button type="button" onClick={() => store.chooseSymbolCandidates(true)}>すべて選ぶ</button><button type="button" onClick={() => store.chooseSymbolCandidates(false)}>すべて外す</button></div>
+      <button type="button" disabled={busy || !candidates.some(c => c.confidence === 'high' && c.state === 'pending')}
+        onClick={() => store.chooseHighConfidenceCandidates()}>確度の高い候補を選ぶ</button>
       <button type="button" disabled={busy || chosen.length === 0} onClick={add}>選んだ {chosen.length} 件を数量へ追加</button>
     </>}
     <p>候補は自動で数量に入りません。図面で確認して選んでください。</p>

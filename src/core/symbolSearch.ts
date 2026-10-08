@@ -1,4 +1,67 @@
 export interface GrayImage { width: number; height: number; data: Uint8Array }
+export interface VerifyTarget { x: number; y: number; width: number; height: number; angle: number }
+
+function rotateForVerification(image: GrayImage, angle: number): GrayImage {
+  const degrees = ((angle % 360) + 360) % 360, quarter = Math.round(degrees / 90)
+  if (Math.abs(degrees - quarter * 90) < 1e-4) {
+    let result = image
+    for (let i = 0; i < quarter % 4; i++) result = rotate(result)
+    return result
+  }
+  const radians = degrees * Math.PI / 180, c = Math.cos(radians), s = Math.sin(radians)
+  const width = Math.ceil(Math.abs(c) * image.width + Math.abs(s) * image.height)
+  const height = Math.ceil(Math.abs(s) * image.width + Math.abs(c) * image.height)
+  const data = new Uint8Array(width * height)
+  const pixel = (x: number, y: number) => x < 0 || y < 0 || x >= image.width || y >= image.height ? 0 : image.data[y * image.width + x]
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const dx = x - (width - 1) / 2, dy = y - (height - 1) / 2
+    const sx = c * dx + s * dy + (image.width - 1) / 2, sy = -s * dx + c * dy + (image.height - 1) / 2
+    const x0 = Math.floor(sx), y0 = Math.floor(sy), fx = sx - x0, fy = sy - y0
+    data[y * width + x] = Math.round((1 - fy) * ((1 - fx) * pixel(x0, y0) + fx * pixel(x0 + 1, y0))
+      + fy * ((1 - fx) * pixel(x0, y0 + 1) + fx * pixel(x0 + 1, y0 + 1)))
+  }
+  return { width, height, data }
+}
+
+/** NCC only near supplied centres. Integral tables cover each local window, never the whole page. */
+export function verifyCandidates(page: GrayImage, template: GrayImage, targets: readonly VerifyTarget[],
+  options: { searchRadius?: number; shouldStop?: () => boolean; onProgress?: (done: number, total: number) => void }): Float32Array {
+  validate(page); validate(template)
+  const radius = options.searchRadius ?? 3
+  if (!Number.isFinite(radius) || radius < 0) throw new Error('invalid search radius')
+  const scores = new Float32Array(targets.length)
+  let lastAngle: number | undefined, prepared: Prepared | undefined
+  options.onProgress?.(0, targets.length)
+  for (let i = 0; i < targets.length; i++) {
+    if (options.shouldStop?.()) break
+    const target = targets[i]
+    if (![target.x, target.y, target.width, target.height, target.angle].every(Number.isFinite)
+      || target.width <= 0 || target.height <= 0) throw new Error('invalid verify target')
+    if (lastAngle !== target.angle) {
+      const rotated = rotateForVerification(template, target.angle)
+      // Constant templates cannot establish similarity.
+      prepared = rotated.data.every(v => v === rotated.data[0]) ? undefined : prepare(rotated, page.width)
+      lastAngle = target.angle
+    }
+    if (prepared) {
+      const { width, height } = prepared.image
+      const cx = target.x + target.width / 2 - width / 2, cy = target.y + target.height / 2 - height / 2
+      const x0 = Math.max(0, Math.ceil(cx - radius)), y0 = Math.max(0, Math.ceil(cy - radius))
+      const x1 = Math.min(page.width - width, Math.floor(cx + radius)), y1 = Math.min(page.height - height, Math.floor(cy + radius))
+      if (x1 >= x0 && y1 >= y0) {
+        const table = integral(page, x0, y0, x1 - x0 + width, y1 - y0 + height)
+        let best = 0
+        for (let y = y0; y <= y1; y++) {
+          if (options.shouldStop?.()) return scores
+          for (let x = x0; x <= x1; x++) best = Math.max(best, ncc(page, prepared, table, x, y))
+        }
+        scores[i] = best
+      }
+    }
+    options.onProgress?.(i + 1, targets.length)
+  }
+  return scores
+}
 export interface SymbolMatch {
   x: number; y: number; width: number; height: number; score: number; rotation: 0 | 90 | 180 | 270
 }

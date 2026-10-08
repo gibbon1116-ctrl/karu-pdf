@@ -4,7 +4,7 @@ import { vectorSymbolSearch, type VectorSymbolOptions } from '../core/vectorSymb
 import { segmentEndpoints } from '../core/vectorPaths'
 import { buildSnapIndex, type SnapIndex } from '../core/snap'
 import type { Rect } from '../core/annotations'
-import { searchSymbol, type SymbolMatch, type SymbolSearchOptions, type SymbolSearchStats } from '../core/symbolSearch'
+import { searchSymbol, type VerifyTarget, type SymbolMatch, type SymbolSearchOptions, type SymbolSearchStats } from '../core/symbolSearch'
 import type { SearchImage } from './protocol'
 
 export type WorkerSearchOptions = Omit<SymbolSearchOptions, 'shouldStop' | 'onProgress'>
@@ -16,7 +16,11 @@ export interface VectorSearchMessage {
   options: Omit<Partial<VectorSymbolOptions>, 'shouldStop'>
 }
 export interface EndpointMessage { type: 'endpoints'; id: number; segments: Float32Array; bounds: Rect }
-export type SymbolSearchMessage = ImageSearchMessage | VectorSearchMessage | EndpointMessage
+export interface VerifyMessage {
+  type: 'verify'; id: number; page: SearchImage; template: SearchImage; targets: VerifyTarget[]
+  searchRadius?: number
+}
+export type SymbolSearchMessage = ImageSearchMessage | VectorSearchMessage | EndpointMessage | VerifyMessage
 export type VectorSearchResult = ReturnType<typeof vectorSymbolSearch>
 export function searchVectorMessage(message: VectorSearchMessage): VectorSearchResult | null {
   const [x0, y0, x1, y1] = message.sampleRect
@@ -34,9 +38,9 @@ export function buildEndpointIndex(message: EndpointMessage): SnapIndex {
   return buildSnapIndex(segmentEndpoints(message.segments, 200_000), message.bounds, 16)
 }
 export type SymbolSearchResponse =
+  | { type: 'verify-result'; id: number; scores: Float32Array; verifyMs: number }
   | { type: 'vector-result'; id: number; result: VectorSearchResult | null }
   | { type: 'endpoint-result'; id: number; index: SnapIndex; indexMs?: number }
   | { type: 'progress'; id: number; done: number; total: number }
   | { type: 'error'; id: number; message: string }
   | { type: 'result'; id: number; matches: SymbolMatch[]; stats: SymbolSearchStats & { workerMs: number }; memory: { pagePixels: number; bytes: number; estimated: true } }
-

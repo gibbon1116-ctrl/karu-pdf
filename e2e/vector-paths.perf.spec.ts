@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import type { VectorSymbolMatch } from '../src/core/vectorSymbolSearch'
+import type { SymbolSearchTestHooks } from '../src/client/SymbolSearchClient'
 
 // Matched automatically by the existing bench project's *.perf.spec.ts rule.
 const realFile = 'test-data/real/七ヶ浜町_実施設計図.pdf'
@@ -96,6 +97,44 @@ for (const { file, pageIndex } of [
   })
 }
 
+test('vector desk candidates: verification on/off timing and confidence, page 1', async ({ page }) => {
+  const exists = await fs.access(realFile).then(() => true, () => false)
+  if (!exists) measurements.push({ file: realFile, verifySkipped: 'PDF is unavailable' })
+  test.skip(!exists, 'real drawing PDF is unavailable')
+  await open(page, realFile, 0)
+  // Warm extraction for both cases. No other heavy work runs during matching/render timings.
+  await page.evaluate(() => (window.__karu as unknown as SymbolSearchTestHooks).symbolSearch({
+    docId:window.__karu!.listTabs()[0].docId,pageIndex:0,samplePageIndex:0,sampleRect:[742,174,753,182],
+    verify:false,options:{threshold:.85,rotations:false,maxResults:500} }))
+  const results = []
+  for (const verify of [false, true]) {
+    const result = await page.evaluate(async verify => {
+      const hooks = window.__karu as unknown as SymbolSearchTestHooks
+      const result = await hooks.symbolSearch({ docId:window.__karu!.listTabs()[0].docId, pageIndex:0, samplePageIndex:0,
+        sampleRect:[742,174,753,182], verify, options:{threshold:.85,rotations:false,maxResults:500} })
+      return { method:result.method, metrics:result.metrics, candidateCount:result.candidates.length,
+        centers:result.candidates.map(c=>[...c.center, c.imageScore ?? -1]), confidence:{
+          high:result.candidates.filter(c=>c.confidence==='high').length,
+          check:result.candidates.filter(c=>c.confidence==='check').length,
+          unverified:result.candidates.filter(c=>c.confidence===undefined).length,
+        } }
+    }, verify)
+    const record = { verify, ...result }
+    results.push(record); console.log('VECTOR_DESK_VERIFY',JSON.stringify(record))
+    expect(result.method).toBe('vector')
+    expect(result.confidence.high+result.confidence.check+result.confidence.unverified).toBe(result.candidateCount)
+    if(!verify) expect(result.metrics).toMatchObject({verifyRenderMs:0,verifyMs:0,renderTiles:0})
+    else if(result.candidateCount>0) { expect(result.metrics.renderTiles).toBe(2); expect(result.confidence.unverified).toBe(0) }
+  }
+  expect(results[1].centers.map(c => c.slice(0, 2))).toEqual(results[0].centers.map(c => c.slice(0, 2)))
+  const off=results[0].metrics, on=results[1].metrics
+  const hardware=await page.evaluate(()=>window.__karu!.getHardwareInfo())
+  measurements.push({ file:realFile,pageIndex:0,sampleRect:[742,174,753,182],threshold:.85,hardware,browser:page.context().browser()?.version(),
+    conditions:{vectorCache:'warm for both',order:'off then on',pageRender:'one page crop and one sample when on',
+      timings:'vectorMs = Worker vector matching; verifyRenderMs = page/sample render round trip; verifyMs = Worker NCC; totalMs = complete client request'},
+    verification:results,totalDeltaMs:on.totalMs-off.totalMs,totalDeltaPercent:off.totalMs>0?(on.totalMs/off.totalMs-1)*100:null })
+})
+
 test('vector desk symbols: threshold .85/.75, page 1, candidate image', async ({ page }) => {
   const exists = await fs.access(realFile).then(() => true, () => false)
   if (!exists) measurements.push({ file: realFile, searchSkipped: 'PDF is unavailable' })
@@ -103,7 +142,13 @@ test('vector desk symbols: threshold .85/.75, page 1, candidate image', async ({
   await open(page, realFile, 0)
   const results = []
   for (const threshold of [.85, .75]) {
-    const result = await page.evaluate(threshold => window.__karu!.vectorSymbolSearch({ pageIndex: 0, sampleRect: [742, 174, 753, 182], threshold, rotations: false }), threshold)
+    const result = await page.evaluate(async threshold => {
+      const result=await (window.__karu as unknown as SymbolSearchTestHooks).symbolSearch({
+        docId:window.__karu!.listTabs()[0].docId,pageIndex:0,samplePageIndex:0,sampleRect:[742,174,753,182],verify:false,
+        options:{threshold,rotations:false,maxResults:2000} })
+      if(!result.vectorDetails) throw Error('見本の範囲に線がありません')
+      return {matches:result.vectorDetails.matches,extractMs:result.metrics.renderMs,searchMs:result.metrics.vectorMs,template:result.vectorDetails.template}
+    }, threshold)
     results.push({ threshold, ...result, candidateCount: result.matches.length })
     console.log('VECTOR_DESK_SYMBOLS', JSON.stringify({ threshold, extractMs: result.extractMs, searchMs: result.searchMs, template: result.template, candidateCount: result.matches.length }))
   }

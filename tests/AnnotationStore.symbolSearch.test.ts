@@ -16,6 +16,22 @@ async function setup() {
 }
 
 describe('visual search count marks', () => {
+  it('selects only pending high candidates and keeps confidence transient', async () => {
+    const store = await setup(), dirty = store.dirtySummary()
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([
+      {...candidate(40,50),confidence:'high',imageScore:.9}, {...candidate(80,50),confidence:'check',imageScore:.2},
+      {...candidate(120,50),confidence:'high',imageScore:.95}, candidate(160,50), {...candidate(200,50),confidence:'high',imageScore:.8},
+    ])
+    store.toggleSymbolCandidate(store.symbolCandidates![1].id)
+    store.toggleSymbolCandidate(store.symbolCandidates![4].id)
+    store.createCountMarks('led',[{pageIndex:0,center:[120,50]}])
+    store.chooseHighConfidenceCandidates()
+    expect(store.symbolCandidates?.map(c=>c.state)).toEqual(['chosen','chosen','counted','pending','chosen'])
+    expect(store.symbolCandidates?.[0]).toMatchObject({confidence:'high',imageScore:.9})
+    store.undo(); expect(store.dirtySummary()).toEqual(dirty)
+    expect(store.toEdits()).toEqual([]); expect(store.canUndo()).toBe(false)
+  })
   it('creates marks at the centers with locations and uses one undo/redo step and one notification', async () => {
     const store = await setup()
     store.currentFloor = '2F'; store.currentRoom = ' 会議室 '

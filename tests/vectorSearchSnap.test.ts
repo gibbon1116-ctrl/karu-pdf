@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { VectorCache, vectorWorkerTask, VECTOR_CACHE_BYTES, SYMBOL_SEARCH_STALL_MS } from '../src/client/VectorCache'
 import { SymbolSearchClient } from '../src/client/SymbolSearchClient'
+import { verifyCandidates } from '../src/core/symbolSearch'
 import type { PdfWorkerPool } from '../src/client/PdfWorkerPool'
 import type { VectorPage } from '../src/core/vectorPaths'
 import { buildSnapIndex, findPreferredSnap } from '../src/core/snap'
@@ -18,6 +19,7 @@ const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = n
 class FakeWorker {
   static instances: FakeWorker[] = []
   static hold = false
+  static holdVerify = false
   onmessage: ((event: { data: SymbolSearchResponse }) => void) | null = null
   onerror: unknown = null
   onmessageerror: unknown = null
@@ -28,12 +30,81 @@ class FakeWorker {
       if (this.terminate.mock.calls.length || FakeWorker.hold) return
       if (owned.type === 'vector-search') this.onmessage?.({ data: { type: 'vector-result', id: owned.id, result: searchVectorMessage(owned) } })
       if (owned.type === 'endpoints') this.onmessage?.({ data: { type: 'endpoint-result', id: owned.id, index: buildEndpointIndex(owned) } })
+      if (owned.type === 'verify' && !FakeWorker.holdVerify) this.onmessage?.({ data: { type: 'verify-result', id: owned.id,
+        scores: verifyCandidates({ width: owned.page.width, height: owned.page.height, data: owned.page.gray },
+          { width: owned.template.width, height: owned.template.height, data: owned.template.gray }, owned.targets, {}), verifyMs: 2 } })
     })
   })
   constructor() { FakeWorker.instances.push(this) }
 }
-const workers = () => { FakeWorker.instances = []; FakeWorker.hold = false; vi.stubGlobal('Worker', FakeWorker) }
+const workers = () => { FakeWorker.instances = []; FakeWorker.hold = false; FakeWorker.holdVerify = false; vi.stubGlobal('Worker', FakeWorker) }
+const verificationPool = () => ({ ...poolFor(i => vector(i, new Float32Array([...squareX(20,20), ...squareX(120,20)]))),
+  renderSearchImage: vi.fn(({ deviceRect: bounds, renderScale: scale }: { deviceRect: [number,number,number,number]; renderScale: number }) => {
+    const width = bounds[2] - bounds[0], height = bounds[3] - bounds[1], gray = new Uint8Array(width * height)
+    // Only the first vector symbol is present in the pixels: the second must remain a check candidate.
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const px = (bounds[0] + x + .5) / scale, py = (bounds[1] + y + .5) / scale
+      if (px >= 19.8 && px <= 30.2 && py >= 19.8 && py <= 30.2
+        && (Math.min(Math.abs(px-20),Math.abs(px-30),Math.abs(py-20),Math.abs(py-30)) < .3
+          || Math.abs(px-py) < .4 || Math.abs(px+py-50) < .4)) gray[y*width+x]=255
+    }
+    return { promise: Promise.resolve({width,height,gray}), cancel: vi.fn() }
+  }) })
+const verifyRequest = { docId:'doc', pageIndex:0, samplePageIndex:0, sampleRect:[19,19,31,31] as [number,number,number,number],
+  searchRect:[10.25,10.25,150.25,50.25] as [number,number,number,number] }
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
+
+describe('vector candidate image verification lifecycle', () => {
+  it('renders one page crop and one sample, transfers pixels, maps targets and retains every vector candidate', async () => {
+    workers(); const pool = verificationPool(), client = new SymbolSearchClient(pool as unknown as PdfWorkerPool), stages: string[] = []
+    const result = await client.search(verifyRequest, stage => stages.push(stage)).promise
+    expect(result.method).toBe('vector'); expect(result.candidates).toHaveLength(2)
+    expect(result.candidates.map(c => c.confidence)).toEqual(['high','check'])
+    expect(result.candidates[0].imageScore).toBeGreaterThan(.99); expect(result.candidates[1].imageScore).toBe(0)
+    expect(pool.renderSearchImage).toHaveBeenCalledTimes(2)
+    expect(pool.renderSearchImage.mock.calls.map(([r])=>r.deviceRect)).toEqual([[20,20,301,101],[38,38,62,62]])
+    const worker = FakeWorker.instances[1], message = worker.postMessage.mock.calls[0][0]
+    expect(message.type).toBe('verify')
+    if (message.type !== 'verify') throw Error('missing verify message')
+    expect(message.targets[0]).toEqual({x:18,y:18,width:24,height:24,angle:0})
+    expect(message.page.gray.byteLength).toBe(0); expect(message.template.gray.byteLength).toBe(0)
+    expect(stages.indexOf('vector')).toBeLessThan(stages.indexOf('verify'))
+    expect(result.metrics).toMatchObject({renderTiles:2,renderScale:2,verifyMs:2})
+    expect(result.metrics.vectorMs).toBeGreaterThanOrEqual(0); expect(result.metrics.verifyRenderMs).toBeGreaterThanOrEqual(0)
+    client.dispose(); expect(worker.terminate).toHaveBeenCalledOnce()
+  })
+  it.each(['off','empty'] as const)('skips all rendering and confidence when %s', async mode => {
+    workers(); const pool = verificationPool(), client = new SymbolSearchClient(pool as unknown as PdfWorkerPool)
+    const result = await client.search({...verifyRequest, verify:mode!=='off',
+      ...(mode==='empty'?{searchRect:[200,200,300,300] as [number,number,number,number]}:{})}).promise
+    expect(result.method).toBe('vector'); expect(pool.renderSearchImage).not.toHaveBeenCalled()
+    expect(result.candidates.every(c => c.confidence===undefined && c.imageScore===undefined)).toBe(true)
+    expect(result.candidates).toHaveLength(mode==='off'?2:0)
+    expect(result.metrics).toMatchObject({verifyMs:0,verifyRenderMs:0,renderTiles:0}); client.dispose()
+  })
+  it('cancels unfinished verification rendering and discards late pixels', async () => {
+    workers(); const pool = verificationPool(), pending = deferred<{width:number;height:number;gray:Uint8Array<ArrayBuffer>}>(), cancel=vi.fn()
+    pool.renderSearchImage.mockImplementation(()=>({promise:pending.promise,cancel}))
+    const client = new SymbolSearchClient(pool as unknown as PdfWorkerPool), task = client.search(verifyRequest)
+    const rejected = expect(task.promise).rejects.toThrow('cancelled')
+    await vi.waitFor(()=>expect(pool.renderSearchImage).toHaveBeenCalledOnce())
+    task.cancel(); await rejected; expect(cancel).toHaveBeenCalledOnce()
+    pending.resolve({width:1,height:1,gray:new Uint8Array(1)}); await Promise.resolve(); await Promise.resolve()
+    expect(FakeWorker.instances).toHaveLength(1); expect(pool.renderSearchImage).toHaveBeenCalledOnce(); client.dispose()
+  })
+  it.each(['cancel','stall'] as const)('terminates the verify Worker on %s and ignores its late result', async mode => {
+    workers(); FakeWorker.holdVerify=true
+    if(mode==='stall') vi.useFakeTimers()
+    const pool = verificationPool(), client = new SymbolSearchClient(pool as unknown as PdfWorkerPool), task=client.search(verifyRequest)
+    const rejected = expect(task.promise).rejects.toThrow(mode==='cancel'?'cancelled':'応答しなくなった')
+    await vi.waitFor(()=>expect(FakeWorker.instances).toHaveLength(2))
+    const worker=FakeWorker.instances[1], listener=worker.onmessage!
+    if(mode==='cancel') task.cancel(); else await vi.advanceTimersByTimeAsync(SYMBOL_SEARCH_STALL_MS+1000)
+    await rejected; expect(worker.terminate).toHaveBeenCalledOnce()
+    listener({data:{type:'verify-result',id:1,scores:new Float32Array([1,1]),verifyMs:1}})
+    client.dispose(); expect(worker.terminate).toHaveBeenCalledOnce()
+  })
+})
 
 describe('bounded document vector cache', () => {
   it('is idle until requested and shares the same in-flight promise', async () => {
@@ -97,7 +168,7 @@ describe('vector Worker messages and drawing endpoint index', () => {
   it('transfers copies, retains cache buffers, maps results and performs no image rendering', async () => {
     workers(); const pool={...poolFor(),renderSearchImage:vi.fn()}, cache=new VectorCache('doc'), page=await cache.get(0,pool)
     const client=new SymbolSearchClient(pool as unknown as PdfWorkerPool,()=>({width:500,height:500}),()=>cache)
-    const result=await client.search({docId:'doc',pageIndex:0,samplePageIndex:0,sampleRect:[19,19,31,31],options:{threshold:.9,rotations:true}}).promise
+    const result=await client.search({docId:'doc',pageIndex:0,samplePageIndex:0,sampleRect:[19,19,31,31],verify:false,options:{threshold:.9,rotations:true}}).promise
     expect(result.method).toBe('vector'); expect(result.candidates[0].center).toEqual([25,25])
     expect(pool.renderSearchImage).not.toHaveBeenCalled(); expect(page.segments.byteLength).toBe(96)
     const message=FakeWorker.instances[0].postMessage.mock.calls[0][0]
@@ -158,4 +229,3 @@ describe('vector Worker messages and drawing endpoint index', () => {
     pending.resolve(vector());client.dispose()
   })
 })
-

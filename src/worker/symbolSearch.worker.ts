@@ -1,6 +1,6 @@
 import { installWorkerExternalSendGuard } from '../security/externalSend'
 import { buildEndpointIndex, searchVectorMessage, type SymbolSearchMessage, type SymbolSearchResponse } from './symbolSearchMessages'
-import { searchSymbol } from '../core/symbolSearch'
+import { searchSymbol, verifyCandidates } from '../core/symbolSearch'
 
 const scope = typeof self !== 'undefined' && typeof document === 'undefined' ? self as unknown as DedicatedWorkerGlobalScope : null
 // The existing guard groups non-PDF pixel Workers under its 'image' source.
@@ -26,6 +26,12 @@ if (scope) scope.onmessage = (event: MessageEvent<SymbolSearchMessage>) => {
     // All pixel arrays are local to this invocation; no image or result cache is retained.
     const page = { width: message.page.width, height: message.page.height, data: message.page.gray }
     const template = { width: message.template.width, height: message.template.height, data: message.template.gray }
+    if (message.type === 'verify') {
+      const scores = verifyCandidates(page, template, message.targets, { searchRadius: message.searchRadius,
+        onProgress: (done, total) => scope.postMessage({ type: 'progress', id: message.id, done, total } satisfies SymbolSearchResponse) })
+      scope.postMessage({ type: 'verify-result', id: message.id, scores, verifyMs: performance.now() - started } satisfies SymbolSearchResponse, [scores.buffer])
+      return
+    }
     const result = searchSymbol(page, template, { ...message.options,
       onProgress: (done, total) => scope.postMessage({ type: 'progress', id: message.id, done, total } satisfies SymbolSearchResponse) })
     scope.postMessage({ type: 'result', id: message.id, ...result,

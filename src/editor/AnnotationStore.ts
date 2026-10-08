@@ -21,6 +21,7 @@ export type DrawingFilterReleaseReason = '数量拾いの印を数えるため' 
 export interface SymbolSearchCandidate {
   id: string; pageIndex: number; rect: Rect; center: Point; score: number
   state: 'pending' | 'chosen' | 'counted'
+  confidence?: 'high' | 'check'; imageScore?: number
 }
 
 export type Kind = MeasureKind | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
@@ -256,7 +257,7 @@ export class AnnotationStore {
     this.symbolCandidateRadius = Math.min(sampleRect[2] - sampleRect[0], sampleRect[3] - sampleRect[1]) / 2
     this.symbolCandidates = []; this.notify(false)
   }
-  appendSymbolCandidates(candidates: Array<{ pageIndex: number; rect: Rect; center: Point; score: number }>): void {
+  appendSymbolCandidates(candidates: Array<{ pageIndex: number; rect: Rect; center: Point; score: number; confidence?: 'high' | 'check'; imageScore?: number }>): void {
     if (!this.symbolCandidates || this.symbolCandidateFixture !== this.selectedFixtureId) return
     for (const c of candidates) this.symbolCandidates.push({ ...c, rect: [...c.rect], center: [...c.center], id: crypto.randomUUID(), state: 'pending' })
     this.refreshSymbolCandidates(); this.notify(false)
@@ -269,6 +270,11 @@ export class AnnotationStore {
   chooseSymbolCandidates(chosen: boolean): void {
     if (!this.symbolCandidates) return
     for (const c of this.symbolCandidates) if (c.state !== 'counted') c.state = chosen ? 'chosen' : 'pending'
+    this.notify(false)
+  }
+  chooseHighConfidenceCandidates(): void {
+    if (!this.symbolCandidates) return
+    for (const c of this.symbolCandidates) if (c.state === 'pending' && c.confidence === 'high') c.state = 'chosen'
     this.notify(false)
   }
   private refreshSymbolCandidates(): void {
