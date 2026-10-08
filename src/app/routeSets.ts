@@ -43,7 +43,11 @@ export function saveRouteSets(sets: readonly RouteSet[]): void {
 }
 export const scopeShort = (scope?: RouteScope | 'custom') => scope === 'custom' ? '個別' : scope === 'rise' ? '立上りのみ' : scope === 'noSlack' ? '平面＋立上り' : '全長'
 export const scopeSuffix = (scope?: RouteScope | 'custom') => scope === 'custom' ? '（個別）' : scope === 'rise' ? '（立上り）' : scope === 'noSlack' ? '（平面＋立上り）' : ''
-export const routeSetSummary = (set: Pick<RouteSet, 'items'>) => set.items.map(e => fixtureCode(e) + (e.count === 1 ? '' : '×' + e.count) + conditionSuffix(e.cond)).join('＋')
+export function routeConditionSummary(cond: RouteConditions = {}): string {
+  const short = (name: string) => ({ 'ケーブルラック配線': 'ラック', '管内配線': '管内', '隠ぺい配管': '隠ぺい', '露出配管': '露出' } as Record<string, string>)[name] ?? (name.length > 12 ? name.slice(0, 11) + '…' : name)
+  return conditionSuffix(cond).replace(/[^（）／]+/g, short)
+}
+export const routeSetSummary = (set: Pick<RouteSet, 'items'>) => set.items.map(e => fixtureCode(e) + (e.count === 1 ? '' : '×' + e.count) + routeConditionSummary(e.cond)).join('＋')
 export function resolveRouteSet(set: RouteSet, fixtures: readonly CountFixture[]): { items: Array<{ itemId: string; count: number; cond?: RouteConditions }>; newFixtures: CountFixture[] } {
   if (!validSet(set)) throw new Error('構成の内容が正しくありません。')
   const newFixtures: CountFixture[] = [], available = [...fixtures]

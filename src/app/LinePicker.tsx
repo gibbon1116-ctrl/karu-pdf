@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { fixtureCode, nextCountStyle, nextQuantityLineStyle, quantityMethod, type CountFixture } from '../core/countFixtures'
-import { routeMembers, conditionScope } from '../core/quantity'
+import { routeMembers, conditionScope, conditionSuffix } from '../core/quantity'
 import type { MasterEntry } from '../core/quantityMaster'
 import type { AnnotationStore, EditableAnnotation } from '../editor/AnnotationStore'
 import { QuantitySwatch } from '../editor/countMarkers'
 import { groupFixtures } from './fixtureOrder'
-import { scopeShort } from './routeSets'
 
 // Scope is a derived display projection for PickupBar (which remains unchanged in 07a).
 export const routeEntries = (a: EditableAnnotation) => routeMembers(a.quantity!).map(e => ({ ...e, scope: conditionScope(e.cond) }))
@@ -31,7 +30,7 @@ export function useRouteFeedback(store: AnnotationStore) {
 export function changeRouteCount(store: AnnotationStore, a: EditableAnnotation, itemId: string, count: number): void {
   const entries = routeEntries(a), current = entries.find(e => e.itemId === itemId)
   if (!current || count < 1 || count > 99 || !Number.isInteger(count) || count === current.count) return
-  store.setRouteItems(a.id, entries.map(e => e.itemId === itemId ? { ...e, count } : e))
+  store.setRouteMembers(a.id, entries.map(e => e.itemId === itemId ? { ...e, count } : e))
   announceRoute(store, a.id, null, `${fixtureCode(store.getCountFixture(itemId)!)} を ${count}条にしました`)
 }
 
@@ -76,7 +75,7 @@ export default function LinePicker({ store, annotation, onClose }: { store: Anno
       if (!store.get(annotation.id)?.quantity?.extra?.some(e => e.itemId === f.id)) return
       // Selecting a picker result must leave the current drawing tool and template intact.
       store.rememberRouteFixture(f.id)
-      announceRoute(store, annotation.id, f.id, `${fixtureCode(f)} を足しました（1条・${scopeShort(conditionScope(next[next.length - 1].cond))}）`); onClose()
+      announceRoute(store, annotation.id, f.id, `${fixtureCode(f)} を足しました（1条・${conditionSuffix(next[next.length - 1].cond).slice(1, -1) || '未設定'}）`); onClose()
     } catch (reason) { setError(String(reason)) }
   }
   const candidates: Array<CountFixture | MasterEntry> = [...recent, ...groups.flatMap(g => g.items), ...master].filter(f => !('id' in f) || !entries.some(e => e.itemId === f.id))

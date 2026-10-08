@@ -923,6 +923,10 @@ export function AnnotationLayer(props: Props) {
         {selectedIds.has(annotation.id) && <>
           {pathPoints === undefined && <rect className="annotation-selection" x={selectionRect[0] - 1} y={selectionRect[1] - 1} width={Math.max(2, selectionRect[2] - selectionRect[0] + 2)} height={Math.max(2, selectionRect[3] - selectionRect[1] + 2)} />}
           {annotation.measure && annotation.vertices && <QuantityRiseMarks annotation={annotation} zoom={props.zoom} highlightedRise={props.store.highlightedRise} />}
+          {props.store.highlightedVertex?.annotationId === annotation.id && (() => {
+            const p = annotation.vertices?.[props.store.highlightedVertex.vertexIndex]
+            return p && <circle data-testid="route-split-vertex" cx={p[0]} cy={p[1]} r={7 / props.zoom} fill="#fff4ae" stroke="#cf7b00" strokeWidth={2 / props.zoom} pointerEvents="none" />
+          })()}
           {props.tool === 'select' && singleSelection && annotation.vertices?.map((p, i) => <rect key={i} className="annotation-resize-handle" data-testid={`measure-handle-${i}`} data-measure-vertex={i} data-annotation-id={annotation.id} x={p[0] - handleSize / 2} y={p[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
           {props.tool === 'select' && singleSelection && positions.map(({ handle, x, y }) => <rect key={`${annotation.id}-${handle}`} className="annotation-resize-handle" data-testid={`resize-handle-${handle}`} data-annotation-id={annotation.id} data-resize-handle={handle} x={x - handleSize / 2} y={y - handleSize / 2} width={handleSize} height={handleSize} />)}
           {props.tool === 'select' && singleSelection && line && line.map((point, index) => <rect key={`${annotation.id}-line-${index}`} className="annotation-resize-handle" data-testid={`line-handle-${index === 0 ? 'start' : 'end'}`} data-annotation-id={annotation.id} data-line-handle={index === 0 ? 'start' : 'end'} x={point[0] - handleSize / 2} y={point[1] - handleSize / 2} width={handleSize} height={handleSize} />)}

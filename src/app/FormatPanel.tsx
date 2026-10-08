@@ -1,6 +1,6 @@
 import { LocationInput } from './LocationInput'
-import { RouteItems } from './RouteItems'
-import { quantityLabel, quantityPoints, quantityDimensions, QUANTITY_DIMENSIONS } from '../core/quantity'
+import { RouteItems, ConditionSelect, addRouteCandidate, addQuantityCandidate } from './RouteItems'
+import { routeMembers, type PartCondition, type RoutePart, quantityLabel, quantityPoints, quantityDimensions, QUANTITY_DIMENSIONS } from '../core/quantity'
 import { polygonArea, polylineLength } from '../core/measure'
 import { fixtureCode, quantityMethod } from '../core/countFixtures'
 import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react'
@@ -186,6 +186,8 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
       <h2>数量拾い</h2>{pickupError && <p role="alert">{pickupError}</p>}
       {/* What is loaded on the route comes first; item details and location follow. */}
       {quantity?.method === 'polyline' && activeSelection?.measure && activeSelection.vertices && store.selectedIds().length === 1 && <RouteItems annotation={activeSelection} store={store} />}
+      {store.selectedIds().length >= 2 && store.selectedIds().every(id => store.get(id)?.quantity?.method === 'polyline') && <BulkRouteConditions key={store.selectedIds().join(',')} store={store} />}
+      {store.selectedPickupsOnly() && fixture && quantity?.method !== 'polyline' && store.selectedIds().every(id => { const a = store.get(id); return a?.quantity ? a.quantity.method !== 'polyline' && a.quantity.itemId === fixture.id : !!a?.count && store.fixtureForCount(a.count)?.id === fixture.id }) && <PickupCondition key={fixture.id + store.selectedIds().join(',')} store={store} fixture={fixture} />}
       {fixture ? <><p>{fixtureCode(fixture)} {fixture.name}</p>{quantityMethod(fixture) === 'click' ? <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + fixture.style.size * (1 + .7 * fixtureCode(fixture).length))} 50`} aria-label="印の見本"><CountMarker style={fixture.style} code={fixtureCode(fixture)} /></svg> : <QuantitySwatch fixture={fixture} />}
         <button onClick={() => fixtureUi?.edit(fixture.id)}>項目を編集…</button></> : <button onClick={() => fixtureUi?.open()}>数量拾いの一覧で項目を選んでください</button>}
       {store.selectedPickupsOnly() && <PickupLocation key={store.selectedIds().join(',') + ':' + store.getSnapshot()} store={store} />}
@@ -321,4 +323,31 @@ function PickupLocation({ store }: { store: AnnotationStore }) {
     const values = marks.map(m => m[key] ?? ''), mixed = values.some(v => v !== values[0])
     return <label key={key}>{key === 'floor' ? '階' : '部屋'}<LocationInput label={key === 'floor' ? '拾いの階' : '拾いの部屋'} value={mixed ? '' : values[0]} mixed={mixed} commit={v => store.updatePickupLocation(store.selectedIds(), key, v)} /></label>
   })}</fieldset>
+}
+
+function PickupCondition({ store, fixture }: { store: AnnotationStore; fixture: NonNullable<ReturnType<AnnotationStore['getCountFixture']>> }) {
+  const ids = store.selectedIds(), values = ids.map(id => { const a = store.get(id)!; return a.quantity?.condition ?? (a.count?.version === 2 ? a.count.condition : undefined) })
+  return <ConditionSelect fixture={fixture} label="施工条件" value={values[0]} mixed={values.some(v => v !== values[0])} emptyCandidatesOnly
+    commit={value => store.setQuantityCondition(ids, value ?? undefined)} add={value => addQuantityCandidate(store, ids, fixture.id, value)} />
+}
+function BulkRouteConditions({ store }: { store: AnnotationStore }) {
+  const ids = store.selectedIds(), itemIds = [...new Set(ids.flatMap(id => routeMembers(store.get(id)!.quantity!).map(e => e.itemId)))]
+  const [chosen, setChosen] = useState(itemIds[0]), [part, setPart] = useState<RoutePart>('plan'), [condition, setCondition] = useState<PartCondition>(), [status, setStatus] = useState('')
+  const itemId = itemIds.includes(chosen) ? chosen : itemIds[0], fixture = store.getCountFixture(itemId)
+  if (!fixture) return null
+  const apply = () => {
+    const count = ids.filter(id => routeMembers(store.get(id)!.quantity!).some(e => e.itemId === itemId)).length
+    store.setRouteCondition(ids, itemId, part, condition)
+    setStatus(count + ' 本の ' + fixtureCode(fixture) + ' の' + (part === 'plan' ? '平面' : part === 'rise' ? '立上り' : 'その他') + 'を' + (condition === undefined ? '未設定' : condition === null ? '数えない' : condition) + 'にしました（Ctrl+Z で戻せます）')
+  }
+  return <fieldset className="route-bulk"><legend>施工条件をまとめて変える</legend>
+    <label className="route-condition-row"><span>部材</span><select aria-label="まとめて変える部材" value={itemId} onChange={e => { setChosen(e.currentTarget.value); setCondition(undefined) }}>{itemIds.map(id => { const f = store.getCountFixture(id); return <option key={id} value={id}>{f ? fixtureCode(f) : id}</option> })}</select></label>
+    <label className="route-condition-row"><span>部分</span><select aria-label="まとめて変える部分" value={part} onChange={e => setPart(e.currentTarget.value as RoutePart)}><option value="plan">平面</option><option value="rise">立上り（すべて）</option><option value="slack">その他</option></select></label>
+    <ConditionSelect key={itemId} fixture={fixture} label="まとめて変える条件" value={condition} allowExclude commit={setCondition} add={value => {
+      const reason = addRouteCandidate(store, ids, itemId, part, value)
+      if (reason) return reason
+      setCondition(value); setStatus('条件を追加して適用しました（Ctrl+Z で戻せます）')
+    }} />
+    <button type="button" onClick={apply}>適用</button><p role="status">{status}</p>
+  </fieldset>
 }

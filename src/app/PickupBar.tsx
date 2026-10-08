@@ -4,7 +4,8 @@ import { FixtureUiContext, type DocumentSession } from './documentModel'
 import FixtureQuickList, { FixtureSwatch, pickupFixtureId } from './fixtureQuickList'
 import { groupFixtures } from './fixtureOrder'
 import LinePicker, { changeRouteCount, routeEntries, routeHighlighted, useRouteFeedback } from './LinePicker'
-import { scopeSuffix } from './routeSets'
+import { conditionSuffix } from '../core/quantity'
+import { routeConditionSummary } from './routeSets'
 import { QuantitySwatch } from '../editor/countMarkers'
 import type { AnnotationStore, EditableAnnotation } from '../editor/AnnotationStore'
 import { SymbolSearchContext } from './symbolSearchContext'
@@ -53,6 +54,7 @@ export default function PickupBar({ session }: { session: DocumentSession }) {
         try { localStorage.setItem('karu-pdf:pickup-bar-position', nextPosition) } catch { /* Optional preference storage. */ }
       }}>{position === 'top' ? '↓' : '↑'}</button>
     </div>
+    {current && store.lastRouteConditions.has(current.id) && <div className="pickup-template" title={'直前の条件: ' + (conditionSuffix(store.lastRouteConditions.get(current.id)).slice(1, -1) || '未設定')}>直前の条件: {routeConditionSummary(store.lastRouteConditions.get(current.id)).slice(1, -1) || '未設定'}<button type="button" aria-label="直前の条件の引継ぎをやめる" onClick={() => store.clearRouteInheritance(current.id)}>×</button></div>}
     {store.routeTemplate && <div className="pickup-template">構成: {store.routeTemplate.name}<button type="button" aria-label="構成を外す" onClick={() => store.setRouteTemplate(null)}>×</button></div>}
     {store.selectedIds().length === 1 && store.get(store.selectedIds()[0])?.quantity?.method === 'polyline' && <PickupRoute key={store.selectedIds()[0]} store={store} annotation={store.get(store.selectedIds()[0])!} />}
     {open && <FixtureQuickList fixtures={fixtures} recentIds={store.recentFixtureIds} onSelect={select} onClose={() => setOpen(false)} onDismiss={() => { setOpen(false); chooser.current?.focus() }} />}
@@ -84,15 +86,15 @@ function PickupRoute({ store, annotation: a }: { store: AnnotationStore; annotat
   const chip = (e: typeof entries[number], measuring = false) => {
     const f = store.getCountFixture(e.itemId), code = f ? fixtureCode(f) : e.itemId
     const added = routeHighlighted(feedback, a.id, e.itemId)
-    return <span key={e.itemId} className={`pickup-route-chip${added ? ' route-item-added' : ''}`} title={code + scopeSuffix(e.scope)}>
-      {f && <QuantitySwatch fixture={f} />}<strong>{code}</strong><span>×{e.count}{scopeSuffix(e.scope)}</span>
+    return <span key={e.itemId} className={`pickup-route-chip${added ? ' route-item-added' : ''}`} title={code + conditionSuffix(e.cond)}>
+      {f && <QuantitySwatch fixture={f} />}<strong>{code}</strong><span>×{e.count}{conditionSuffix(e.cond)}</span>
       <button type="button" tabIndex={measuring ? -1 : undefined} aria-label={'拾いバーの' + code + 'の条数を減らす'} disabled={e.count <= 1} onClick={() => changeRouteCount(store, a, e.itemId, e.count - 1)}>−</button>
       <button type="button" tabIndex={measuring ? -1 : undefined} aria-label={'拾いバーの' + code + 'の条数を増やす'} disabled={e.count >= 99} onClick={() => changeRouteCount(store, a, e.itemId, e.count + 1)}>+</button>
     </span>
   }
   return <div className="pickup-route" ref={root}>
     <div className="pickup-route-row"><span ref={summary}>{entries.length}種類・{entries.reduce((n, e) => n + e.count, 0)}条</span>
-      {entries.slice(0, visible).map(e => chip(e))}{visible < entries.length && <span className="pickup-route-more" title={entries.slice(visible).map(e => { const f = store.getCountFixture(e.itemId); return (f ? fixtureCode(f) : e.itemId) + '×' + e.count + scopeSuffix(e.scope) }).join('、')}>ほか {entries.length - visible}</span>}
+      {entries.slice(0, visible).map(e => chip(e))}{visible < entries.length && <span className="pickup-route-more" title={entries.slice(visible).map(e => { const f = store.getCountFixture(e.itemId); return (f ? fixtureCode(f) : e.itemId) + '×' + e.count + conditionSuffix(e.cond) }).join('、')}>ほか {entries.length - visible}</span>}
       <button type="button" aria-label="拾いバーで線要素を追加" aria-expanded={open} onClick={() => setOpen(v => !v)}>＋</button>
     </div>
     <div ref={measure} className="pickup-route-measure" aria-hidden="true">{entries.map(e => chip(e, true))}</div>

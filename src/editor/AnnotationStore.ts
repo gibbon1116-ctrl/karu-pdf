@@ -221,6 +221,13 @@ export interface DirtySummary {
 }
 
 export class AnnotationStore {
+  private vertexHighlight: { annotationId: string; vertexIndex: number } | null = null
+  get highlightedVertex(): Readonly<{ annotationId: string; vertexIndex: number }> | null { return this.vertexHighlight }
+  setHighlightedVertex(value: { annotationId: string; vertexIndex: number } | null): void {
+    if (this.vertexHighlight?.annotationId === value?.annotationId && this.vertexHighlight?.vertexIndex === value?.vertexIndex) return
+    this.vertexHighlight = value ? { ...value } : null
+    this.notify(false)
+  }
   private riseHighlight: { annotationId: string; riseIndex: number } | null = null
   get highlightedRise(): Readonly<{ annotationId: string; riseIndex: number }> | null { return this.riseHighlight }
   /** Display-only state: no undo entry, quantity invalidation or saved edit. */
@@ -654,6 +661,44 @@ export class AnnotationStore {
   newRouteConditions(itemId: string): RouteConditions { return structuredClone(this.lastRouteConditions.get(itemId) ?? this.getCountFixture(itemId)?.routeDefaults ?? {}) }
   private newCondition(itemId: string): string | undefined { return this.lastCondition.has(itemId) ? this.lastCondition.get(itemId) : this.getCountFixture(itemId)?.defaultCondition }
   private readonly lastRouteMembers = new Map<string, NonNullable<AnnotationStore['routeTemplate']>>()
+  clearRouteInheritance(itemId: string): void {
+    this.lastRouteConditions.delete(itemId)
+    this.lastRouteMembers.delete(itemId)
+    // Also remove this item's remembered conditions from other inherited compositions.
+    for (const [id, t] of this.lastRouteMembers) {
+      if (t.extra.some(e => e.itemId === itemId)) this.lastRouteMembers.set(id, { ...t, extra: t.extra.map(e => e.itemId === itemId ? { ...e, cond: undefined } : e) })
+    }
+    this.notify(false)
+  }
+  splitRoute(id: string, vertexIndex: number): string | undefined {
+    const a = this.annotations.get(id), q = a?.quantity, points = a?.vertices
+    if (!a || a.deleted || a.legacyChange || q?.method !== 'polyline' || !a.measure || !points
+      || !Number.isInteger(vertexIndex) || vertexIndex < 1 || vertexIndex >= points.length - 1) return
+    const before: HistoryState = [cloneState(a)]
+    const rises = routeRises(q), left: number[] = [], right: number[] = []
+    rises.forEach((r, i) => (r.at !== undefined && r.at >= vertexIndex ? right : left).push(i))
+    const portion = (indices: number[], moved: boolean): QuantityMark => {
+      const condition = (c: RouteConditions = {}): RouteConditions => {
+        const rise = c.rise
+        return normalizeRouteConditions({ ...c, ...(Array.isArray(rise) ? { rise: indices.map(i => rise[i]) } : {}) })
+      }
+      const selectedRises = indices.map(i => ({ ...rises[i], ...(moved && rises[i].at !== undefined ? { at: rises[i].at! - vertexIndex } : {}) }))
+      return { ...cloneQuantity(q), ...(moved ? { id: crypto.randomUUID(), slackM: 0 } : {}), rises: selectedRises,
+        addM: riseTotal(selectedRises), cond: condition(q.cond), extra: q.extra?.map(e => ({ ...e, cond: condition(e.cond) })) }
+    }
+    const newId = crypto.randomUUID()
+    const next: StoredAnnotation = { ...cloneState(a), id: newId, objNum: null, madeByKaru: true, deleted: false, revision: 0,
+      vertices: clonePoints(points.slice(vertexIndex)), quantity: portion(right, true) }
+    a.vertices = clonePoints(points.slice(0, vertexIndex + 1)); a.quantity = portion(left, false)
+    this.refreshQuantity(a); this.refreshQuantity(next)
+    this.markTouched(a); a.revision++
+    this.annotations.set(newId, next)
+    this.history.push({ before, after: [cloneState(a), cloneState(next)] })
+    this.selection.clear(); this.selection.add(newId)
+    this.vertexHighlight = null; this.riseHighlight = null
+    this.notify()
+    return newId
+  }
   private rememberRoute(q: QuantityMark): void {
     for (const e of routeMembers(q)) this.lastRouteConditions.set(e.itemId, structuredClone(e.cond))
     this.lastRouteMembers.set(q.itemId, { itemId: q.itemId, count: q.count ?? 1, cond: structuredClone(q.cond ?? {}), extra: structuredClone(q.extra ?? []), name: '' })
@@ -734,34 +779,87 @@ export class AnnotationStore {
       this.rememberRoute(a.quantity); this.refreshQuantity(a)
     }, true)
   }
+  removeRouteRise(id: string, riseIndex: number): void {
+    const q = this.get(id)?.quantity
+    if (q?.method !== 'polyline' || !Number.isInteger(riseIndex) || riseIndex < 0 || riseIndex >= routeRises(q).length) return
+    this.mutate(id, a => {
+      const mark = a.quantity!, rises = routeRises(mark).filter((_, i) => i !== riseIndex)
+      const remove = (cond: RouteConditions = {}): RouteConditions => normalizeRouteConditions({ ...cond,
+        ...(Array.isArray(cond.rise) ? { rise: cond.rise.filter((_, i) => i !== riseIndex) } : {}) })
+      a.quantity = { ...mark, rises, addM: riseTotal(rises), cond: remove(mark.cond),
+        extra: mark.extra?.map(e => ({ ...e, cond: remove(e.cond) })) }
+      this.rememberRoute(a.quantity); this.refreshQuantity(a)
+    }, true)
+  }
   setRouteCondition(ids: readonly string[], itemId: string, part: RoutePart, condition: PartCondition, riseIndex?: number): void {
     if (!['plan', 'rise', 'slack'].includes(part) || condition !== undefined && condition !== null && !validCondition(condition)
       || riseIndex !== undefined && (part !== 'rise' || !Number.isInteger(riseIndex) || riseIndex < 0 || riseIndex >= 20)) return
-    this.mutateMany(ids, a => {
-      const q = a.quantity
-      if (q?.method !== 'polyline' || riseIndex !== undefined && riseIndex >= routeRises(q).length) return
-      const member = q.itemId === itemId ? q : q.extra?.find(e => e.itemId === itemId)
-      if (!member) return
-      const cond = normalizeRouteConditions(member.cond)
-      if (part === 'rise' && riseIndex !== undefined) {
-        const old = cond.rise
-        cond.rise = Array.from({ length: routeRises(q).length }, (_, i) => i === riseIndex ? condition : Array.isArray(old) ? old[i] : old)
-      } else if (condition === undefined) delete cond[part]
-      else cond[part] = condition
-      member.cond = cond; this.rememberRoute(q); this.refreshQuantity(a)
-    }, true)
+    this.mutateMany(ids, a => this.changeRouteCondition(a, itemId, part, condition, riseIndex), true)
+  }
+  private changeRouteCondition(a: StoredAnnotation, itemId: string, part: RoutePart, condition: PartCondition, riseIndex?: number): void {
+    const q = a.quantity
+    if (q?.method !== 'polyline' || riseIndex !== undefined && riseIndex >= routeRises(q).length) return
+    const member = q.itemId === itemId ? q : q.extra?.find(e => e.itemId === itemId)
+    if (!member) return
+    const cond = normalizeRouteConditions(member.cond)
+    if (part === 'rise' && riseIndex !== undefined) {
+      const old = cond.rise
+      cond.rise = Array.from({ length: routeRises(q).length }, (_, i) => i === riseIndex ? condition : Array.isArray(old) ? old[i] : old)
+    } else if (condition === undefined) delete cond[part]
+    else cond[part] = condition
+    member.cond = cond; this.rememberRoute(q); this.refreshQuantity(a)
+  }
+  /** Candidate edits use the same fixtures snapshot as item editing, in the pickup's history step. */
+  private addConditionAndApply(fixtureId: string, condition: string, ids: readonly string[], change: (a: StoredAnnotation) => void): string | undefined {
+    if (!validCondition(condition)) return '条件は1〜30文字で、前後の空白・改行を入れずに入力してください。'
+    const fixture = this.getCountFixture(fixtureId)
+    if (!fixture) return '項目が見つかりません。'
+    const candidates = fixture.conditions ?? [], exists = candidates.includes(condition)
+    if (!exists && candidates.length >= 30) return '施工条件の候補は30件までです。'
+    if (!ids.length) return '条件を適用できる拾いがありません。'
+    const fixtures = exists ? undefined : this.getCountFixtures().map(f => f.id === fixtureId ? { ...f, conditions: [...candidates, condition] } : f)
+    const memory = this.pickupMemory(this.pickupMemoryIds(ids.map(id => this.annotations.get(id)!)))
+    // Validate detached edits first: a rejected pickup must not leave a new candidate behind.
+    try {
+      if (fixtures) serializeCountFixtures(fixtures)
+      for (const id of new Set(ids)) {
+        const a = this.annotations.get(id)!, proposed = { ...a, ...cloneState(a) }
+        change(proposed)
+        if (proposed.quantity && serializeQuantityMark(proposed.quantity).length > 8000) return '条件を適用すると経路の保存容量を超えます。条件名を短くしてください。'
+      }
+    } catch (reason) { return reason instanceof Error ? reason.message : String(reason) }
+    finally { this.restorePickupMemory(memory) }
+    this.mutateMany(ids, change, true, fixtures)
+  }
+  addConditionAndSetRoute(fixtureId: string, condition: string, ids: readonly string[], itemId: string, part: RoutePart, riseIndex?: number): string | undefined {
+    if (fixtureId !== itemId || !['plan', 'rise', 'slack'].includes(part)
+      || riseIndex !== undefined && (part !== 'rise' || !Number.isInteger(riseIndex) || riseIndex < 0 || riseIndex >= 20)) return '条件を適用する部分が不正です。'
+    const targets = ids.filter(id => {
+      const a = this.annotations.get(id), q = a?.quantity
+      return a && !a.deleted && !a.legacyChange && q?.method === 'polyline'
+        && (riseIndex === undefined || riseIndex < routeRises(q).length) && routeMembers(q).some(e => e.itemId === itemId)
+    })
+    return this.addConditionAndApply(fixtureId, condition, targets, a => this.changeRouteCondition(a, itemId, part, condition, riseIndex))
+  }
+  addConditionAndSetQuantity(fixtureId: string, condition: string, ids: readonly string[]): string | undefined {
+    const targets = ids.filter(id => {
+      const a = this.annotations.get(id)
+      return a && !a.deleted && !a.legacyChange && (a.quantity ? a.quantity.method !== 'polyline' && a.quantity.itemId === fixtureId : a.count && countFixtureId(a.count) === fixtureId)
+    })
+    return this.addConditionAndApply(fixtureId, condition, targets, a => this.changeQuantityCondition(a, condition))
   }
   setQuantityCondition(ids: readonly string[], condition: string | undefined): void {
     if (condition !== undefined && !validCondition(condition)) return
-    this.mutateMany(ids, a => {
-      if (a.quantity?.method === 'polyline' || !a.quantity && !a.count) return
-      if (a.count?.version === 1 && !a.quantity) a.count = { version: 2, id: a.count.id, fixtureId: countFixtureId(a.count) }
-      const mark = a.quantity ?? (a.count?.version === 2 ? a.count : null)
-      if (!mark) return
-      if (condition === undefined) delete mark.condition; else mark.condition = condition
-      const itemId = a.quantity?.itemId ?? countFixtureId(a.count!)
-      this.lastCondition.set(itemId, condition)
-    }, true)
+    this.mutateMany(ids, a => this.changeQuantityCondition(a, condition), true)
+  }
+  private changeQuantityCondition(a: StoredAnnotation, condition: string | undefined): void {
+    if (a.quantity?.method === 'polyline' || !a.quantity && !a.count) return
+    if (a.count?.version === 1 && !a.quantity) a.count = { version: 2, id: a.count.id, fixtureId: countFixtureId(a.count) }
+    const mark = a.quantity ?? (a.count?.version === 2 ? a.count : null)
+    if (!mark) return
+    if (condition === undefined) delete mark.condition; else mark.condition = condition
+    const itemId = a.quantity?.itemId ?? countFixtureId(a.count!)
+    this.lastCondition.set(itemId, condition)
   }
   fixtureRemovalCounts(id: string): { deleted: number; detached: number } {
     let deleted = 0, detached = 0
@@ -1599,7 +1697,7 @@ export class AnnotationStore {
     this.notify()
   }
 
-  private mutateMany(ids: readonly string[], change: (annotation: StoredAnnotation) => void, rememberPickup = false): void {
+  private mutateMany(ids: readonly string[], change: (annotation: StoredAnnotation) => void, rememberPickup = false, fixtures?: CountFixture[]): void {
     const before: HistoryState = []
     const after: HistoryState = []
     const memoryIds = rememberPickup ? this.pickupMemoryIds(ids.flatMap(id => { const a = this.annotations.get(id); return a && !a.deleted && !a.legacyChange ? [a] : [] })) : []
@@ -1622,7 +1720,8 @@ export class AnnotationStore {
       before.push(previous)
       after.push(next)
     }
-    if (before.length === 0) return
+    if (before.length === 0 && !fixtures) return
+    if (fixtures) { before.fixtures = this.getCountFixtures(); after.fixtures = structuredClone(fixtures); this.fixtures = structuredClone(fixtures) }
     if (rememberPickup) after.pickupMemory = this.pickupMemory(memoryIds)
     this.history.push({ before, after })
     if (this.drawingFilterActive()) this.pruneHiddenSelection()

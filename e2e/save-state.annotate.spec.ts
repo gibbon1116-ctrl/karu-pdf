@@ -120,14 +120,17 @@ async function createCaseA(page: Page) {
   await page.getByTestId('fixture-panel').getByRole('button', { name: 'CV ケーブル', exact: true }).click()
   await clickPoint(page, 100, 300); await clickPoint(page, 172, 300); await page.keyboard.press('Enter')
   await expect.poll(() => page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter(a => a.quantity).length)).toBe(1)
-  for (const [label, value] of [['CVの条数', '2'], ['立上り・立下り', '3'], ['余長・その他', '1']]) {
+  await format(page).getByRole('button', { name: '＋ 立上り・立下りを足す', exact: true }).click()
+  for (const [label, value] of [['CVの条数', '2'], ['立上り・立下り1', '3'], ['その他の加算', '1']]) {
     await format(page).getByLabel(label, { exact: true }).fill(value)
     await format(page).getByLabel(label, { exact: true }).press('Enter')
   }
   await format(page).getByRole('button', { name: '線要素を追加', exact: true }).click()
   await format(page).getByLabel('線要素を検索', { exact: true }).fill('PF28')
   await format(page).getByRole('dialog', { name: '線要素を追加', exact: true }).getByRole('button', { name: 'PF28', exact: true }).first().click()
-  await format(page).getByLabel('PF28の範囲', { exact: true }).selectOption('rise')
+  const pf = format(page).locator('.route-item').filter({ hasText: 'PF28' })
+  await pf.getByLabel('平面', { exact: true }).selectOption('exclude')
+  await pf.getByLabel('その他', { exact: true }).selectOption('exclude')
   await addItem(page, 'LED', '照明器具')
   await page.getByTestId('fixture-panel').getByRole('button', { name: 'LED 照明器具', exact: true }).click()
   await clickPoint(page, 100, 180)
@@ -188,7 +191,7 @@ test('A: saved shared route/count closes without tab or beforeunload dialogs', a
 test("A': Ctrl+S commits a focused slack draft into /KaruQuantity", async ({ page }) => {
   await createCaseA(page)
   await selectRoute(page)
-  const slack = format(page).getByLabel('余長・その他', { exact: true })
+  const slack = format(page).getByLabel('その他の加算', { exact: true })
   await slack.fill('2')
   await expect(slack).toBeFocused()
   expect(await page.evaluate(() => window.__karu!.getEditableAnnotations(0).find(a => a.quantity)?.quantity?.slackM)).toBe(1)

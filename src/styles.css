@@ -745,11 +745,11 @@ button, input { font: inherit; }
 .route-heading > strong { font-size: 13px; }
 .route-lengths { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-bottom: 3px; }
 .route-lengths > span { flex-basis: 100%; }
-.route-lengths > div { flex: 1; min-width: 80px; }
-.route-lengths label { display: flex; align-items: center; gap: 2px; margin: 0; font-size: 0; }
-.route-lengths label::before { font-size: 11px; white-space: nowrap; }
-.route-rise label::before { content: '立上り'; }
-.route-slack label::before { content: '＋余長'; }
+.route-lengths > div { flex-basis: 100%; min-width: 0; }
+.route-lengths label { display: flex; align-items: center; gap: 2px; margin: 0; font-size: 11px; min-width: 0; }
+
+
+
 .route-lengths .quantity-input-unit { font-size: 11px; min-width: 0; gap: 1px; }
 .route-lengths input { width: 46px; padding: 2px 1px; font-size: 12px; box-sizing: border-box; appearance: textfield; }
 .route-lengths input::-webkit-inner-spin-button, .route-count input::-webkit-inner-spin-button { appearance: none; margin: 0; }
@@ -868,3 +868,32 @@ button, input { font: inherit; }
 .fixture-dialog-details .fixture-conditions > label { display: flex; margin: 8px 0 0; justify-content: space-between; gap: 8px; }
 .fixture-conditions select { max-width: 65%; min-width: 0; }
 .fixture-conditions [role="alert"] { margin-top: 6px; color: #b42318; }
+
+/* SPEC-07c: compact controls within the existing format panel width. */
+.route-rise-row { display: grid; grid-template-columns: minmax(0, 1fr) 60px 22px; gap: 3px; align-items: center; }
+.route-rise-row select { width: 100%; min-width: 0; font-size: 11px; padding: 2px; }
+.route-rise-row button { padding: 1px; min-width: 0; }
+.route-rise-row .quantity-input-unit { margin-left: auto; }
+.route-condition-field { min-width: 0; margin-top: 4px; }
+.route-condition-row { display: grid !important; grid-template-columns: minmax(48px, auto) minmax(0, 1fr); align-items: center; gap: 4px; margin: 3px 0 !important; min-width: 0; }
+.route-condition-row > span { max-width: 105px; font-size: 11px; }
+.route-condition-row select { width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; padding: 2px; }
+.route-condition-add { display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; }
+.route-condition-add input { width: 0; flex: 1; min-width: 40px; }
+.route-condition-add button { padding: 2px; font-size: 11px; }
+.route-condition-add small { flex-basis: 100%; }
+.route-individual { display: flex !important; align-items: center; gap: 3px; font-size: 11px; margin: 4px 0 !important; }
+.route-individual input { width: auto; }
+.route-item-values { height: auto; }
+.route-item-length { text-align: left; white-space: normal; overflow-wrap: anywhere; margin-top: 5px; }
+.route-unset { display: block; color: #755311; font-size: 10px; }
+.route-split { margin: 6px 0; }
+.route-split label { font-size: 11px; }
+.route-bulk { min-width: 0; }
+.route-bulk legend { font-size: 12px; }
+.route-bulk p { font-size: 11px; overflow-wrap: anywhere; }
+
+.route-lengths { counter-reset: route-rise; }
+.route-rise-row { counter-increment: route-rise; }
+.route-rise-row label { font-size: 0; }
+.route-rise-row label::before { content: '立上り' counter(route-rise); font-size: 11px; white-space: nowrap; }
