@@ -119,7 +119,7 @@ test('actual matching, candidate choice, one-step undo/redo, counted candidates 
   for (const [x, y] of foundCenters) expect(centers.some(([cx, cy]) => Math.hypot(x - cx, y - cy) < 2)).toBe(true)
   for (let i = 0; i < 3; i++) await candidates(page, 'pending').first().click()
   await expect(candidates(page, 'chosen')).toHaveCount(3)
-  await expect(candidates(page).first().locator('title')).toContainText(/線 [0-9.]+・余分な線 [0-9]+%・画像 [0-9.]+/)
+  await expect(candidates(page).first().locator('title')).toContainText(/線 [0-9.]+・余分な線 [0-9]+%(・添字 [^・]+)?・画像 [0-9.]+/)
   await panel(page).getByRole('button', { name: '選んだ 3 件を数量へ追加', exact: true }).click()
   expect(await marks(page)).toBe(3)
   await expect(quantity(page)).toContainText('全図面: 3個')
