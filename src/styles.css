@@ -144,6 +144,8 @@ button, input { font: inherit; }
 .quantity-table .quantity-table-spacer td { height: auto; max-height: none; padding: 0; border: 0; }
 .quantity-pickup-flash { pointer-events: none; transform-box: fill-box; transform-origin: center; animation: quantity-pickup-flash 1.2s ease-out forwards; }
 @keyframes quantity-pickup-flash { from { transform: scale(1); opacity: 1; } to { transform: scale(1.4); opacity: 0; } }
+.quantity-pickup-flash-path { fill: none; stroke: #ff8a00; stroke-linecap: round; stroke-linejoin: round; animation-name: quantity-pickup-flash-path; }
+@keyframes quantity-pickup-flash-path { from { opacity: 1; } to { opacity: 0; } }
 .pickup-bar-region { position: absolute; inset: 0 auto 0 0; pointer-events: none; z-index: 6; }
 .pickup-bar-anchor { position: absolute; left: 8px; max-width: min(70%, calc(100% - 16px)); pointer-events: auto; font-size: 12px; }
 .pickup-bar-top { top: 8px; }
@@ -337,6 +339,9 @@ button, input { font: inherit; }
 .header-footer-dialog > footer { display: flex; gap: 8px; padding: 9px 12px; border-top: 1px solid #bbb; }
 .header-footer-dialog > footer span { flex: 1; }
 .annotation-selection { fill: rgba(20, 115, 230, 0.15); stroke: #1473e6; stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+.annotation-selection-path { fill: none; stroke: #1473e6; opacity: .55; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.annotation-rise-mark { fill: #1473e6; stroke: #fff; paint-order: stroke; font-weight: bold; pointer-events: none; }
+.annotation-rise-mark-highlighted { fill: #ff8a00; }
 .annotation-draft { display: none; fill: none; stroke: #e00000; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
 .annotation-line-draft, .annotation-line-preview, .annotation-ink-draft { display: none; fill: none; stroke: #e00000; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 .annotation-line-preview { stroke: #1473e6; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
