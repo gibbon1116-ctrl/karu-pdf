@@ -54,7 +54,7 @@ export function resolveRouteSet(set: RouteSet, fixtures: readonly CountFixture[]
       f = { id: crypto.randomUUID(), code: e.code, spec: e.spec, name: e.name, category: e.category, kind: 'length', method: 'polyline', aggregation: 'document', order: available.reduce((n, f) => Math.max(n, f.order + 1), 0), style: { ...nextCountStyle([]), color: appearance.color }, line: appearance.line }
       available.push(f); newFixtures.push(f)
     }
-    return { itemId: f.id, count: e.count, cond: normalizeRouteConditions(e.cond) }
+    return { itemId: f.id, count: e.count, cond: normalizeRouteConditions(e.cond ?? f.routeDefaults) }
   })
   return { items, newFixtures }
 }

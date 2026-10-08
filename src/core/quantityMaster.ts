@@ -1,6 +1,7 @@
-import { FIXTURE_PRESETS, type FixturePreset, type QuantityKind, type QuantityMethod, type QuantityDefaults } from './countFixtures'
+import { FIXTURE_PRESETS, nextCountStyle, nextQuantityLineStyle, type CountFixture, type FixturePreset, type QuantityKind, type QuantityMethod, type QuantityDefaults } from './countFixtures'
 
 export interface MasterType {
+  conditions: readonly string[]
   field: string
   category: string
   type: string
@@ -31,15 +32,33 @@ const a200 = [...a15, '200A'], a80 = a15.slice(0, 8), a50 = a15.slice(0, 6), a40
 const waterPlastic = list('13, 16, 20, 25, 30, 40, 50')
 const drainPlastic = list('40, 50, 65, 75, 100, 125, 150')
 const roundDuct = list('φ100, φ125, φ150, φ175, φ200, φ225, φ250, φ300, φ350, φ400, φ450, φ500, φ600')
+const wireConditions = ['管内配線', '合成樹脂管内配線（PF・CD・FEP）', 'ケーブルラック配線', '二重天井内・二重床内・ピット内・トラフ内配線'] as const
+const cableConditions = [...wireConditions, 'サドル止め（コンクリート）', 'サドル止め・ステープル止め（木造）', '地中管路内', '架空（ちょう架）']
+// 計画1章: 設備数量積算基準R7・標準単価積算基準R8。候補だけで既定は選ばない。
+export function standardConditions(category: string, type: string): readonly string[] {
+  if (category === '電線') return [...wireConditions, 'ダクト内配線']
+  if (['ケーブル（低圧）', 'ケーブル（高圧）', '制御ケーブル', '通信・弱電ケーブル', '耐火・耐熱ケーブル'].includes(category)) return cableConditions
+  if (category === '電線管') return type === 'CD' ? ['コンクリート埋込配管'] : type === 'FEP' ? ['地中埋設', '露出配管'] : ['隠ぺい配管', '露出配管', 'コンクリート埋込配管', '地中埋設']
+  if (category === 'ケーブルラック・ダクト') return ['屋内', '屋外']
+  if (category === '照明器具') return ['天井直付', '天井埋込', '壁付', '吊下げ', '床置・据置']
+  if (['配管（給水・給湯）', '配管（排水・通気）', '配管（消火・冷温水・蒸気）', '冷媒管', 'ドレン管'].includes(category)) return ['屋内一般配管', '機械室・便所配管', '屋外配管（架空・暗渠内・共同溝内）', '屋外露出配管', '地中配管']
+  if (category === 'ダクト') return ['屋内一般', '機械室', '屋外露出']
+  if (category === '保温') return ['屋内露出（一般居室・廊下）', '屋内隠ぺい（天井内・パイプシャフト）', '機械室・書庫・倉庫', '屋外露出・浴室・厨房', '暗渠内']
+  if (category === '塗装' || type === '塗装') return ['屋内', '屋外']
+  if (category === '土工' && type === '根切り') return ['直掘り工法', '法付け工法']
+  if (category === '撤去') return ['撤去（廃棄）', '取外し（再使用）']
+  if (['スイッチ', 'コンセント', '配線器具'].includes(category)) return ['隠ぺい（埋込）', '露出']
+  return []
+}
 const length = (field: string, category: string, type: string, code: string, name: string, specs: readonly string[], codeFromSpec?: MasterType['codeFromSpec']): MasterType =>
-  ({ field, category, type, code, name, specs, kind: 'length', method: 'polyline', ...(codeFromSpec ? { codeFromSpec } : {}) })
+  ({ conditions: standardConditions(category, type), field, category, type, code, name, specs, kind: 'length', method: 'polyline', ...(codeFromSpec ? { codeFromSpec } : {}) })
 const electric = (category: string, type: string, name: string, specs: readonly string[], code = type, codeFromSpec?: MasterType['codeFromSpec']) => length('電気設備', category, type, code, name, specs, codeFromSpec)
 const mechanical = (category: string, type: string, name: string, specs: readonly string[], code = type) => length('機械設備', category, type, code, name, specs)
-const light = (type: string, code: string, name: string, specs: readonly string[]): MasterType => ({ field: '電気設備', category: '照明器具', type, code, name, specs, kind: 'count', method: 'click' })
-const fromPreset = (field: string, f: FixturePreset): MasterType => ({ field, category: f.category, type: f.code, code: f.code, name: f.name, kind: f.kind ?? 'count', method: f.method ?? 'click', ...(f.defaults ? { defaults: { ...f.defaults } } : {}), specs: [] })
+const light = (type: string, code: string, name: string, specs: readonly string[]): MasterType => ({ conditions: standardConditions('照明器具', type), field: '電気設備', category: '照明器具', type, code, name, specs, kind: 'count', method: 'click' })
+const fromPreset = (field: string, f: FixturePreset): MasterType => ({ conditions: standardConditions(f.category, f.code), field, category: f.category, type: f.code, code: f.code, name: f.name, kind: f.kind ?? 'count', method: f.method ?? 'click', ...(f.defaults ? { defaults: { ...f.defaults } } : {}), specs: [] })
 const countPresets = (field: string) => FIXTURE_PRESETS[field].filter(f => !f.kind || f.kind === 'count').map(f => fromPreset(field, f))
 const surface = (field: string, category: string, type: string, name: string, kind: QuantityKind, method: QuantityMethod, code = type, specs: readonly string[] = [], defaults?: QuantityDefaults): MasterType =>
-  ({ field, category, type, code, name, kind, method, specs, ...(defaults ? { defaults } : {}) })
+  ({ conditions: standardConditions(category, type), field, category, type, code, name, kind, method, specs, ...(defaults ? { defaults } : {}) })
 
 // Order here, including each specs array, is the browsing and search order.
 export const QUANTITY_MASTER: readonly MasterType[] = [
@@ -115,6 +134,9 @@ export const QUANTITY_MASTER: readonly MasterType[] = [
   mechanical('ダクト', 'RDB', '丸ダクト（板巻き）', roundDuct),
   mechanical('ダクト', 'FLD', 'フレキシブルダクト', list('φ100, φ125, φ150, φ200, φ250')),
   ...countPresets('機械設備'),
+  mechanical('保温', 'GW', '配管保温（グラスウール）', a15),
+  surface('機械設備', '保温', 'DUCT-GW', 'ダクト保温（長方形）（長さ×周長）', 'area', 'lengthHeight'),
+  mechanical('塗装', 'PIPE-PAINT', '配管塗装', a15),
   surface('建築', '内装（面積）', '床仕上げ', '床仕上げ（囲む）', 'area', 'polygon'),
   surface('建築', '内装（面積）', '天井仕上げ', '天井仕上げ（囲む）', 'area', 'polygon'),
   surface('建築', '内装（面積）', '壁仕上げ', '壁仕上げ（長さ×高さ）', 'area', 'lengthHeight'),
@@ -149,7 +171,7 @@ export function masterEntries(): readonly MasterEntry[] {
     const code = t.codeFromSpec === 'concat' ? t.code + spec : t.codeFromSpec === 'replace' ? spec : t.code
     return {
       key: JSON.stringify([t.field, t.category, t.type, spec]), field: t.field, type: t.type,
-      category: t.category, code, ...(!t.codeFromSpec && spec ? { spec } : {}), name: t.name,
+      conditions: [...t.conditions], category: t.category, code, ...(!t.codeFromSpec && spec ? { spec } : {}), name: t.name,
       kind: t.kind, method: t.method, ...(t.defaults ? { defaults: { ...t.defaults } } : {}),
       aggregation: t.kind === 'count' ? 'location' as const : 'document' as const,
       search: normalizeMasterText(`${t.field} ${t.category} ${t.type} ${code} ${t.codeFromSpec ? '' : spec} ${t.name}`),
@@ -167,4 +189,20 @@ export function searchQuantityMaster(query: string, limit = 200): { entries: Mas
   const exact = (entry: MasterEntry) => terms.some(term => !sizeTerm(term) && normalizeMasterText(entry.code) === term)
   const ranked = [...matches.filter(exact), ...matches.filter(entry => !exact(entry))]
   return { entries: ranked.slice(0, Math.max(0, Math.floor(limit))), total: ranked.length }
+}
+
+/** Explicit standard import / user-requested refill, including legacy bundle categories. */
+export function standardConditionsForFixture(f: Pick<FixturePreset, 'category' | 'code'>): string[] {
+  const aliases: Record<string, readonly string[]> = { '電線・ケーブル': ['電線', 'ケーブル（低圧）'], 'ケーブルラック': ['ケーブルラック・ダクト'], '配管': ['配管（給水・給湯）', '配管（排水・通気）', '配管（消火・冷温水・蒸気）', '冷媒管', 'ドレン管'] }
+  const categories = aliases[f.category] ?? [f.category]
+  const types = QUANTITY_MASTER.filter(t => categories.includes(t.category) && (f.code === t.code || t.codeFromSpec === 'concat' && f.code.startsWith(t.code))).sort((a, b) => b.code.length - a.code.length)
+  if (types[0]) return [...types[0].conditions]
+  if (f.category === '配管' && ['SGP', 'VP', 'RP'].includes(f.code)) return [...standardConditions('配管（給水・給湯）', f.code)]
+  return []
+}
+/** Materialize here so both tabs retain candidates through the existing fixture import path. */
+export function fixtureFromPreset(p: FixturePreset, fixtures: readonly CountFixture[]): CountFixture {
+  const { category, code, spec, name, kind, method, defaults, aggregation } = p
+  const line = kind && kind !== 'count' ? nextQuantityLineStyle(fixtures) : undefined
+  return { category, code, spec, name, kind, method, defaults: defaults ? { ...defaults } : undefined, aggregation, conditions: [...(p.conditions ?? standardConditionsForFixture(p))], id: crypto.randomUUID(), order: fixtures.reduce((n, f) => Math.max(n, f.order + 1), 0), style: line ? { ...nextCountStyle([]), color: line.color } : nextCountStyle(fixtures), ...(line ? { line: line.line } : {}) }
 }

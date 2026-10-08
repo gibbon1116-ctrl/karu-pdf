@@ -82,7 +82,7 @@ export function useMeasurementInteraction(props: Props) {
   const cloud = props.tool === 'cloudPolygon'
   const quantityItem = props.tool === 'count' && props.quantityItem && quantityMethod(props.quantityItem) !== 'click' ? props.quantityItem : undefined
   const quantityKind = quantityItem && quantityPoints(quantityMethod(quantityItem) as QuantityMark['method']) === 'polygon' ? 'area' : 'perimeter'
-  const quantityMark = (id = 'draft'): QuantityMark => ({ version: 1, id, itemId: quantityItem!.id, method: quantityMethod(quantityItem!) as QuantityMark['method'], ...quantityItem?.defaults, ...(quantityMethod(quantityItem!) === 'polyline' ? { ...(quantityItem?.routeScope && quantityItem.routeScope !== 'all' ? { scope: quantityItem.routeScope } : {}), ...props.store.routeTemplateItems(quantityItem!.id) } : {}) })
+  const quantityMark = (id = 'draft'): QuantityMark => ({ version: 1, id, itemId: quantityItem!.id, method: quantityMethod(quantityItem!) as QuantityMark['method'], ...quantityItem?.defaults, ...(quantityMethod(quantityItem!) === 'polyline' ? { ...props.store.routeTemplateItems(quantityItem!.id) } : {}) })
   const extraCode = (id: string) => { const f = props.store.getCountFixture(id); return f ? fixtureCode(f) : id }
   const [pending, setPending] = useState<{ mark: QuantityMark; save(mark: QuantityMark): void } | null>(null)
   const constrain = (start: Point, end: Point, shift: boolean): Point => {

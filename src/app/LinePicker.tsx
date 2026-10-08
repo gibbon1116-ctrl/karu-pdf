@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { fixtureCode, nextCountStyle, nextQuantityLineStyle, quantityMethod, type CountFixture } from '../core/countFixtures'
-import { routeMembers, conditionScope, conditionsFromScope } from '../core/quantity'
+import { routeMembers, conditionScope } from '../core/quantity'
 import type { MasterEntry } from '../core/quantityMaster'
 import type { AnnotationStore, EditableAnnotation } from '../editor/AnnotationStore'
 import { QuantitySwatch } from '../editor/countMarkers'
@@ -65,12 +65,12 @@ export default function LinePicker({ store, annotation, onClose }: { store: Anno
       if ('id' in candidate) f = candidate
       else {
         const appearance = nextQuantityLineStyle(fixtures)
-        const { code, spec, name, category, kind, method, defaults, aggregation } = candidate
-        f = { id: crypto.randomUUID(), code, spec, name, category, kind, method, defaults, aggregation, order: fixtures.reduce((n, f) => Math.max(n, f.order + 1), 0), style: { ...nextCountStyle([]), color: appearance.color }, line: appearance.line }
+        const { code, spec, name, category, kind, method, defaults, aggregation, conditions } = candidate
+        f = { id: crypto.randomUUID(), code, spec, name, category, kind, method, defaults, aggregation, conditions: [...(conditions ?? [])], order: fixtures.reduce((n, f) => Math.max(n, f.order + 1), 0), style: { ...nextCountStyle([]), color: appearance.color }, line: appearance.line }
         newFixtures = [f]
       }
       if (entries.some(e => e.itemId === f.id)) return
-      const next = [...entries, { itemId: f.id, count: 1, cond: structuredClone(store.lastRouteConditions.get(f.id) ?? conditionsFromScope(f.routeScope)) }]
+      const next = [...entries, { itemId: f.id, count: 1, cond: structuredClone(store.lastRouteConditions.get(f.id) ?? f.routeDefaults ?? {}) }]
       if (newFixtures.length) store.addFixturesAndSetRouteItems(newFixtures, annotation.id, next)
       else store.setRouteItems(annotation.id, next)
       if (!store.get(annotation.id)?.quantity?.extra?.some(e => e.itemId === f.id)) return

@@ -3,7 +3,7 @@ import { stableJson } from '../core/stableJson'
 import { floorFromDrawingName, normalizeFloor } from '../core/location'
 import { mergeAutomaticDrawingInfo, type DrawingInfo } from '../core/drawingInfo'
 import { validRouteScope, type RouteScope, validRouteCount, validRouteConditions, routeConditionsKey, normalizeRouteConditions, conditionsFromScope, withRouteScope, routeMembers, routeRises, validRises, riseTotal, validCondition, quantityLabel, quantityDimensions, parseQuantityMark, serializeQuantityMark, type RouteConditions, type RoutePart, type PartCondition, type Rise, type QuantityMark } from '../core/quantity'
-import { fixtureCode, quantityKind, quantityMethod, quantityLine, type QuantityLineStyle } from '../core/countFixtures'
+import { fixtureConditionRenames, fixtureCode, quantityKind, quantityMethod, quantityLine, type QuantityLineStyle } from '../core/countFixtures'
 import { symbolRectFromDrag, nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type LegacyChangeData, type Point, type Rect, type RGB, type SymbolName } from '../core/annotations'
 import type { Quad } from 'mupdf'
 import type { FontName } from '../core/fontMetrics'
@@ -66,8 +66,8 @@ export interface EditableAnnotation {
 type ScaleChange = { pageIndex: number; scale: PageScale | null }
 type DrawingChange = { pageIndex: number; info: DrawingInfo | null }
 type RouteTemplate = { itemId: string; extra: NonNullable<QuantityMark['extra']>; count: number; cond?: RouteConditions; name: string }
-type PickupMemory = Array<{ itemId: string; cond?: RouteConditions; condition?: string; members?: RouteTemplate }>
-type HistoryState = AnnotationState[] & { pickupMemory?: PickupMemory; drawings?: DrawingChange[]; scales?: ScaleChange[]; scaleRegions?: Array<{ pageIndex: number; regions: ScaleRegion[] }>; issueMaximum?: number; fixtures?: CountFixture[] }
+type PickupMemory = Array<{ itemId: string; cond?: RouteConditions; condition?: string; conditionSet?: boolean; members?: RouteTemplate }>
+type HistoryState = AnnotationState[] & { routeTemplate?: RouteTemplate | null; pickupMemory?: PickupMemory; drawings?: DrawingChange[]; scales?: ScaleChange[]; scaleRegions?: Array<{ pageIndex: number; regions: ScaleRegion[] }>; issueMaximum?: number; fixtures?: CountFixture[] }
 interface AnnotationState extends Omit<EditableAnnotation, 'dirty'> {}
 interface StoredAnnotation extends AnnotationState {
   deleted: boolean
@@ -314,8 +314,8 @@ export class AnnotationStore {
   routeTemplateItems(itemId: string): Partial<Pick<QuantityMark, 'count' | 'cond' | 'extra'>> {
     const t = this.routeTemplate?.itemId === itemId ? this.routeTemplate : this.lastRouteMembers.get(itemId), f = this.getCountFixture(itemId)
     if (!f || quantityMethod(f) !== 'polyline') return {}
-    if (!t) return this.lastRouteConditions.has(itemId) ? { cond: structuredClone(this.lastRouteConditions.get(itemId)!) } : {}
-    return { count: t.count, cond: structuredClone(this.routeTemplate?.itemId === itemId ? t.cond ?? {} : this.lastRouteConditions.get(itemId) ?? t.cond ?? {}), extra: t.extra.filter(e => { const f = this.getCountFixture(e.itemId); return f && quantityMethod(f) === 'polyline' }).map(e => ({ ...e, cond: structuredClone(this.routeTemplate?.itemId === itemId ? e.cond ?? {} : this.lastRouteConditions.get(e.itemId) ?? e.cond ?? {}) })) }
+    if (!t) return { cond: this.newRouteConditions(itemId) }
+    return { count: t.count, cond: structuredClone(this.routeTemplate?.itemId === itemId ? t.cond ?? f.routeDefaults ?? {} : this.lastRouteConditions.get(itemId) ?? t.cond ?? f.routeDefaults ?? {}), extra: t.extra.filter(e => { const f = this.getCountFixture(e.itemId); return f && quantityMethod(f) === 'polyline' }).map(e => ({ ...e, cond: structuredClone(this.routeTemplate?.itemId === itemId ? e.cond ?? this.getCountFixture(e.itemId)?.routeDefaults ?? {} : this.lastRouteConditions.get(e.itemId) ?? e.cond ?? this.getCountFixture(e.itemId)?.routeDefaults ?? {}) })) }
   }
   private recentFixtures: readonly string[] = []
   get recentFixtureIds(): readonly string[] { return this.recentFixtures }
@@ -641,14 +641,16 @@ export class AnnotationStore {
     })
   }
   readonly lastRouteConditions = new Map<string, RouteConditions>()
-  readonly lastCondition = new Map<string, string>()
+  readonly lastCondition = new Map<string, string | undefined>()
+  newRouteConditions(itemId: string): RouteConditions { return structuredClone(this.lastRouteConditions.get(itemId) ?? this.getCountFixture(itemId)?.routeDefaults ?? {}) }
+  private newCondition(itemId: string): string | undefined { return this.lastCondition.has(itemId) ? this.lastCondition.get(itemId) : this.getCountFixture(itemId)?.defaultCondition }
   private readonly lastRouteMembers = new Map<string, NonNullable<AnnotationStore['routeTemplate']>>()
   private rememberRoute(q: QuantityMark): void {
     for (const e of routeMembers(q)) this.lastRouteConditions.set(e.itemId, structuredClone(e.cond))
     this.lastRouteMembers.set(q.itemId, { itemId: q.itemId, count: q.count ?? 1, cond: structuredClone(q.cond ?? {}), extra: structuredClone(q.extra ?? []), name: '' })
   }
   private pickupMemory(ids: Iterable<string>): PickupMemory {
-    return [...new Set(ids)].map(itemId => ({ itemId, cond: structuredClone(this.lastRouteConditions.get(itemId)), condition: this.lastCondition.get(itemId), members: structuredClone(this.lastRouteMembers.get(itemId)) }))
+    return [...new Set(ids)].map(itemId => ({ itemId, cond: structuredClone(this.lastRouteConditions.get(itemId)), condition: this.lastCondition.get(itemId), conditionSet: this.lastCondition.has(itemId), members: structuredClone(this.lastRouteMembers.get(itemId)) }))
   }
   private pickupMemoryIds(annotations: readonly AnnotationState[]): string[] {
     return annotations.flatMap(a => a.quantity ? routeMembers(a.quantity).map(e => e.itemId) : a.count ? [countFixtureId(a.count)] : [])
@@ -656,7 +658,7 @@ export class AnnotationStore {
   private restorePickupMemory(memory: PickupMemory): void {
     for (const m of memory) {
       if (m.cond === undefined) this.lastRouteConditions.delete(m.itemId); else this.lastRouteConditions.set(m.itemId, structuredClone(m.cond))
-      if (m.condition === undefined) this.lastCondition.delete(m.itemId); else this.lastCondition.set(m.itemId, m.condition)
+      if (!m.conditionSet) this.lastCondition.delete(m.itemId); else this.lastCondition.set(m.itemId, m.condition)
       if (m.members === undefined) this.lastRouteMembers.delete(m.itemId); else this.lastRouteMembers.set(m.itemId, structuredClone(m.members))
     }
   }
@@ -749,7 +751,7 @@ export class AnnotationStore {
       if (!mark) return
       if (condition === undefined) delete mark.condition; else mark.condition = condition
       const itemId = a.quantity?.itemId ?? countFixtureId(a.count!)
-      if (condition === undefined) this.lastCondition.delete(itemId); else this.lastCondition.set(itemId, condition)
+      this.lastCondition.set(itemId, condition)
     }, true)
   }
   fixtureRemovalCounts(id: string): { deleted: number; detached: number } {
@@ -791,6 +793,31 @@ export class AnnotationStore {
     serializeCountFixtures(fixtures)
     const before: HistoryState = [], after: HistoryState = []
     before.fixtures = this.getCountFixtures(); after.fixtures = structuredClone(fixtures)
+    const renames = new Map(fixtures.map(f => [f.id, fixtureConditionRenames(f)] as const).filter(([, edits]) => edits.size))
+    const renamedIds = [...renames.keys()] as string[]
+    if (renames.size) { before.pickupMemory = this.pickupMemory(renamedIds); before.routeTemplate = structuredClone(this.routeTemplate) }
+    const renameCondition = (itemId: string, v: PartCondition) => typeof v === 'string' ? renames.get(itemId)?.get(v) ?? v : v
+    const renameRoute = (itemId: string, c: RouteConditions = {}): RouteConditions => normalizeRouteConditions({ plan: renameCondition(itemId, c.plan), rise: Array.isArray(c.rise) ? c.rise.map(v => renameCondition(itemId, v)) : renameCondition(itemId, c.rise), slack: renameCondition(itemId, c.slack) })
+    const renameTemplate = (t: RouteTemplate): RouteTemplate => ({ ...t, cond: renameRoute(t.itemId, t.cond), extra: t.extra.map(e => ({ ...e, cond: renameRoute(e.itemId, e.cond) })) })
+    // A longer name repeated across many members/rises can exceed the mark limit.
+    // Reject the whole edit before changing fixtures, marks or inheritance memory.
+    for (const edits of renames.values()) for (const name of edits.values()) if (!validCondition(name)) throw new Error('改名後の施工条件は1〜30文字で、前後の空白や改行を入れずに入力してください。')
+    if (renames.size) for (const a of this.annotations.values()) {
+      const q = a.quantity
+      if (a.deleted || q?.method !== 'polyline' || !routeMembers(q).some(e => renames.has(e.itemId))) continue
+      const renamed = { ...q, cond: renameRoute(q.itemId, q.cond), extra: q.extra?.map(e => ({ ...e, cond: renameRoute(e.itemId, e.cond) })) }
+      if (!parseQuantityMark(serializeQuantityMark(renamed))) throw new Error('施工条件の改名で経路の保存容量を超えます。条件名を短くしてください。')
+    }
+    for (const id of renamedIds) {
+      if (this.lastRouteConditions.has(id)) this.lastRouteConditions.set(id, renameRoute(id, this.lastRouteConditions.get(id)))
+      if (this.lastCondition.has(id)) this.lastCondition.set(id, renameCondition(id, this.lastCondition.get(id)) as string | undefined)
+    }
+    // Compositions can reference an edited item as an extra member of another item.
+    const memoryIds = [...new Set([...renamedIds, ...[...this.lastRouteMembers].filter(([, t]) => [t.itemId, ...t.extra.map(e => e.itemId)].some(id => renames.has(id))).map(([id]) => id)])]
+    if (renames.size) before.pickupMemory = [...before.pickupMemory!, ...this.pickupMemory(memoryIds.filter(id => !renames.has(id)))]
+    for (const [id, t] of this.lastRouteMembers) if (memoryIds.includes(id)) this.lastRouteMembers.set(id, renameTemplate(t))
+    if (this.routeTemplate && renames.size) this.routeTemplate = renameTemplate(this.routeTemplate)
+    if (renames.size) { after.pickupMemory = this.pickupMemory(memoryIds); after.routeTemplate = structuredClone(this.routeTemplate) }
     const appearance = (f: CountFixture | undefined) => f ? stableJson([f.name, f.code, f.spec, f.style, f.line]) : ''
     const changed = new Set(fixtures.filter(f => appearance(f) !== appearance(this.getCountFixture(f.id))).map(f => f.id))
     this.fixtures = structuredClone(fixtures)
@@ -798,9 +825,15 @@ export class AnnotationStore {
     for (const a of this.annotations.values()) if (!a.deleted && (a.count || a.quantity)) {
       const id = a.quantity?.itemId ?? countFixtureId(a.count!)
       const routeIds = [id, ...(a.quantity?.extra ?? []).map(e => e.itemId)]
-      if (!routeIds.some(id => removeIds.includes(id) || changed.has(id))) continue
+      if (!routeIds.some(id => removeIds.includes(id) || changed.has(id) || renames.has(id))) continue
       before.push(cloneState(a))
+      if (a.quantity?.method !== 'polyline' && a.quantity?.condition !== undefined) a.quantity.condition = renameCondition(id, a.quantity.condition) as string
+      if (a.count?.version === 2 && a.count.condition !== undefined) a.count.condition = renameCondition(id, a.count.condition) as string
       if (a.quantity) {
+        if (a.quantity.method === 'polyline') {
+          a.quantity.cond = renameRoute(a.quantity.itemId, a.quantity.cond)
+          a.quantity.extra = a.quantity.extra?.map(e => ({ ...e, cond: renameRoute(e.itemId, e.cond) }))
+        }
         const remaining = routeMembers(a.quantity).filter(e => !removeIds.includes(e.itemId))
         if (!remaining.length) { a.deleted = true; this.selection.delete(a.id) }
         else {
@@ -1042,13 +1075,13 @@ export class AnnotationStore {
       if (quantity.cond === undefined) {
         const template = this.routeTemplateItems(quantity.itemId)
         if (quantity.count === undefined && quantity.extra === undefined) quantity = { ...quantity, ...template }
-        else if (this.lastRouteConditions.has(quantity.itemId)) quantity.cond = structuredClone(this.lastRouteConditions.get(quantity.itemId)!)
+        else quantity.cond = this.newRouteConditions(quantity.itemId)
       }
-      if (quantity.extra) quantity.extra = quantity.extra.map(e => ({ ...e, ...(e.cond === undefined && this.lastRouteConditions.has(e.itemId) ? { cond: structuredClone(this.lastRouteConditions.get(e.itemId)!) } : {}) }))
+      if (quantity.extra) quantity.extra = quantity.extra.map(e => ({ ...e, ...(e.cond === undefined ? { cond: this.newRouteConditions(e.itemId) } : {}) }))
       quantity = parseQuantityMark(serializeQuantityMark(quantity))
       if (!quantity) throw new Error('数量拾いの値が不正です。')
-    } else if (quantity && quantity.condition === undefined && this.lastCondition.has(quantity.itemId)) quantity.condition = this.lastCondition.get(quantity.itemId)
-    if (count?.version === 2 && count.condition === undefined && this.lastCondition.has(count.fixtureId)) count.condition = this.lastCondition.get(count.fixtureId)
+    } else if (quantity && quantity.condition === undefined) quantity.condition = this.newCondition(quantity.itemId)
+    if (count?.version === 2 && count.condition === undefined) count.condition = this.newCondition(count.fixtureId)
     const annotation: StoredAnnotation = {
       quantity, quantityDash: input.quantityDash,
       count,
@@ -1589,6 +1622,7 @@ export class AnnotationStore {
 
   private restoreMany(target: HistoryState, counterpart: HistoryState): void {
     if (target.pickupMemory) this.restorePickupMemory(target.pickupMemory)
+    if (target.routeTemplate !== undefined) this.routeTemplate = structuredClone(target.routeTemplate)
     for (const item of target.drawings ?? []) {
       const auto = this.automaticDrawings.get(item.pageIndex)
       this.drawings.set(item.pageIndex, auto ? mergeAutomaticDrawingInfo(item.info, auto) : item.info)
@@ -1756,7 +1790,7 @@ export class AnnotationStore {
     step: HistoryStep<HistoryState>,
     mapper: (state: AnnotationState) => AnnotationState,
   ): HistoryStep<HistoryState> {
-    return { before: Object.assign(step.before.map(mapper), { pickupMemory: step.before.pickupMemory, drawings: step.before.drawings, scales: step.before.scales, scaleRegions: step.before.scaleRegions, issueMaximum: step.before.issueMaximum, fixtures: step.before.fixtures }), after: Object.assign(step.after.map(mapper), { pickupMemory: step.after.pickupMemory, drawings: step.after.drawings, scales: step.after.scales, scaleRegions: step.after.scaleRegions, issueMaximum: step.after.issueMaximum, fixtures: step.after.fixtures }) }
+    return { before: Object.assign(step.before.map(mapper), { routeTemplate: step.before.routeTemplate, pickupMemory: step.before.pickupMemory, drawings: step.before.drawings, scales: step.before.scales, scaleRegions: step.before.scaleRegions, issueMaximum: step.before.issueMaximum, fixtures: step.before.fixtures }), after: Object.assign(step.after.map(mapper), { routeTemplate: step.after.routeTemplate, pickupMemory: step.after.pickupMemory, drawings: step.after.drawings, scales: step.after.scales, scaleRegions: step.after.scaleRegions, issueMaximum: step.after.issueMaximum, fixtures: step.after.fixtures }) }
   }
 
   private markTouched(annotation: AnnotationState): void {

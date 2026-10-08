@@ -180,7 +180,7 @@ it('sets area/count conditions together, inherits them, and leaves lines unchang
   store.redo(); expect([store.get(area.id)!.quantity, store.get(count.id)!.count]).toStrictEqual(changed)
   const next = store.create(routeInput({ ...base, itemId: 'area', method: 'polygon' }))
   expect(next.quantity!.condition).toBe('屋外')
-  store.setQuantityCondition([area.id], undefined); expect(store.lastCondition.has('area')).toBe(false)
+  store.setQuantityCondition([area.id], undefined); expect(store.lastCondition.has('area')).toBe(true); expect(store.lastCondition.get('area')).toBeUndefined()
   store.undo(); expect(store.get(area.id)!.quantity!.condition).toBe('屋外')
   store.redo(); expect(store.get(area.id)!.quantity).not.toHaveProperty('condition')
   const [led] = store.createCountMarks('led', [{ pageIndex: 0, center: [20, 20] }])
@@ -269,7 +269,7 @@ it('restores condition inheritance memories with member/condition Undo and Redo'
  store.redo(); expect(store.lastCondition.get('area')).toBe('屋外')
  store.setQuantityCondition([area.id], undefined)
  store.undo(); expect(store.lastCondition.get('area')).toBe('屋外')
- store.redo(); expect(store.lastCondition.has('area')).toBe(false)
+ store.redo(); expect(store.lastCondition.has('area')).toBe(true); expect(store.lastCondition.get('area')).toBeUndefined()
 })
 it('remembers explicitly placed configurations and keeps every mutated mark round-trippable', async () => {
  const { store } = await setup()

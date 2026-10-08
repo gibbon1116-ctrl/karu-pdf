@@ -1,6 +1,6 @@
 import { useContext, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
-import { fixtureCode, quantityAggregation, COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, COUNT_SIZES, COUNT_OPACITIES, countHex, countRgb, nextCountStyle, nextQuantityLineStyle, sameFixtureAppearance, quantityKind, quantityMethod, QUANTITY_METHODS, quantityLine, QUANTITY_LINE_WIDTHS, QUANTITY_DASHES, type QuantityKind, type QuantityLineAppearance, type QuantityLineStyle, serializeCountFixtures, type CountFixture, type CountStyle } from '../core/countFixtures'
-import { ROUTE_SCOPES, type RouteScope, quantityDimensions, quantityLabel, QUANTITY_DIMENSIONS, type QuantityMark } from '../core/quantity'
+import { fixtureCode, quantityAggregation, COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, COUNT_SIZES, COUNT_OPACITIES, countHex, countRgb, nextCountStyle, nextQuantityLineStyle, sameFixtureAppearance, quantityKind, quantityMethod, QUANTITY_METHODS, quantityLine, QUANTITY_LINE_WIDTHS, QUANTITY_DASHES, type QuantityKind, type QuantityLineAppearance, type QuantityLineStyle, serializeCountFixtures, fixtureConditionsError, setFixtureConditionRenames, type CountFixture, type CountStyle } from '../core/countFixtures'
+import { normalizeRouteConditions, type PartCondition, quantityDimensions, quantityLabel, QUANTITY_DIMENSIONS, type QuantityMark } from '../core/quantity'
 import { FixtureSampleContext } from '../editor/AnnotationLayer'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 import { groupFixtures } from './fixtureOrder'
@@ -10,6 +10,19 @@ let fixtureDialogPosition = { x: 0, y: 0 }
 
 export default function FixtureDialog({ initial, fixtures, editing, duplicate = false, hasMarks = false, onSave, onClose }: { initial: CountFixture; fixtures: readonly CountFixture[]; editing: boolean; duplicate?: boolean; hasMarks?: boolean; onSave(fixture: CountFixture): void; onClose(): void }) {
   const dialog = useRef<HTMLDialogElement>(null), [value, setValue] = useState(initial), [error, setError] = useState('')
+  const [conditionInput, setConditionInput] = useState(''), [conditionError, setConditionError] = useState('')
+  const [conditionDrafts, setConditionDrafts] = useState(initial.conditions ?? [])
+  const conditionRenames = useRef(new Map<string, string>())
+  const conditionOrigins = useRef<Array<string | undefined>>([...(initial.conditions ?? [])])
+  const changeCandidates = (conditions: string[], origins: Array<string | undefined>, renamed?: [string, string]) => {
+    const message = fixtureConditionsError({ conditions })
+    if (message) { setConditionError(message); return false }
+    const replace = (v: PartCondition) => typeof v === 'string' ? renamed && v === renamed[0] ? renamed[1] : conditions.includes(v) ? v : undefined : v
+    setValue(v => ({ ...v, conditions, defaultCondition: replace(v.defaultCondition) as string | undefined,
+      routeDefaults: v.routeDefaults === undefined ? undefined : normalizeRouteConditions({ plan: replace(v.routeDefaults.plan), rise: Array.isArray(v.routeDefaults.rise) ? v.routeDefaults.rise.map(replace) : replace(v.routeDefaults.rise), slack: replace(v.routeDefaults.slack) }) }))
+    if (renamed) { const index = value.conditions?.indexOf(renamed[0]) ?? -1, origin = conditionOrigins.current[index]; if (origin !== undefined) { if (origin === renamed[1]) conditionRenames.current.delete(origin); else conditionRenames.current.set(origin, renamed[1]) } }
+    conditionOrigins.current = origins; setConditionDrafts([...conditions]); setConditionError(''); return true
+  }
   const specInput = useRef<HTMLInputElement>(null), aggregationTouched = useRef(editing)
   const categories = useMemo(() => {
     const result = groupFixtures(fixtures).map(g => g.category)
@@ -74,7 +87,7 @@ export default function FixtureDialog({ initial, fixtures, editing, duplicate = 
   const changeKind = (kind: QuantityKind) => {
     try {
       const appearance = kind !== 'count' && !editing ? nextQuantityLineStyle(fixtures) : undefined
-      setValue(v => ({ ...v, aggregation: aggregationTouched.current ? quantityAggregation(v) : kind === 'count' ? 'location' : 'document', kind: kind === 'count' ? undefined : kind, routeScope: kind === 'length' ? v.routeScope : undefined, method: undefined, style: appearance ? { ...v.style, color: appearance.color } : v.style, line: kind !== 'count' ? appearance?.line ?? { width: 1.5, dash: 'solid' } : undefined, defaults: kind !== 'count' ? {} : undefined }))
+      setValue(v => ({ ...v, aggregation: aggregationTouched.current ? quantityAggregation(v) : kind === 'count' ? 'location' : 'document', kind: kind === 'count' ? undefined : kind, routeDefaults: kind === 'length' ? v.routeDefaults : undefined, defaultCondition: kind === 'length' ? undefined : v.defaultCondition, method: undefined, style: appearance ? { ...v.style, color: appearance.color } : v.style, line: kind !== 'count' ? appearance?.line ?? { width: 1.5, dash: 'solid' } : undefined, defaults: kind !== 'count' ? {} : undefined }))
       setError('')
     } catch (reason) { setError(String(reason)) }
   }
@@ -85,8 +98,12 @@ export default function FixtureDialog({ initial, fixtures, editing, duplicate = 
     <form onSubmit={event => {
       event.preventDefault()
       try {
+        if (conditionDrafts.some((text, i) => text !== value.conditions?.[i])) { setConditionError('候補の名前を編集したら「名前の変更」を押してください。'); return }
+        const message = fixtureConditionsError(value)
+        if (message) { setConditionError(message); return }
         const f = { ...value, aggregation: quantityAggregation(value), spec: value.spec?.trim() || undefined, name: value.name.trim(), category: categories.find(c => c.trim() === value.category.trim()) ?? value.category.trim() }
         serializeCountFixtures(editing ? fixtures.map(p => p.id === f.id ? f : p) : [...fixtures, f])
+        setFixtureConditionRenames(f, conditionRenames.current)
         onSave(f)
       } catch (reason) { setError(String(reason)) }
     }}>
@@ -119,7 +136,7 @@ export default function FixtureDialog({ initial, fixtures, editing, duplicate = 
         <label>透明度<select value={value.style.opacity} onChange={e => style({ opacity: Number(e.currentTarget.value) })}>{COUNT_OPACITIES.map(n => <option key={n} value={n}>{Math.round(n * 100)}%</option>)}</select></label></div>
       <label><input type="checkbox" checked={value.style.showCode} onChange={e => style({ showCode: e.currentTarget.checked })} />略号を図面に表示</label>
       <label>メモ<textarea maxLength={200} value={value.memo ?? ''} onChange={e => setValue({ ...value, memo: e.currentTarget.value })} /></label>
-      {length ? <div className="quantity-preview"><QuantitySwatch fixture={value} preview /><span>{quantityLabel(quantityMethod(value) === 'polygon' || quantityMethod(value) === 'polygonDepth' ? [[0, 0], [8, 0], [8, 6], [0, 6]] : [[0, 0], [quantityMethod(value) === 'polyline' ? 9.35 : 24, 0]], 1000, { version: 1, id: 'preview', itemId: value.id, method: quantityMethod(value) as QuantityMark['method'], ...value.defaults, scope: value.routeScope }, fixtureCode(value), value.style.showCode)}</span></div> : <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + value.style.size * (1 + .7 * fixtureCode(value).length))} 50`} aria-label="印の見本"><CountMarker style={value.style} code={fixtureCode(value)} /></svg>}
+      {length ? <div className="quantity-preview"><QuantitySwatch fixture={value} preview /><span>{quantityLabel(quantityMethod(value) === 'polygon' || quantityMethod(value) === 'polygonDepth' ? [[0, 0], [8, 0], [8, 6], [0, 6]] : [[0, 0], [quantityMethod(value) === 'polyline' ? 9.35 : 24, 0]], 1000, { version: 1, id: 'preview', itemId: value.id, method: quantityMethod(value) as QuantityMark['method'], ...value.defaults, cond: value.routeDefaults, condition: value.defaultCondition }, fixtureCode(value), value.style.showCode)}</span></div> : <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + value.style.size * (1 + .7 * fixtureCode(value).length))} 50`} aria-label="印の見本"><CountMarker style={value.style} code={fixtureCode(value)} /></svg>}
       {!length && <div className="fixture-sample-editor">
         {value.sample && <img className="fixture-sample-preview" src={`data:image/png;base64,${value.sample.png}`} width={value.sample.width} height={value.sample.height} alt="図面から切り取った見本" />}
         <div className="fixture-fields"><button type="button" disabled={!sampleInteraction} onClick={() => void capture()}>図面から見本を切り取る</button>
@@ -128,9 +145,26 @@ export default function FixtureDialog({ initial, fixtures, editing, duplicate = 
       }
       {quantityMethod(value) === 'polyline' && <label>立上り・立下り（新しく拾うときの初期値）<input type="number" min="0" max="1000" step="0.01" value={value.defaults?.addM ?? 0} onChange={e => { const addM = Number(e.currentTarget.value); setValue(v => ({ ...v, defaults: { ...v.defaults, addM } })) }} /> m</label>}
       {quantityMethod(value) === 'polyline' && <>
-        <label>余長・その他（初期値）<input type="number" min="0" max="1000" step="0.01" value={value.defaults?.slackM ?? 0} onChange={e => { const slackM = Number(e.currentTarget.value); setValue(v => ({ ...v, defaults: { ...v.defaults, slackM: slackM || undefined } })) }} /> m</label>
-        <label>経路での範囲（初期値）<select aria-label="経路での範囲（初期値）" value={value.routeScope ?? 'all'} onChange={e => { const scope = e.currentTarget.value as RouteScope; setValue(v => ({ ...v, routeScope: scope === 'all' ? undefined : scope })) }}>{Object.entries(ROUTE_SCOPES).map(([scope, label]) => <option key={scope} value={scope}>{label}</option>)}</select></label>
+        <label>その他の加算（初期値）<input title="図示されない付加長を、設計図書に指示がある場合だけ入れる。切り無駄・割増は入れない（単価に含まれる）" type="number" min="0" max="1000" step="0.01" value={value.defaults?.slackM ?? 0} onChange={e => { const slackM = Number(e.currentTarget.value); setValue(v => ({ ...v, defaults: { ...v.defaults, slackM: slackM || undefined } })) }} /> m</label>
+
       </>}
+      <fieldset className="fixture-conditions"><legend>施工条件</legend>
+        <div className="fixture-condition-add"><label>追加する施工条件<input aria-label="追加する施工条件" value={conditionInput} onChange={e => setConditionInput(e.currentTarget.value)} /></label><button type="button" onClick={() => { if (changeCandidates([...(value.conditions ?? []), conditionInput], [...conditionOrigins.current, undefined])) setConditionInput('') }}>追加</button></div>
+        <ol>{(value.conditions ?? []).map((condition, i) => <li key={i}>
+          <input aria-label={'施工条件の候補' + (i + 1)} value={conditionDrafts[i] ?? condition} onChange={e => { const text = e.currentTarget.value; setConditionDrafts(previous => previous.map((v, j) => j === i ? text : v)) }} />
+          <button type="button" onClick={() => { const name = conditionDrafts[i]; changeCandidates(value.conditions!.map((v, j) => j === i ? name : v), [...conditionOrigins.current], [condition, name]) }}>名前の変更</button>
+          <button type="button" onClick={() => changeCandidates(value.conditions!.filter((_, j) => j !== i), conditionOrigins.current.filter((_, j) => j !== i))}>削除</button>
+          {([-1, 1] as const).map(delta => <button type="button" key={delta} disabled={i + delta < 0 || i + delta >= value.conditions!.length} onClick={() => { const next = [...value.conditions!], origins = [...conditionOrigins.current]; [next[i], next[i + delta]] = [next[i + delta], next[i]]; [origins[i], origins[i + delta]] = [origins[i + delta], origins[i]]; changeCandidates(next, origins) }}>{delta === -1 ? '上へ' : '下へ'}</button>)}
+        </li>)}</ol>
+        <button type="button" onClick={async () => {
+          try { const m = await import('../core/quantityMaster'), additions = m.standardConditionsForFixture(value).filter(c => !value.conditions?.includes(c)); changeCandidates([...(value.conditions ?? []), ...additions], [...conditionOrigins.current, ...additions.map(() => undefined)]) }
+          catch { setConditionError('標準の候補を読み込めませんでした。') }
+        }}>標準の候補を入れる</button>
+        {quantityKind(value) === 'length' ? (['plan', 'rise', 'slack'] as const).map(part => <label key={part}>{{ plan: '平面', rise: '立上り・立下り', slack: 'その他の加算' }[part]}の既定<select aria-label={{ plan: '平面', rise: '立上り・立下り', slack: 'その他の加算' }[part] + 'の既定'} value={Array.isArray(value.routeDefaults?.[part]) ? 'per-rise' : value.routeDefaults?.[part] === null ? 'excluded' : typeof value.routeDefaults?.[part] === 'string' ? 'condition:' + value.routeDefaults[part] : 'unset'} onChange={e => { const selected = e.currentTarget.value; setValue(v => ({ ...v, routeDefaults: normalizeRouteConditions({ ...v.routeDefaults, [part]: selected === 'unset' ? undefined : selected === 'excluded' ? null : selected.slice(10) }) })) }}>
+          <option value="unset">未設定</option>{Array.isArray(value.routeDefaults?.[part]) && <option value="per-rise" disabled>立上りごとの既定（保存済み）</option>}{(value.conditions ?? []).map(c => <option key={c} value={'condition:' + c}>{c}</option>)}<option value="excluded">数えない</option>
+        </select></label>) : <label>既定の施工条件<select aria-label="既定の施工条件" value={value.defaultCondition ?? ''} onChange={e => { const selected = e.currentTarget.value; setValue(v => ({ ...v, defaultCondition: selected || undefined })) }}><option value="">未設定</option>{(value.conditions ?? []).map(c => <option key={c} value={c}>{c}</option>)}</select></label>}
+        {conditionError && <p role="alert">{conditionError}</p>}
+      </fieldset>
       {quantityDimensions(quantityMethod(value)).map(key => <label key={key}>{QUANTITY_DIMENSIONS[key]}（新しく拾うときの初期値）<span className="quantity-input-unit"><input aria-label={QUANTITY_DIMENSIONS[key] + '（新しく拾うときの初期値）'} type="number" min="0" max="1000" step="0.01" value={value.defaults?.[key] ?? ''} onChange={e => { const text = e.currentTarget.value; setValue(v => ({ ...v, defaults: { ...v.defaults, [key]: text === '' ? undefined : Number(text) } })) }} />m</span></label>)}
       {quantityDimensions(quantityMethod(value)).length > 0 && <p>空欄または0なら、拾うときに寸法を入力します。</p>}
       {!!collisions.length && <p role="status">同じ見た目の項目があります: {collisions.map(f => `${fixtureCode(f)} ${f.name}`.trim()).join('、')}</p>}

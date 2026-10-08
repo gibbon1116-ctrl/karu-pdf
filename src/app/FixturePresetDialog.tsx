@@ -85,8 +85,17 @@ export default function FixturePresetDialog({ sources, fixtures = [], onAdd, onC
       </label>)}</div>
     </div>}
     {error && <p role="alert">{error}</p>}
-    <div className="dialog-actions"><button onClick={onClose}>閉じる</button><button disabled={specTab ? chosen.length === 0 : !items?.some((_, i) => !unchecked.has(i))} onClick={() => {
-      try { onAdd(specTab ? chosen : items.filter((_, i) => !unchecked.has(i))); onClose() } catch (reason) { setError(String(reason)) }
+    <div className="dialog-actions"><button onClick={onClose}>閉じる</button><button disabled={specTab ? chosen.length === 0 : !items?.some((_, i) => !unchecked.has(i))} onClick={async () => {
+      try {
+        const selectedItems = specTab ? chosen : items.filter((_, i) => !unchecked.has(i))
+        if (sources) onAdd(selectedItems)
+        else {
+          const m = master ?? await import('../core/quantityMaster')
+          const available = [...fixtures], additions = selectedItems.map(item => { const f = m.fixtureFromPreset(item, available); available.push(f); return f })
+          onAdd(additions)
+        }
+        onClose()
+      } catch (reason) { setError(String(reason)) }
     }}>{specTab ? `選んだ項目を追加（${chosen.length}件）` : '選んだ項目を追加'}</button></div>
   </dialog>
 }

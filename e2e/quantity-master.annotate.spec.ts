@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import mupdf from 'mupdf'
 import { FIXTURE_PRESETS, fixtureCode, readCountFixtures } from '../src/core/countFixtures'
+import { listAnnotations } from '../src/core/annotations'
 
 test.use({ serviceWorkers: 'block' })
 
@@ -48,6 +49,70 @@ async function clickPoint(page: Page, x: number, y: number) {
 const emName = 'EM-CE 60sq-3C 600V架橋ポリエチレン絶縁耐燃性ポリエチレンシースケーブル'
 const cvName = 'CV 60sq-3C 600V架橋ポリエチレン絶縁ビニルシースケーブル'
 const pfName = (code: string) => `${code} 合成樹脂製可とう電線管（PF管）`
+
+async function addCVAndEdit(page: Page) {
+  await open(page)
+  const master = await masterDialog(page)
+  await master.getByLabel('標準マスタを検索', { exact: true }).fill('CV 60sq-3C')
+  await master.getByRole('checkbox', { name: `${cvName}（長さ・m）`, exact: true }).check()
+  await master.getByRole('button', { name: '選んだ項目を追加（1件）', exact: true }).click()
+  const panel = page.getByTestId('fixture-panel')
+  await panel.getByRole('button', { name: cvName, exact: true }).click()
+  await panel.getByRole('button', { name: '管理', exact: true }).click()
+  await panel.getByRole('button', { name: '編集', exact: true }).click()
+  return page.getByRole('dialog', { name: '項目を編集', exact: true })
+}
+
+test('CV candidates start unset and support validation, add, rename, delete, reorder and explicit standard refill', async ({ page }) => {
+  let editor = await addCVAndEdit(page)
+  const section = editor.locator('.fixture-conditions')
+  await expect(section.locator('li')).toHaveCount(8)
+  await expect(editor.getByLabel('施工条件の候補1', { exact: true })).toHaveValue('管内配線')
+  for (const part of ['平面', '立上り・立下り', 'その他の加算']) await expect(editor.getByLabel(part + 'の既定', { exact: true })).toHaveValue('unset')
+  await editor.getByLabel('追加する施工条件', { exact: true }).fill(' 前後空白 ')
+  await section.getByRole('button', { name: '追加', exact: true }).click()
+  await expect(section.getByRole('alert')).toContainText('前後の空白')
+  await editor.getByLabel('追加する施工条件', { exact: true }).fill('特殊配線')
+  await section.getByRole('button', { name: '追加', exact: true }).click()
+  await expect(section.locator('li')).toHaveCount(9)
+  const custom = section.locator('li').last()
+  await custom.getByRole('textbox').fill('指定配線')
+  await custom.getByRole('button', { name: '名前の変更', exact: true }).click()
+  await custom.getByRole('button', { name: '上へ', exact: true }).click()
+  await expect(editor.getByLabel('施工条件の候補8', { exact: true })).toHaveValue('指定配線')
+  await section.locator('li').nth(7).getByRole('button', { name: '下へ', exact: true }).click()
+  await expect(editor.getByLabel('施工条件の候補9', { exact: true })).toHaveValue('指定配線')
+  await section.locator('li').first().getByRole('button', { name: '削除', exact: true }).click()
+  await section.getByRole('button', { name: '標準の候補を入れる', exact: true }).click()
+  await expect(editor.getByLabel('施工条件の候補9', { exact: true })).toHaveValue('管内配線')
+  await section.getByRole('button', { name: '標準の候補を入れる', exact: true }).click()
+  await expect(section.locator('li')).toHaveCount(9)
+  await editor.getByRole('button', { name: '変更する', exact: true }).click()
+  await page.getByTestId('fixture-panel').getByRole('button', { name: '編集', exact: true }).click()
+  editor = page.getByRole('dialog', { name: '項目を編集', exact: true })
+  await expect(editor.getByLabel('施工条件の候補8', { exact: true })).toHaveValue('指定配線')
+  await expect(editor.getByLabel('平面の既定', { exact: true })).toHaveValue('unset')
+})
+
+test('new CV routes use the user-selected defaults for each part and persist them', async ({ page }) => {
+  const editor = await addCVAndEdit(page)
+  for (const part of ['平面', '立上り・立下り', 'その他の加算']) await editor.getByLabel(part + 'の既定', { exact: true }).selectOption('condition:ケーブルラック配線')
+  await editor.getByRole('button', { name: '変更する', exact: true }).click()
+  await page.getByRole('button', { name: '数量拾い', exact: true }).click()
+  await clickPoint(page, 100, 220)
+  const scale = page.getByRole('dialog', { name: '縮尺の設定（1 ページ）', exact: true })
+  await scale.getByLabel('縮尺の分母').fill('100')
+  await scale.getByRole('button', { name: '決定', exact: true }).click()
+  await clickPoint(page, 100, 220); await clickPoint(page, 172, 220); await page.keyboard.press('Enter')
+  await expect(page.locator('.measurement-shape')).toHaveCount(1)
+  const bytes = await page.evaluate(async () => [...(await window.__karu!.saveToBytes())!])
+  const doc = new mupdf.PDFDocument(new Uint8Array(bytes))
+  try {
+    const expected = { plan: 'ケーブルラック配線', rise: 'ケーブルラック配線', slack: 'ケーブルラック配線' }
+    expect(readCountFixtures(doc)[0].routeDefaults).toEqual(expected)
+    expect(listAnnotations(doc, 0).find(a => a.quantity)?.quantity?.cond).toEqual(expected)
+  } finally { doc.destroy() }
+})
 
 test('selects only requested specs, undoes one batch, draws PF22 and persists four items', async ({ page }) => {
   await open(page)

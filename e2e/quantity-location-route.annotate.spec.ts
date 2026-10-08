@@ -21,7 +21,7 @@ async function add(page:Page,code:string,name:string,spec:string,length=false,sc
  const d=page.getByRole('dialog',{name:'項目を追加',exact:true})
  await d.getByLabel('名称',{exact:true}).fill(name);await d.getByLabel('略号',{exact:true}).fill(code);await d.getByLabel('規格',{exact:true}).fill(spec)
  if(length)await d.getByRole('radio',{name:'長さ',exact:true}).check()
- if(scope){await d.getByLabel('経路での範囲（初期値）',{exact:true}).selectOption(scope);await d.getByLabel('余長・その他（初期値）').fill('1')}
+ if(scope){if(scope === 'rise') await d.getByLabel('平面の既定',{exact:true}).selectOption('excluded'); if(scope !== 'all') await d.getByLabel('その他の加算の既定',{exact:true}).selectOption('excluded');await d.getByLabel('その他の加算（初期値）').fill('1')}
  await expect(d.getByRole('radio',{name:length?'全図面の合計':'場所別（階・部屋ごと）',exact:true})).toBeChecked()
  await d.getByRole('button',{name:'追加する',exact:true}).click()
 }
@@ -133,7 +133,7 @@ test('route scopes, separate rise/slack, defaults, Undo and saved quantities', a
  const saved=await page.evaluate(async()=>[...(await window.__karu!.saveToBytes())!])
  const doc=new mupdf.PDFDocument(new Uint8Array(saved))
  try {
-  expect(readCountFixtures(doc).find(f=>f.code==='PF28')?.routeScope).toBe('rise')
+  expect(readCountFixtures(doc).find(f=>f.code==='PF28')?.routeDefaults).toEqual({plan:null,slack:null})
   expect(listAnnotations(doc,0).find(a=>a.quantity)?.quantity).toMatchObject({addM:3,slackM:1,extra:[{count:1,cond:{plan:null,slack:null}}]})
   expect(listAnnotations(doc,0).find(a=>a.quantity)?.contents).toBe('CV 38sq-3C, PF28（立上り）  2.54+3.00+余1.00=6.54 m')
  } finally {doc.destroy()}

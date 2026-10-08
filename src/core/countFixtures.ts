@@ -1,6 +1,6 @@
 import type { PDFDocument } from 'mupdf'
 import type { RGB } from './annotations'
-import { validRouteScope, type RouteScope } from './quantity'
+import { validRouteScope, conditionsFromScope, normalizeRouteConditions, validRouteConditions, parseQuantityMark, serializeQuantityMark, validCondition, type RouteConditions } from './quantity'
 
 export const COUNT_SHAPES = ['circle', 'doubleCircle', 'square', 'roundedSquare', 'triangle', 'invertedTriangle', 'diamond', 'pentagon', 'hexagon', 'octagon', 'star', 'plus', 'cross', 'hourglass'] as const
 export const COUNT_FILLS = ['none', 'solid', 'half', 'dot', 'hatch'] as const
@@ -10,7 +10,7 @@ export type CountShape = typeof COUNT_SHAPES[number]
 export type CountFill = typeof COUNT_FILLS[number]
 export interface CountStyle { shape: CountShape; fill: CountFill; color: RGB; size: number; opacity: number; showCode: boolean }
 export interface CountFixtureSample { png: string; width: number; height: number; pageIndex: number }
-export interface CountFixture { routeScope?: RouteScope; spec?: string; aggregation?: 'location' | 'document'; kind?: QuantityKind; method?: QuantityMethod; defaults?: QuantityDefaults; line?: QuantityLineStyle; id: string; name: string; code: string; category: string; style: CountStyle; memo?: string; order: number; sample?: CountFixtureSample }
+export interface CountFixture { conditions?: string[]; routeDefaults?: RouteConditions; defaultCondition?: string; spec?: string; aggregation?: 'location' | 'document'; kind?: QuantityKind; method?: QuantityMethod; defaults?: QuantityDefaults; line?: QuantityLineStyle; id: string; name: string; code: string; category: string; style: CountStyle; memo?: string; order: number; sample?: CountFixtureSample }
 export type QuantityKind = 'count' | 'length' | 'area' | 'volume'
 export type QuantityMethod = 'click' | 'polyline' | 'polygon' | 'lengthHeight' | 'polygonDepth' | 'lengthWidthDepth'
 export const QUANTITY_METHODS: Record<QuantityKind, readonly QuantityMethod[]> = { count: ['click'], length: ['polyline'], area: ['polygon', 'lengthHeight'], volume: ['polygonDepth', 'lengthWidthDepth'] }
@@ -116,6 +116,30 @@ export function nextQuantityLineStyle(fixtures: readonly CountFixture[], exclude
   if (!best) throw new Error('線の組合せを割り当てられません。')
   return { color: countRgb(best.hex), line: { ...best.line } }
 }
+// Rename intent belongs to an edit, never to PDF data. Keep it separate from reorder/deletion.
+const conditionEdits = new WeakMap<CountFixture, ReadonlyMap<string, string>>()
+export function setFixtureConditionRenames(f: CountFixture, renames: ReadonlyMap<string, string>): void { conditionEdits.set(f, new Map(renames)) }
+export function fixtureConditionRenames(f: CountFixture): ReadonlyMap<string, string> { return conditionEdits.get(f) ?? new Map() }
+export function fixtureConditionsError(f: Pick<CountFixture, 'conditions' | 'routeDefaults' | 'defaultCondition' | 'kind'>): string | undefined {
+  const candidates = f.conditions === undefined ? [] : f.conditions
+  if (!Array.isArray(candidates) || candidates.length > 30) return '施工条件の候補は30件までです。'
+  if (!Array.from(candidates).every(validCondition)) return '施工条件は1〜30文字で、前後の空白や改行を入れずに入力してください。'
+  if (new Set(candidates).size !== candidates.length) return '同じ施工条件が重複しています。'
+  if (f.routeDefaults !== undefined) {
+    const c = f.routeDefaults
+    if (f.kind !== 'length' || !validRouteConditions(c) || Object.keys(c).some(k => !['plan', 'rise', 'slack'].includes(k))
+      || [c.plan, ...(Array.isArray(c.rise) ? c.rise : [c.rise]), c.slack].some(v => v !== undefined && v !== null && (typeof v !== 'string' || !candidates.includes(v)))) return '部分ごとの既定は長さの項目だけに設定でき、未設定・候補・数えないから選んでください。'
+  }
+  if (f.defaultCondition !== undefined && (f.kind === 'length' || !validCondition(f.defaultCondition) || !candidates.includes(f.defaultCondition))) return '既定の施工条件は候補の中から選んでください（長さは部分ごとに設定します）。'
+}
+// Reuse SPEC-07a's riseUnset encoding so explicit unset slots survive JSON.
+function readFixtureRouteDefaults(value: unknown): RouteConditions | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(k => !['plan', 'rise', 'slack', 'riseUnset'].includes(k))) return null
+  return parseQuantityMark(JSON.stringify({ version: 1, id: 'defaults', itemId: 'defaults', method: 'polyline', cond: value }))?.cond ?? null
+}
+function wireFixtureRouteDefaults(cond: RouteConditions): object {
+  return JSON.parse(serializeQuantityMark({ version: 1, id: 'defaults', itemId: 'defaults', method: 'polyline', cond })).cond ?? {}
+}
 export function parseCountFixtures(raw: string | null): CountFixture[] {
   try {
     if (!raw || new TextEncoder().encode(raw).length > MAX_COUNT_FIXTURE_BYTES) return []
@@ -137,15 +161,18 @@ export function parseCountFixtures(raw: string | null): CountFixture[] {
       if ((f.routeScope !== undefined && (kind !== 'length' || !validRouteScope(f.routeScope))) || (f.defaults?.slackM !== undefined && kind !== 'length') || !Object.hasOwn(QUANTITY_METHODS, kind) || (f.method !== undefined && !QUANTITY_METHODS[kind as QuantityKind].includes(f.method))
         || (f.defaults !== undefined && (!f.defaults || typeof f.defaults !== 'object' || Array.isArray(f.defaults) || Object.entries(f.defaults).some(([k, v]) => !['addM', 'slackM', 'heightM', 'widthM', 'depthM'].includes(k) || typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1000)))
         || (f.line !== undefined && (!f.line || !QUANTITY_LINE_WIDTHS.includes(f.line.width) || !QUANTITY_DASHES.includes(f.line.dash)))) continue
+      const routeDefaults = f.routeDefaults !== undefined ? readFixtureRouteDefaults(f.routeDefaults) : f.routeScope && f.routeScope !== 'all' ? conditionsFromScope(f.routeScope) : undefined
+      if (routeDefaults === null || fixtureConditionsError({ ...f, routeDefaults })) continue
       ids.add(f.id)
       const sample = parseCountFixtureSample(f.sample)
-      result.push({ ...(f.routeScope && f.routeScope !== 'all' ? { routeScope: f.routeScope } : {}), ...(f.spec?.trim() ? { spec: f.spec.trim() } : {}), ...(f.aggregation !== undefined ? { aggregation: f.aggregation } : {}), ...(f.kind !== undefined ? { kind: f.kind } : {}), ...(f.method !== undefined ? { method: f.method } : {}), ...(f.defaults !== undefined ? { defaults: { ...f.defaults } } : {}), ...(f.line !== undefined ? { line: { ...f.line } } : {}), id: f.id, name: f.name.trim(), code: f.code, category: f.category.trim(), memo: f.memo, order: f.order, ...(sample ? { sample } : {}), style: { shape: s.shape, fill: s.fill, color: [...s.color] as RGB, size: s.size, opacity: s.opacity, showCode: s.showCode } })
+      result.push({ ...(f.conditions !== undefined ? { conditions: [...f.conditions] } : {}), ...(routeDefaults !== undefined ? { routeDefaults } : {}), ...(f.defaultCondition !== undefined ? { defaultCondition: f.defaultCondition } : {}), ...(f.spec?.trim() ? { spec: f.spec.trim() } : {}), ...(f.aggregation !== undefined ? { aggregation: f.aggregation } : {}), ...(f.kind !== undefined ? { kind: f.kind } : {}), ...(f.method !== undefined ? { method: f.method } : {}), ...(f.defaults !== undefined ? { defaults: { ...f.defaults } } : {}), ...(f.line !== undefined ? { line: { ...f.line } } : {}), id: f.id, name: f.name.trim(), code: f.code, category: f.category.trim(), memo: f.memo, order: f.order, ...(sample ? { sample } : {}), style: { shape: s.shape, fill: s.fill, color: [...s.color] as RGB, size: s.size, opacity: s.opacity, showCode: s.showCode } })
     }
     return result.sort((a, b) => a.order - b.order)
   } catch { return [] }
 }
 export function serializeCountFixtures(fixtures: readonly CountFixture[]): string {
-  const raw = JSON.stringify({ version: 1, fixtures: fixtures.map(f => ({ ...f, routeScope: f.routeScope === 'all' ? undefined : f.routeScope, defaults: f.defaults ? { ...f.defaults, slackM: f.defaults.slackM === 0 ? undefined : f.defaults.slackM } : undefined, spec: f.spec?.trim() || undefined })).map(f => f.kind === 'count' && f.method === undefined && f.defaults === undefined && f.line === undefined ? { ...f, kind: undefined } : f) })
+  for (const f of fixtures) { const error = fixtureConditionsError(f); if (error) throw new Error(error) }
+  const raw = JSON.stringify({ version: 1, fixtures: fixtures.map(f => ({ ...f, routeDefaults: f.routeDefaults === undefined ? undefined : wireFixtureRouteDefaults(f.routeDefaults), routeScope: f.routeDefaults?.plan === null && f.routeDefaults?.slack === null ? 'rise' : f.routeDefaults?.slack === null ? 'noSlack' : undefined, defaults: f.defaults ? { ...f.defaults, slackM: f.defaults.slackM === 0 ? undefined : f.defaults.slackM } : undefined, spec: f.spec?.trim() || undefined })).map(f => f.kind === 'count' && f.method === undefined && f.defaults === undefined && f.line === undefined ? { ...f, kind: undefined } : f) })
   if (fixtures.some(f => f.spec !== undefined && (typeof f.spec !== 'string' || f.spec.length > 40)) || fixtures.length > MAX_COUNT_FIXTURES || fixtures.some(f => f.sample !== undefined && !parseCountFixtureSample(f.sample)) || new TextEncoder().encode(raw).length > MAX_COUNT_FIXTURE_BYTES || parseCountFixtures(raw).length !== fixtures.length) throw new Error('数量拾いの値・件数・容量が上限を超えています。')
   return raw
 }
@@ -157,7 +184,7 @@ export function writeCountFixtures(doc: PDFDocument, fixtures: readonly CountFix
   const raw = serializeCountFixtures(fixtures), root = doc.getTrailer().get('Root'), value = doc.newString(raw)
   try { root.put('KaruCountFixtures', value) } finally { value.destroy(); root.destroy() }
 }
-export interface FixturePreset { spec?: string; aggregation?: 'location' | 'document'; category: string; code: string; name: string; kind?: QuantityKind; method?: QuantityMethod; defaults?: QuantityDefaults }
+export interface FixturePreset { conditions?: string[]; spec?: string; aggregation?: 'location' | 'document'; category: string; code: string; name: string; kind?: QuantityKind; method?: QuantityMethod; defaults?: QuantityDefaults }
 export const FIXTURE_PRESETS: Record<string, FixturePreset[]> = {}
 const presets: Record<string, Record<string, string[]>> = {
   電気設備: {

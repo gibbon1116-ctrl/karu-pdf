@@ -57,12 +57,12 @@ it('validates new route fields only for polylines', () => {
   }
 })
 it('round-trips fixture defaults and rejects only invalid fixtures', () => {
-  const pf: CountFixture = { ...fixtures[1], routeScope: 'rise', defaults: { addM: 3, slackM: 1 } }
+  const pf: CountFixture = { ...fixtures[1], routeDefaults: { plan: null, slack: null }, defaults: { addM: 3, slackM: 1 } }
   expect(parseCountFixtures(serializeCountFixtures([pf]))).toEqual([pf])
   for (const changes of [{ routeScope: 'invalid' }, { routeScope: null }, { defaults: { slackM: -1 } }, { defaults: { slackM: 1001 } }, { defaults: { slackM: '1' } }, { kind: 'area', method: 'polygon', routeScope: 'rise' }, { kind: 'count', method: 'click', defaults: { slackM: 1 } }]) {
     expect(parseCountFixtures(JSON.stringify({ version: 1, fixtures: [fixtures[0], { ...pf, ...changes }] }))).toEqual([fixtures[0]])
   }
-  const zero = parseCountFixtures(serializeCountFixtures([{ ...pf, routeScope: 'all', defaults: { slackM: 0 } }]))[0]
+  const zero = parseCountFixtures(serializeCountFixtures([{ ...pf, routeDefaults: undefined, defaults: { slackM: 0 } }]))[0]
   expect(zero).not.toHaveProperty('routeScope'); expect(zero.defaults).not.toHaveProperty('slackM')
   expect(Object.values(FIXTURE_PRESETS).flat().every(f => !('routeScope' in f))).toBe(true)
 })

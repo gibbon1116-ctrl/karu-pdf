@@ -208,8 +208,8 @@ it('opens old fields unchanged, edits metadata and saves another compatible PDF'
 })
 
 it('saves scoped routes as version 1 JSON, Contents and exact item totals after reopening', async () => {
- const pf: CountFixture = { ...fixture, id: 'pf', name: '立上り電線管', code: 'PF28', order: 1, routeScope: 'rise', defaults: { addM: 3, slackM: 1 } }
- const rack: CountFixture = { ...fixture, id: 'rack', code: 'CR', order: 2, routeScope: 'noSlack' }
+ const pf: CountFixture = { ...fixture, id: 'pf', name: '立上り電線管', code: 'PF28', order: 1, routeDefaults: { plan: null, slack: null }, defaults: { addM: 3, slackM: 1 } }
+ const rack: CountFixture = { ...fixture, id: 'rack', code: 'CR', order: 2, routeDefaults: { slack: null } }
  const fixtures = [{ ...fixture, spec: '38sq-3C' }, pf, rack]
  const q: QuantityMark = { version: 1, id: 'route', itemId: 'cv', method: 'polyline', addM: 3, slackM: 1, count: 2, extra: [{ itemId: 'pf', count: 1, cond: { plan: null, slack: null } }, { itemId: 'rack', count: 1, cond: { slack: null } }] }
  const text = quantityLabel(points, measure.mmPerPoint, q, 'CV 38sq-3C', true, id => id === 'pf' ? 'PF28' : 'CR')
