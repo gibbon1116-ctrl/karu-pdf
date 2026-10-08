@@ -5,6 +5,7 @@ import type { Rect } from '../core/annotations'
 import { compareFloors, type QuantityEntry, type QuantityIndex } from '../core/quantityIndex'
 import type { DocumentSession } from './documentModel'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
+import { nextReview, refreshReview, reviewOrder, type ReviewCursor } from './reviewCursor'
 
 export const QuantityNavigationContext = createContext<{
   navigate(pageIndex: number, rect?: Rect): void
@@ -40,7 +41,7 @@ export default function QuantityBreakdown({ fixture, index, session, pool, onClo
   const navigation = useContext(QuantityNavigationContext)
   const [mode, setMode] = useState<'page' | 'location'>(quantityAggregation(fixture) === 'location' ? 'location' : 'page')
   const [location, setLocation] = useState<{ floor: string; room?: string } | null>(null)
-  const [cursor, setCursor] = useState<{ page: number; id: string; position: number; count: number } | null>(null)
+  const [cursor, setCursor] = useState<(ReviewCursor & { page: number }) | null>(null)
   const [busy, setBusy] = useState(false), [error, setError] = useState('')
   const close = useRef<HTMLButtonElement>(null), alive = useRef(true)
   useEffect(() => {
@@ -52,13 +53,20 @@ export default function QuantityBreakdown({ fixture, index, session, pool, onClo
     window.addEventListener('keydown', key, true)
     return () => { alive.current = false; window.removeEventListener('keydown', key, true) }
   }, [onClose])
-  const entries = index.entries(fixture.id)
+  const entries = useMemo(() => index.entries(fixture.id), [index, fixture.id])
   const filtered = useMemo(() => location ? entries.filter(e => (e.floor ?? '') === location.floor && (location.room === undefined || (e.room ?? '') === location.room)) : entries, [entries, location])
   const pages = useMemo(() => {
     const result = new Map<number, QuantityEntry[]>()
     for (const e of filtered) { const list = result.get(e.pageIndex) ?? []; list.push(e); result.set(e.pageIndex, list) }
     return [...result].sort((a, b) => a[0] - b[0])
   }, [filtered])
+  useEffect(() => {
+    setCursor(previous => {
+      if (!previous) return previous
+      const list = pages.find(([page]) => page === previous.page)?.[1] ?? []
+      return { ...refreshReview(reviewOrder(list, id => session.annotationStore.get(id)), previous), page: previous.page }
+    })
+  }, [pages, session])
   const floors = useMemo(() => [...index.byFloorRoom(fixture.id)].sort((a, b) => compareFloors(a[0], b[0])), [index, fixture.id])
   const format = (n: number) => `${quantityKind(fixture) === 'count' ? n : n.toFixed(2)} ${QUANTITY_UNITS[quantityKind(fixture)]}`
   const go = async (pageIndex: number, list: readonly QuantityEntry[]) => {
@@ -68,12 +76,11 @@ export default function QuantityBreakdown({ fixture, index, session, pool, onClo
       await session.annotationStore.ensurePageLoaded(pageIndex, () => pool.listAnnotations(session.docId, pageIndex))
       if (!alive.current || revision !== session.pageRevision) return
       const store = session.annotationStore
-      const marks = [...new Set(list.map(e => e.annotationId))].map(id => store.get(id)).filter(a => !!a)
-        .sort((a, b) => a.rect[1] - b.rect[1] || a.rect[0] - b.rect[0] || a.id.localeCompare(b.id))
-      const last = cursor?.page === pageIndex ? marks.findIndex(a => a.id === cursor.id) : -1
-      const position = (last + 1) % marks.length, mark = marks[position]
+      const next = nextReview(reviewOrder(list, id => store.get(id)), cursor?.page === pageIndex ? cursor : null)
+      if (!next) return
+      const mark = store.get(next.id)
       if (mark && await revealPickup(session, pool, fixture.id, mark.id, pageIndex,
-        (page, rect) => navigation?.navigate(page, rect), () => alive.current)) setCursor({ page: pageIndex, id: mark.id, position: position + 1, count: marks.length })
+        (page, rect) => navigation?.navigate(page, rect), () => alive.current)) setCursor({ ...next, page: pageIndex })
     } catch (e) { if (alive.current) setError(String(e)) }
     finally { if (alive.current) setBusy(false) }
   }

@@ -7,6 +7,7 @@ import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 import { FixtureUiContext, type DocumentSession } from './documentModel'
 import { groupFixtures } from './fixtureOrder'
 import { QuantityNavigationContext, QuantityTableContext, revealPickup } from './QuantityBreakdown'
+import { nextReview, refreshReview, reviewOrder, type ReviewCursor } from './reviewCursor'
 
 export type QuantityTableMode = 'page' | 'floor' | 'room'
 export interface QuantityTableFilters { category?: string; kind?: QuantityKind | ''; search?: string }
@@ -15,6 +16,12 @@ interface TableItem { fixture: CountFixture; total: number; values: Record<Quant
 export type QuantityTableRow = { category: string; item?: TableItem }
 const pageKey = (page: number) => String(page)
 const roomKey = (floor: string, room: string) => JSON.stringify([floor, room])
+
+function columnEntries(index: QuantityIndex, itemId: string, mode: QuantityTableMode, key: string) {
+  const [floor, room] = mode === 'room' ? JSON.parse(key) as string[] : [key, '']
+  return index.entries(itemId).filter(e => mode === 'page' ? e.pageIndex === Number(key)
+    : (e.floor ?? '') === floor && (mode === 'floor' || (e.room ?? '') === room))
+}
 
 /** Read index entries, never annotations. Build all three modes once per index. */
 export function buildQuantityTableData(index: QuantityIndex, fixtures: readonly CountFixture[]): TableItem[] {
@@ -95,7 +102,7 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
   const scrollRef = useRef<HTMLDivElement>(null), closeRef = useRef<HTMLButtonElement>(null)
   const alive = useRef(true), busyRef = useRef(false)
   const [busy, setBusy] = useState(false), [error, setError] = useState('')
-  const [cursors, setCursors] = useState<Record<string, { id: string; position: number; count: number }>>({})
+  const [cursors, setCursors] = useState<Record<string, ReviewCursor>>({})
   useEffect(() => {
     alive.current = true; closeRef.current?.focus()
     const key = (e: KeyboardEvent) => {
@@ -114,7 +121,22 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0
     setViewport(v => ({ ...v, top: 0 })); setCursors({})
-  }, [mode, filters, index])
+  }, [mode, filters])
+  useEffect(() => {
+    setCursors(previous => {
+      const keys = Object.keys(previous)
+      if (!keys.length) return previous
+      const refreshed: Record<string, ReviewCursor> = {}
+      for (const key of keys) {
+        const [cursorMode, itemId, columnKey] = JSON.parse(key) as [QuantityTableMode, string, string]
+        if (cursorMode !== mode || !table.columns.some(c => c.key === columnKey)) continue
+        const entries = columnEntries(index, itemId, mode, columnKey)
+        if (!entries.length || entries.reduce((n, e) => n + e.value, 0) === 0) continue
+        refreshed[key] = refreshReview(reviewOrder(entries, id => store.get(id)), previous[key])
+      }
+      return refreshed
+    })
+  }, [index, table, mode, store])
   const resize = (n: number) => {
     const clamped = Math.max(20, Math.min(70, n)); onHeightChange(clamped)
     try { localStorage.setItem(HEIGHT_KEY, String(clamped)) } catch { /* Optional UI preference. */ }
@@ -124,21 +146,18 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
     busyRef.current = true; setBusy(true); setError('')
     const revision = session.pageRevision
     try {
-      const entries = index.entries(item.fixture.id).filter(e => mode === 'page' ? e.pageIndex === column.pageIndex
-        : (e.floor ?? '') === column.floor && (mode === 'floor' || (e.room ?? '') === column.room))
+      const entries = columnEntries(index, item.fixture.id, mode, column.key)
       for (const page of new Set(entries.map(e => e.pageIndex))) {
         await store.ensurePageLoaded(page, () => pool.listAnnotations(session.docId, page))
         if (!alive.current || revision !== session.pageRevision) return
       }
-      const marks = [...new Set(entries.map(e => e.annotationId))].map(id => store.get(id)).filter(a => !!a)
-        .sort((a, b) => a.pageIndex - b.pageIndex || a.rect[1] - b.rect[1] || a.rect[0] - b.rect[0] || a.id.localeCompare(b.id))
       const key = JSON.stringify([mode, item.fixture.id, column.key])
-      const cursor = cursors[key]
-      const last = cursor ? marks.findIndex(a => a.id === cursor.id) : -1
-      const position = (last + 1) % marks.length, mark = marks[position]
+      const next = nextReview(reviewOrder(entries, id => store.get(id)), cursors[key] ?? null)
+      if (!next) return
+      const mark = store.get(next.id)
       if (mark && await revealPickup(session, pool, item.fixture.id, mark.id, mark.pageIndex, navigation.navigate,
         () => alive.current && revision === session.pageRevision)) {
-        setCursors(previous => ({ ...previous, [key]: { id: mark.id, position: position + 1, count: marks.length } }))
+        setCursors(previous => ({ ...previous, [key]: next }))
       }
     } catch (e) { if (alive.current) setError(String(e)) }
     finally { busyRef.current = false; if (alive.current) setBusy(false) }
