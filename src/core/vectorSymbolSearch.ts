@@ -51,6 +51,96 @@ function clippedLine(a: Float32Array, i: number, r: Rect): Rect | null {
 const lineBounds = (a: ArrayLike<number>, i: number, t: number): Rect =>
   [Math.min(a[i], a[i + 2]) - t, Math.min(a[i + 1], a[i + 3]) - t, Math.max(a[i], a[i + 2]) + t, Math.max(a[i + 1], a[i + 3]) + t]
 
+/** Endpoint graph for bent wiring. Mid-segment contacts are stops, not graph edges.
+ * Non-bridge edges belong to closed rings and are protected even at junctions. */
+function boundaryWiring(lines: Float32Array, widths: Float32Array, rect: Rect, tol: number, seeds: Set<number>, neighbors: (r: Rect) => Set<number>) {
+  const count = lines.length / 2, parent = Array.from({ length: count }, (_, i) => i)
+  const middle = new Uint8Array(count)
+  const root = (e: number): number => {
+    while (parent[e] !== e) { parent[e] = parent[parent[e]]; e = parent[e] }
+    return e
+  }
+  for (let e = 0; e < count; e++) {
+    const x = lines[e * 2], y = lines[e * 2 + 1], own = Math.floor(e / 2) * 4
+    if (Math.min(Math.abs(x - rect[0]), Math.abs(x - rect[2]), Math.abs(y - rect[1]), Math.abs(y - rect[3])) <= tol) seeds.add(e)
+    for (const j of neighbors([x - tol, y - tol, x + tol, y + tol])) {
+      if (j === own) continue
+      let endpoint = false
+      for (let end = 0; end < 2; end++) if (Math.hypot(x - lines[j + end * 2], y - lines[j + end * 2 + 1]) <= tol) {
+        parent[root(e)] = root(j / 2 + end); endpoint = true
+      }
+      if (!endpoint && pointDistance(x, y, lines, j) <= tol) middle[e] = 1
+    }
+  }
+  const nodes = parent.map((_, e) => root(e)), edges: number[][] = Array.from({ length: count }, () => [])
+  const stops = new Uint8Array(count)
+  for (let e = 0; e < count; e++) { edges[nodes[e]].push(Math.floor(e / 2) * 4); stops[nodes[e]] |= middle[e] }
+  // Iterative bridge detection avoids recursion depth failures on large templates.
+  const discovery = new Int32Array(count), low = new Int32Array(count), bridges = new Set<number>()
+  let clock = 0
+  for (let start = 0; start < count; start++) {
+    if (!edges[start].length || discovery[start]) continue
+    discovery[start] = low[start] = ++clock
+    const stack = [{ node: start, via: -1, from: -1, next: 0 }]
+    while (stack.length) {
+      const frame = stack[stack.length - 1], node = frame.node
+      if (frame.next === edges[node].length) {
+        stack.pop()
+        if (frame.from >= 0) {
+          low[frame.from] = Math.min(low[frame.from], low[node])
+          if (low[node] > discovery[frame.from]) bridges.add(frame.via)
+        }
+        continue
+      }
+      const line = edges[node][frame.next++]
+      if (line === frame.via) continue
+      const a = nodes[line / 2], b = nodes[line / 2 + 1], next = a === node ? b : a
+      if (discovery[next]) low[node] = Math.min(low[node], discovery[next])
+      else {
+        discovery[next] = low[next] = ++clock
+        stack.push({ node: next, via: line, from: node, next: 0 })
+      }
+    }
+  }
+  const protectedLines = new Set<number>(), wiring = new Set<number>()
+  for (let i = 0; i < lines.length; i += 4) if (!bridges.has(i)) protectedLines.add(i)
+  const trace = (e: number, requireRing: boolean) => {
+    let node = nodes[e], line = Math.floor(e / 2) * 4
+    // Starting at an interior contact or junction must not eat a symbol stroke.
+    if (stops[node] || edges[node].length >= 3 || wiring.has(line)) return
+    const path = new Set<number>()
+    let ring = false
+    while (!protectedLines.has(line) && !path.has(line)) {
+      path.add(line)
+      const a = nodes[line / 2], b = nodes[line / 2 + 1]
+      const end = a === node ? line + 2 : line
+      node = a === node ? b : a
+      if (stops[node] || edges[node].length !== 2) {
+        const ringStroke = (i: number) => protectedLines.has(i) && (!requireRing ||
+          (widths[i / 4] > 0 && widths[line / 4] > 0 && Math.abs(widths[i / 4] - widths[line / 4]) <= Math.max(widths[i / 4], widths[line / 4]) * .1))
+        ring = edges[node].some(ringStroke)
+        if (!ring && stops[node]) {
+          const x = lines[end], y = lines[end + 1]
+          ring = [...neighbors([x - tol, y - tol, x + tol, y + tol])]
+            .some(i => ringStroke(i) && pointDistance(x, y, lines, i) <= tol)
+        }
+        break
+      }
+      line = edges[node].find(i => i !== line)!
+    }
+    if (!requireRing || (ring && [...path].every(i => widths[i / 4] > 0 && Math.abs(widths[i / 4] - widths[line / 4]) <= Math.max(widths[i / 4], widths[line / 4]) * .1))) {
+      for (const i of path) wiring.add(i)
+    }
+  }
+  for (const e of seeds) trace(e, false)
+  // Real page 71 also has a wire ending freely inside the sample. Extend the
+  // seed rule only for pendant paths that actually terminate at a closed ring.
+  for (let e = 0; e < count; e++) {
+    if (!seeds.has(e) && edges[nodes[e]].length === 1 && !stops[nodes[e]]) trace(e, true)
+  }
+  return { wiring, protectedLines }
+}
+
 /** Cleanup is demand-only in the matching Worker. Dense/oversize templates fall
  * back intact, with bounded grid visits and neighbor comparisons. */
 export function prepareVectorTemplate(pageSegments: Float32Array, pageWidths: Float32Array, sampleRect: Rect): PreparedTemplate {
@@ -115,7 +205,7 @@ export function prepareVectorTemplate(pageSegments: Float32Array, pageWidths: Fl
       && segmentDistance(a, i, original, j) <= 2
   }
   try {
-    const wiring = new Set<number>(), queue: number[] = []
+    const wiring = new Set<number>(), queue: number[] = [], seeds = new Set<number>()
     const expanded: Rect = [sampleRect[0] - tol, sampleRect[1] - tol, sampleRect[2] + tol, sampleRect[3] + tol]
     for (let i = 0; i < pageSegments.length; i += 4) {
       if (!acceptsWidth(pageWidths[i / 4], strokeWidth)) continue
@@ -123,10 +213,19 @@ export function prepareVectorTemplate(pageSegments: Float32Array, pageWidths: Fl
       const clipped = clippedLine(pageSegments, i, expanded)
       if (!clipped) continue
       for (const j of neighbors(lineBounds(clipped, 0, 2))) if (!wiring.has(j) && collinear(pageSegments, i, j)) { wiring.add(j); queue.push(j) }
+      for (const j of neighbors(lineBounds(clipped, 0, tol))) for (let e = 0; e < 2; e++) {
+        if (pointDistance(original[j + e * 2], original[j + e * 2 + 1], pageSegments, i) <= tol) seeds.add(j / 2 + e)
+      }
     }
     for (let at = 0; at < queue.length; at++) {
       const i = queue[at]
       for (const j of neighbors(lineBounds(original, i, 2))) if (!wiring.has(j) && collinear(original, i, j)) { wiring.add(j); queue.push(j) }
+    }
+    const paths = boundaryWiring(original, originalWidths, sampleRect, tol, seeds, neighbors)
+    for (const i of paths.protectedLines) wiring.delete(i)
+    const combined = new Set([...wiring, ...paths.wiring]), remaining = all.filter(i => !combined.has(i))
+    if (remaining.length >= 2 && remaining.reduce((sum, i) => sum + lengths[i / 4], 0) >= totalLength * .4) {
+      for (const i of paths.wiring) wiring.add(i)
     }
     const seen = new Set(wiring), groups: Array<{ ids: number[]; length: number }> = []
     for (const start of all) {

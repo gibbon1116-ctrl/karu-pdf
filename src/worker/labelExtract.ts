@@ -1,5 +1,5 @@
 import type { Document, StructuredText, Rect as MuRect } from 'mupdf'
-import { normalizeSymbolLabel, type SymbolLabel } from '../core/symbolLabels'
+import { deduplicateSymbolLabels, normalizeSymbolLabel, type SymbolLabel } from '../core/symbolLabels'
 import type { Rect } from '../core/annotations'
 
 /** MuPDF structured text already includes /Rotate, like the vector display list.
@@ -29,7 +29,7 @@ export function labelsFromStructuredText(structured: StructuredText, bounds: MuR
     endLine: flush,
   })
   flush()
-  return labels
+  return deduplicateSymbolLabels(labels)
 }
 export function extractLabelPage(document: Document, pageIndex: number): SymbolLabel[] {
   const page = document.loadPage(pageIndex)
