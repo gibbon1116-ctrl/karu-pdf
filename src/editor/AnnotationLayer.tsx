@@ -46,16 +46,49 @@ export function canOverlaySelectedAnnotation(annotation: Pick<EditableAnnotation
 const SELECTED_OVERLAY_KINDS = new Set<Kind>(['line', 'arrow', 'square', 'circle', 'ink', 'cloudSquare', 'cloudPolygon', 'distance', 'perimeter', 'area', 'symbol'])
 const SELECTED_HALO_KINDS = new Set<Kind>(['line', 'arrow', 'square', 'circle', 'ink', 'highlight', 'textHighlight', 'cloudSquare', 'cloudPolygon', 'distance', 'perimeter', 'area'])
 
+export function measurementPathPoints(vertices: readonly Point[], closed = false): string {
+  const points = vertices.map(p => p.join(',')).join(' ')
+  return closed && vertices.length ? `${points} ${vertices[0].join(',')}` : points
+}
+
+/** Only the added width stays constant in screen pixels. */
+export function MeasurementFeedbackPath({ points, kind, width, zoom, flash = false, flashId }: {
+  points: string; kind: string; width: number; zoom: number; flash?: boolean; flashId?: string
+}) {
+  const Shape = kind === 'area' ? 'polygon' : 'polyline'
+  return <Shape className={flash ? 'quantity-pickup-flash quantity-pickup-flash-path' : 'annotation-selection-path'}
+    data-testid={flash ? 'quantity-pickup-flash' : undefined} data-flash-id={flashId}
+    points={points} strokeWidth={width + (flash ? 10 : 6) / Math.max(.01, zoom * CSS_PX_PER_PT)}
+    fill="none" pointerEvents="none" aria-hidden="true" />
+}
+
+export function QuantityRiseMarks({ annotation, zoom, highlightedRise }: {
+  annotation: Pick<EditableAnnotation, 'id' | 'vertices' | 'quantity'>; zoom: number
+  highlightedRise: AnnotationStore['highlightedRise']
+}) {
+  const rises = annotation.quantity?.rises
+  if (!rises?.length || !annotation.vertices) return null
+  const scale = Math.max(.01, zoom * CSS_PX_PER_PT)
+  return <g pointerEvents="none" aria-hidden="true">{rises.map((rise, i) => {
+    const point = rise.at !== undefined && Number.isInteger(rise.at) && rise.at >= 0 ? annotation.vertices![rise.at] : undefined
+    if (!point) return null
+    const highlighted = highlightedRise?.annotationId === annotation.id && highlightedRise.riseIndex === i
+    return <text key={i} className={`annotation-rise-mark${highlighted ? ' annotation-rise-mark-highlighted' : ''}`}
+      data-rise-index={i} data-rise-vertex={rise.at} x={point[0]} y={point[1]} dx={7 / scale} dy={-9 / scale}
+      fontSize={(highlighted ? 14 : 12) / scale} strokeWidth={2 / scale} pointerEvents="none">{rises.length > 1 ? `↕${i + 1}` : '↕'}</text>
+  })}</g>
+}
+
 /** The halo is outside the original stroke when that stroke remains in the PDF bitmap. */
-function SelectionHalo({ annotation: a, zoom, hollow, maskId, pageSize }: {
-  annotation: EditableAnnotation; zoom: number; hollow: boolean; maskId: string; pageSize: PageSize
+function SelectionHalo({ annotation: a, zoom, hollow, maskId, pageSize, pathPoints }: {
+  annotation: EditableAnnotation; zoom: number; hollow: boolean; maskId: string; pageSize: PageSize; pathPoints?: string
 }) {
   const [x0, y0, x1, y1] = a.rect
   const geometry = <>
     {(a.kind === 'cloudSquare' || a.kind === 'cloudPolygon') && <path d={cloudPath(a.vertices ?? rectVertices(a.rect), a.cloudIntensity ?? 1, a.borderWidth)} />}
     {a.measure && a.vertices && (a.measure.kind === 'area'
-      ? <polygon points={a.vertices.map(p => p.join(',')).join(' ')} />
-      : <polyline points={a.vertices.map(p => p.join(',')).join(' ')} />)}
+      ? <polygon points={pathPoints} />
+      : <polyline points={pathPoints} />)}
     {a.measure?.kind === 'distance' && a.vertices && (() => {
       const points = a.vertices
       if (points.length < 2) return null
@@ -834,10 +867,14 @@ export function AnnotationLayer(props: Props) {
     const selectionRect: Rect = calloutLine
       ? [Math.min(x0, calloutLine[0][0]), Math.min(y0, calloutLine[0][1]), Math.max(x1, calloutLine[0][0]), Math.max(y1, calloutLine[0][1])]
       : annotation.rect
+    // Share the hit geometry with feedback; selection adds no vertex walk.
+    const pathPoints = annotation.measure && annotation.vertices
+      ? measurementPathPoints(annotation.vertices, annotation.kind === 'area') : undefined
     return (
       <g key={annotation.id} data-annotation-id={annotation.id} data-symbol={annotation.symbol ?? undefined} className="annotation-item" data-issue-number={annotation.issue?.number}>
         {annotation.issue && <title>{annotation.text}</title>}
-        {selected && !annotation.count && SELECTED_HALO_KINDS.has(annotation.kind) && !(visible && annotation.measure && annotation.opacity >= .99) && <SelectionHalo annotation={annotation} zoom={props.zoom} hollow={!visible || annotation.opacity < .99 || annotation.kind === 'highlight' || annotation.kind === 'textHighlight'} maskId={`selection-halo-${props.docId}-${annotation.id}`} pageSize={props.pageSize} />}
+        {selected && pathPoints !== undefined && <MeasurementFeedbackPath points={pathPoints} kind={annotation.measure!.kind} width={annotation.borderWidth} zoom={props.zoom} />}
+        {selected && !annotation.count && SELECTED_HALO_KINDS.has(annotation.kind) && !(visible && annotation.measure && annotation.opacity >= .99) && <SelectionHalo annotation={annotation} zoom={props.zoom} hollow={!visible || annotation.opacity < .99 || annotation.kind === 'highlight' || annotation.kind === 'textHighlight'} maskId={`selection-halo-${props.docId}-${annotation.id}`} pageSize={props.pageSize} pathPoints={pathPoints} />}
         {visible && (annotation.kind === 'cloudSquare' || annotation.kind === 'cloudPolygon') && <path className="annotation-cloud" d={cloudPath(annotation.vertices ?? rectVertices(annotation.rect), annotation.cloudIntensity ?? 1, annotation.borderWidth)} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={color(annotation.color)} strokeWidth={annotation.borderWidth} opacity={annotation.opacity} />}
         {visible && annotation.issue && <g className="annotation-issue" fill={color(issueColor(annotation.issue, annotation.color))}>
           <circle cx={(x0+x1)/2} cy={(y0+y1)/2} r={(x1-x0)*.45} fill="white" stroke={color(issueColor(annotation.issue, annotation.color))} strokeWidth={(x1-x0)*.06} />
@@ -881,10 +918,11 @@ export function AnnotationLayer(props: Props) {
             <text key={`${annotation.id}-line-${index}`} className="annotation-text" x={x0 + lineLayout.x} y={y0 + lineLayout.baseline} fill={color(annotation.color)} opacity={annotation.textOpacity} fontFamily={annotation.font === 'BIZUDMincho' ? 'KaruBIZUDMincho' : 'KaruBIZUDGothic'} fontSize={annotation.fontSize} style={{ fontKerning: 'none' }} xmlSpace="preserve">{lineLayout.text}</text>
           ))}
         </g>}
-        {annotation.measure && annotation.vertices ? <polyline className="annotation-hit annotation-line-hit" points={[...annotation.vertices, ...(annotation.kind === 'area' ? [annotation.vertices[0]] : [])].map(p => p.join(',')).join(' ')} fill="none" /> : line ? <line className="annotation-hit annotation-line-hit" data-annotation-id={annotation.id} x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]} /> : <rect className="annotation-hit" data-annotation-id={annotation.id} x={x0} y={y0} width={Math.max(1, x1 - x0)} height={Math.max(1, y1 - y0)} />}
+        {annotation.measure && annotation.vertices ? <polyline className="annotation-hit annotation-line-hit" points={pathPoints} fill="none" /> : line ? <line className="annotation-hit annotation-line-hit" data-annotation-id={annotation.id} x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]} /> : <rect className="annotation-hit" data-annotation-id={annotation.id} x={x0} y={y0} width={Math.max(1, x1 - x0)} height={Math.max(1, y1 - y0)} />}
         {calloutLine && <line className="annotation-hit annotation-line-hit" data-annotation-id={annotation.id} x1={calloutLine[0][0]} y1={calloutLine[0][1]} x2={calloutLine[1][0]} y2={calloutLine[1][1]} />}
         {selectedIds.has(annotation.id) && <>
-          <rect className="annotation-selection" x={selectionRect[0] - 1} y={selectionRect[1] - 1} width={Math.max(2, selectionRect[2] - selectionRect[0] + 2)} height={Math.max(2, selectionRect[3] - selectionRect[1] + 2)} />
+          {pathPoints === undefined && <rect className="annotation-selection" x={selectionRect[0] - 1} y={selectionRect[1] - 1} width={Math.max(2, selectionRect[2] - selectionRect[0] + 2)} height={Math.max(2, selectionRect[3] - selectionRect[1] + 2)} />}
+          {annotation.measure && annotation.vertices && <QuantityRiseMarks annotation={annotation} zoom={props.zoom} highlightedRise={props.store.highlightedRise} />}
           {props.tool === 'select' && singleSelection && annotation.vertices?.map((p, i) => <rect key={i} className="annotation-resize-handle" data-testid={`measure-handle-${i}`} data-measure-vertex={i} data-annotation-id={annotation.id} x={p[0] - handleSize / 2} y={p[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
           {props.tool === 'select' && singleSelection && positions.map(({ handle, x, y }) => <rect key={`${annotation.id}-${handle}`} className="annotation-resize-handle" data-testid={`resize-handle-${handle}`} data-annotation-id={annotation.id} data-resize-handle={handle} x={x - handleSize / 2} y={y - handleSize / 2} width={handleSize} height={handleSize} />)}
           {props.tool === 'select' && singleSelection && line && line.map((point, index) => <rect key={`${annotation.id}-line-${index}`} className="annotation-resize-handle" data-testid={`line-handle-${index === 0 ? 'start' : 'end'}`} data-annotation-id={annotation.id} data-line-handle={index === 0 ? 'start' : 'end'} x={point[0] - handleSize / 2} y={point[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
@@ -1140,13 +1178,13 @@ export function AnnotationLayer(props: Props) {
       <rect ref={resizePreviewRef} className="annotation-resize-preview" x="0" y="0" width="0" height="0" />
       <line ref={linePreviewRef} className="annotation-line-preview" x1="0" y1="0" x2="0" y2="0" />
       <line ref={calloutPreviewRef} className="annotation-line-preview" x1="0" y1="0" x2="0" y2="0" />
-      {flash?.pageIndex === props.pageIndex && <rect key={props.store.flashVersion}
+      {flash?.pageIndex === props.pageIndex && (flash.measure && flash.vertices ? <MeasurementFeedbackPath key={props.store.flashVersion} points={measurementPathPoints(flash.vertices, flash.measure.kind === 'area')} kind={flash.measure.kind} width={flash.borderWidth} zoom={props.zoom} flash flashId={flash.id} /> : <rect key={props.store.flashVersion}
         className="quantity-pickup-flash" data-testid="quantity-pickup-flash" data-flash-id={flash.id}
         x={flash.rect[0] - flashPadding} y={flash.rect[1] - flashPadding}
         width={Math.max(0, flash.rect[2] - flash.rect[0]) + 2 * flashPadding}
         height={Math.max(0, flash.rect[3] - flash.rect[1]) + 2 * flashPadding}
         rx={flashPadding} fill="none" stroke="#ff8a00" strokeWidth={3}
-        vectorEffect="non-scaling-stroke" pointerEvents="none" aria-hidden="true" />}
+        vectorEffect="non-scaling-stroke" pointerEvents="none" aria-hidden="true" />)}
     </svg>
     {measurement.dialog}
     {props.store.symbolCandidates?.some(c => c.pageIndex === props.pageIndex) && <svg className="annotation-layer symbol-search-candidates"

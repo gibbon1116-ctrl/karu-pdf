@@ -221,6 +221,14 @@ export interface DirtySummary {
 }
 
 export class AnnotationStore {
+  private riseHighlight: { annotationId: string; riseIndex: number } | null = null
+  get highlightedRise(): Readonly<{ annotationId: string; riseIndex: number }> | null { return this.riseHighlight }
+  /** Display-only state: no undo entry, quantity invalidation or saved edit. */
+  setHighlightedRise(value: { annotationId: string; riseIndex: number } | null): void {
+    if (this.riseHighlight?.annotationId === value?.annotationId && this.riseHighlight?.riseIndex === value?.riseIndex) return
+    this.riseHighlight = value ? { ...value } : null
+    this.notify(false)
+  }
   private flashTarget: string | null = null
   private flashTimer: ReturnType<typeof setTimeout> | null = null
   flashVersion = 0
@@ -418,6 +426,7 @@ export class AnnotationStore {
   canRedo = (): boolean => this.history.canRedo
 
   reset(preserveFixtureVisibility = false): void {
+    this.riseHighlight = null
     this.clearSymbolCandidates()
     if (!preserveFixtureVisibility) { this.routeTemplate = null; this.lastRouteConditions.clear(); this.lastCondition.clear(); this.lastRouteMembers.clear() }
     if (!preserveFixtureVisibility) this.recentFixtures = []

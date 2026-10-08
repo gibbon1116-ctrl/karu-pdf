@@ -178,4 +178,8 @@ test('renders only viewport rows, fixes headings/left columns and limits 100 dra
   await expect(table(page).getByRole('columnheader')).toHaveCount(6)
   await expect(table(page).getByRole('status')).toHaveCount(0)
   await expect(row(page, 'cv').locator('button[data-column-key="1"]')).toHaveText('10.00')
+  await row(page, 'cv').locator('button[data-column-key="1"]').click()
+  await expect(page.getByTestId('annotation-layer-1').locator('polyline.annotation-selection-path')).toHaveCount(1)
+  await expect(page.getByTestId('annotation-layer-1').locator('.annotation-selection')).toHaveCount(0)
+  await expect(page.getByTestId('quantity-pickup-flash')).toHaveJSProperty('tagName', 'polyline')
 })

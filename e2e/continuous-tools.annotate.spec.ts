@@ -166,7 +166,7 @@ for (const [name, kind] of [['距離', 'distance'], ['連続した長さ', 'peri
     expect(created[1].vertices![0][0]).toBeCloseTo(260, 3)
     if (kind === 'distance') expect(created.map(a => a.text)).toEqual(['2,540 mm', '2,540 mm'])
     await expect(page.getByRole('button', { name, exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await expect(layer(page).locator('.annotation-selection')).toHaveCount(1)
+    await expect(layer(page).locator(kind === 'cloudPolygon' ? '.annotation-selection' : '.annotation-selection-path')).toHaveCount(1)
     await expect(layer(page).locator('[data-measure-vertex]')).toHaveCount(0)
   })
 }
