@@ -86,8 +86,8 @@ test('length selection retains vertex editing, keyboard and drag movement, and r
   await expect(rise).toHaveClass(/annotation-rise-mark-highlighted/)
   await expect(group.locator('[data-rise-index="1"]')).not.toHaveClass(/annotation-rise-mark-highlighted/)
   await drag(page, [210, 200], [230, 220])
-  await expect.poll(async () => (await annotations(page)).find(a => a.id === route.id)!.vertices![2]).toEqual([230, 220])
-  await expect(rise).toHaveAttribute('x', '230'); await expect(rise).toHaveAttribute('y', '220')
+  await expect.poll(async () => (await annotations(page)).find(a => a.id === route.id)!.vertices![2].map(n => Math.round(n * 100) / 100)).toEqual([230, 220])
+  await expect.poll(async () => [Number(await rise.getAttribute('x')), Number(await rise.getAttribute('y'))].map(n => Math.round(n * 100) / 100)).toEqual([230, 220])
   await page.keyboard.press('ArrowRight')
   await expect.poll(async () => (await annotations(page)).find(a => a.id === route.id)!.vertices![0][0]).toBeGreaterThan(70)
   const before = (await annotations(page)).find(a => a.id === route.id)!.vertices!

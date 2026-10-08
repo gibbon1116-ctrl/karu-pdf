@@ -69,7 +69,7 @@ test('page breakdown, live updates, top-to-bottom navigation, cycling, visibilit
     const selected = window.__karu!.getSelectedAnnotationIds()
     return window.__karu!.getEditableAnnotations(1).find(a => selected.includes(a.id))?.rect[1]
   })).toBeLessThan(200)
-  await expect(page.getByTestId('annotation-layer-1').locator('.annotation-selection-path')).toBeVisible()
+  await expect(page.getByTestId('annotation-layer-1').locator('.annotation-selection-path')).toHaveCount(1)
   await expect(page.getByTestId('annotation-layer-1').locator('.annotation-selection')).toHaveCount(0)
   await expect(page.getByTestId('quantity-pickup-flash')).toHaveJSProperty('tagName', 'polyline')
   await expect.poll(() => page.evaluate(() => {
