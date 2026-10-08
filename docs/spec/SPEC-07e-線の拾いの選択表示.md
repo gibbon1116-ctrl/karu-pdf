@@ -79,7 +79,7 @@ SPEC-07a の `QuantityMark.rises[i].at`（頂点の番号）があり、その�
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\sekisan-07e`
+- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
 - 変更してよいファイル:
   - `src/editor/AnnotationLayer.tsx`（選択の描画と flash の描画だけ）
   - `src/editor/AnnotationStore.ts`（`highlightedRise` の状態だけ）
