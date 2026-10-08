@@ -36,7 +36,30 @@ async function add(page: Page, name: string, selectedCategory: string, create = 
   if (create) await dialog.getByLabel('新しい分類の名前', { exact: true }).fill(selectedCategory)
   await dialog.getByRole('button', { name: '追加する', exact: true }).click()
 }
-async function drag(source: Locator, target: Locator, side: 'before' | 'after' = 'before') {
+async function drag(page: Page, source: Locator, target: Locator, side: 'before' | 'after' = 'before') {
+  const groups = panel(page).locator('.fixture-groups')
+  const [groupsBox, sourceBox, targetBox, scroll] = await Promise.all([
+    groups.boundingBox(), source.boundingBox(), target.boundingBox(),
+    groups.evaluate(el => ({ scrollTop: el.scrollTop, clientHeight: el.clientHeight, maxScrollTop: el.scrollHeight - el.clientHeight })),
+  ])
+  expect(groupsBox).not.toBeNull()
+  expect(sourceBox).not.toBeNull()
+  expect(targetBox).not.toBeNull()
+  const contentTop = Math.min(sourceBox!.y, targetBox!.y) - groupsBox!.y + scroll.scrollTop
+  const contentBottom = Math.max(sourceBox!.y + sourceBox!.height, targetBox!.y + targetBox!.height) - groupsBox!.y + scroll.scrollTop
+  // Leave room for the sticky list heading and keep the drop target off the lower edge.
+  const minScrollTop = Math.max(0, contentBottom + 3 - scroll.clientHeight)
+  const maxScrollTop = Math.min(scroll.maxScrollTop, contentTop - 28)
+  expect(minScrollTop, 'both drag endpoints must fit in the quantity list viewport').toBeLessThanOrEqual(maxScrollTop)
+  const scrollTop = Math.max(minScrollTop, Math.min(scroll.scrollTop, maxScrollTop))
+  await groups.evaluate((el, top) => { el.scrollTop = top }, scrollTop)
+  await expect.poll(async () => {
+    const [viewport, from, to] = await Promise.all([groups.boundingBox(), source.boundingBox(), target.boundingBox()])
+    return !!viewport && !!from && !!to
+      && from.y >= viewport.y + 28 && to.y >= viewport.y + 28
+      && from.y + from.height <= viewport.y + viewport.height - 3
+      && to.y + to.height <= viewport.y + viewport.height - 3
+  }).toBe(true)
   const box = await target.boundingBox()
   expect(box).not.toBeNull()
   await source.dragTo(target, { sourcePosition: { x: 5, y: 10 }, targetPosition: { x: 50, y: side === 'before' ? 3 : box!.height - 3 } })
@@ -51,8 +74,8 @@ async function clickPoint(page: Page, x: number, y: number) {
 }
 
 test('category selection, visible steps, drag moves, Undo, and persisted category/order', async ({ page }) => {
-  // Keep both endpoints visible: dragTo does not simulate scrolling during a drag.
-  await page.setViewportSize({ width: 1440, height: 1400 })
+  // Give the scrollable quantity list room for both drag endpoints, including on Linux.
+  await page.setViewportSize({ width: 1440, height: 2000 })
   await open(page)
   await page.getByRole('button', { name: '項目を追加', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '項目を追加', exact: true }), select = dialog.getByLabel('分類', { exact: true })
@@ -64,10 +87,10 @@ test('category selection, visible steps, drag moves, Undo, and persisted categor
   await expect(category(page, '照明器具').locator('li').last()).toHaveAttribute('data-fixture-id', (await row(page, '新LED').getAttribute('data-fixture-id'))!)
   await add(page, '幹線項目', '幹線', true)
   await expect(header(page, '幹線')).toBeVisible()
-  // Collapse unrelated groups to keep both drag endpoints in the scroll viewport.
+  // Collapse unrelated groups so the rows stay close and require less scrolling.
   for (const name of ['コンセント', 'スイッチ', '弱電・防災', '電線・ケーブル', '電線管', 'ケーブルラック']) await header(page, name).click()
   const first = row(page, 'DL ダウンライト')
-  await drag(row(page, '新LED'), first)
+  await drag(page, row(page, '新LED'), first)
   await expect(category(page, '照明器具').locator('.fixture-row-name').first()).toHaveText('新LED')
   await expect(row(page, '新LED')).toHaveClass(/selected/)
   await page.keyboard.press('Control+z')
@@ -79,13 +102,13 @@ test('category selection, visible steps, drag moves, Undo, and persisted categor
   await expect(panel(page).getByRole('button', { name: '上へ', exact: true })).toBeDisabled()
   await expect(panel(page).getByRole('button', { name: '上へ', exact: true })).toHaveAttribute('title', /分類の先頭/)
   await header(page, 'コンセント').click()
-  await drag(row(page, '新LED'), row(page, 'C2 コンセント（2口）'), 'after')
+  await drag(page, row(page, '新LED'), row(page, 'C2 コンセント（2口）'), 'after')
   await expect(category(page, 'コンセント').locator('.fixture-row-name').nth(1)).toHaveText('新LED')
   await expect(panel(page).getByRole('status')).toHaveText('新LEDを分類「コンセント」へ移しました（Ctrl+Z で戻せます）')
-  // Row heights differ between fonts (the Linux runner); collapse the long groups so both headers stay in the scroll viewport.
+  // Collapse the long groups before reordering category headers in the scrollable list.
   for (const name of ['照明器具', 'コンセント']) await header(page, name).click()
   await header(page, '幹線').scrollIntoViewIfNeeded()
-  await drag(header(page, '幹線'), header(page, '照明器具'))
+  await drag(page, header(page, '幹線'), header(page, '照明器具'))
   await expect(panel(page).locator('.fixture-category button[aria-expanded]').first()).toHaveText('幹線（1）')
   for (const name of ['照明器具', 'コンセント']) await header(page, name).click()
   await panel(page).getByLabel('名称・略号で検索').fill('新LED')
@@ -131,7 +154,7 @@ test('new category validation, existing-name reuse, edit/duplicate defaults, and
   await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
   await add(page, '幹線項目', '幹線', true)
   await header(page, '照明器具').click()
-  await drag(row(page, '幹線項目'), header(page, '照明器具'))
+  await drag(page, row(page, '幹線項目'), header(page, '照明器具'))
   await expect(header(page, '幹線')).toHaveCount(0)
   await expect(header(page, '照明器具')).toHaveAttribute('aria-expanded', 'false')
   await header(page, '照明器具').click()
@@ -140,7 +163,7 @@ test('new category validation, existing-name reuse, edit/duplicate defaults, and
   await page.keyboard.press('Control+z')
   await expect(header(page, '幹線')).toHaveText('幹線（1）')
   // Category drops on rows use the row's category; the lower half moves after it.
-  await drag(header(page, '照明器具'), row(page, '幹線項目'), 'after')
+  await drag(page, header(page, '照明器具'), row(page, '幹線項目'), 'after')
   await expect(panel(page).locator('.fixture-category button[aria-expanded]').first()).toHaveText('幹線（1）')
 })
 
