@@ -24,37 +24,88 @@ export interface QuantityTableDisplay { allConditions?: boolean; expanded?: Read
 const pageKey = (page: number) => String(page)
 const roomKey = (floor: string, room: string) => JSON.stringify([floor, room])
 
-function columnEntries(item: TableItem, mode: QuantityTableMode, key: string | null, condition?: string) {
+export function columnEntries(item: TableItem, mode: QuantityTableMode, key: string | null, condition?: string) {
   const aggregate = condition === undefined ? item : item.byCondition.get(condition)
-  return key === null ? aggregate?.entries ?? [] : aggregate?.reviewEntries[mode].get(key) ?? []
+  const entries = aggregate?.entries ?? []
+  if (key === null) return entries
+  if (mode === 'page') return entries.filter(entry => pageKey(entry.pageIndex) === key)
+  if (mode === 'floor') return entries.filter(entry => (entry.floor ?? '') === key)
+  const [floor, room] = JSON.parse(key) as [string, string]
+  return entries.filter(entry => (entry.floor ?? '') === floor && (entry.room ?? '') === room)
+}
+class Aggregate implements TableAggregate {
+  total = 0; plan = 0; rise = 0; slack = 0
+  entries: readonly QuantityEntry[] = []
+  values: TableAggregate['values'] = { page: new Map(), floor: new Map(), room: new Map() }
+  // Share the lazy accessor on the prototype instead of allocating one per item.
+  // Compatibility for existing consumers; the UI uses columnEntries directly.
+  get reviewEntries(): TableAggregate['reviewEntries'] {
+    const result: TableAggregate['reviewEntries'] = { page: new Map(), floor: new Map(), room: new Map() }
+    for (const entry of this.entries) {
+      const keys = { page: pageKey(entry.pageIndex), floor: entry.floor ?? '', room: roomKey(entry.floor ?? '', entry.room ?? '') }
+      for (const mode of ['page', 'floor', 'room'] as const) {
+        const key = keys[mode], list = result[mode].get(key)
+        if (list) list.push(entry); else result[mode].set(key, [entry])
+      }
+    }
+    Object.defineProperty(this, 'reviewEntries', { value: result, enumerable: true, configurable: true })
+    return result
+  }
 }
 function emptyAggregate(): TableAggregate {
-  return { total: 0, plan: 0, rise: 0, slack: 0, entries: [],
-    values: { page: new Map(), floor: new Map(), room: new Map() },
-    reviewEntries: { page: new Map(), floor: new Map(), room: new Map() } }
+  return new Aggregate()
+}
+
+function addEntry(aggregate: TableAggregate, entry: QuantityEntry, page: string, floor: string, room: string) {
+  aggregate.total += entry.value
+  if (entry.part) aggregate[entry.part] += entry.value
+  const values = aggregate.values
+  values.page.set(page, (values.page.get(page) ?? 0) + entry.value)
+  values.floor.set(floor, (values.floor.get(floor) ?? 0) + entry.value)
+  values.room.set(room, (values.room.get(room) ?? 0) + entry.value)
 }
 
 /** Read index entries, never annotations. Build all three modes once per index. */
 export function buildQuantityTableData(index: QuantityIndex, fixtures: readonly CountFixture[]): TableItem[] {
+  const roomKeys = new Map<string, Map<string, string>>()
   return groupFixtures(fixtures).flatMap(group => group.items.map(fixture => {
-    const item: TableItem = { ...emptyAggregate(), fixture, byCondition: new Map(), hasUnset: false }
+    const item: TableItem = Object.assign(emptyAggregate(), { fixture, byCondition: new Map<string, TableAggregate>(), hasUnset: false })
     const entries = index.entries(fixture.id)
     item.entries = entries
+    let entryIndex = 0
     for (const entry of entries) {
-      const conditionKey = entry.condition ?? '', condition = item.byCondition.get(conditionKey) ?? emptyAggregate()
-      item.byCondition.set(conditionKey, condition)
-      ;(condition.entries as QuantityEntry[]).push(entry)
-      if (entry.condition === undefined && fixture.conditions?.length) item.hasUnset = true
-      const keys = { page: pageKey(entry.pageIndex), floor: entry.floor ?? '', room: roomKey(entry.floor ?? '', entry.room ?? '') }
-      for (const aggregate of [item, condition]) {
-        aggregate.total += entry.value
-        if (entry.part) aggregate[entry.part] += entry.value
-        for (const mode of ['page', 'floor', 'room'] as const) {
-          const key = keys[mode], list = aggregate.reviewEntries[mode].get(key)
-          aggregate.values[mode].set(key, (aggregate.values[mode].get(key) ?? 0) + entry.value)
-          if (list) list.push(entry); else aggregate.reviewEntries[mode].set(key, [entry])
+      const conditionKey = entry.condition ?? ''
+      let condition = item.byCondition.get(conditionKey)
+      if (!condition) {
+        if (item.byCondition.size === 0) condition = item
+        else {
+          if (item.byCondition.size === 1) {
+            // Share the item until a second condition appears, then detach only
+            // the prefix already accumulated for the first condition.
+            const firstKey = item.byCondition.keys().next().value!
+            const first = Object.assign(emptyAggregate(), {
+              total: item.total, plan: item.plan, rise: item.rise, slack: item.slack,
+              entries: entries.slice(0, entryIndex),
+              values: { page: new Map(item.values.page), floor: new Map(item.values.floor), room: new Map(item.values.room) },
+            })
+            item.byCondition.set(firstKey, first)
+          }
+          condition = emptyAggregate()
         }
+        item.byCondition.set(conditionKey, condition)
       }
+      if (entry.condition === undefined && fixture.conditions?.length) item.hasUnset = true
+      const page = pageKey(entry.pageIndex), floor = entry.floor ?? '', room = entry.room ?? ''
+      let keys = roomKeys.get(floor)
+      if (!keys) { keys = new Map(); roomKeys.set(floor, keys) }
+      let key = keys.get(room)
+      if (key === undefined) { key = roomKey(floor, room); keys.set(room, key) }
+      addEntry(item, entry, page, floor, key)
+      if (condition !== item) {
+        ;(condition.entries as QuantityEntry[]).push(entry)
+        addEntry(condition, entry, page, floor, key)
+      }
+      entryIndex++
     }
     // Retain occupied zero-quantity pages of fully excluded routes.
     item.values.page = new Map([...index.byPage(fixture.id)].map(([page, value]) => [pageKey(page), value]))
