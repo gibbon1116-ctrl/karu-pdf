@@ -554,6 +554,13 @@ export class PdfWorkerPool {
     return response.hasText
   }
 
+  async extractLabels(options: { docId: string; pageIndex: number }): Promise<import('../core/symbolLabels').SymbolLabel[]> {
+    const available = (this.slots.length > 1 ? this.slots.slice(1) : this.slots).filter(slot => slot.documents.has(options.docId))
+    if (!available.length) throw new Error('PDF が開かれていません。')
+    const slot = available.reduce((a, b) => a.queueLength <= b.queueLength ? a : b)
+    const response = await this.request<import('../worker/protocol').LabelsExtractedResponse>(slot, requestId => ({ type: 'extractLabels', requestId, ...options }))
+    return response.labels
+  }
   async drawingPage(docId: string, pageIndex: number): Promise<import('../worker/protocol').DrawingPageResponse> {
     return this.request<import('../worker/protocol').DrawingPageResponse>(this.slots[0], requestId => ({ type: 'drawingPage', requestId, docId, pageIndex }))
   }

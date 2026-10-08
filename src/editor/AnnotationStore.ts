@@ -22,6 +22,7 @@ export interface SymbolSearchCandidate {
   id: string; pageIndex: number; rect: Rect; center: Point; score: number
   state: 'pending' | 'chosen' | 'counted'
   confidence?: 'high' | 'check'; imageScore?: number; extra?: number
+  label: string; gc: boolean; around?: number; aroundCheck?: boolean
 }
 
 export type Kind = MeasureKind | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
@@ -261,37 +262,49 @@ export class AnnotationStore {
   selectedFixtureId: string | null = null
   // Allocated only by explicit visual search; excluded from persisted/history states.
   symbolCandidates: SymbolSearchCandidate[] | null = null
+  symbolLabelFilter: string[] | null = null
+  symbolGcFilter: 'all' | 'with' | 'without' = 'all'
+  isSymbolCandidateVisible(c: SymbolSearchCandidate): boolean {
+    return (this.symbolLabelFilter === null || this.symbolLabelFilter.includes(c.label))
+      && (this.symbolGcFilter === 'all' || (this.symbolGcFilter === 'with' ? c.gc : !c.gc))
+  }
+  get visibleSymbolCandidates(): SymbolSearchCandidate[] | null { return this.symbolCandidates?.filter(c => this.isSymbolCandidateVisible(c)) ?? null }
+  setSymbolCandidateFilters(labels: string[] | null, gc: 'all' | 'with' | 'without' = this.symbolGcFilter): void {
+    this.symbolLabelFilter = labels === null ? null : [...labels]; this.symbolGcFilter = gc; this.notify(false)
+  }
   private symbolCandidateFixture: string | null = null
   private symbolCandidateRadius = 0
 
   clearSymbolCandidates(): void {
     if (this.symbolCandidates === null) return
     this.symbolCandidates = null; this.symbolCandidateFixture = null; this.symbolCandidateRadius = 0
+    this.symbolLabelFilter = null; this.symbolGcFilter = 'all'
     this.notify(false)
   }
   beginSymbolCandidates(fixtureId: string, sampleRect: Rect): void {
     this.symbolCandidateFixture = fixtureId
     this.symbolCandidateRadius = Math.min(sampleRect[2] - sampleRect[0], sampleRect[3] - sampleRect[1]) / 2
+    this.symbolLabelFilter = null; this.symbolGcFilter = 'all'
     this.symbolCandidates = []; this.notify(false)
   }
-  appendSymbolCandidates(candidates: Array<{ pageIndex: number; rect: Rect; center: Point; score: number; confidence?: 'high' | 'check'; imageScore?: number; extra?: number }>): void {
+  appendSymbolCandidates(candidates: Array<{ pageIndex: number; rect: Rect; center: Point; score: number; confidence?: 'high' | 'check'; imageScore?: number; extra?: number; label?: string; gc?: boolean; around?: number; aroundCheck?: boolean }>): void {
     if (!this.symbolCandidates || this.symbolCandidateFixture !== this.selectedFixtureId) return
-    for (const c of candidates) this.symbolCandidates.push({ ...c, rect: [...c.rect], center: [...c.center], id: crypto.randomUUID(), state: 'pending' })
+    for (const c of candidates) this.symbolCandidates.push({ ...c, label: c.label ?? '', gc: c.gc ?? false, rect: [...c.rect], center: [...c.center], id: crypto.randomUUID(), state: 'pending' })
     this.refreshSymbolCandidates(); this.notify(false)
   }
   toggleSymbolCandidate(id: string): void {
     const c = this.symbolCandidates?.find(c => c.id === id)
-    if (!c || c.state === 'counted') return
+    if (!c || c.state === 'counted' || !this.isSymbolCandidateVisible(c)) return
     c.state = c.state === 'chosen' ? 'pending' : 'chosen'; this.notify(false)
   }
   chooseSymbolCandidates(chosen: boolean): void {
     if (!this.symbolCandidates) return
-    for (const c of this.symbolCandidates) if (c.state !== 'counted') c.state = chosen ? 'chosen' : 'pending'
+    for (const c of this.visibleSymbolCandidates ?? []) if (c.state !== 'counted') c.state = chosen ? 'chosen' : 'pending'
     this.notify(false)
   }
   chooseHighConfidenceCandidates(): void {
     if (!this.symbolCandidates) return
-    for (const c of this.symbolCandidates) if (c.state === 'pending' && c.confidence === 'high') c.state = 'chosen'
+    for (const c of this.visibleSymbolCandidates ?? []) if (c.state === 'pending' && c.confidence === 'high') c.state = 'chosen'
     this.notify(false)
   }
   private refreshSymbolCandidates(): void {

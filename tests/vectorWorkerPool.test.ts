@@ -35,6 +35,16 @@ const result: VectorPage = { pageIndex: 0, segments: new Float32Array([0, 0, 10,
   stats: { strokePaths: 1, fillPaths: 0, whiteFills: 0, curves: 0, images: 0, imageAreaRatio: 0, textGlyphs: 0, ms: { displayList: 0, walk: 0, total: 0 } } }
 afterEach(() => { pool?.destroy(); workers.length = 0; vi.unstubAllGlobals() })
 describe('vector request pool lifecycle', () => {
+  it('extracts labels only explicitly on a rendering worker and passes a core response', async () => {
+    await opened()
+    expect(workers.flatMap(w=>w.requests).some(r=>r.type==='extractLabels')).toBe(false)
+    const pending=pool.extractLabels({docId:'vectors',pageIndex:0})
+    const worker=workers.find(w=>w.requests.some(r=>r.type==='extractLabels'))!
+    expect(worker).not.toBe(workers[0])
+    const request=worker.requests.find(r=>r.type==='extractLabels')!
+    worker.emit({type:'labelsExtracted',requestId:request.requestId,labels:[{text:'ET',rect:[0,0,10,10]}]})
+    expect(await pending).toEqual([{text:'ET',rect:[0,0,10,10]}])
+  })
   it('requests only explicitly, uses a rendering worker and lower priority, then releases queue accounting', async () => {
     await opened()
     const task = pool.extractVectors({ docId: 'vectors', pageIndex: 0 }), { worker, request } = extraction()

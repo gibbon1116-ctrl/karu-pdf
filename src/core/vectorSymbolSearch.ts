@@ -8,11 +8,11 @@ export interface VectorSymbolOptions {
   region?: Rect
   shouldStop?: () => boolean
 }
-export interface VectorSymbolMatch { rect: Rect; center: Point; score: number; angle: number; extra: number }
+export interface VectorSymbolMatch { rect: Rect; center: Point; score: number; angle: number; extra: number; around: number }
 
 export interface PreparedTemplate {
   segments: Float32Array; widths: Float32Array; bounds: Rect; tolerance: number
-  removed: { wiring: number; other: number }; total: number; cleaned: boolean
+  strokeWidth: number; removed: { wiring: number; other: number; thin: number }; total: number; cleaned: boolean
 }
 export function defaultVectorTolerance(rect: Rect): number {
   return Math.min(1, Math.max(.3, Math.max(rect[2] - rect[0], rect[3] - rect[1]) * .03))
@@ -57,11 +57,22 @@ export function prepareVectorTemplate(pageSegments: Float32Array, pageWidths: Fl
   if (pageSegments.length % 4 || pageWidths.length !== pageSegments.length / 4 || !pageSegments.every(Number.isFinite)
     || !pageWidths.every(v => Number.isFinite(v) && v >= 0)) throw Error('Invalid vector segments or widths')
   if (!sampleRect.every(Number.isFinite) || sampleRect[2] <= sampleRect[0] || sampleRect[3] <= sampleRect[1]) throw Error('Invalid template rectangle')
-  const tol = defaultVectorTolerance(sampleRect), ids: number[] = []
+  const tol = defaultVectorTolerance(sampleRect)
+  let ids: number[] = []
   for (let i = 0; i < pageSegments.length; i += 4) {
     if (contains(sampleRect, pageSegments[i], pageSegments[i + 1], tol) && contains(sampleRect, pageSegments[i + 2], pageSegments[i + 3], tol)
       && Math.hypot(pageSegments[i + 2] - pageSegments[i], pageSegments[i + 3] - pageSegments[i + 1]) > 0) ids.push(i)
   }
+  const total = ids.length, buckets = new Map<number, number>()
+  for (const i of ids) if (pageWidths[i / 4] > 0) {
+    const w = Math.round(pageWidths[i / 4] * 100) / 100
+    if (w > 0) buckets.set(w, (buckets.get(w) ?? 0) + Math.hypot(pageSegments[i + 2] - pageSegments[i], pageSegments[i + 3] - pageSegments[i + 1]))
+  }
+  let strokeWidth = [...buckets].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0] ?? 0
+  const filtered = ids.filter(i => acceptsWidth(pageWidths[i / 4], strokeWidth))
+  const thin = strokeWidth > 0 && filtered.length >= 2 ? ids.length - filtered.length : 0
+  if (strokeWidth > 0 && filtered.length >= 2) ids = filtered
+  else strokeWidth = 0
   const original = new Float32Array(ids.flatMap(i => Array.from(pageSegments.subarray(i, i + 4))))
   const originalWidths = new Float32Array(ids.map(i => pageWidths[i / 4]))
   const lengths = ids.map(i => Math.hypot(pageSegments[i + 2] - pageSegments[i], pageSegments[i + 3] - pageSegments[i + 1]))
@@ -75,7 +86,12 @@ export function prepareVectorTemplate(pageSegments: Float32Array, pageWidths: Fl
       bounds[2] = Math.max(bounds[2], segments[i]); bounds[3] = Math.max(bounds[3], segments[i + 1])
     }
     if (!segments.length) bounds.splice(0, 4, ...sampleRect)
-    return { segments, widths, bounds, tolerance: defaultVectorTolerance(bounds), removed: { wiring, other }, total: ids.length, cleaned: wiring + other > 0 }
+    const weighted = kept.filter(i => originalWidths[i / 4] > 0).map(i => ({ width: originalWidths[i / 4], length: lengths[i / 4] })).sort((a, b) => a.width - b.width)
+    let sum = 0
+    const half = weighted.reduce((n, v) => n + v.length, 0) / 2
+    const median = weighted.find(v => (sum += v.length) >= half)?.width ?? 0
+    return { segments, widths, bounds, strokeWidth: strokeWidth ? median : 0,
+      tolerance: defaultVectorTolerance(bounds), removed: { wiring, other, thin }, total, cleaned: wiring + other + thin > 0 }
   }
   const all = ids.map((_, i) => i * 4), fallback = () => finish(all)
   if (ids.length < 2 || ids.length > 4096) return fallback()
@@ -102,6 +118,7 @@ export function prepareVectorTemplate(pageSegments: Float32Array, pageWidths: Fl
     const wiring = new Set<number>(), queue: number[] = []
     const expanded: Rect = [sampleRect[0] - tol, sampleRect[1] - tol, sampleRect[2] + tol, sampleRect[3] + tol]
     for (let i = 0; i < pageSegments.length; i += 4) {
+      if (!acceptsWidth(pageWidths[i / 4], strokeWidth)) continue
       if (contains(sampleRect, pageSegments[i], pageSegments[i + 1], tol) && contains(sampleRect, pageSegments[i + 2], pageSegments[i + 3], tol)) continue
       const clipped = clippedLine(pageSegments, i, expanded)
       if (!clipped) continue
@@ -184,8 +201,18 @@ function gridLines(grid: ReturnType<typeof spatialIndex>, size: number, r: Rect)
   return result
 }
 
+// Float32 storage must not exclude exact .5W/2W boundary widths by rounding.
+const acceptsWidth = (width: number, w: number) => !w || !width || (width >= .5 * w - 1e-6 && width <= 2 * w + 1e-6)
+function widthFiltered(segments: Float32Array, widths: Float32Array | undefined, w: number): Float32Array {
+  if (!w || !widths) return segments
+  const kept: number[] = []
+  for (let i = 0; i < segments.length; i += 4) if (acceptsWidth(widths[i / 4], w)) kept.push(i)
+  const result = new Float32Array(kept.length * 4)
+  kept.forEach((i, at) => result.set(segments.subarray(i, i + 4), at * 4))
+  return result
+}
 export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, options: Partial<VectorSymbolOptions> = {},
-  sampleSegments: Float32Array = segments, sampleWidths: Float32Array = new Float32Array(sampleSegments.length / 4)) {
+  sampleSegments: Float32Array = segments, sampleWidths: Float32Array = new Float32Array(sampleSegments.length / 4), segmentWidths?: Float32Array) {
   const started = performance.now(), width = sampleRect[2] - sampleRect[0], height = sampleRect[3] - sampleRect[1]
   const initialTolerance = options.tolerance ?? defaultVectorTolerance(sampleRect)
   const threshold = options.threshold ?? .85, maxResults = options.maxResults ?? 2000
@@ -193,7 +220,10 @@ export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, opt
     || !Number.isFinite(threshold) || threshold < 0 || threshold > 1 || !Number.isInteger(maxResults) || maxResults < 0
     || (options.region && (!options.region.every(Number.isFinite) || options.region[2] < options.region[0] || options.region[3] < options.region[1]))) throw Error('Invalid vector search options')
   if (segments.length % 4 || sampleSegments.length % 4 || !segments.every(Number.isFinite) || !sampleSegments.every(Number.isFinite)) throw Error('Invalid vector segments')
+  if (segmentWidths && (segmentWidths.length !== segments.length / 4 || !segmentWidths.every(w => Number.isFinite(w) && w >= 0))) throw Error('Invalid vector widths')
   const templateStarted = prepareVectorTemplate(sampleSegments, sampleWidths, sampleRect)
+  const samplePageSegments = widthFiltered(sampleSegments, sampleWidths, templateStarted.strokeWidth)
+  segments = widthFiltered(segments, segmentWidths, templateStarted.strokeWidth)
   sampleSegments = templateStarted.segments
   const bounds = templateStarted.bounds, tolerance = options.tolerance ?? templateStarted.tolerance
   const short = Math.max(.3, Math.min(bounds[2] - bounds[0], bounds[3] - bounds[1]))
@@ -213,7 +243,17 @@ export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, opt
   }
   if (templateIds.length < 2) throw Error('見本の範囲に線がありません')
   const template = { segments: templateIds.length, length: totalLength, removed: templateStarted.removed,
-    total: templateStarted.total, cleaned: templateStarted.cleaned, rect: bounds }
+    total: templateStarted.total, cleaned: templateStarted.cleaned, rect: bounds, strokeWidth: templateStarted.strokeWidth, sampleAround: 0 }
+  const padding = Math.max(bounds[2] - bounds[0], bounds[3] - bounds[1]) * .4
+  const bandLength = (lines: Float32Array, ids: Iterable<number>, inverse: (x: number, y: number) => Point) => {
+    let length = 0
+    for (const i of ids) {
+      const a = inverse(lines[i], lines[i + 1]), b = inverse(lines[i + 2], lines[i + 3])
+      if ([a, b].every(p => contains(bounds, p[0], p[1], padding) && !contains(bounds, p[0], p[1], tolerance))) length += Math.hypot(b[0] - a[0], b[1] - a[1])
+    }
+    return Math.min(1, length / totalLength)
+  }
+  template.sampleAround = bandLength(samplePageSegments, (function* () { for (let i = 0; i < samplePageSegments.length; i += 4) yield i })(), (x, y) => [x, y])
   if (!maxResults || options.shouldStop?.()) return { matches: [] as VectorSymbolMatch[], template, stats: { anchorsTried: 0, ms: performance.now() - started } }
   const size = Math.min(16, Math.max(8, short)), grid = spatialIndex(segments, size), radius = Math.ceil(tolerance / size)
   const hits = (px: number, py: number) => {
@@ -267,7 +307,7 @@ export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, opt
         const score = Math.min(1, covered / totalLength)
         if (score >= threshold - 1e-10) {
           const match = { rect, center: [(rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2] as Point,
-            score, angle: ((angle * 180 / Math.PI % 360) + 360) % 360, extra: 0 }
+            score, angle: ((angle * 180 / Math.PI % 360) + 360) % 360, extra: 0, around: 0 }
           candidates.push(match); transforms.set(match, [ox, oy, cos, sin])
         }
       }
@@ -296,6 +336,8 @@ export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, opt
       sampleSegments[anchor + 1] - sin * (x - ox) + cos * (y - oy)]
     const r = match.rect, margin = tolerance * (Math.abs(cos) + Math.abs(sin))
     const expanded: Rect = [r[0] - margin, r[1] - margin, r[2] + margin, r[3] + margin]
+    const aroundMargin = padding * (Math.abs(cos) + Math.abs(sin))
+    match.around = bandLength(segments, gridLines(grid, size, [r[0] - aroundMargin, r[1] - aroundMargin, r[2] + aroundMargin, r[3] + aroundMargin]), inverse)
     let total = 0, uncovered = 0
     for (const i of gridLines(grid, size, expanded)) {
       const a = inverse(segments[i], segments[i + 1]), b = inverse(segments[i + 2], segments[i + 3])

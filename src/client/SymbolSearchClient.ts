@@ -1,5 +1,6 @@
 import { VectorCache, vectorWorkerTask, SYMBOL_SEARCH_STALL_MS } from './VectorCache'
 import type { VectorSearchResult } from '../worker/symbolSearchMessages'
+import { assignSymbolLabels, type SymbolLabelValue } from '../core/symbolLabels'
 /* @single:start */import { createSingleWorker } from '../single/runtime'
 /* @single:end */import type { Point, Rect } from '../core/annotations'
 export { SYMBOL_SEARCH_STALL_MS } from './VectorCache'
@@ -10,10 +11,10 @@ import type { SymbolSearchMessage, SymbolSearchResponse, WorkerSearchOptions } f
 
 export interface SymbolSearchRequest {
   docId: string; pageIndex: number; sampleRect: Rect; samplePageIndex: number
-  searchRect?: Rect; options?: Partial<SymbolSearchOptions>; verify?: boolean
+  searchRect?: Rect; options?: Partial<SymbolSearchOptions>; verify?: boolean; splitG?: boolean
 }
 export interface SymbolCandidate { pageIndex: number; rect: Rect; center: Point; score: number; rotation: number
-  confidence?: 'high' | 'check'; imageScore?: number; extra?: number }
+  confidence?: 'high' | 'check'; imageScore?: number; extra?: number; around?: number; aroundCheck?: boolean; label?: string; gc?: boolean }
 // Image similarity only grades line matches; it never removes them. On real drawings the
 // correct line matches scored 0.17-1.00 (median 0.70; text and lines crossing the symbol pull
 // it down) while the wrong ones scored 0.16-0.30, so the bar sits well below whole-page image
@@ -30,7 +31,7 @@ export interface SymbolSearchMetrics {
   estimatedWorkerBytes: number; levels: number; coarseMs: number; refineMs: number
   vectorMs: number; verifyRenderMs: number; verifyMs: number
 }
-export interface SymbolSearchResult { candidates: SymbolCandidate[]; metrics: SymbolSearchMetrics; method: 'vector' | 'image'; vectorDetails?: VectorSearchResult }
+export interface SymbolSearchResult { candidates: SymbolCandidate[]; metrics: SymbolSearchMetrics; method: 'vector' | 'image'; vectorDetails?: VectorSearchResult; sampleLabel: string; sampleGc: boolean }
 export interface SymbolSearchTestHooks {
   symbolSearch(request: SymbolSearchRequest): Promise<SymbolSearchResult>
   symbolSearchCancelTest(request: SymbolSearchRequest, afterMs: number): Promise<{ cancelled: boolean; settledMs: number }>
@@ -92,12 +93,17 @@ export class SymbolSearchClient {
       }
       validRect(rect)
       let vector: VectorSearchResult | undefined
+      let sampleValue: SymbolLabelValue = { label: '', gc: false }, labelValues: SymbolLabelValue[] = []
       let vectorBytes = 0, vectorFinished = 0
       const finishVector = (candidates: SymbolCandidate[], verification?: { renderScale: number; requestedRenderScale: number; pagePixels: number; renderMs: number; verifyMs: number; bytes: number }) => {
         const result = vector!, searchMs = result.stats.ms
         run.done = true; clearInterval(watchdog); this.running = null
         if (this.worker) { this.worker.onmessage = null; this.worker.onerror = null; this.worker.onmessageerror = null }
-        resolve({ method: 'vector', vectorDetails: result, candidates,
+        resolve({ method: 'vector', vectorDetails: result, ...{ sampleLabel: sampleValue.label, sampleGc: sampleValue.gc },
+          candidates: candidates.map((c, i) => {
+            const aroundCheck = (c.around ?? 0) - result.template.sampleAround > .3
+            return { ...c, ...labelValues[i], aroundCheck, confidence: aroundCheck ? 'check' : c.confidence }
+          }),
           metrics: { renderScale: verification?.renderScale ?? 0, requestedRenderScale: verification?.requestedRenderScale ?? 0,
             scaleReduced: !!verification && verification.renderScale < verification.requestedRenderScale, renderTiles: verification ? 2 : 0,
             pagePixels: verification?.pagePixels ?? 0, renderMs: Math.max(0, vectorFinished-started-searchMs) + (verification?.renderMs ?? 0),
@@ -117,6 +123,7 @@ export class SymbolSearchClient {
         if (target.kind === 'vector' || target.kind === 'mixed') {
           onProgress?.('vector', 0, 1)
           const response = await vectorWorkerTask({ type: 'vector-search', id: run.id, segments: target.segments,
+            segmentWidths: target.widths,
             sampleSegments: samplePage.segments, sampleWidths: samplePage.widths, sampleRect: request.sampleRect,
             options: { threshold: request.options?.threshold ?? .85, rotations: request.options?.rotations ?? false,
               maxResults: request.options?.maxResults ?? 500, region: rect } }, run.abort.signal,
@@ -125,7 +132,17 @@ export class SymbolSearchClient {
           if (response.type !== 'vector-result') throw Error('Invalid vector response')
           if (response.result) {
             vector = response.result; vectorFinished = performance.now()
-            vectorBytes = target.segments.byteLength + samplePage.segments.byteLength + samplePage.widths.byteLength
+            const targetLabels = await cache.getLabels(request.pageIndex, this.pool, run.abort.signal)
+            check(); lastHeard = performance.now()
+            const sampleLabels = request.pageIndex === request.samplePageIndex ? targetLabels : await cache.getLabels(request.samplePageIndex, this.pool, run.abort.signal)
+            check(); lastHeard = performance.now()
+            const body = vector.template.rect, radius = Math.max(body[2] - body[0], body[3] - body[1])
+            labelValues = assignSymbolLabels(targetLabels, vector.matches, radius, request.splitG ?? true)
+            // Use all bodies on the sample page as competitors, so a neighboring
+            // body's overlapping label cannot be stolen by the selected sample.
+            const sampleBodies = request.pageIndex === request.samplePageIndex ? vector.matches.filter(m => Math.hypot(m.center[0] - (body[0] + body[2]) / 2, m.center[1] - (body[1] + body[3]) / 2) > .01) : []
+            sampleValue = assignSymbolLabels(sampleLabels, [{ rect: body }, ...sampleBodies], radius, request.splitG ?? true)[0]
+            vectorBytes = target.segments.byteLength + target.widths.byteLength + samplePage.segments.byteLength + samplePage.widths.byteLength
             if (request.verify === false || vector.matches.length === 0) {
               finishVector(vector.matches.map(m => ({ ...m, pageIndex: request.pageIndex, rotation: m.angle,
                 confidence: m.extra <= .4 ? 'high' : 'check' })))
@@ -207,11 +224,11 @@ export class SymbolSearchClient {
         const candidates: SymbolCandidate[] = response.matches.map(match => {
           const x = (match.x + searchDevice[0]) / renderScale, y = (match.y + searchDevice[1]) / renderScale
           const w = match.width / renderScale, h = match.height / renderScale
-          return { pageIndex: request.pageIndex, rect: [x, y, x + w, y + h], center: [x + w / 2, y + h / 2], score: match.score, rotation: match.rotation }
+          return { pageIndex: request.pageIndex, rect: [x, y, x + w, y + h], center: [x + w / 2, y + h / 2], score: match.score, rotation: match.rotation, label: '', gc: false }
         })
         run.done = true; clearInterval(watchdog); this.running = null
         worker.onmessage = null; worker.onerror = null; worker.onmessageerror = null
-        resolve({ method: 'image', candidates, metrics: { renderScale, requestedRenderScale, scaleReduced: renderScale < requestedRenderScale, renderTiles,
+        resolve({ method: 'image', candidates, sampleLabel: '', sampleGc: false, metrics: { renderScale, requestedRenderScale, scaleReduced: renderScale < requestedRenderScale, renderTiles,
           pagePixels: response.memory.pagePixels, renderMs, transferMs: Math.max(0, performance.now() - transferred - response.stats.workerMs),
           searchMs: response.stats.workerMs, coarseCandidates: response.stats.coarseCandidates, refined: response.stats.refined, totalMs: performance.now() - started,
           estimatedWorkerBytes: response.memory.bytes, levels: response.stats.levels, coarseMs: response.stats.ms.coarse, refineMs: response.stats.ms.refine,

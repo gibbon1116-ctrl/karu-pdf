@@ -24,7 +24,7 @@ describe('vector template preparation', () => {
     const result = prepareVectorTemplate(segments, widths, [18,15,39,42])
     expect(result.cleaned).toBe(true)
     expect(result.segments).toEqual(new Float32Array(body))
-    expect(result.removed).toEqual({ wiring: 7, other: 3 })
+    expect(result.removed).toEqual({ wiring: 7, other: 3, thin: 0 })
     expect(result.total).toBe(26)
     expect(result.bounds).toEqual([20,20,23,39])
     expect(result.tolerance).toBeCloseTo(19 * .03)
@@ -41,7 +41,7 @@ describe('vector template preparation', () => {
     const segments = new Float32Array([-3,0,1,0, 2,0,4,0, 5,0,7,0, 3,3,3,4])
     const result = prepareVectorTemplate(segments, new Float32Array(4), [0,-1,8,5])
     expect(result.cleaned).toBe(false); expect(result.total).toBe(3)
-    expect(result.removed).toEqual({ wiring: 0, other: 0 }); expect(result.segments).toEqual(segments.slice(4))
+    expect(result.removed).toEqual({ wiring: 0, other: 0, thin: 0 }); expect(result.segments).toEqual(segments.slice(4))
   })
   it('restores the original when wiring removal leaves less than 40% of its length', () => {
     const segments = new Float32Array([-3,0,1,0, 2,0,12,0, 13,0,23,0, 4,4,5,4, 5,4,5,5])

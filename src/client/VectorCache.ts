@@ -1,6 +1,7 @@
 /* @single:start */import { createSingleWorker } from '../single/runtime'
 /* @single:end */import { classifyPage, type PageKind, type VectorPage } from '../core/vectorPaths'
 import type { Rect } from '../core/annotations'
+import type { SymbolLabel } from '../core/symbolLabels'
 import type { SnapIndex } from '../core/snap'
 import type { PdfWorkerPool } from './PdfWorkerPool'
 import type { EndpointMessage, VectorSearchMessage, SymbolSearchResponse } from '../worker/symbolSearchMessages'
@@ -8,7 +9,7 @@ import type { EndpointMessage, VectorSearchMessage, SymbolSearchResponse } from 
 export const SYMBOL_SEARCH_STALL_MS = 60_000
 export const VECTOR_CACHE_PAGES = 3
 export const VECTOR_CACHE_BYTES = 16 * 1024 * 1024
-export interface CachedVectorPage extends VectorPage { kind: PageKind; endpointIndex?: SnapIndex }
+export interface CachedVectorPage extends VectorPage { kind: PageKind; endpointIndex?: SnapIndex; labels?: SymbolLabel[] }
 export const cancelled = () => new Error('cancelled')
 
 /** Every invocation owns a disposable Worker; no matching/indexing runs on the UI thread. */
@@ -40,7 +41,9 @@ export function vectorWorkerTask(message: VectorSearchMessage | EndpointMessage,
       if (message.type === 'vector-search') {
         const sampleSegments = message.sampleSegments.slice()
         const sampleWidths = message.sampleWidths.slice()
-        worker.postMessage({ ...message, segments, sampleSegments, sampleWidths }, [segments.buffer, sampleSegments.buffer, sampleWidths.buffer])
+        const segmentWidths = message.segmentWidths?.slice()
+        worker.postMessage({ ...message, segments, sampleSegments, sampleWidths, segmentWidths },
+          [segments.buffer, sampleSegments.buffer, sampleWidths.buffer, ...(segmentWidths ? [segmentWidths.buffer] : [])])
       } else worker.postMessage({ ...message, segments }, [segments.buffer])
       } catch (error) { finish(error instanceof Error ? error : new Error(String(error))) }
   })
@@ -49,6 +52,7 @@ export function vectorWorkerTask(message: VectorSearchMessage | EndpointMessage,
 interface Entry {
   promise: Promise<CachedVectorPage>; value?: CachedVectorPage; cancel(): void; users: number
   endpoint?: Promise<SnapIndex | null>; endpointAbort?: AbortController; endpointUsers?: number
+  labels?: Promise<SymbolLabel[]>
 }
 /** Document-owned, demand-only LRU. Pending requests are shared; invalidated late results never return to the cache. */
 export class VectorCache {
@@ -58,7 +62,8 @@ export class VectorCache {
   reportUnavailable(pageIndex: number): boolean { if (this.unavailable.has(pageIndex)) return false; this.unavailable.add(pageIndex); return true }
   peekEndpoint(pageIndex: number): SnapIndex | null { return this.entries.get(pageIndex)?.value?.endpointIndex ?? null }
   get size(): number { return [...this.entries.values()].filter(e => e.value).length }
-  get bytes(): number { return [...this.entries.values()].reduce((sum, e) => sum + (e.value?.segments.byteLength ?? 0) + (e.value?.widths.byteLength ?? 0) + (e.value?.endpointIndex?.bytes ?? 0), 0) }
+  get bytes(): number { return [...this.entries.values()].reduce((sum, e) => sum + (e.value?.segments.byteLength ?? 0) + (e.value?.widths.byteLength ?? 0) + (e.value?.endpointIndex?.bytes ?? 0)
+    + (e.value?.labels?.reduce((n, label) => n + label.text.length * 2 + 32, 0) ?? 0), 0) }
   constructor(private docId: string) {}
   clear(): void {
     for (const e of this.entries.values()) { e.cancel(); e.endpointAbort?.abort() }
@@ -125,6 +130,23 @@ export class VectorCache {
       const abort = () => { if (done) return; finish(); reject(cancelled()); if (!entry.endpointUsers) entry.endpointAbort?.abort() }
       signal.addEventListener('abort', abort, { once: true })
       entry.endpoint!.then(value => { if (!done) { finish(); resolve(value) } }, error => { if (!done) { finish(); reject(error) } })
+    })
+  }
+  /** Called only after a successful vector search, never by get() or endpoints(). */
+  async getLabels(pageIndex: number, pool: Pick<PdfWorkerPool, 'extractLabels'>, signal: AbortSignal): Promise<SymbolLabel[]> {
+    if (signal.aborted) throw cancelled()
+    const entry = this.entries.get(pageIndex)
+    if (entry?.value?.labels) return entry.value.labels
+    const load = () => pool.extractLabels({ docId: this.docId, pageIndex })
+    const pending = entry ? (entry.labels ??= load().then(labels => {
+      if (this.entries.get(pageIndex) !== entry) throw cancelled()
+      if (entry.value) entry.value.labels = labels
+      this.trim(); return labels
+    }).finally(() => { entry.labels = undefined })) : load()
+    return new Promise((resolve, reject) => {
+      const abort = () => reject(cancelled())
+      signal.addEventListener('abort', abort, { once: true })
+      pending.then(labels => { signal.removeEventListener('abort', abort); if (!signal.aborted) resolve(labels) }, error => { signal.removeEventListener('abort', abort); reject(error) })
     })
   }
 }

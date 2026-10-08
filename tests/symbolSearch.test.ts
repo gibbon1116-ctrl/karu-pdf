@@ -306,7 +306,7 @@ describe('SymbolSearchClient resource lifecycle', () => {
     worker.onmessage!({ data: { type: 'result', id: message.id, matches: [{ x: 4, y: 6, width: 10, height: 12, score: 1, rotation: 90 }],
       stats: { coarseCandidates: 1, refined: 1, levels: 1, workerMs: 0, ms: { coarse: 0, refine: 0 } }, memory: { pagePixels: 1089, bytes: 100 } } })
     const result = await task.promise
-    expect(result.candidates[0]).toEqual({ pageIndex: 0, rect: [38 / 3, 24, 58 / 3, 32], center: [16, 28], score: 1, rotation: 90 })
+    expect(result.candidates[0]).toEqual({ pageIndex: 0, rect: [38 / 3, 24, 58 / 3, 32], center: [16, 28], score: 1, rotation: 90, label: '', gc: false })
     expect(result.metrics).toMatchObject({ renderScale: 1.5, renderTiles: 2 })
     expect(pool.extractVectors).toHaveBeenCalledOnce() // Raster sample forces image matching for every target page.
     expect(pool.renderSearchImage).toHaveBeenCalledTimes(2)

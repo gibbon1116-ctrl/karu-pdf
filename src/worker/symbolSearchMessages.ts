@@ -12,7 +12,7 @@ export interface ImageSearchMessage {
   type: 'search'; id: number; page: SearchImage; template: SearchImage; renderScale: number; options: WorkerSearchOptions
 }
 export interface VectorSearchMessage {
-  type: 'vector-search'; id: number; segments: Float32Array; sampleSegments: Float32Array; sampleWidths: Float32Array; sampleRect: Rect
+  type: 'vector-search'; id: number; segments: Float32Array; segmentWidths?: Float32Array; sampleSegments: Float32Array; sampleWidths: Float32Array; sampleRect: Rect
   options: Omit<Partial<VectorSymbolOptions>, 'shouldStop'>
 }
 export interface EndpointMessage { type: 'endpoints'; id: number; segments: Float32Array; bounds: Rect }
@@ -32,7 +32,7 @@ export function searchVectorMessage(message: VectorSearchMessage): VectorSearchR
       && a[i+2]>=x0-tolerance && a[i+2]<=x1+tolerance && a[i+3]>=y0-tolerance && a[i+3]<=y1+tolerance
       && (a[i]!==a[i+2] || a[i+1]!==a[i+3])) count++
   }
-  return count < 2 ? null : vectorSymbolSearch(message.segments, message.sampleRect, message.options, message.sampleSegments, message.sampleWidths)
+  return count < 2 ? null : vectorSymbolSearch(message.segments, message.sampleRect, message.options, message.sampleSegments, message.sampleWidths, message.segmentWidths)
 }
 export function buildEndpointIndex(message: EndpointMessage): SnapIndex {
   return buildSnapIndex(segmentEndpoints(message.segments, 200_000), message.bounds, 16)

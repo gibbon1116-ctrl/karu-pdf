@@ -7,13 +7,14 @@ import type { VectorPage } from '../src/core/vectorPaths'
 import { buildSnapIndex, findPreferredSnap } from '../src/core/snap'
 import { buildEndpointIndex, searchVectorMessage, type SymbolSearchMessage, type SymbolSearchResponse } from '../src/worker/symbolSearchMessages'
 import { DocumentSession, DocumentTabsModel } from '../src/app/documentModel'
+import { circleLines, outletLines } from './symbolLabelFixtures'
 
 const squareX = (x: number, y: number, diagonal = true) => [x,y,x+10,y, x+10,y,x+10,y+10, x+10,y+10,x,y+10, x,y+10,x,y, ...(diagonal ? [x,y,x+10,y+10, x+10,y,x,y+10] : [])]
 const vector = (pageIndex = 0, segments = new Float32Array(squareX(20, 20)), imageAreaRatio = 0, truncated = false): VectorPage => ({
   pageIndex, segments, widths: new Float32Array(segments.length / 4), segmentCount: segments.length / 4, truncated,
   stats: { strokePaths: 1, fillPaths: 0, whiteFills: 0, curves: 0, images: imageAreaRatio ? 1 : 0, imageAreaRatio, textGlyphs: 0, ms: { displayList: 0, walk: 0, total: 0 } },
 })
-const poolFor = (make = (index: number) => vector(index)) => ({ extractVectors: vi.fn(({ pageIndex }: { pageIndex: number }) => ({ promise: Promise.resolve(make(pageIndex)), cancel: vi.fn() })) })
+const poolFor = (make = (index: number) => vector(index)) => ({ extractLabels: vi.fn(async () => []), extractVectors: vi.fn(({ pageIndex }: { pageIndex: number }) => ({ promise: Promise.resolve(make(pageIndex)), cancel: vi.fn() })) })
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
 
 class FakeWorker {
@@ -61,6 +62,22 @@ const verifyRequest = { docId:'doc', pageIndex:0, samplePageIndex:0, sampleRect:
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('vector candidate image verification lifecycle', () => {
+  it('assigns labels after the Worker result and retains around checks with perfect image verification', async () => {
+    workers();FakeWorker.holdVerify=true
+    const lines=new Float32Array([...outletLines(25,25),...outletLines(125,25),...circleLines(125,25,7)])
+    const pool={...verificationPool(),...poolFor(i=>vector(i,lines)),extractLabels:vi.fn(async()=>[
+      {text:'ET',rect:[31,20,38,27] as [number,number,number,number]},
+      {text:'ETG',rect:[131,20,140,27] as [number,number,number,number]},
+    ])}
+    const client=new SymbolSearchClient(pool as unknown as PdfWorkerPool), task=client.search(verifyRequest)
+    await vi.waitFor(()=>expect(FakeWorker.instances).toHaveLength(2))
+    FakeWorker.instances[1].onmessage!({data:{type:'verify-result',id:1,scores:new Float32Array([1,1]),verifyMs:1}})
+    const result=await task.promise
+    expect(result.sampleLabel).toBe('ET');expect(result.sampleGc).toBe(false)
+    expect(result.candidates.map(c=>[c.label,c.gc])).toEqual([['ET',false],['ET',true]])
+    expect(result.candidates[1]).toMatchObject({aroundCheck:true,confidence:'check',imageScore:1})
+    expect(pool.extractLabels).toHaveBeenCalledOnce();client.dispose()
+  })
   it.each([false, true])('grades extra lines even with perfect image scores (verify: %s)', async verify => {
     workers(); FakeWorker.holdVerify = true
     const thin = (x: number) => [x,20,x+3,20, x+3,20,x+3,39, x+3,39,x,39, x,39,x,20]
@@ -98,6 +115,7 @@ describe('vector candidate image verification lifecycle', () => {
       const client = new SymbolSearchClient(pool as unknown as PdfWorkerPool)
       const result = await client.search({ ...verifyRequest, verify }).promise
       expect(result.method).toBe('image'); expect(result.candidates.length).toBeGreaterThan(0)
+      expect(pool.extractLabels).not.toHaveBeenCalled()
       expect(result.candidates.every(c => c.confidence === undefined && c.extra === undefined && c.imageScore === undefined)).toBe(true)
       expect(pool.renderSearchImage.mock.calls.map(([r])=>r.deviceRect)).toEqual([[20,20,301,101],[38,38,62,62]])
       expect(FakeWorker.instances[0].postMessage.mock.calls[0][0].type).toBe('search')
@@ -157,6 +175,23 @@ describe('vector candidate image verification lifecycle', () => {
 })
 
 describe('bounded document vector cache', () => {
+  it('fetches labels only explicitly, shares and accounts for them, and clears late results', async () => {
+    workers();const cache=new VectorCache('doc'),pool={...poolFor(),extractLabels:vi.fn(async()=>[{text:'ET',rect:[30,20,38,28] as [number,number,number,number]}])}
+    await cache.get(0,pool)
+    await cache.endpoints(0,pool,[0,0,200,200],new AbortController().signal)
+    expect(pool.extractLabels).not.toHaveBeenCalled()
+    const initialBytes=cache.bytes,signal=new AbortController().signal
+    const [a,b]=await Promise.all([cache.getLabels(0,pool,signal),cache.getLabels(0,pool,signal)])
+    expect(a).toBe(b);expect(pool.extractLabels).toHaveBeenCalledOnce()
+    expect(cache.bytes-initialBytes).toBe(36)
+    expect(await cache.getLabels(0,pool,signal)).toBe(a)
+    cache.clear();expect(cache.bytes).toBe(0)
+    await cache.get(0,pool)
+    const pending=deferred<typeof a>()
+    pool.extractLabels.mockImplementation(()=>pending.promise)
+    const loading=cache.getLabels(0,pool,signal),rejected=expect(loading).rejects.toThrow('cancelled')
+    cache.clear();pending.resolve(a);await rejected;expect(cache.size).toBe(0)
+  })
   it('is idle until requested and shares the same in-flight promise', async () => {
     const cache = new VectorCache('doc'), pool = poolFor()
     expect(pool.extractVectors).not.toHaveBeenCalled()
@@ -225,6 +260,7 @@ describe('vector Worker messages and drawing endpoint index', () => {
     const message=FakeWorker.instances[0].postMessage.mock.calls[0][0]
     expect(message.type).toBe('vector-search'); if (message.type !== 'vector-search') throw Error('missing vector message'); expect(message.segments.byteLength).toBe(0)
     expect(message.sampleSegments.byteLength).toBe(0); expect(message.sampleWidths.byteLength).toBe(0)
+    expect(message.segmentWidths?.byteLength).toBe(0)
     expect(result.candidates[0]).toMatchObject({ confidence: 'high', extra: 0 })
     expect(FakeWorker.instances[0].terminate).toHaveBeenCalledOnce(); client.dispose()
   })

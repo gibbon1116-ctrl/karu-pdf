@@ -16,6 +16,30 @@ async function setup() {
 }
 
 describe('visual search count marks', () => {
+  it('filters labels and G for toggling, bulk selection, high confidence and quantity addition without deleting candidates', async () => {
+    const store=await setup()
+    store.beginSymbolCandidates('led',sampleRect)
+    store.appendSymbolCandidates([
+      {...candidate(40,50),label:'ET',gc:false,confidence:'high'},
+      {...candidate(80,50),label:'ET',gc:true,confidence:'high'},
+      {...candidate(120,50),label:'4H',confidence:'high'},
+      {...candidate(160,50),label:'',confidence:'check'},
+    ])
+    store.setSymbolCandidateFilters(['ET'],'with');store.chooseSymbolCandidates(true)
+    expect(store.symbolCandidates?.map(c=>c.state)).toEqual(['pending','chosen','pending','pending'])
+    store.toggleSymbolCandidate(store.symbolCandidates![2].id)
+    expect(store.symbolCandidates![2].state).toBe('pending')
+    store.setSymbolCandidateFilters(['ET'],'without');store.chooseHighConfidenceCandidates()
+    expect(store.visibleSymbolCandidates).toHaveLength(1)
+    // This is the same visible-only source used by the panel's quantity action.
+    const selected=store.visibleSymbolCandidates!.filter(c=>c.state==='chosen')
+    store.createCountMarks('led',selected.map(c=>({pageIndex:c.pageIndex,center:c.center})))
+    expect(store.quantityIndex().total('led')).toBe(1)
+    expect(store.symbolCandidates).toHaveLength(4)
+    store.setSymbolCandidateFilters(['ET',''],'all')
+    expect(store.visibleSymbolCandidates).toHaveLength(3)
+    store.setSymbolCandidateFilters(null,'all');expect(store.visibleSymbolCandidates).toHaveLength(4)
+  })
   it('selects only pending high candidates and keeps confidence transient', async () => {
     const store = await setup(), dirty = store.dirtySummary()
     store.beginSymbolCandidates('led', sampleRect)

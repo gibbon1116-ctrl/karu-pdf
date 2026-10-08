@@ -9,6 +9,7 @@ import { openDocument, type OpenedDocument } from '../core/mupdfDoc'
 import { renderRegion } from '../core/render'
 import mupdf, { type Pixmap, type DrawDevice } from 'mupdf'
 import { extractVectorPage } from './vectorExtract'
+import { extractLabelPage } from './labelExtract'
 import { ComparePageCache, renderComparePixels } from './compareRender'
 import { readDocumentScaleMetadata } from '../core/measure'
 import { applyEdits, listAnnotations } from '../core/annotations'
@@ -92,6 +93,7 @@ let sequence = 0
 let running = false
 let processedCount = 0
 type CoreRequest =
+  | import('./protocol').ExtractLabelsRequest
   | import('./protocol').DrawingPageRequest
   | import('./protocol').GetCountFixturesRequest
   | MaxIssueNumberRequest
@@ -457,6 +459,10 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       return
     }
 
+    if (request.type === 'extractLabels') {
+      post({ type: 'labelsExtracted', requestId: request.requestId, labels: extractLabelPage(document, request.pageIndex) })
+      return
+    }
     if (request.type === 'drawingPage') {
       const started = performance.now(), page = document.loadPage(request.pageIndex)
       let display: ReturnType<typeof page.toDisplayList> | undefined, structured: ReturnType<typeof page.toStructuredText> | undefined
@@ -887,7 +893,7 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     schedule()
     return
   }
-  if (message.type === 'drawingPage') {
+  if (message.type === 'drawingPage' || message.type === 'extractLabels') {
     queue.push({ ...message, priority: 3, sequence: sequence++ })
     queue.sort((a, b) => a.priority - b.priority || a.sequence - b.sequence)
     schedule(); return

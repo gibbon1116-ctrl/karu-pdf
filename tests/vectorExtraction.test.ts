@@ -1,4 +1,5 @@
 import { vectorSearchSnapPdf } from './vectorSearchSnapFixtures'
+import { symbolLabelsPdf } from './symbolLabelFixtures'
 import { classifyPage } from '../src/core/vectorPaths'
 import { searchVectorMessage, buildEndpointIndex } from '../src/worker/symbolSearchMessages'
 import { findSnap } from '../src/core/snap'
@@ -88,6 +89,21 @@ function trackCallbackDestruction() {
 }
 
 describe('real MuPDF vector device', () => {
+  it('extracts labels only on the new explicit request, after display priority, and closes queued requests', async () => {
+    send({type:'open',requestId:710,docId:'labels',bytes:new Uint8Array(symbolLabelsPdf()).buffer})
+    await runNext()
+    expect(messages.some(m=>m.message.type==='labelsExtracted')).toBe(false)
+    send({type:'extractLabels',requestId:711,docId:'labels',pageIndex:0})
+    send({type:'render',jobId:712,docId:'missing',pageIndex:0,priority:0,renderScale:1,deviceRect:null})
+    await runNext()
+    expect(messages.some(m=>m.message.type==='labelsExtracted'&&m.message.requestId===711)).toBe(false)
+    await runNext()
+    const response=messages.find(m=>m.message.type==='labelsExtracted'&&m.message.requestId===711)!.message
+    expect(response.type).toBe('labelsExtracted')
+    if(response.type==='labelsExtracted') expect(response.labels.map(l=>l.text).sort()).toEqual(['20A','20A','4H','ET','ET','ET','ETG','ETG'])
+    send({type:'extractLabels',requestId:713,docId:'labels',pageIndex:0});send({type:'close',docId:'labels'})
+    expect(messages.some(m=>m.message.type==='error'&&m.message.requestId===713)).toBe(true)
+  })
   it.each([false, true])('destroys every callback wrapper before returning (annotated temporary list: %s)', annotated => {
     const pdf = documentWithCallbackResources(), cache = new DisplayListCache(pdf)
     if (annotated) {

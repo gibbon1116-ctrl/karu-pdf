@@ -49,6 +49,8 @@ export interface RenderRequest {
 }
 
 export interface SearchImage { width: number; height: number; gray: Uint8Array }
+export interface ExtractLabelsRequest { type: 'extractLabels'; requestId: number; docId: string; pageIndex: number }
+export interface LabelsExtractedResponse { type: 'labelsExtracted'; requestId: number; labels: import('../core/symbolLabels').SymbolLabel[] }
 export interface ExtractVectorsRequest {
   type: 'extractVectors'
   jobId: number
@@ -306,6 +308,7 @@ export type WorkerRequest =
   | RenderRequest
   | RenderSearchImageRequest
   | ExtractVectorsRequest
+  | ExtractLabelsRequest
   | CancelJobsRequest
   | ReprioritizeRequest
   | StatsRequest
@@ -553,6 +556,7 @@ export type WorkerResponse =
   | RenderResponse
   | SearchImageResponse
   | VectorsExtractedResponse
+  | LabelsExtractedResponse
   | StatsResponse
   | ListAnnotationsResponse
   | AllAnnotationsProgressResponse

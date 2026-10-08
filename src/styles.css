@@ -644,6 +644,8 @@ button, input { font: inherit; }
 .symbol-search-panel p { margin: 6px 0; }
 .symbol-search-panel fieldset { margin: 8px 0; padding: 6px; }
 .symbol-search-panel label { display: block; margin: 4px 0; }
+.symbol-search-panel .symbol-search-labels { display: flex; flex-wrap: wrap; gap: 2px 8px; }
+.symbol-search-panel .symbol-search-labels label { display: inline-flex; align-items: center; }
 .symbol-search-panel input:not([type="radio"]):not([type="checkbox"]), .symbol-search-panel progress { box-sizing: border-box; width: 100%; }
 .symbol-search-sample { display: flex; gap: 8px; align-items: center; overflow-wrap: anywhere; }
 .symbol-search-sample img { width: 56px; height: 56px; object-fit: contain; }
