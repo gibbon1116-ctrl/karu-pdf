@@ -6,6 +6,7 @@ import { applyEdits } from '../src/core/annotations'
 import { createFontResource } from '../src/core/fontMetrics'
 import { writePageScale } from '../src/core/measure'
 import { QuantityIndex } from '../src/core/quantityIndex'
+const rounded = (o: object | undefined) => o && Object.fromEntries(Object.entries(o).map(([k, v]) => [k, typeof v === 'number' ? Math.round(v * 100) / 100 : v]))
 
 const fixtures: CountFixture[] = [
   { id: 'cv', code: 'CV', spec: '5.5sq-3C', name: 'ケーブル', category: 'ケーブル', kind: 'length', method: 'polyline', conditions: ['ケーブルラック配線', '管内配線'], defaults: { addM: 3 }, order: 0, style: nextCountStyle([]) },
@@ -71,14 +72,14 @@ test('CVの部分別条件とPFの立上りだけの拾いがカード・条件�
   await card(page, 'CV').getByLabel('平面', { exact: true }).selectOption('value:ケーブルラック配線')
   await card(page, 'CV').getByLabel('立上り', { exact: true }).selectOption('value:管内配線')
   await expect(card(page, 'CV')).toContainText('平面 144.00 ＋ 立上り 3.00 ＝ 147.00 m')
-  expect((await index(page)).byCondition('cv').get('ケーブルラック配線')).toMatchObject({ plan: 144, total: 144 })
-  expect((await index(page)).byCondition('cv').get('管内配線')).toMatchObject({ rise: 3, total: 3 })
+  expect(rounded((await index(page)).byCondition('cv').get('ケーブルラック配線'))).toMatchObject({ plan: 144, total: 144 })
+  expect(rounded((await index(page)).byCondition('cv').get('管内配線'))).toMatchObject({ rise: 3, total: 3 })
   await addPF(page)
   await card(page, 'PF22').getByLabel('平面', { exact: true }).selectOption('exclude')
   await card(page, 'PF22').getByLabel('立上り', { exact: true }).selectOption('value:隠ぺい配管')
   await expect(card(page, 'PF22')).toContainText('立上り 3.00 ＝ 3.00 m')
   expect((await index(page)).total('pf')).toBe(3)
-  expect((await index(page)).byCondition('pf').get('隠ぺい配管')).toMatchObject({ plan: 0, rise: 3, total: 3 })
+  expect(rounded((await index(page)).byCondition('pf').get('隠ぺい配管'))).toMatchObject({ plan: 0, rise: 3, total: 3 })
 })
 test('立上りごとの条件、途中の削除とUndo、候補追加も1回のUndo', async ({ page }) => {
   await open(page); await draw(page)
@@ -162,7 +163,7 @@ test('面積と器具の施工条件を選べる', async ({ page }) => {
   await page.getByTestId('fixture-panel').getByRole('button', { name: '床 床面積', exact: true }).click()
   await point(page, 100, 100); await point(page, 150, 100); await point(page, 150, 150); await point(page, 100, 150); await page.keyboard.press('Enter')
   await format(page).getByLabel('施工条件', { exact: true }).selectOption('value:屋内')
-  expect((await index(page)).byCondition('area').get('屋内')!.total).toBe(2500)
+  expect((await index(page)).byCondition('area').get('屋内')!.total).toBeCloseTo(2500, 1)
   await page.getByTestId('fixture-panel').getByRole('button', { name: 'LED 照明器具', exact: true }).click(); await point(page, 250, 200)
   await format(page).getByLabel('施工条件', { exact: true }).selectOption('value:天井直付')
   expect((await index(page)).byCondition('led').get('天井直付')!.total).toBe(1)

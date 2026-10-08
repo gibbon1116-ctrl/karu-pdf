@@ -105,7 +105,7 @@ export function RouteItems({ annotation: a, store }: { annotation: EditableAnnot
         {!!f?.conditions?.length && portions.some(p => p.condition === undefined) && <small className="route-unset">施工条件が未設定</small>}
       </div>
     })}
-    <button type="button" className="route-add" aria-label="線要素を追加" disabled={routes.length >= 11} onClick={() => { setSets(false); setPicker(v => !v) }} aria-expanded={picker}>＋ 線要素を追加</button>
+    <button type="button" className="route-add" aria-label="線要素を追加" onClick={() => { setSets(false); setPicker(v => !v) }} aria-expanded={picker}>＋ 線要素を追加</button>
     {picker && <LinePicker store={store} annotation={a} onClose={closePicker} />}
     {a.vertices!.length >= 3 && <div className="route-split">
       {!splitting ? <button type="button" onClick={() => { setSplitting(true); store.setHighlightedVertex({ annotationId: a.id, vertexIndex: vertex }) }}>経路を分ける</button> : <>
