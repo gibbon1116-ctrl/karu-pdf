@@ -251,18 +251,21 @@ test('ordinary viewing, zoom, scrolling and manual pickup never create the match
 })
 
 
-test('斜線入りも候補に残し、画像の確認がオフでも要確認に分ける', async ({ page }) => {
+test('形の比較がオフなら、局所画像で明らかに違う斜線入りは候補から除く', async ({ page }) => {
   await open(page, 1, true); await capture(page)
   await panel(page).getByRole('checkbox', { name: '画像でも確認する', exact: true }).uncheck()
-  await search(page)
+  // With shape comparison off, the local image comparison removes the visibly hatched bodies.
+  await panel(page).getByRole('checkbox', { name: '形の細部（円弧・枠・斜線・塗り）も見本と比べる', exact: true }).uncheck()
+  await search(page, 3)
   const high = page.locator('[data-testid="symbol-search-candidate"][data-confidence="high"]')
   const check = page.locator('[data-testid="symbol-search-candidate"][data-confidence="check"]')
-  await expect(high).toHaveCount(3); await expect(check).toHaveCount(3)
-  for (const candidate of await check.all()) {
-    const y = await candidate.locator('rect').evaluate(el => {
-      const r = el as SVGRectElement; return r.y.baseVal.value + r.height.baseVal.value / 2
-    })
-    expect(y).toBeGreaterThanOrEqual(240)
+  await expect(high).toHaveCount(3); await expect(check).toHaveCount(0)
+  // The first three centers are the plain bodies; the hatched three are removed.
+  const found = await candidates(page).locator('rect').evaluateAll(rects => rects.map(el => {
+    const r = el as SVGRectElement; return [Math.round(r.x.baseVal.value + r.width.baseVal.value / 2), Math.round(r.y.baseVal.value + r.height.baseVal.value / 2)]
+  }))
+  expect(found.sort((a, b) => a[1] - b[1] || a[0] - b[0])).toEqual(centers.slice(0, 3).map(([x, y]) => [x, y]))
+  for (const candidate of await candidates(page).all()) {
     await expect(candidate.locator('title')).toContainText(/線 [0-9.]+・余分な線 [0-9]+%/)
     await expect(candidate.locator('title')).not.toContainText('画像')
   }
@@ -272,3 +275,4 @@ test('斜線入りも候補に残し、画像の確認がオフでも要確認�
   for (const candidate of await check.all()) await expect(candidate).toHaveAttribute('data-state', 'pending')
   expect(await marks(page)).toBe(0)
 })
+

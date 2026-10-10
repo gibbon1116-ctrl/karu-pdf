@@ -8,6 +8,8 @@ import { buildSnapIndex, findPreferredSnap } from '../src/core/snap'
 import { buildEndpointIndex, searchVectorMessage, type SymbolSearchMessage, type SymbolSearchResponse } from '../src/worker/symbolSearchMessages'
 import { DocumentSession, DocumentTabsModel } from '../src/app/documentModel'
 import { circleLines, outletLines } from './symbolLabelFixtures'
+import {describeLocalBody} from '../src/core/symbolLocalImage'
+import {describeLocalLabel,resolveLocalLabels} from '../src/core/symbolGlyphs'
 
 const squareX = (x: number, y: number, diagonal = true) => [x,y,x+10,y, x+10,y,x+10,y+10, x+10,y+10,x,y+10, x,y+10,x,y, ...(diagonal ? [x,y,x+10,y+10, x+10,y,x,y+10] : [])]
 const vector = (pageIndex = 0, segments = new Float32Array(squareX(20, 20)), imageAreaRatio = 0, truncated = false): VectorPage => ({
@@ -29,6 +31,10 @@ class FakeWorker {
     const owned = structuredClone(message, { transfer })
     queueMicrotask(() => {
       if (this.terminate.mock.calls.length || FakeWorker.hold) return
+      if(owned.type==='local-describe')this.onmessage?.({data:{type:'local-described',id:owned.id,bodies:owned.bodies.map(body=>{
+        const patch={...owned.image,body};return {...describeLocalBody(patch),label:describeLocalLabel(patch)}
+      })}})
+      if(owned.type==='local-labels')this.onmessage?.({data:{type:'local-labels-resolved',id:owned.id,labels:resolveLocalLabels(owned.labels)}})
       if (owned.type === 'vector-search') this.onmessage?.({ data: { type: 'vector-result', id: owned.id, result: searchVectorMessage(owned) } })
       if (owned.type === 'endpoints') this.onmessage?.({ data: { type: 'endpoint-result', id: owned.id, index: buildEndpointIndex(owned) } })
       if (owned.type === 'verify' && !FakeWorker.holdVerify) this.onmessage?.({ data: { type: 'verify-result', id: owned.id,
@@ -62,6 +68,50 @@ const verifyRequest = { docId:'doc', pageIndex:0, samplePageIndex:0, sampleRect:
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('vector candidate image verification lifecycle', () => {
+  it.each([false,true])('reuses local batches only within one search, then releases the Worker (verify=%s)',async verify=>{
+    workers();const pool=verificationPool()
+    pool.extractVectors.mockImplementation(({pageIndex})=>({promise:Promise.resolve({...vector(pageIndex,new Float32Array([...squareX(20,20),...squareX(120,20)])),
+      paint:{points:new Float32Array(),moves:new Uint8Array(),paths:new Float32Array(),uncertain:false,truncated:true}}),cancel:vi.fn()}))
+    const client=new SymbolSearchClient(pool as unknown as PdfWorkerPool,()=>({width:500,height:500}))
+    await client.search({...verifyRequest,verify}).promise
+    const local=FakeWorker.instances.find(w=>w.postMessage.mock.calls.some(([m])=>m.type==='local-describe'))!
+    expect(local.postMessage.mock.calls.filter(([m])=>m.type==='local-describe')).toHaveLength(2)
+    expect(local.postMessage.mock.calls.some(([m])=>m.type==='local-labels')).toBe(true)
+    expect(local.terminate).toHaveBeenCalledOnce()
+    await client.search({...verifyRequest,verify}).promise
+    expect(FakeWorker.instances.filter(w=>w.postMessage.mock.calls.some(([m])=>m.type==='local-describe'))).toHaveLength(2)
+    client.dispose();expect(local.terminate).toHaveBeenCalledOnce()
+  })
+  it('terminates a silent reused local Worker on cancel and ignores its late handler',async()=>{
+    workers();const pool=verificationPool(),render=pool.renderSearchImage.getMockImplementation()!
+    pool.extractVectors.mockImplementation(({pageIndex})=>({promise:Promise.resolve({...vector(pageIndex),paint:{points:new Float32Array(),moves:new Uint8Array(),paths:new Float32Array(),uncertain:false,truncated:true}}),cancel:vi.fn()}))
+    pool.renderSearchImage.mockImplementation(args=>{FakeWorker.hold=true;return render(args)})
+    const client=new SymbolSearchClient(pool as unknown as PdfWorkerPool),task=client.search({...verifyRequest,verify:false})
+    await vi.waitFor(()=>expect(FakeWorker.instances).toHaveLength(2))
+    const local=FakeWorker.instances[1],late=local.onmessage!
+    task.cancel();await expect(task.promise).rejects.toThrow('cancelled');expect(local.terminate).toHaveBeenCalledOnce()
+    late({data:{type:'local-described',id:1,bodies:[]}});expect(pool.renderSearchImage).toHaveBeenCalledOnce()
+    client.dispose();expect(local.terminate).toHaveBeenCalledOnce()
+  })
+  it('cancels a local crop and ignores late arrays before creating glyph Workers',async()=>{
+    workers();const pending=deferred<{width:number;height:number;gray:Uint8Array<ArrayBuffer>}>(),cancel=vi.fn(),pool=verificationPool()
+    pool.extractVectors.mockImplementation(({pageIndex})=>({promise:Promise.resolve({...vector(pageIndex),paint:{points:new Float32Array(),moves:new Uint8Array(),paths:new Float32Array(),uncertain:false,truncated:true}}),cancel:vi.fn()}))
+    pool.renderSearchImage.mockImplementation(()=>({promise:pending.promise,cancel}))
+    const client=new SymbolSearchClient(pool as unknown as PdfWorkerPool),task=client.search({...verifyRequest,verify:false})
+    await vi.waitFor(()=>expect(pool.renderSearchImage).toHaveBeenCalledOnce())
+    task.cancel();await expect(task.promise).rejects.toThrow('cancelled');expect(cancel).toHaveBeenCalledOnce()
+    pending.resolve({width:200,height:200,gray:new Uint8Array(40000)})
+    await new Promise(r=>setTimeout(r,0));expect(FakeWorker.instances).toHaveLength(1);client.dispose()
+  })
+  it.each([false,true])('keeps unresolved paint at check even after image verification=%s',async verify=>{
+    workers();const pool=verificationPool()
+    pool.extractVectors.mockImplementation(({pageIndex})=>({promise:Promise.resolve({...vector(pageIndex,new Float32Array([...squareX(20,20),...squareX(120,20)])),
+      paint:{points:new Float32Array(),moves:new Uint8Array(),paths:new Float32Array(),uncertain:true,truncated:false}}),cancel:vi.fn()}))
+    const client=new SymbolSearchClient(pool as unknown as PdfWorkerPool)
+    try{const result=await client.search({...verifyRequest,verify}).promise
+      expect(result.candidates).toHaveLength(2);expect(result.candidates.every(c=>c.structureCheck&&c.confidence==='check')).toBe(true)
+    }finally{client.dispose()}
+  })
   it('assigns labels after the Worker result and retains around checks with perfect image verification', async () => {
     workers();FakeWorker.holdVerify=true
     const lines=new Float32Array([...outletLines(25,25),...outletLines(125,25),...circleLines(125,25,7)])
@@ -238,6 +288,55 @@ describe('bounded document vector cache', () => {
 })
 
 describe('vector Worker messages and drawing endpoint index', () => {
+  it('rejects an already aborted task without creating a Worker', async () => {
+    workers(); const controller = new AbortController(); controller.abort()
+    await expect(vectorWorkerTask({ type:'endpoints', id:1, segments:vector().segments, bounds:[0,0,500,500] }, controller.signal)).rejects.toThrow('cancelled')
+    expect(FakeWorker.instances).toHaveLength(0)
+  })
+  it.each(['response', 'error', 'messageerror'] as const)('terminates a vector Worker and releases its timer on %s failure', async mode => {
+    workers(); FakeWorker.hold = true; vi.useFakeTimers()
+    const task = vectorWorkerTask({ type:'endpoints', id:9, segments:vector().segments, bounds:[0,0,500,500] })
+    const rejected = expect(task).rejects.toThrow(mode === 'messageerror' ? 'Worker message failed' : 'fixture failure')
+    const worker = FakeWorker.instances[0]
+    worker.onmessage!({ data:{type:'progress', id:8, done:0, total:1} }) // Unrelated id is ignored.
+    expect(worker.terminate).not.toHaveBeenCalled()
+    if (mode === 'response') worker.onmessage!({ data:{type:'error', id:9, message:'fixture failure'} })
+    else if (mode === 'error') (worker.onerror as (event: {message:string;preventDefault():void}) => void)({message:'fixture failure',preventDefault:vi.fn()})
+    else (worker.onmessageerror as () => void)()
+    await rejected; expect(worker.terminate).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0)
+  })
+  it('clears a pending endpoint Worker, ignores its late response and rebuilds identical snap data', async () => {
+    workers(); FakeWorker.hold = true
+    const cache = new VectorCache('doc'), pool = poolFor(), controller = new AbortController()
+    const pending = cache.endpoints(0,pool,[0,0,500,500],controller.signal), rejected = expect(pending).rejects.toThrow('cancelled')
+    await vi.waitFor(() => expect(FakeWorker.instances).toHaveLength(1))
+    const oldWorker = FakeWorker.instances[0], late = oldWorker.onmessage!
+    const expected = buildEndpointIndex({type:'endpoints',id:0,segments:vector().segments,bounds:[0,0,500,500]})
+    cache.clear(); await rejected
+    late({data:{type:'endpoint-result',id:0,index:expected}})
+    expect(oldWorker.terminate).toHaveBeenCalledOnce(); expect(cache.size).toBe(0); expect(cache.bytes).toBe(0)
+    expect(cache.peekEndpoint(0)).toBeNull()
+    FakeWorker.hold = false
+    expect(await cache.endpoints(0,pool,[0,0,500,500],controller.signal)).toEqual(expected)
+    expect(pool.extractVectors).toHaveBeenCalledTimes(2)
+    expect(FakeWorker.instances[1].terminate).toHaveBeenCalledOnce()
+    cache.clear(); expect(cache.bytes).toBe(0)
+  })
+  it('disposes an active vector search, ignores late matches and frees its owned cache', async () => {
+    workers(); FakeWorker.hold = true
+    const pool = poolFor(), client = new SymbolSearchClient(pool as unknown as PdfWorkerPool,()=>({width:500,height:500}))
+    const request = {docId:'doc',pageIndex:0,samplePageIndex:0,sampleRect:[19,19,31,31] as [number,number,number,number],verify:false}
+    const task = client.search(request), rejected = expect(task.promise).rejects.toThrow('cancelled')
+    await vi.waitFor(() => expect(FakeWorker.instances).toHaveLength(1))
+    const worker = FakeWorker.instances[0], late = worker.onmessage!
+    client.dispose(); await rejected
+    late({data:{type:'vector-result',id:1,result:searchVectorMessage({type:'vector-search',id:1,segments:vector().segments,sampleSegments:vector().segments,sampleWidths:vector().widths,sampleRect:request.sampleRect,options:{}})}})
+    expect(worker.terminate).toHaveBeenCalledOnce()
+    // Inspect the existing ownership boundary; no production debug API is added.
+    expect((client as unknown as {caches:Map<string,VectorCache>}).caches.size).toBe(0)
+    await expect(client.search(request).promise).rejects.toThrow('disposed')
+    client.dispose(); expect(worker.terminate).toHaveBeenCalledOnce()
+  })
   it('finds all six X squares including crossed symbols, excludes plain squares', () => {
     const segments = new Float32Array([...[20,60,100,140,180,220].flatMap(x=>squareX(x,20)), ...[260,300,340].flatMap(x=>squareX(x,20,false)), 130,25,170,25, 210,25,250,25])
     const result=searchVectorMessage({type:'vector-search',id:1,segments,sampleSegments:segments,sampleWidths:new Float32Array(segments.length / 4),sampleRect:[19,19,31,31],options:{threshold:.85}})!
@@ -318,3 +417,4 @@ describe('vector Worker messages and drawing endpoint index', () => {
     pending.resolve(vector());client.dispose()
   })
 })
+

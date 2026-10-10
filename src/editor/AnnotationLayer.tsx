@@ -1194,15 +1194,19 @@ export function AnnotationLayer(props: Props) {
     {props.store.visibleSymbolCandidates?.some(c => c.pageIndex === props.pageIndex) && <svg className="annotation-layer symbol-search-candidates"
       data-testid={`symbol-search-candidates-${props.pageIndex}`} viewBox={`0 0 ${props.pageSize.width} ${props.pageSize.height}`}>
       {props.store.visibleSymbolCandidates!.filter(c => c.pageIndex === props.pageIndex).map(c => <g key={c.id}
-        data-testid="symbol-search-candidate" data-candidate-id={c.id} data-state={c.state} data-confidence={c.confidence} className={`symbol-search-candidate ${c.state}`}
-        role="button" aria-label={`記号の候補${c.state === 'counted' ? '（拾い済み）' : ''}`} aria-pressed={c.state === 'chosen'} aria-disabled={c.state === 'counted'} tabIndex={c.state === 'counted' ? -1 : 0}
+        data-testid="symbol-search-candidate" data-candidate-id={c.id} data-state={c.state} data-confidence={c.confidence} data-shape={c.shape?.decision ?? 'none'} data-other={c.otherFixture ? 'true' : undefined}
+        className={`symbol-search-candidate ${c.state}${c.shape?.decision === 'different' ? ' shape-different' : ''}${c.otherFixture ? ' other-fixture' : ''}`}
+        role="button" aria-label={`記号の候補${c.otherFixture ? '（他の項目で拾い済み）' : c.state === 'counted' ? '（拾い済み）' : ''}`} aria-pressed={c.state === 'chosen'} aria-disabled={c.state === 'counted' || !!c.otherFixture} tabIndex={c.state === 'counted' || c.otherFixture ? -1 : 0}
         onPointerDown={e => { e.preventDefault(); e.stopPropagation() }} onPointerUp={e => { e.preventDefault(); e.stopPropagation() }}
         onDoubleClick={e => { e.preventDefault(); e.stopPropagation() }} onClick={e => { e.preventDefault(); e.stopPropagation(); props.store.toggleSymbolCandidate(c.id) }}
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); props.store.toggleSymbolCandidate(c.id) } }}>
         <title>{c.extra === undefined ? `似ている度合い ${c.score.toFixed(2)}`
-          : `線 ${c.score.toFixed(2)}・余分な線 ${Math.round(c.extra * 100)}%・添字 ${c.label || 'なし'}${c.gc ? '・G' : ''}${c.aroundCheck ? `・周りの線 ${Math.round((c.around ?? 0) * 100)}%` : ''}${c.imageScore === undefined ? '' : `・画像 ${c.imageScore.toFixed(2)}`}`}</title>
+          : `線 ${c.score.toFixed(2)}・余分な線 ${Math.round(c.extra * 100)}%・添字 ${c.label || 'なし'}${c.gc ? '・G' : ''}${c.aroundCheck ? `・周りの線 ${Math.round((c.around ?? 0) * 100)}%` : ''}${c.imageScore === undefined ? '' : `・画像 ${c.imageScore.toFixed(2)}`}`}
+          {c.shape?.decision === 'different' ? `・形の細部が違う（${c.shape.differences.map(feature => ({ topArc: '円弧', annexFrame: '外の枠', interiorLines: '中の斜線', interior: '中の塗り' }[feature])).join('・')}）`
+            : c.shape?.decision === 'unknown' ? `・形の細部は不明（${c.shape.unknown.map(feature => ({ topArc: '円弧', annexFrame: '外の枠', interiorLines: '中の斜線', interior: '中の塗り' }[feature])).join('・')}）` : ''}
+          {c.otherFixture ? `・他の項目（${props.store.symbolOtherFixtureLabel(c.otherFixture)}）で拾い済み` : ''}</title>
         <rect x={c.rect[0]} y={c.rect[1]} width={c.rect[2] - c.rect[0]} height={c.rect[3] - c.rect[1]} vectorEffect="non-scaling-stroke" />
-        {c.state === 'pending' && c.confidence === 'check' && <text className="symbol-search-question" x={c.rect[2]} y={c.rect[1]} textAnchor="end"
+        {c.state === 'pending' && !c.otherFixture && c.confidence === 'check' && <text className="symbol-search-question" x={c.rect[2]} y={c.rect[1]} textAnchor="end"
           fontSize={Math.min(c.rect[2] - c.rect[0], c.rect[3] - c.rect[1]) * .65}>?</text>}
         {c.state === 'chosen' && <text x={c.center[0]} y={c.center[1]} textAnchor="middle" dominantBaseline="central" fontSize={Math.min(c.rect[2] - c.rect[0], c.rect[3] - c.rect[1]) * .75}>✓</text>}
       </g>)}

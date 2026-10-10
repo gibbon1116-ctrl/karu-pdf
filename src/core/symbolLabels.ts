@@ -2,10 +2,14 @@ import type { Rect } from './annotations'
 
 export interface SymbolLabel { text: string; rect: Rect }
 export interface SymbolLabelValue { label: string; gc: boolean }
+/** Transient search group only; cannot be returned by normalizeSymbolLabel. */
+export const UNKNOWN_SYMBOL_LABEL = '?'
+export const symbolLabelDisplay = (label:string) => label===UNKNOWN_SYMBOL_LABEL?'添字を判定できない':label||'添字なし'
 export function normalizeSymbolLabel(text: string): string | null {
   const normalized = text.normalize('NFKC').toUpperCase()
-  return /^[0-9A-Z]{1,6}$/.test(normalized) && !/^\d+$/.test(normalized)
-    && (normalized.match(/\d/g)?.length ?? 0) < 3 ? normalized : null
+  const length = Array.from(normalized).length
+  return length >= 1 && length <= 12 && !/\s/u.test(normalized)
+    && /[\p{L}\p{N}]/u.test(normalized) ? normalized : null
 }
 /** Collapse overprinted words before ownership is decided. Keep spatially distinct copies. */
 export function deduplicateSymbolLabels(labels: readonly SymbolLabel[]): SymbolLabel[] {
@@ -44,7 +48,7 @@ export function assignSymbolLabels(labels: SymbolLabel[], bodies: readonly { rec
     }
     if (nearest < 0) continue
     let text = word.text
-    if (splitG && (text === 'G' || (text.length >= 3 && text.endsWith('G')))) {
+    if (splitG && (text === 'G' || (text.length >= 3 && text.endsWith('G') && /^[0-9A-Z]+$/.test(text.slice(0, -1))))) {
       values[nearest].gc = true; text = text.slice(0, -1)
     }
     if (text) words[nearest].push({ text, distance })

@@ -380,7 +380,7 @@ export class PdfWorkerPool {
     return this.startRender(slot, 'render', options)
   }
 
-  extractVectors(options: { docId: string; pageIndex: number }): { promise: Promise<VectorPage>; cancel(): void } {
+  extractVectors(options: { docId: string; pageIndex: number; includePaint?: boolean }): { promise: Promise<VectorPage>; cancel(): void } {
     const renderSlots = this.slots.length > 1 ? this.slots.slice(1) : this.slots
     const available = renderSlots.filter(slot => slot.documents.has(options.docId))
     if (!available.length) return { promise: Promise.reject(new Error('PDF が開かれていません。')), cancel() {} }

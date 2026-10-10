@@ -1,6 +1,7 @@
 import { installWorkerExternalSendGuard } from '../security/externalSend'
-import { buildEndpointIndex, searchVectorMessage, type SymbolSearchMessage, type SymbolSearchResponse } from './symbolSearchMessages'
+import { buildEndpointIndex, searchVectorMessage, probeVectorMatches, describeLocalMessage, type SymbolSearchMessage, type SymbolSearchResponse } from './symbolSearchMessages'
 import { searchSymbol, verifyCandidates } from '../core/symbolSearch'
+import { resolveLocalLabels } from '../core/symbolGlyphs'
 
 const scope = typeof self !== 'undefined' && typeof document === 'undefined' ? self as unknown as DedicatedWorkerGlobalScope : null
 // The existing guard groups non-PDF pixel Workers under its 'image' source.
@@ -12,9 +13,19 @@ if (scope) scope.onmessage = (event: MessageEvent<SymbolSearchMessage>) => {
   try {
     if (busy) throw new Error('search already running')
     busy = true
+    if(message.type==='local-labels'){
+      if(message.labels.length>501||message.labels.some(l=>l.glyphs.length>6||l.glyphs.some(g=>g.mask.length!==560)))throw Error('局所添字の上限を超えました')
+      scope.postMessage({type:'local-labels-resolved',id:message.id,labels:resolveLocalLabels(message.labels)} satisfies SymbolSearchResponse)
+      return
+    }
+    if(message.type==='local-describe'){
+      scope.postMessage({type:'local-described',id:message.id,bodies:describeLocalMessage(message)} satisfies SymbolSearchResponse)
+      return
+    }
     if (message.type === 'vector-search') {
       scope.postMessage({ type: 'progress', id: message.id, done: 0, total: 1 } satisfies SymbolSearchResponse)
-      scope.postMessage({ type: 'vector-result', id: message.id, result: searchVectorMessage(message) } satisfies SymbolSearchResponse)
+      const result=searchVectorMessage(message),probes=probeVectorMatches(message,result)
+      scope.postMessage({ type: 'vector-result', id: message.id, result, ...(probes?{probes}:{}) } satisfies SymbolSearchResponse)
       return
     }
     if (message.type === 'endpoints') {

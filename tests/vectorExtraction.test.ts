@@ -343,3 +343,39 @@ it('uses the exact screen fixture: six crossed squares, drawing endpoints and ra
     } finally { pdf.destroy() }
   }
 })
+
+// Characterization of d1ddc1c, not the desired fill/hole recognition contract.
+// See docs/spec/SPEC-S04-線の見本は塗りの輪郭と照合しない.md before changing these expectations.
+it('records outline, solid fill, white overlay and even-odd hole through search and snap', () => {
+  const pdf = documentWith('q 1 0 0 -1 0 100 cm 0 G 0 g .8 w '
+    + '20 20 10 10 re S 60 20 10 10 re f '
+    + '100 20 10 10 re f 1 g 103 23 4 4 re f 0 g '
+    + '140 20 10 10 re 143 23 4 4 re f* Q')
+  try {
+    const page = extract(pdf, 0), original = page.segments.slice(), originalWidths = page.widths.slice()
+    expect(classifyPage(page)).toBe('vector')
+    expect(page.stats).toMatchObject({ strokePaths: 1, fillPaths: 4, whiteFills: 1 })
+    expect(page.segmentCount).toBe(20)
+    expect(page.widths.length).toBe(page.segmentCount)
+    expect(Array.from(page.widths)).toEqual([...Array(4).fill(Math.fround(.8)), ...Array(16).fill(0)])
+    const result = searchVectorMessage({ type: 'vector-search', id: 1, segments: page.segments,
+      segmentWidths: page.widths, sampleSegments: page.segments, sampleWidths: page.widths,
+      sampleRect: [19,19,31,31], options: { threshold: .9 } })!
+    // SPEC-S04: a stroked sample matches stroked lines only, not fill outlines.
+    expect(result.matches.map(m => m.center)).toEqual([[25,25]])
+    expect(result.matches[0].score).toBeGreaterThan(.999)
+    // A fill-outline sample still matches every drawn square. The hole adds extra geometry.
+    const filled = searchVectorMessage({ type: 'vector-search', id: 2, segments: page.segments,
+      segmentWidths: page.widths, sampleSegments: page.segments, sampleWidths: page.widths,
+      sampleRect: [59,19,71,31], options: { threshold: .9 } })!
+    expect(filled.matches.map(m => m.center).sort((a,b) => a[0]-b[0])).toEqual([[25,25],[65,25],[105,25],[145,25]])
+    expect(filled.matches.every(m => m.score > .999 && m.angle === 0)).toBe(true)
+    expect(filled.matches.filter(m => m.center[0] < 140).every(m => m.extra === 0)).toBe(true)
+    expect(filled.matches.find(m => m.center[0] === 145)!.extra).toBeCloseTo(16 / 56)
+    const index = buildEndpointIndex({ type: 'endpoints', id: 1, segments: page.segments, bounds: [0,0,200,100] })
+    expect(index.ids).toHaveLength(20) // 16 outer corners + 4 even-odd hole corners.
+    expect(findSnap([143.1,23.1], .5, index)?.point).toEqual([143,23])
+    expect(findSnap([103.1,23.1], .5, index)).toBeNull() // White overlay supplies no endpoints.
+    expect(page.segments).toEqual(original); expect(page.widths).toEqual(originalWidths)
+  } finally { pdf.destroy() }
+})

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { vectorSearchSnapPdf } from '../tests/vectorSearchSnapFixtures'
+import type { SymbolSearchTestHooks } from '../src/client/SymbolSearchClient'
 
 const panel=(page:Page)=>page.getByRole('dialog',{name:'同じ記号を探す',exact:true})
 async function open(page:Page,raster=false) {
@@ -109,4 +110,30 @@ test('通常閲覧・スナップオフ・選択だけの操作では線を取�
   await page.mouse.move(p.x+10,p.y+10);await page.mouse.click(p.x,p.y)
   await expect(page.getByTestId('snap-marker-0')).toHaveAttribute('data-drawing-ready','false')
   expect(await requests()).toBe(0)
+})
+
+test('スナップ取得後の検索は付加情報だけを一度追加し、端点と再検索のキャッシュを保つ',async({page})=>{
+  await open(page);await measurement(page)
+  await setting(page,'スナップ（既存の頂点に合わせる）',true)
+  await setting(page,'図面の線の端点にも合わせる',true)
+  const marker=page.getByTestId('snap-marker-0')
+  await expect(marker).toHaveAttribute('data-drawing-ready','true')
+  const before=await page.evaluate(()=>window.__karu!.vectorCacheProbe())
+  const results=await page.evaluate(async()=>{
+    const api=window.__karu as typeof window.__karu & SymbolSearchTestHooks
+    const request={docId:api.listTabs()[0].docId,pageIndex:0,samplePageIndex:0,sampleRect:[49,49,61,61] as [number,number,number,number],verify:false}
+    const first=await api.symbolSearch(request),afterFirst=api.vectorCacheProbe()
+    const second=await api.symbolSearch(request),afterSecond=api.vectorCacheProbe()
+    return {first,second,afterFirst,afterSecond}
+  })
+  expect(results.first.candidates).toHaveLength(6);expect(results.second.candidates).toHaveLength(6)
+  expect(results.afterFirst.requests).toBe(before.requests+1)
+  expect(results.afterSecond.requests).toBe(results.afterFirst.requests)
+  expect(results.afterFirst.bytes).toBeGreaterThan(before.bytes)
+  expect(results.afterFirst.bytes).toBeLessThan(16*1024*1024)
+  const p=await point(page,100.6,400.4);await page.mouse.move(p.x,p.y)
+  await expect(marker).toHaveAttribute('data-kind','drawing-endpoint')
+  await expect(marker).toHaveAttribute('data-drawing-ready','true')
+  console.log('SNAP_TO_SEARCH_UPGRADE',JSON.stringify({before,after:results.afterFirst,
+    firstMs:results.first.metrics.totalMs,repeatMs:results.second.metrics.totalMs}))
 })

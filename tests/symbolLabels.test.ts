@@ -6,12 +6,29 @@ import type { Rect } from '../src/core/annotations'
 
 const bodies = [{ rect: [10,10,20,20] as Rect }, { rect: [30,10,40,20] as Rect }]
 describe('symbol labels', () => {
-  it('normalizes fullwidth letters and digits, rejects circuit numbers and long/nonalphanumeric words', () => {
+  it('normalizes fullwidth text and accepts numeric, Japanese and punctuated words', () => {
     expect(normalizeSymbolLabel('２ｅｔ')).toBe('2ET')
-    expect(normalizeSymbolLabel('３０１')).toBeNull()
-    for (const word of ['G301', 'Ｇ３０２', '222', '1A2B3']) expect(normalizeSymbolLabel(word)).toBeNull()
-    expect(normalizeSymbolLabel('20A')).toBe('20A')
-    for (const word of ['ABCDEF7', '日本', 'ET-G', '']) expect(normalizeSymbolLabel(word)).toBeNull()
+    expect(normalizeSymbolLabel('３０１')).toBe('301')
+    expect(normalizeSymbolLabel('Ｇ３０２')).toBe('G302')
+    expect(normalizeSymbolLabel('ＺＭ－２００Ａ')).toBe('ZM-200A')
+    for (const word of ['332', '443', '554', 'G301', '222', '1A2B3', '20A', 'ABCDEF7', '日本', '制御用', 'ET-G', '2.6']) {
+      expect(normalizeSymbolLabel(word)).toBe(word)
+    }
+  })
+  it('rejects symbol-only words, whitespace and words longer than 12 characters', () => {
+    for (const word of ['', '-', '・・', '×', '?', 'ET G', 'ET\tG', 'ET\n', '　ET', 'ABCDEFGHIJKLM', '1234567890123', '制'.repeat(13)]) {
+      expect(normalizeSymbolLabel(word)).toBeNull()
+    }
+    expect(normalizeSymbolLabel('ABCDEFGHIJKL')).toBe('ABCDEFGHIJKL')
+    expect(normalizeSymbolLabel('123456789012')).toBe('123456789012')
+    expect(normalizeSymbolLabel('制'.repeat(12))).toBe('制'.repeat(12))
+  })
+  it('counts Unicode characters after normalization rather than UTF-16 code units', () => {
+    const supplementaryLetter = '\u{20000}'
+    expect(normalizeSymbolLabel(supplementaryLetter.repeat(12))).toBe(supplementaryLetter.repeat(12))
+    expect(normalizeSymbolLabel(supplementaryLetter.repeat(13))).toBeNull()
+    expect(normalizeSymbolLabel('\uFB03'.repeat(4))).toBe('FFI'.repeat(4))
+    expect(normalizeSymbolLabel('\uFB03'.repeat(5))).toBeNull()
   })
   it('assigns each word once to the nearest body, with overlap first and inclusive R', () => {
     const result = assignSymbolLabels([
@@ -25,12 +42,26 @@ describe('symbol labels', () => {
     // A touching edge must not win a zero-distance tie against actual overlap.
     expect(assignSymbolLabels([{text:'ET',rect:[20,11,31,15]}], bodies, 10)[1].label).toBe('ET')
   })
+  it('assigns a numeric-only word once to the nearest body', () => {
+    expect(assignSymbolLabels([{text:'332',rect:[26,11,28,15]}], bodies, 10))
+      .toEqual([{label:'',gc:false},{label:'332',gc:false}])
+  })
+  it('assigns nearby 332 and 443 words to their respective nearest bodies', () => {
+    expect(assignSymbolLabels([
+      {text:'332',rect:[22,11,24,15]},
+      {text:'443',rect:[26,11,28,15]},
+    ], bodies, 10)).toEqual([{label:'332',gc:false},{label:'443',gc:false}])
+  })
+  it('assigns Japanese words using the same ownership rules', () => {
+    expect(assignSymbolLabels([{text:'制御用',rect:[22,11,24,15]}], bodies, 10))
+      .toEqual([{label:'制御用',gc:false},{label:'',gc:false}])
+  })
   it('deduplicates overprinting within .3pt before assignment, preserving separate copies', () => {
     const words = [{text:'ｅｔ',rect:[22,11,24,15] as Rect}, {text:'ET',rect:[22.2,11,24.2,15] as Rect},
       {text:'ET',rect:[22.6,11,24.6,15] as Rect}, {text:'G301',rect:[12,12,15,15] as Rect}]
-    expect(deduplicateSymbolLabels(words).map(w => w.text)).toEqual(['ET','ET'])
+    expect(deduplicateSymbolLabels(words).map(w => w.text)).toEqual(['ET','ET','G301'])
     expect(assignSymbolLabels(words.slice(0,2), bodies, 10)[0]).toEqual({label:'ET',gc:false})
-    expect(assignSymbolLabels(words.slice(3), bodies, 10)[0]).toEqual({label:'',gc:false})
+    expect(assignSymbolLabels(words.slice(3), bodies, 10)[0]).toEqual({label:'G301',gc:false})
   })
   it('keeps only nearby non-G words but retains GC anywhere within R', () => {
     const words = [{text:'4H',rect:[21,11,23,15] as Rect}, {text:'2C',rect:[23,11,25,15] as Rect},
@@ -47,22 +78,26 @@ describe('symbol labels', () => {
     ],bodies,10)[0].label).toBe('ET+LK')
     expect(assignSymbolLabels([{text:'ET',rect:[21,11,23,15]}, {text:'LK',rect:[21.51,16,23.51,19]}],bodies,10)[0].label).toBe('ET')
   })
-  it('deduplicates actual PDF overprinting in the worker extraction result', () => {
+  it('deduplicates actual PDF overprinting and retains circuit and numeric labels', () => {
     const doc = new mupdf.PDFDocument(), font = new mupdf.Font('Helvetica'), ref = doc.addSimpleFont(font)
     let page: import('mupdf').PDFObject | undefined
     try {
       page = doc.addPage([0,0,100,100],0,{Font:{F1:ref}},
         'BT /F1 6 Tf 20 50 Td (ET) Tj ET BT /F1 6 Tf 20.2 50 Td (ET) Tj ET BT /F1 6 Tf 60 50 Td (G301 222) Tj ET')
       doc.insertPage(-1,page)
-      expect(extractLabelPage(doc,0).map(w => w.text)).toEqual(['ET'])
+      expect(extractLabelPage(doc,0).map(w => w.text)).toEqual(['ET','G301','222'])
     } finally { page?.destroy(); ref.destroy(); font.destroy(); doc.destroy() }
   })
-  it.each([['ETG','ET'],['2CG','2C'],['ADG','AD'],['G','']])('splits %s into %s and GC', (text,label) => {
+  it.each([['ETG','ET'],['2CG','2C'],['ADG','AD'],['332G','332'],['G','']])('splits %s into %s and GC', (text,label) => {
     expect(assignSymbolLabels([{text,rect:[12,12,15,15]}],bodies,10)[0]).toEqual({label,gc:true})
     expect(assignSymbolLabels([{text,rect:[12,12,15,15]}],bodies,10,false)[0]).toEqual({label:text,gc:false})
   })
   it('does not split two-character words ending in G', () => {
     expect(assignSymbolLabels([{text:'AG',rect:[12,12,15,15]}],bodies,10)[0]).toEqual({label:'AG',gc:false})
+  })
+  it.each(['制御用G', '日本G', 'ET-G', '2.6G'])('does not split %s when the remainder is not ASCII alphanumeric', text => {
+    expect(assignSymbolLabels([{text,rect:[12,12,15,15]}],bodies,10)[0]).toEqual({label:text,gc:false})
+    expect(assignSymbolLabels([{text,rect:[12,12,15,15]}],bodies,10,false)[0]).toEqual({label:text,gc:false})
   })
   it('splits whitespace with word-specific quads, normalizes and releases every Font wrapper', () => {
     const destroy=vi.fn()
@@ -71,7 +106,11 @@ describe('symbol labels', () => {
       Array.from('ｅｔ ３０１\t２ＣＧ').forEach((c,i)=>w.onChar?.(c,[i*5,0],{destroy} as unknown as import('mupdf').Font,10,[i*5,0,i*5+5,0,i*5,10,i*5+5,10],[0],0))
       w.endLine?.()
     }} as import('mupdf').StructuredText
-    expect(labelsFromStructuredText(structured,[0,0,60,10])).toEqual([{text:'ET',rect:[0,0,10,10]},{text:'2CG',rect:[35,0,50,10]}])
+    expect(labelsFromStructuredText(structured,[0,0,60,10])).toEqual([
+      {text:'ET',rect:[0,0,10,10]},
+      {text:'301',rect:[15,0,30,10]},
+      {text:'2CG',rect:[35,0,50,10]},
+    ])
     expect(destroy).toHaveBeenCalledTimes(10)
   })
   it('extracts rotated real PDF labels in the displayed vector coordinate frame', () => {
@@ -82,7 +121,7 @@ describe('symbol labels', () => {
       ref=doc.addPage([0,0,200,100],90,resources,'BT /F1 10 Tf 20 30 Td (et 301 2CG) Tj ET');doc.insertPage(-1,ref)
       upright=doc.addPage([0,0,200,100],0,resources,'BT /F1 10 Tf 20 30 Td (et 301 2CG) Tj ET');doc.insertPage(-1,upright)
       const labels=extractLabelPage(doc,0)
-      expect(labels.map(l=>l.text)).toEqual(['ET','2CG'])
+      expect(labels.map(l=>l.text)).toEqual(['ET','301','2CG'])
       const r=extractLabelPage(doc,1)[0].rect
       const expected=[100-r[3],r[0],100-r[1],r[2]]
       labels[0].rect.forEach((value,i)=>expect(value).toBeCloseTo(expected[i],4))

@@ -1,10 +1,11 @@
 /* @single:start */import { createSingleWorker } from '../single/runtime'
 /* @single:end */import { classifyPage, type PageKind, type VectorPage } from '../core/vectorPaths'
+import { copyPaint, paintBuffers, paintBytes } from '../core/vectorPaint'
 import type { Rect } from '../core/annotations'
 import type { SymbolLabel } from '../core/symbolLabels'
 import type { SnapIndex } from '../core/snap'
 import type { PdfWorkerPool } from './PdfWorkerPool'
-import type { EndpointMessage, VectorSearchMessage, SymbolSearchResponse } from '../worker/symbolSearchMessages'
+import type { EndpointMessage, VectorSearchMessage, SymbolSearchResponse, LocalDescribeMessage, LocalLabelMessage } from '../worker/symbolSearchMessages'
 
 export const SYMBOL_SEARCH_STALL_MS = 60_000
 export const VECTOR_CACHE_PAGES = 3
@@ -12,16 +13,19 @@ export const VECTOR_CACHE_BYTES = 16 * 1024 * 1024
 export interface CachedVectorPage extends VectorPage { kind: PageKind; endpointIndex?: SnapIndex; labels?: SymbolLabel[] }
 export const cancelled = () => new Error('cancelled')
 
-/** Every invocation owns a disposable Worker; no matching/indexing runs on the UI thread. */
-export function vectorWorkerTask(message: VectorSearchMessage | EndpointMessage, signal?: AbortSignal,
-  onProgress?: () => void): Promise<SymbolSearchResponse> {
+/** Disposable by default. Local search batches may supply one sequential Worker;
+ * its caller must terminate it on completion/cancellation. No UI-thread matching. */
+export function vectorWorkerTask(message: VectorSearchMessage | EndpointMessage | LocalDescribeMessage | LocalLabelMessage, signal?: AbortSignal,
+  onProgress?: () => void, sequentialWorker?:Worker): Promise<SymbolSearchResponse> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(cancelled()); return }
-    const worker = /* @single:start */createSingleWorker('symbol-search') ?? /* @single:end */new Worker(new URL('../worker/symbolSearch.worker.ts', import.meta.url), { type: 'module' })
+    const worker = sequentialWorker ?? /* @single:start */createSingleWorker('symbol-search') ?? /* @single:end */new Worker(new URL('../worker/symbolSearch.worker.ts', import.meta.url), { type: 'module' })
     let lastHeard = performance.now(), finished = false
     const finish = (error?: Error, response?: SymbolSearchResponse) => {
       if (finished) return
-      finished = true; clearInterval(timer); signal?.removeEventListener('abort', abort); worker.terminate()
+      finished = true; clearInterval(timer); signal?.removeEventListener('abort', abort)
+      worker.onmessage=null;worker.onerror=null;worker.onmessageerror=null
+      if(!sequentialWorker)worker.terminate()
       if (error) reject(error); else resolve(response!)
     }
     const abort = () => finish(cancelled())
@@ -37,13 +41,23 @@ export function vectorWorkerTask(message: VectorSearchMessage | EndpointMessage,
     worker.onmessageerror = () => finish(new Error('Worker message failed'))
     // Cache arrays remain attached. Only copies belong to the Worker.
     try {
+      if(message.type==='local-labels'){
+        worker.postMessage(message,[...new Set(message.labels.flatMap(l=>l.glyphs.map(g=>g.mask.buffer)))]);return
+      }
+      if(message.type==='local-describe'){
+        // This is a newly rendered, search-owned crop, not a cached page array.
+        worker.postMessage(message,[message.image.gray.buffer]);return
+      }
       const segments = message.segments.slice()
       if (message.type === 'vector-search') {
         const sampleSegments = message.sampleSegments.slice()
         const sampleWidths = message.sampleWidths.slice()
         const segmentWidths = message.segmentWidths?.slice()
-        worker.postMessage({ ...message, segments, sampleSegments, sampleWidths, segmentWidths },
-          [segments.buffer, sampleSegments.buffer, sampleWidths.buffer, ...(segmentWidths ? [segmentWidths.buffer] : [])])
+        const paint = copyPaint(message.paint), samePaint = !!message.paint && message.paint === message.samplePaint
+        const samplePaint = samePaint ? paint : copyPaint(message.samplePaint)
+        worker.postMessage({ ...message, segments, sampleSegments, sampleWidths, segmentWidths, paint, samplePaint },
+          [segments.buffer, sampleSegments.buffer, sampleWidths.buffer, ...(segmentWidths ? [segmentWidths.buffer] : []),
+            ...paintBuffers(paint), ...(samePaint ? [] : paintBuffers(samplePaint))])
       } else worker.postMessage({ ...message, segments }, [segments.buffer])
       } catch (error) { finish(error instanceof Error ? error : new Error(String(error))) }
   })
@@ -51,10 +65,15 @@ export function vectorWorkerTask(message: VectorSearchMessage | EndpointMessage,
 
 interface Entry {
   promise: Promise<CachedVectorPage>; value?: CachedVectorPage; cancel(): void; users: number
+  paintRequested: boolean
+  paint?: {promise:Promise<CachedVectorPage>;cancel():void;users:number;cancelled:boolean}
   endpoint?: Promise<SnapIndex | null>; endpointAbort?: AbortController; endpointUsers?: number
   labels?: Promise<SymbolLabel[]>
 }
-/** Document-owned, demand-only LRU. Pending requests are shared; invalidated late results never return to the cache. */
+/** Document-owned, demand-only LRU. Pending requests are shared; invalidated late results never return to the cache.
+ * The 3-page/16MiB budget counts retained geometry, widths, endpoints and labels, not
+ * transient extraction/Worker copies or browser/GPU memory. clear() releases ownership
+ * and cancels tasks; it does not promise immediate garbage collection. */
 export class VectorCache {
   private entries = new Map<number, Entry>()
   extractionRequests = 0
@@ -62,27 +81,28 @@ export class VectorCache {
   reportUnavailable(pageIndex: number): boolean { if (this.unavailable.has(pageIndex)) return false; this.unavailable.add(pageIndex); return true }
   peekEndpoint(pageIndex: number): SnapIndex | null { return this.entries.get(pageIndex)?.value?.endpointIndex ?? null }
   get size(): number { return [...this.entries.values()].filter(e => e.value).length }
-  get bytes(): number { return [...this.entries.values()].reduce((sum, e) => sum + (e.value?.segments.byteLength ?? 0) + (e.value?.widths.byteLength ?? 0) + (e.value?.endpointIndex?.bytes ?? 0)
+  get bytes(): number { return [...this.entries.values()].reduce((sum, e) => sum + (e.value?.segments.byteLength ?? 0) + (e.value?.widths.byteLength ?? 0) + paintBytes(e.value?.paint) + (e.value?.endpointIndex?.bytes ?? 0)
     + (e.value?.labels?.reduce((n, label) => n + label.text.length * 2 + 32, 0) ?? 0), 0) }
   constructor(private docId: string) {}
   clear(): void {
-    for (const e of this.entries.values()) { e.cancel(); e.endpointAbort?.abort() }
+    for (const e of this.entries.values()) { e.cancel(); e.endpointAbort?.abort(); if(e.paint){e.paint.cancelled=true;e.paint.cancel()} }
     this.entries.clear(); this.unavailable.clear()
   }
   private trim(): void {
     while (this.size > VECTOR_CACHE_PAGES || this.bytes > VECTOR_CACHE_BYTES) {
       const oldest = [...this.entries].find(([, e]) => e.value)
       if (!oldest) break
-      oldest[1].endpointAbort?.abort(); this.entries.delete(oldest[0])
+      oldest[1].endpointAbort?.abort(); if(oldest[1].paint){oldest[1].paint.cancelled=true;oldest[1].paint.cancel()}; this.entries.delete(oldest[0])
     }
   }
-  get(pageIndex: number, pool: Pick<PdfWorkerPool, 'extractVectors'>, signal?: AbortSignal): Promise<CachedVectorPage> {
+  get(pageIndex: number, pool: Pick<PdfWorkerPool, 'extractVectors'>, signal?: AbortSignal, includePaint = false): Promise<CachedVectorPage> {
     if (signal?.aborted) return Promise.reject(cancelled())
     let entry = this.entries.get(pageIndex)
+    if(entry && includePaint && !entry.paintRequested) return this.loadPaint(pageIndex,pool,signal)
     if (!entry) {
       this.extractionRequests++
-      const task = pool.extractVectors({ docId: this.docId, pageIndex })
-      entry = { promise: null!, cancel: task.cancel, users: 0 }
+      const task = pool.extractVectors({ docId: this.docId, pageIndex, ...(includePaint ? {includePaint:true} : {}) })
+      entry = { promise: null!, cancel: task.cancel, users: 0, paintRequested:includePaint }
       const own = entry
       entry.promise = task.promise.then(page => {
         const value = { ...page, kind: classifyPage(page) }
@@ -104,6 +124,32 @@ export class VectorCache {
       }
       signal.addEventListener('abort', abort, { once: true })
       own.promise.then(value => { if (!done) { finish(); resolve(value) } }, error => { if (!done) { finish(); reject(error) } })
+    })
+  }
+  /** Upgrade a snap-owned entry without replacing its geometry or blocking snap users. */
+  private async loadPaint(pageIndex:number,pool:Pick<PdfWorkerPool,'extractVectors'>,signal?:AbortSignal):Promise<CachedVectorPage> {
+    const page = await this.get(pageIndex,pool,signal)
+    if(signal?.aborted) throw cancelled()
+    const entry=this.entries.get(pageIndex)
+    if(!entry) return page
+    if(entry.paintRequested) return page
+    if(!entry.paint){
+      this.extractionRequests++
+      const task=pool.extractVectors({docId:this.docId,pageIndex,includePaint:true})
+      const work={promise:null! as Promise<CachedVectorPage>,cancel:task.cancel,users:0,cancelled:false}
+      entry.paint=work
+      work.promise=task.promise.then(value=>{
+        if(work.cancelled||this.entries.get(pageIndex)!==entry)throw cancelled()
+        page.paint=value.paint;entry.paintRequested=true;this.trim();return page
+      }).finally(()=>{if(entry.paint===work)entry.paint=undefined})
+    }
+    const work=entry.paint;work.users++
+    return new Promise((resolve,reject)=>{
+      let done=false
+      const finish=()=>{done=true;work.users--;signal?.removeEventListener('abort',abort)}
+      const abort=()=>{if(done)return;finish();reject(cancelled());if(!work.users){work.cancelled=true;work.cancel();if(entry.paint===work)entry.paint=undefined}}
+      signal?.addEventListener('abort',abort,{once:true})
+      work.promise.then(value=>{if(!done){finish();resolve(value)}},error=>{if(!done){finish();reject(error)}})
     })
   }
   async endpoints(pageIndex: number, pool: Pick<PdfWorkerPool, 'extractVectors'>, bounds: Rect, signal: AbortSignal): Promise<SnapIndex | null> {

@@ -1,4 +1,6 @@
 import type { Point, Rect } from './annotations'
+import type { VectorPaint } from './vectorPaint'
+import { createPaintMatcher, paintTemplateGeometry } from './vectorAppearance'
 
 export interface VectorSymbolOptions {
   threshold: number
@@ -8,7 +10,10 @@ export interface VectorSymbolOptions {
   region?: Rect
   shouldStop?: () => boolean
 }
-export interface VectorSymbolMatch { rect: Rect; center: Point; score: number; angle: number; extra: number; around: number }
+/** Geometry scores in displayed pt coordinates. extra/around describe line length,
+ * not a fill/hatch class; the client adds image/label confidence afterwards. */
+export interface VectorSymbolMatch { rect: Rect; center: Point; score: number; angle: number; extra: number; around: number
+  structureScore?: number; fillScore?: number; structureCheck?: boolean }
 
 export interface PreparedTemplate {
   segments: Float32Array; widths: Float32Array; bounds: Rect; tolerance: number
@@ -243,7 +248,31 @@ export function prepareVectorTemplate(pageSegments: Float32Array, pageWidths: Fl
       }
       groups.push(group)
     }
-    const largest = Math.max(0, ...groups.map(g => g.length)), kept = groups.filter(g => g.length >= largest * .25).flatMap(g => g.ids).sort((a, b) => a - b)
+    // A short, disconnected mark inside a simple closed contour is symbol content.
+    // Require a degree-two ring: a bounding box alone would also retain nearby text.
+    const rings = groups.filter(group => {
+      if(group.ids.length<3)return false
+      const degree=new Map<string,number>(),cell=Math.max(.01,tol/4)
+      for(const i of group.ids)for(const e of [0,2]){
+        const key=`${Math.round(original[i+e]/cell)},${Math.round(original[i+e+1]/cell)}`
+        degree.set(key,(degree.get(key)??0)+1)
+      }
+      return [...degree.values()].every(count=>count===2)
+    })
+    const insideRing=(x:number,y:number,ring:typeof groups[number])=>{
+      budget-=ring.ids.length
+      if(budget<0)throw Error('cleanup budget')
+      let inside=false
+      for(const i of ring.ids){
+        const ax=original[i],ay=original[i+1],bx=original[i+2],by=original[i+3]
+        if(pointDistance(x,y,original,i)<=tol)return false
+        if((ay>y)!==(by>y)&&x<(bx-ax)*(y-ay)/(by-ay)+ax)inside=!inside
+      }
+      return inside
+    }
+    const enclosed=(group:typeof groups[number])=>rings.some(ring=>ring!==group&&ring.length>group.length
+      &&group.ids.every(i=>insideRing(original[i],original[i+1],ring)&&insideRing(original[i+2],original[i+3],ring)))
+    const largest = Math.max(0, ...groups.map(g => g.length)), kept = groups.filter(g => g.length >= largest * .25 || enclosed(g)).flatMap(g => g.ids).sort((a, b) => a - b)
     if (kept.length < 2 || kept.reduce((sum, i) => sum + lengths[i / 4], 0) < totalLength * .4) return fallback()
     return finish(kept, wiring.size, ids.length - wiring.size - kept.length)
   } catch { return fallback() }
@@ -302,16 +331,19 @@ function gridLines(grid: ReturnType<typeof spatialIndex>, size: number, r: Rect)
 
 // Float32 storage must not exclude exact .5W/2W boundary widths by rounding.
 const acceptsWidth = (width: number, w: number) => !w || !width || (width >= .5 * w - 1e-6 && width <= 2 * w + 1e-6)
-function widthFiltered(segments: Float32Array, widths: Float32Array | undefined, w: number): Float32Array {
+function widthFiltered(segments: Float32Array, widths: Float32Array | undefined, w: number, strokeOnly = false): Float32Array {
   if (!w || !widths) return segments
   const kept: number[] = []
-  for (let i = 0; i < segments.length; i += 4) if (acceptsWidth(widths[i / 4], w)) kept.push(i)
+  for (let i = 0; i < segments.length; i += 4) if (acceptsWidth(widths[i / 4], w) && (!strokeOnly || widths[i / 4] > 0)) kept.push(i)
   const result = new Float32Array(kept.length * 4)
   kept.forEach((i, at) => result.set(segments.subarray(i, i + 4), at * 4))
   return result
 }
+/** Borrows target/sample geometry and aligned widths without modifying them.
+ * Template cleanup and width filtering are search-local; snap keeps the extracted arrays. */
 export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, options: Partial<VectorSymbolOptions> = {},
-  sampleSegments: Float32Array = segments, sampleWidths: Float32Array = new Float32Array(sampleSegments.length / 4), segmentWidths?: Float32Array) {
+  sampleSegments: Float32Array = segments, sampleWidths: Float32Array = new Float32Array(sampleSegments.length / 4), segmentWidths?: Float32Array,
+  paint?: {sample:VectorPaint;target:VectorPaint}) {
   const started = performance.now(), width = sampleRect[2] - sampleRect[0], height = sampleRect[3] - sampleRect[1]
   const initialTolerance = options.tolerance ?? defaultVectorTolerance(sampleRect)
   const threshold = options.threshold ?? .85, maxResults = options.maxResults ?? 2000
@@ -322,9 +354,13 @@ export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, opt
   if (segmentWidths && (segmentWidths.length !== segments.length / 4 || !segmentWidths.every(w => Number.isFinite(w) && w >= 0))) throw Error('Invalid vector widths')
   const templateStarted = prepareVectorTemplate(sampleSegments, sampleWidths, sampleRect)
   const samplePageSegments = widthFiltered(sampleSegments, sampleWidths, templateStarted.strokeWidth)
+  const targetSegments = segments
   segments = widthFiltered(segments, segmentWidths, templateStarted.strokeWidth)
-  sampleSegments = templateStarted.segments
+  const templateGeometry = paintTemplateGeometry(templateStarted.segments,templateStarted.widths,templateStarted.bounds,paint?.sample)
+  sampleSegments = templateGeometry.segments
+  const restrictStrokes = !!segmentWidths && templateStarted.strokeWidth > 0 && templateGeometry.widths.some(w => w > 0)
   const bounds = templateStarted.bounds, tolerance = options.tolerance ?? templateStarted.tolerance
+  const comparePaint=paint?createPaintMatcher(paint.sample,paint.target,bounds,tolerance):undefined
   const short = Math.max(.3, Math.min(bounds[2] - bounds[0], bounds[3] - bounds[1]))
   const templateIds: number[] = [], lengths = new Map<number, number[]>()
   let anchor = -1, longest = 0, totalLength = 0
@@ -355,13 +391,17 @@ export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, opt
   template.sampleAround = bandLength(samplePageSegments, (function* () { for (let i = 0; i < samplePageSegments.length; i += 4) yield i })(), (x, y) => [x, y])
   if (!maxResults || options.shouldStop?.()) return { matches: [] as VectorSymbolMatch[], template, stats: { anchorsTried: 0, ms: performance.now() - started } }
   const size = Math.min(16, Math.max(8, short)), grid = spatialIndex(segments, size), radius = Math.ceil(tolerance / size)
-  const hits = (px: number, py: number) => {
+  // Only build the additional grid when aligned target widths and template strokes are available.
+  const strokeSegments = restrictStrokes ? widthFiltered(targetSegments, segmentWidths, templateStarted.strokeWidth, true) : segments
+  const strokeGrid = restrictStrokes ? spatialIndex(strokeSegments, size) : grid
+  const hits = (px: number, py: number, stroke: boolean) => {
+    const lines = stroke ? strokeSegments : segments, index = stroke ? strokeGrid : grid
     const cx = Math.floor(px / size), cy = Math.floor(py / size)
     for (let y = cy - radius; y <= cy + radius; y++) for (let x = cx - radius; x <= cx + radius; x++) {
-      const c = grid.cells.get(`${x},${y}`)
+      const c = index.cells.get(`${x},${y}`)
       if (c === undefined) continue
-      for (let k = grid.offsets[c]; k < grid.offsets[c + 1]; k++) {
-        const i = grid.ids[k], ax = segments[i], ay = segments[i + 1], dx = segments[i + 2] - ax, dy = segments[i + 3] - ay
+      for (let k = index.offsets[c]; k < index.offsets[c + 1]; k++) {
+        const i = index.ids[k], ax = lines[i], ay = lines[i + 1], dx = lines[i + 2] - ax, dy = lines[i + 3] - ay
         const d = dx * dx + dy * dy, t = d ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / d)) : 0
         if ((px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2 <= tolerance * tolerance) return true
       }
@@ -369,11 +409,12 @@ export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, opt
     return false
   }
   // Sampling weights sum to each line's length, independent of its subdivision.
-  const samples: Array<[number, number, number]> = []
+  // Fill-contour samples retain the existing all-lines coverage.
+  const samples: Array<[number, number, number, boolean]> = []
   for (const i of templateIds) {
     const dx = sampleSegments[i + 2] - sampleSegments[i], dy = sampleSegments[i + 3] - sampleSegments[i + 1], length = Math.hypot(dx, dy)
-    const n = Math.max(3, Math.ceil(length / 2) + 1)
-    for (let j = 0; j < n; j++) samples.push([sampleSegments[i] + dx * j / (n - 1) - sampleSegments[anchor], sampleSegments[i + 1] + dy * j / (n - 1) - sampleSegments[anchor + 1], length / n])
+    const n = Math.max(3, Math.ceil(length / 2) + 1), stroke = restrictStrokes && templateGeometry.widths[i / 4] > 0
+    for (let j = 0; j < n; j++) samples.push([sampleSegments[i] + dx * j / (n - 1) - sampleSegments[anchor], sampleSegments[i + 1] + dy * j / (n - 1) - sampleSegments[anchor + 1], length / n, stroke])
   }
   const baseAngle = Math.atan2(sampleSegments[anchor + 3] - sampleSegments[anchor + 1], sampleSegments[anchor + 2] - sampleSegments[anchor])
   const corners: Point[] = [[bounds[0], bounds[1]], [bounds[2], bounds[1]], [bounds[2], bounds[3]], [bounds[0], bounds[3]]]
@@ -397,16 +438,26 @@ export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, opt
         const region = options.region
         if (region && (rect[0] < region[0] - 1e-6 || rect[1] < region[1] - 1e-6 || rect[2] > region[2] + 1e-6 || rect[3] > region[3] + 1e-6)) continue
         let covered = 0, remaining = totalLength
-        for (const [x, y, weight] of samples) {
+        for (const [x, y, weight, stroke] of samples) {
           const [px, py] = transform(x, y)
           remaining -= weight
-          if (hits(px, py)) covered += weight
+          if (hits(px, py, stroke)) covered += weight
           if ((covered + remaining) / totalLength < threshold - 1e-10) break
         }
         const score = Math.min(1, covered / totalLength)
         if (score >= threshold - 1e-10) {
-          const match = { rect, center: [(rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2] as Point,
+          const match:VectorSymbolMatch = { rect, center: [(rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2] as Point,
             score, angle: ((angle * 180 / Math.PI % 360) + 360) % 360, extra: 0, around: 0 }
+          if(comparePaint){
+            // With structural comparison, rotation-off must not turn a left/right
+            // fill difference into an automatically accepted half turn.
+            if(!options.rotations&&Math.abs(Math.sin(angle/2))>Math.sin(Math.PI/180))continue
+            const comparison=comparePaint(match.center,match.angle)
+            if(comparison.known&&comparison.score<.9)continue
+            match.structureScore=comparison.known?comparison.lineScore:undefined
+            match.fillScore=comparison.known?comparison.fillScore:undefined
+            match.structureCheck=!comparison.known||comparison.score<.97
+          }
           candidates.push(match); transforms.set(match, [ox, oy, cos, sin])
         }
       }

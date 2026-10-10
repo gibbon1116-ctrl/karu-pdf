@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Point, Rect } from '../src/core/annotations'
 import type { CountFixture } from '../src/core/countFixtures'
+import type { SymbolShapeDecision } from '../src/core/symbolShapeDecision'
 import { AnnotationStore } from '../src/editor/AnnotationStore'
 import { parseSymbolSearchPages } from '../src/app/SymbolSearchPanel'
 
@@ -99,13 +100,14 @@ describe('memory-only candidates', () => {
     store.beginSymbolCandidates('led', sampleRect)
     store.appendSymbolCandidates([candidate(56, 50), candidate(56.01, 50), candidate(50, 50, 1), candidate(100, 100)])
     expect(store.symbolCandidates?.map(c => c.state)).toEqual(['counted', 'pending', 'pending', 'pending'])
+    expect(store.symbolCandidates?.map(c => c.otherFixture)).toEqual([undefined, undefined, undefined, 'other'])
     store.toggleSymbolCandidate(store.symbolCandidates![0].id)
     expect(store.symbolCandidates![0].state).toBe('counted')
     const id = store.symbolCandidates![1].id
     store.toggleSymbolCandidate(id); expect(store.symbolCandidates![1].state).toBe('chosen')
     store.toggleSymbolCandidate(id); expect(store.symbolCandidates![1].state).toBe('pending')
     store.chooseSymbolCandidates(true)
-    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['counted', 'chosen', 'chosen', 'chosen'])
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['counted', 'chosen', 'chosen', 'pending'])
     store.chooseSymbolCandidates(false)
     expect(store.symbolCandidates?.map(c => c.state)).toEqual(['counted', 'pending', 'pending', 'pending'])
   })
@@ -130,6 +132,314 @@ describe('memory-only candidates', () => {
     expect(store.symbolCandidates?.map(c => c.state)).toEqual(['counted', 'pending'])
     store.undo(); expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'pending']); expect(store.canUndo()).toBe(false)
     store.redo(); expect(store.symbolCandidates?.map(c => c.state)).toEqual(['counted', 'pending'])
+  })
+})
+
+describe('other-fixture candidates', () => {
+  it('hides other-fixture candidates by default and shows them without changing persisted state', async () => {
+    const store = await setup()
+    store.createCountMarks('other', [{ pageIndex: 0, center: [40, 50] }])
+    const index = store.quantityIndex(), dirty = store.dirtySummary(), edits = store.toEdits()
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([candidate(40, 50), candidate(80, 50)])
+    expect(store.symbolOtherFilter).toBe('hide')
+    expect(store.symbolCandidates).toHaveLength(2)
+    expect(store.symbolCandidates![0]).toMatchObject({ state: 'pending', otherFixture: 'other' })
+    expect(store.isSymbolCandidateVisible(store.symbolCandidates![0])).toBe(false)
+    expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[80, 50]])
+    expect(store.symbolOtherFixtureLabel('other')).toBe('LED 別の項目')
+
+    store.setSymbolOtherFilter('show')
+    expect(store.isSymbolCandidateVisible(store.symbolCandidates![0])).toBe(true)
+    expect(store.visibleSymbolCandidates).toHaveLength(2)
+    store.setSymbolOtherFilter('hide')
+    expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[80, 50]])
+    expect(store.quantityIndex()).toBe(index)
+    expect(store.dirtySummary()).toEqual(dirty)
+    expect(store.toEdits()).toEqual(edits)
+    store.undo()
+    expect(store.canUndo()).toBe(false)
+    expect(store.quantityIndex().total('other')).toBe(0)
+  })
+  it('blocks other-fixture candidates in all three selection actions even when shown and excludes them from quantity addition', async () => {
+    const store = await setup()
+    const ids = store.createCountMarks('other', [{ pageIndex: 0, center: [40, 50] }])
+    const originalMark = JSON.stringify(store.get(ids[0]))
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([
+      { ...candidate(40, 50), confidence: 'high' },
+      { ...candidate(80, 50), confidence: 'high' },
+    ])
+    store.setSymbolOtherFilter('show')
+    expect(store.visibleSymbolCandidates).toHaveLength(2)
+    const blockedId = store.symbolCandidates![0].id
+    store.toggleSymbolCandidate(blockedId)
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'pending'])
+
+    store.chooseSymbolCandidates(true)
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'chosen'])
+    store.chooseSymbolCandidates(false)
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'pending'])
+
+    store.chooseHighConfidenceCandidates()
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'chosen'])
+    const selected = store.visibleSymbolCandidates!.filter(c => c.state === 'chosen' && !c.otherFixture)
+    expect(selected.map(c => c.center)).toEqual([[80, 50]])
+    store.createCountMarks('led', selected.map(c => ({ pageIndex: c.pageIndex, center: c.center })))
+    expect(store.quantityIndex().total('led')).toBe(1)
+    expect(store.quantityIndex().total('other')).toBe(1)
+    expect(JSON.stringify(store.get(ids[0]))).toBe(originalMark)
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'counted'])
+    expect(store.symbolCandidates![0].otherFixture).toBe('other')
+  })
+  it('uses the nearest other-fixture mark on the same page and includes the radius boundary', async () => {
+    const store = await setup()
+    store.setCountFixtures([...store.getCountFixtures(), { ...fixture, id: 'near', code: 'N', name: '近い項目', order: 2 }])
+    store.createCountMarks('other', [{ pageIndex: 0, center: [54, 50] }])
+    store.createCountMarks('near', [{ pageIndex: 0, center: [52, 50] }])
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([candidate(50, 50), candidate(60, 50), candidate(60.01, 50), candidate(50, 50, 1)])
+    expect(store.symbolCandidates?.map(c => c.otherFixture)).toEqual(['near', 'other', undefined, undefined])
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'pending', 'pending', 'pending'])
+    expect(store.visibleSymbolCandidates?.map(c => [c.pageIndex, ...c.center])).toEqual([[0, 60.01, 50], [1, 50, 50]])
+  })
+  it('prioritizes counted marks of the same fixture and removes otherFixture while counted', async () => {
+    const store = await setup()
+    store.createCountMarks('other', [{ pageIndex: 0, center: [40, 50] }])
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([candidate(40, 50)])
+    expect(store.symbolCandidates![0].otherFixture).toBe('other')
+
+    store.createCountMarks('led', [{ pageIndex: 0, center: [45, 50] }])
+    expect(store.symbolCandidates![0].state).toBe('counted')
+    expect(store.symbolCandidates![0]).not.toHaveProperty('otherFixture')
+    expect(store.visibleSymbolCandidates).toHaveLength(1)
+    store.toggleSymbolCandidate(store.symbolCandidates![0].id)
+    expect(store.symbolCandidates![0].state).toBe('counted')
+
+    store.undo()
+    expect(store.symbolCandidates![0]).toMatchObject({ state: 'pending', otherFixture: 'other' })
+    expect(store.visibleSymbolCandidates).toHaveLength(0)
+    store.redo()
+    expect(store.symbolCandidates![0].state).toBe('counted')
+    expect(store.symbolCandidates![0]).not.toHaveProperty('otherFixture')
+    expect(store.visibleSymbolCandidates).toHaveLength(1)
+  })
+  it('removes otherFixture after undo and allows selection, then blocks it again after redo', async () => {
+    const store = await setup()
+    store.createCountMarks('other', [{ pageIndex: 0, center: [40, 50] }])
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([candidate(40, 50)])
+    const id = store.symbolCandidates![0].id
+    expect(store.visibleSymbolCandidates).toHaveLength(0)
+    expect(store.symbolCandidates![0].otherFixture).toBe('other')
+
+    store.undo()
+    expect(store.symbolCandidates![0]).not.toHaveProperty('otherFixture')
+    expect(store.visibleSymbolCandidates).toHaveLength(1)
+    expect(store.canUndo()).toBe(false)
+    store.toggleSymbolCandidate(id)
+    expect(store.symbolCandidates![0].state).toBe('chosen')
+
+    store.redo()
+    expect(store.symbolCandidates![0]).toMatchObject({ state: 'pending', otherFixture: 'other' })
+    expect(store.visibleSymbolCandidates).toHaveLength(0)
+    store.setSymbolOtherFilter('show')
+    store.toggleSymbolCandidate(id)
+    expect(store.symbolCandidates![0].state).toBe('pending')
+    expect(store.quantityIndex().total('led')).toBe(0)
+    expect(store.quantityIndex().total('other')).toBe(1)
+  })
+  it('ignores deleted other-fixture marks when quantities are refreshed and allows selection again', async () => {
+    const store = await setup()
+    const ids = store.createCountMarks('other', [{ pageIndex: 0, center: [40, 50] }])
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([candidate(40, 50)])
+    expect(store.symbolCandidates![0].otherFixture).toBe('other')
+    expect(store.visibleSymbolCandidates).toHaveLength(0)
+
+    // Delete the other fixture's mark through the store, as the user would.
+    store.remove(ids[0])
+    expect(store.symbolCandidates![0]).not.toHaveProperty('otherFixture')
+    expect(store.visibleSymbolCandidates).toHaveLength(1)
+    store.toggleSymbolCandidate(store.symbolCandidates![0].id)
+    expect(store.symbolCandidates![0].state).toBe('chosen')
+    expect(store.quantityIndex().total('led')).toBe(0)
+    expect(store.quantityIndex().total('other')).toBe(0)
+  })
+  it('returns chosen candidates to pending when another fixture gains a mark at their position', async () => {
+    const store = await setup()
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([candidate(40, 50), candidate(80, 50)])
+    store.chooseSymbolCandidates(true)
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['chosen', 'chosen'])
+
+    store.createCountMarks('other', [{ pageIndex: 0, center: [40, 50] }])
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'chosen'])
+    expect(store.symbolCandidates![0].otherFixture).toBe('other')
+    expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[80, 50]])
+
+    store.undo()
+    expect(store.symbolCandidates![0]).not.toHaveProperty('otherFixture')
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'chosen'])
+    store.toggleSymbolCandidate(store.symbolCandidates![0].id)
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['chosen', 'chosen'])
+    expect(store.canUndo()).toBe(false)
+  })
+  it('combines the other-fixture filter with shape, label and G filters', async () => {
+    const store = await setup()
+    store.createCountMarks('other', [{ pageIndex: 0, center: [40, 50] }, { pageIndex: 0, center: [80, 50] }])
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([
+      { ...candidate(40, 50), label: 'ET', gc: true, shape: { decision: 'same', differences: [], unknown: [] } },
+      { ...candidate(80, 50), label: 'ET', gc: true, shape: { decision: 'different', differences: ['topArc'], unknown: [] } },
+      { ...candidate(120, 50), label: 'ET', gc: true, shape: { decision: 'same', differences: [], unknown: [] } },
+      { ...candidate(160, 50), label: 'ET', gc: false, shape: { decision: 'same', differences: [], unknown: [] } },
+      { ...candidate(200, 50), label: '4H', gc: true, shape: { decision: 'same', differences: [], unknown: [] } },
+    ])
+    store.setSymbolCandidateFilters(['ET'], 'with')
+    expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[120, 50]])
+    store.setSymbolOtherFilter('show')
+    expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[40, 50], [120, 50]])
+    store.setSymbolShapeFilter('all')
+    expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[40, 50], [80, 50], [120, 50]])
+    store.setSymbolOtherFilter('hide')
+    expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[120, 50]])
+    expect(store.symbolShapeFilter).toBe('all')
+    expect(store.symbolLabelFilter).toEqual(['ET'])
+    expect(store.symbolGcFilter).toBe('with')
+    store.setSymbolCandidateFilters(['ET'], 'without')
+    expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[160, 50]])
+    expect(store.symbolCandidates).toHaveLength(5)
+  })
+  it('resets the other-fixture filter on begin and clear, including clear without candidates, without changing persisted state', async () => {
+    const store = await setup(), index = store.quantityIndex(), dirty = store.dirtySummary()
+    expect(store.symbolCandidates).toBeNull()
+    store.setSymbolOtherFilter('show')
+    store.clearSymbolCandidates()
+    expect(store.symbolCandidates).toBeNull()
+    expect(store.symbolOtherFilter).toBe('hide')
+
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([candidate(40, 50)])
+    store.setSymbolOtherFilter('show')
+    store.beginSymbolCandidates('led', sampleRect)
+    expect(store.symbolCandidates).toEqual([])
+    expect(store.symbolOtherFilter).toBe('hide')
+
+    store.setSymbolOtherFilter('show')
+    store.clearSymbolCandidates()
+    expect(store.symbolCandidates).toBeNull()
+    expect(store.symbolOtherFilter).toBe('hide')
+    expect(store.quantityIndex()).toBe(index)
+    expect(store.dirtySummary()).toEqual(dirty)
+    expect(store.toEdits()).toEqual([])
+    expect(store.canUndo()).toBe(false)
+  })
+})
+
+describe('shape-filtered candidates', () => {
+  it('hides different shapes by default while retaining same, unknown and untested candidates', async () => {
+    const store = await setup()
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([
+      { ...candidate(40, 50), shape: { decision: 'same', differences: [], unknown: [] } },
+      { ...candidate(80, 50), shape: { decision: 'different', differences: ['topArc', 'interior'], unknown: [] } },
+      { ...candidate(120, 50), shape: { decision: 'unknown', differences: [], unknown: ['topArc'] } },
+      candidate(160, 50),
+    ])
+    expect(store.symbolShapeFilter).toBe('same')
+    expect(store.symbolCandidates).toHaveLength(4)
+    expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[40, 50], [120, 50], [160, 50]])
+    expect(store.isSymbolCandidateVisible(store.symbolCandidates![1])).toBe(false)
+    store.setSymbolShapeFilter('all')
+    expect(store.visibleSymbolCandidates).toHaveLength(4)
+    store.setSymbolShapeFilter('same')
+    expect(store.visibleSymbolCandidates).toHaveLength(3)
+  })
+  it('blocks hidden shapes in all selection actions and excludes already chosen hidden shapes from quantity addition', async () => {
+    const store = await setup()
+    store.beginSymbolCandidates('led', sampleRect)
+    // Use high confidence even for the different shape to test visibility independently of confidence.
+    store.appendSymbolCandidates([
+      { ...candidate(40, 50), confidence: 'high', shape: { decision: 'same', differences: [], unknown: [] } },
+      { ...candidate(80, 50), confidence: 'high', shape: { decision: 'different', differences: ['topArc'], unknown: [] } },
+    ])
+    const hiddenId = store.symbolCandidates![1].id
+    store.chooseSymbolCandidates(true)
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['chosen', 'pending'])
+    store.chooseSymbolCandidates(false)
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'pending'])
+    store.chooseHighConfidenceCandidates()
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['chosen', 'pending'])
+    store.toggleSymbolCandidate(hiddenId)
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['chosen', 'pending'])
+
+    store.setSymbolShapeFilter('all')
+    store.toggleSymbolCandidate(hiddenId)
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['chosen', 'chosen'])
+    store.setSymbolShapeFilter('same')
+    store.chooseSymbolCandidates(false)
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'chosen'])
+    store.chooseHighConfidenceCandidates()
+    const selected = store.visibleSymbolCandidates!.filter(c => c.state === 'chosen')
+    expect(selected).toHaveLength(1)
+    store.createCountMarks('led', selected.map(c => ({ pageIndex: c.pageIndex, center: c.center })))
+    expect(store.quantityIndex().total('led')).toBe(1)
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['counted', 'chosen'])
+  })
+  it('combines the shape filter with the existing label and G filters', async () => {
+    const store = await setup()
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([
+      { ...candidate(40, 50), label: 'ET', gc: true, shape: { decision: 'same', differences: [], unknown: [] } },
+      { ...candidate(80, 50), label: 'ET', gc: true, shape: { decision: 'different', differences: ['topArc'], unknown: [] } },
+      { ...candidate(120, 50), label: 'ET', gc: false, shape: { decision: 'same', differences: [], unknown: [] } },
+      { ...candidate(160, 50), label: '4H', gc: true, shape: { decision: 'same', differences: [], unknown: [] } },
+    ])
+    store.setSymbolCandidateFilters(['ET'], 'with')
+    expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[40, 50]])
+    store.setSymbolShapeFilter('all')
+    expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[40, 50], [80, 50]])
+    expect(store.symbolLabelFilter).toEqual(['ET']); expect(store.symbolGcFilter).toBe('with')
+    store.setSymbolCandidateFilters(['ET'], 'without')
+    expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[120, 50]])
+    store.setSymbolShapeFilter('same')
+    expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[120, 50]])
+    expect(store.symbolCandidates).toHaveLength(4)
+  })
+  it('resets the shape filter on begin and clear, including clear without candidates, without changing persisted state', async () => {
+    const store = await setup(), index = store.quantityIndex(), dirty = store.dirtySummary()
+    expect(store.symbolCandidates).toBeNull()
+    store.setSymbolShapeFilter('all')
+    store.clearSymbolCandidates()
+    expect(store.symbolCandidates).toBeNull(); expect(store.symbolShapeFilter).toBe('same')
+
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([
+      { ...candidate(40, 50), shape: { decision: 'different', differences: ['topArc'], unknown: [] } },
+    ])
+    store.setSymbolShapeFilter('all')
+    store.beginSymbolCandidates('led', sampleRect)
+    expect(store.symbolCandidates).toEqual([]); expect(store.symbolShapeFilter).toBe('same')
+    store.setSymbolShapeFilter('all')
+    store.clearSymbolCandidates()
+    expect(store.symbolCandidates).toBeNull(); expect(store.symbolShapeFilter).toBe('same')
+    expect(store.quantityIndex()).toBe(index); expect(store.dirtySummary()).toEqual(dirty)
+    expect(store.toEdits()).toEqual([]); expect(store.canUndo()).toBe(false)
+  })
+  it('copies shape decisions and both arrays when appending candidates', async () => {
+    const store = await setup()
+    const shape: SymbolShapeDecision = { decision: 'different', differences: ['topArc'], unknown: ['interiorLines'] }
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([{ ...candidate(40, 50), shape }])
+    const stored = store.symbolCandidates![0].shape!
+    expect(stored).not.toBe(shape)
+    expect(stored.differences).not.toBe(shape.differences)
+    expect(stored.unknown).not.toBe(shape.unknown)
+    shape.decision = 'same'; shape.differences.push('interior'); shape.unknown.push('annexFrame')
+    expect(stored).toEqual({ decision: 'different', differences: ['topArc'], unknown: ['interiorLines'] })
+    expect(store.visibleSymbolCandidates).toHaveLength(0)
   })
 })
 

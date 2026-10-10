@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import * as mupdf from 'mupdf'
 import { defaultVectorTolerance, prepareVectorTemplate, vectorSymbolSearch } from '../src/core/vectorSymbolSearch'
 import type { Rect } from '../src/core/annotations'
 
@@ -13,6 +14,14 @@ const thin = [[0, 0, 3, 0], [3, 0, 3, 19], [3, 19, 0, 19], [0, 19, 0, 0]]
 // Several diagonal strokes make the additional line length exceed 40%.
 const hatched = [...thin, ...[0, 1, 2, 3, 4].map(y => [0, y, 3, 19 - y])]
 describe('vector template preparation', () => {
+  it('keeps short disconnected interior marks inside a closed ring, but still removes nearby outside marks', () => {
+    const circle=Array.from({length:24},(_,i)=>[20+10*Math.cos(i*Math.PI/12),20+10*Math.sin(i*Math.PI/12),20+10*Math.cos((i+1)*Math.PI/12),20+10*Math.sin((i+1)*Math.PI/12)])
+    const lines=new Float32Array([...circle.flat(),17,23,23,17, 32,14,33,15])
+    const prepared=prepareVectorTemplate(lines,new Float32Array(lines.length/4).fill(.6),[9,9,34,31])
+    expect(prepared.segments.length/4).toBe(25)
+    expect(Array.from(prepared.segments.slice(-4))).toEqual([17,23,23,17])
+    expect(prepared.removed.other).toBe(1)
+  })
   it('keeps the thin fixture and polygon circle, removing neighboring text and a dashed wiring chain', () => {
     const circle = Array.from({ length: 12 }, (_, i) => [21.5 + 1.5 * Math.cos(i * Math.PI / 6), 29.5 + 1.5 * Math.sin(i * Math.PI / 6),
       21.5 + 1.5 * Math.cos((i + 1) * Math.PI / 6), 29.5 + 1.5 * Math.sin((i + 1) * Math.PI / 6)])
@@ -143,4 +152,186 @@ describe('vector symbol coverage search', () => {
     console.log('VECTOR_SYMBOL_SYNTHETIC_PERF', JSON.stringify({ unrelatedSegments: 100_000, symbols: 200, matches: result.matches.length, ...result.stats, underOneSecond: result.stats.ms < 1000 }))
     expect(result.matches).toHaveLength(200)
   }, 30_000)
+})
+
+interface PaintFixture {
+  content: string
+  segments: number[]
+  widths: number[]
+}
+
+// The PDF and the known coverage geometry share the same cubic paths.
+// Geometry is authored here; this helper does not test the production extractor.
+function circleFixturePath(x: number, y: number, radius: number) {
+  const k = radius * .5522847498307936
+  const curves = [
+    [x + radius,y, x + radius,y + k, x + k,y + radius, x,y + radius],
+    [x,y + radius, x - k,y + radius, x - radius,y + k, x - radius,y],
+    [x - radius,y, x - radius,y - k, x - k,y - radius, x,y - radius],
+    [x,y - radius, x + k,y - radius, x + radius,y - k, x + radius,y],
+  ]
+  const segments: number[] = []
+  for (const [ax,ay,bx,by,cx,cy,dx,dy] of curves) {
+    const point = (t: number) => {
+      const u = 1 - t
+      return [u ** 3 * ax + 3 * u * u * t * bx + 3 * u * t * t * cx + t ** 3 * dx,
+        u ** 3 * ay + 3 * u * u * t * by + 3 * u * t * t * cy + t ** 3 * dy]
+    }
+    for (let i = 0; i < 12; i++) segments.push(...point(i / 12), ...point((i + 1) / 12))
+  }
+  const content = `${x + radius} ${y} m\n${curves.map(curve => `${curve.slice(2).join(' ')} c`).join('\n')}\nh\n`
+  return { content, segments }
+}
+function circleFixture(x: number, y: number, width: number): PaintFixture {
+  const circle = circleFixturePath(x, y, 8)
+  return { content: width > 0 ? `${width} w\n${circle.content}S\n` : `${circle.content}f\n`,
+    segments: circle.segments, widths: Array(circle.segments.length / 4).fill(width) }
+}
+function letterOFixture(x: number, y: number): PaintFixture {
+  const outer = circleFixturePath(x, y, 8), inner = circleFixturePath(x, y, 7.25)
+  const segments = [...outer.segments, ...inner.segments]
+  return { content: `${outer.content}${inner.content}f*\n`,
+    segments, widths: Array(segments.length / 4).fill(0) }
+}
+function triangleFixture(x: number, y: number, width = 0): PaintFixture {
+  const segments = [x - 2,y - 2,x + 2,y - 2, x + 2,y - 2,x,y + 2, x,y + 2,x - 2,y - 2]
+  const path = `${x - 2} ${y - 2} m\n${x + 2} ${y - 2} l\n${x} ${y + 2} l\nh\n`
+  return { content: width > 0 ? `${width} w\n${path}S\n` : `${path}f\n`,
+    segments, widths: Array(3).fill(width) }
+}
+function syntheticVectorPage(parts: PaintFixture[]) {
+  const doc = new mupdf.PDFDocument()
+  try {
+    const object = doc.addPage([0,0,240,100], 0, {}, `0 G\n0 g\n${parts.map(part => part.content).join('')}`)
+    try { doc.insertPage(-1, object) } finally { object.destroy() }
+    const page = doc.loadPage(0)
+    try {
+      const pixmap = page.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, false)
+      try {
+        expect(pixmap.getWidth()).toBe(240)
+        expect(pixmap.getHeight()).toBe(100)
+      } finally { pixmap.destroy() }
+    } finally { page.destroy() }
+    return {
+      segments: new Float32Array(parts.flatMap(part => part.segments)),
+      widths: new Float32Array(parts.flatMap(part => part.widths)),
+    }
+  } finally { doc.destroy() }
+}
+describe('vector symbol stroke and fill coverage', () => {
+  const rect: Rect = [11,31,29,49]
+  const centers = (result: ReturnType<typeof vectorSymbolSearch>) =>
+    result.matches.map(match => Math.round(match.center[0])).sort((a, b) => a - b)
+
+  it('finds only the two .54pt stroke circles, retaining all four matches without target widths', () => {
+    const page = syntheticVectorPage([
+      circleFixture(20,40,.54), circleFixture(75,40,.54),
+      letterOFixture(130,40), letterOFixture(185,40),
+    ])
+    const originalSegments = page.segments.slice(), originalWidths = page.widths.slice()
+    const options = { threshold: .98 }
+    const result = vectorSymbolSearch(page.segments, rect, options, page.segments, page.widths, page.widths)
+    expect(result.template.strokeWidth).toBeCloseTo(.54)
+    expect(result.matches).toHaveLength(2)
+    expect(centers(result)).toEqual([20,75])
+    const legacy = vectorSymbolSearch(page.segments, rect, options, page.segments, page.widths)
+    expect(legacy.matches).toHaveLength(4)
+    expect(centers(legacy)).toEqual([20,75,130,185])
+    expect(page.segments).toEqual(originalSegments)
+    expect(page.widths).toEqual(originalWidths)
+  })
+
+  it('keeps filled-circle templates compatible with filled circles and stroke contours', () => {
+    const page = syntheticVectorPage([
+      circleFixture(20,40,0), circleFixture(75,40,0), circleFixture(130,40,.54),
+    ])
+    const options = { threshold: .98 }
+    const result = vectorSymbolSearch(page.segments, rect, options, page.segments, page.widths, page.widths)
+    const legacy = vectorSymbolSearch(page.segments, rect, options, page.segments, page.widths)
+    expect(result.template.strokeWidth).toBe(0)
+    expect(result.matches).toHaveLength(3)
+    expect(centers(result)).toEqual([20,75,130])
+    expect(result.matches).toEqual(legacy.matches)
+  })
+
+  it('matches stroke circles with filled triangles, excluding a fill-contour circle with the same triangle', () => {
+    const page = syntheticVectorPage([
+      circleFixture(20,40,.54), triangleFixture(20,40),
+      circleFixture(75,40,.54), triangleFixture(75,40),
+      letterOFixture(130,40), triangleFixture(130,40),
+    ])
+    const prepared = prepareVectorTemplate(page.segments, page.widths, rect)
+    expect(prepared.widths.some(width => width > 0)).toBe(true)
+    expect(prepared.widths.some(width => width === 0)).toBe(true)
+    expect(prepared.segments.length / 4).toBe(51)
+    const options = { threshold: .98 }
+    const result = vectorSymbolSearch(page.segments, rect, options, page.segments, page.widths, page.widths)
+    expect(result.matches).toHaveLength(2)
+    expect(centers(result)).toEqual([20,75])
+    const legacy = vectorSymbolSearch(page.segments, rect, options, page.segments, page.widths)
+    expect(legacy.matches).toHaveLength(3)
+    expect(centers(legacy)).toEqual([20,75,130])
+  })
+
+  it('allows fill samples to hit stroke lines in a mixed template', () => {
+    const page = syntheticVectorPage([
+      circleFixture(20,40,.54), triangleFixture(20,40),
+      circleFixture(75,40,.54), triangleFixture(75,40,.54),
+    ])
+    const result = vectorSymbolSearch(page.segments, rect, { threshold: .98 }, page.segments, page.widths, page.widths)
+    expect(result.matches).toHaveLength(2)
+    expect(centers(result)).toEqual([20,75])
+  })
+
+  it('retains the .5W and 2W boundaries while excluding narrower strokes and fill contours', () => {
+    const page = syntheticVectorPage([
+      circleFixture(20,40,.54), circleFixture(75,40,.27),
+      circleFixture(130,40,1.08), circleFixture(185,40,.26),
+      letterOFixture(220,40),
+    ])
+    const result = vectorSymbolSearch(page.segments, rect, { threshold: .98 }, page.segments, page.widths, page.widths)
+    expect(result.matches).toHaveLength(3)
+    expect(centers(result)).toEqual([20,75,130])
+  })
+
+  it('keeps fill contours in reverse extra and surrounding-line measurements', () => {
+    const target = [
+      circleFixture(20,40,.54), triangleFixture(20,40),
+      { content: '30 38 m\n30 42 l\nS\n', segments: [30,38,30,42], widths: [0] },
+    ]
+    // The surrounding mark is a fill contour in the known geometry.
+    target[2].content = '30 38 m\n30 42 l\n30.1 42 l\n30.1 38 l\nh\nf\n'
+    target[2].segments = [30,38,30,42, 30,42,30.1,42, 30.1,42,30.1,38, 30.1,38,30,38]
+    target[2].widths = [0,0,0,0]
+    const page = syntheticVectorPage(target)
+    const samplePart = circleFixture(20,40,.54)
+    const sampleSegments = new Float32Array(samplePart.segments), sampleWidths = new Float32Array(samplePart.widths)
+    const options = { threshold: .98 }
+    const result = vectorSymbolSearch(page.segments, rect, options, sampleSegments, sampleWidths, page.widths)
+    const legacy = vectorSymbolSearch(page.segments, rect, options, sampleSegments, sampleWidths)
+    expect(result.matches).toHaveLength(1)
+    expect(legacy.matches).toHaveLength(1)
+    expect(result.matches[0].extra).toBeGreaterThan(.1)
+    expect(result.matches[0].around).toBeGreaterThan(0)
+    expect(result.matches[0].extra).toBeCloseTo(legacy.matches[0].extra)
+    expect(result.matches[0].around).toBeCloseTo(legacy.matches[0].around)
+  })
+
+  it('returns no matches when a stroke template searches a target containing only fill contours', () => {
+    const page = syntheticVectorPage([letterOFixture(75,40), letterOFixture(130,40)])
+    const samplePart = circleFixture(20,40,.54)
+    const sampleSegments = new Float32Array(samplePart.segments), sampleWidths = new Float32Array(samplePart.widths)
+    const options = { threshold: .98 }
+    expect(vectorSymbolSearch(page.segments, rect, options, sampleSegments, sampleWidths, page.widths).matches).toHaveLength(0)
+    expect(vectorSymbolSearch(page.segments, rect, options, sampleSegments, sampleWidths).matches).toHaveLength(2)
+  })
+
+  it('preserves cancellation checks when stroke-only coverage is enabled', () => {
+    const data = new Float32Array(Array.from({ length: 600 }, (_, i) => stamp(symbol, 20 + i * 30, 20)).flat())
+    const widths = new Float32Array(data.length / 4).fill(.54)
+    let checks = 0
+    const result = vectorSymbolSearch(data, sample, { shouldStop: () => ++checks >= 3 }, data, widths, widths)
+    expect(result.stats.anchorsTried).toBe(500)
+    expect(checks).toBe(3)
+  })
 })

@@ -655,10 +655,16 @@ button, input { font: inherit; }
 .symbol-search-candidate rect { fill: #ff950009; stroke: #cf7600; stroke-width: 1.5; stroke-dasharray: 5 3; }
 .symbol-search-candidate.pending[data-confidence="check"] rect { stroke-dasharray: 1 3; stroke-linecap: round; }
 .symbol-search-candidate.pending text.symbol-search-question { fill: #cf7600; font-weight: bold; }
+/* Violet, unlike the gray counted marks; the later counted and chosen rules take precedence. */
+.symbol-search-candidate.shape-different rect,
+.symbol-search-candidate.shape-different.pending[data-confidence="check"] rect { fill: #8a5fbf08; stroke: #8a5fbf; stroke-dasharray: 2 2; stroke-linecap: butt; }
 .symbol-search-candidate.chosen rect { fill: #008a1712; stroke: #008127; stroke-dasharray: none; }
 .symbol-search-candidate text { fill: #008127; pointer-events: none; }
-.symbol-search-candidate.counted { cursor: default; }
-.symbol-search-candidate.counted rect { fill: transparent; stroke: #777; stroke-width: 1; stroke-dasharray: 3 3; }
+.symbol-search-candidate.counted,
+.symbol-search-candidate.other-fixture { cursor: default; }
+.symbol-search-candidate.counted rect,
+.symbol-search-candidate.other-fixture rect,
+.symbol-search-candidate.other-fixture.pending[data-confidence="check"] rect { fill: transparent; stroke: #777; stroke-width: 1; stroke-dasharray: 3 3; stroke-linecap: butt; }
 .symbol-search-candidate:focus-visible rect { stroke-width: 3; }
 .fixture-preview { width: 100%; height: 100px; background: white; border: 1px solid #ddd; }
 .fixture-dialog { width: min(560px, 90vw); max-height: 88vh; overflow: auto; }

@@ -20,3 +20,6 @@ dist-single/
 *.docx
 *.xlsx
 *.pptx
+
+# Local analysis may contain supplied drawing text and rendered pages.
+work/vector-recognition/

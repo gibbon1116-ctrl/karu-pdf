@@ -123,14 +123,16 @@ test('vector desk candidates: verification on/off timing and confidence, page 1'
     results.push(record); console.log('VECTOR_DESK_VERIFY',JSON.stringify(record))
     expect(result.method).toBe('vector')
     expect(result.confidence.high+result.confidence.check+result.confidence.unverified).toBe(result.candidateCount)
-    if(!verify) expect(result.metrics).toMatchObject({verifyRenderMs:0,verifyMs:0,renderTiles:0})
-    else if(result.candidateCount>0) { expect(result.metrics.renderTiles).toBe(2); expect(result.confidence.unverified).toBe(0) }
+    // Local body/letter crops run in both modes; only the page/template NCC
+    // verification is controlled by this checkbox.
+    if(!verify) expect(result.metrics).toMatchObject({verifyRenderMs:0,verifyMs:0})
+    else if(result.candidateCount>0) { expect(result.metrics.renderTiles).toBe(results[0].metrics.renderTiles+2); expect(result.confidence.unverified).toBe(0) }
   }
   expect(results[1].centers.map(c => c.slice(0, 2))).toEqual(results[0].centers.map(c => c.slice(0, 2)))
   const off=results[0].metrics, on=results[1].metrics
   const hardware=await page.evaluate(()=>window.__karu!.getHardwareInfo())
   measurements.push({ file:realFile,pageIndex:0,sampleRect:[742,174,753,182],threshold:.85,hardware,browser:page.context().browser()?.version(),
-    conditions:{vectorCache:'warm for both',order:'off then on',pageRender:'one page crop and one sample when on',
+      conditions:{vectorCache:'warm for both',order:'off then on',pageRender:'bounded local crops in both modes; one extra page crop and sample when on',
       timings:'vectorMs = Worker vector matching; verifyRenderMs = page/sample render round trip; verifyMs = Worker NCC; totalMs = complete client request'},
     verification:results,totalDeltaMs:on.totalMs-off.totalMs,totalDeltaPercent:off.totalMs>0?(on.totalMs/off.totalMs-1)*100:null })
 })

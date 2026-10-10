@@ -1,13 +1,21 @@
 import type { Point } from './annotations'
+import type { VectorPaint } from './vectorPaint'
 
+/** Shared extraction result for search and drawing-endpoint snap.
+ * Geometry is content-only, in display-list order; this is not a PDF fill model.
+ * Consumers borrow these arrays: search cleanup must not mutate the snap source. */
 export interface VectorPage {
   pageIndex: number
-  /** x1,y1,x2,y2 in displayed page points, including /Rotate. */
+  /** Packed x1,y1,x2,y2 in displayed page points, including /Rotate and bounds origin. */
   segments: Float32Array
-  /** One displayed stroke width per line in `segments`; fill outlines have width zero. */
+  /** Same-order width per line; length === segmentCount === segments.length / 4.
+   * Nonwhite fill outlines have width zero; no color, fill rule or occlusion is retained. */
   widths: Float32Array
   segmentCount: number
+  /** Extraction reached its 400,000-line cap; consumers must treat geometry as partial. */
   truncated: boolean
+  /** Requested only by symbol search. Never replaces or edits snap geometry. */
+  paint?: VectorPaint
   stats: {
     strokePaths: number; fillPaths: number; whiteFills: number; curves: number; images: number
     imageAreaRatio: number; textGlyphs: number

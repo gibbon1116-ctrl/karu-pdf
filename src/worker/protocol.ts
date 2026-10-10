@@ -56,6 +56,7 @@ export interface ExtractVectorsRequest {
   jobId: number
   docId: string
   pageIndex: number
+  includePaint?: boolean
   priority: 4
 }
 export interface VectorsExtractedResponse {

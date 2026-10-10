@@ -9,6 +9,7 @@ import { openDocument, type OpenedDocument } from '../core/mupdfDoc'
 import { renderRegion } from '../core/render'
 import mupdf, { type Pixmap, type DrawDevice } from 'mupdf'
 import { extractVectorPage } from './vectorExtract'
+import { paintBuffers } from '../core/vectorPaint'
 import { extractLabelPage } from './labelExtract'
 import { ComparePageCache, renderComparePixels } from './compareRender'
 import { readDocumentScaleMetadata } from '../core/measure'
@@ -261,9 +262,9 @@ async function execute(job: QueuedRequest): Promise<void> {
       post({ type: 'started', jobId: job.jobId })
       const entry = documents.get(job.docId)
       if (!entry) throw new Error('PDF が開かれていません。')
-      const page = extractVectorPage(entry.opened.document, job.pageIndex, entry.displayLists)
+      const page = extractVectorPage(entry.opened.document, job.pageIndex, entry.displayLists, job.includePaint)
       processedCount++
-      post({ type: 'vectorsExtracted', jobId: job.jobId, page }, [page.segments.buffer as ArrayBuffer, page.widths.buffer as ArrayBuffer])
+      post({ type: 'vectorsExtracted', jobId: job.jobId, page }, [page.segments.buffer as ArrayBuffer, page.widths.buffer as ArrayBuffer, ...paintBuffers(page.paint)])
     } catch (error) {
       post({ type: 'error', jobId: job.jobId, message: error instanceof Error ? error.message : String(error) })
     }
@@ -374,7 +375,17 @@ function renderSearchImage(entry: WorkerDocument, job: RenderSearchImageRequest)
     pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, rect, false)
     pixmap.clear(255)
     device = new mupdf.DrawDevice(mupdf.Matrix.identity, pixmap)
-    page.runPageContents(device, mupdf.Matrix.scale(job.renderScale, job.renderScale))
+    let contentsOnly=true
+    if(page.isPDF()){
+      const pdfPage=page as import('mupdf').PDFPage
+      const annotations=pdfPage.getAnnotations(),widgets=pdfPage.getWidgets()
+      contentsOnly=annotations.length===0&&widgets.length===0
+      for(const a of annotations)a.destroy()
+      for(const w of widgets)w.destroy()
+    }
+    // Reuse extraction's cached list only when it contains no annotations/widgets.
+    if(contentsOnly)entry.displayLists.get(job.pageIndex).run(device,mupdf.Matrix.scale(job.renderScale,job.renderScale))
+    else page.runPageContents(device, mupdf.Matrix.scale(job.renderScale, job.renderScale))
     device.close()
     const pixels = pixmap.getPixels(), stride = pixmap.getStride(), components = pixmap.getNumberOfComponents()
     const gray = new Uint8Array(width * height)

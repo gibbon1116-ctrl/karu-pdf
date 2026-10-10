@@ -5,9 +5,12 @@ import { fixtureCode, type CountFixtureSample } from '../core/countFixtures'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import type { SymbolSearchClient } from '../client/SymbolSearchClient'
 import type { DocumentSession } from './documentModel'
+import { symbolLabelDisplay, UNKNOWN_SYMBOL_LABEL } from '../core/symbolLabels'
 
 import type { SymbolSearchSelection } from './symbolSearchContext'
 export { SymbolSearchContext, type SymbolSearchSelection } from './symbolSearchContext'
+
+const shapeFeatures = [['topArc', '円弧'], ['annexFrame', '外の枠'], ['interiorLines', '中の斜線'], ['interior', '中の塗り']] as const
 
 /** User-facing pages are one-based; the client receives sorted, unique zero-based pages. */
 export function parseSymbolSearchPages(text: string, pageCount: number): number[] {
@@ -37,6 +40,9 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
   const [verify, setVerify] = useState(() => {
     try { return localStorage.getItem('karu-pdf:symbol-search-verify') !== 'false' } catch { return true }
   })
+  const [shapeCheck, setShapeCheck] = useState(() => {
+    try { return localStorage.getItem('karu-pdf:symbol-search-shape') === 'true' } catch { return false }
+  })
   const [splitG, setSplitG] = useState(() => {
     try { return localStorage.getItem('karu-pdf:symbol-search-split-g') !== 'false' } catch { return true }
   })
@@ -49,9 +55,21 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
   const generation = useRef(0), alive = useRef(false)
   const candidates = store.visibleSymbolCandidates
   const labelCounts = new Map<string, number>()
-  for (const c of store.symbolCandidates ?? []) labelCounts.set(c.label, (labelCounts.get(c.label) ?? 0) + 1)
+  // Count only candidates the shape and other-fixture filters can show, so a label never offers hidden marks.
+  for (const c of store.symbolCandidates ?? []) if ((store.symbolShapeFilter === 'all' || c.shape?.decision !== 'different')
+    && (store.symbolOtherFilter === 'show' || !c.otherFixture)) labelCounts.set(c.label, (labelCounts.get(c.label) ?? 0) + 1)
   const labelGroups = [...labelCounts].sort((a, b) => !a[0] ? 1 : !b[0] ? -1 : b[1] - a[1] || a[0].localeCompare(b[0]))
-  const chosen = candidates?.filter(c => c.state === 'chosen') ?? []
+  const shapeCompared = store.symbolCandidates?.some(c => c.shape !== undefined) ?? false
+  const shapeDifferent = store.symbolCandidates?.filter(c => c.shape?.decision === 'different') ?? []
+  const shapeDifferenceSummary = shapeFeatures.map(([feature, name]) => {
+    const count = shapeDifferent.filter(c => c.shape?.differences.includes(feature)).length
+    return count ? `${name} ${count}` : ''
+  }).filter(Boolean).join('・')
+  const otherCandidates = store.symbolCandidates?.filter(c => c.otherFixture) ?? []
+  const otherFixtureCounts = new Map<string, number>()
+  for (const c of otherCandidates) if (c.otherFixture) otherFixtureCounts.set(c.otherFixture, (otherFixtureCounts.get(c.otherFixture) ?? 0) + 1)
+  const otherFixtureSummary = [...otherFixtureCounts].map(([id, count]) => `${store.symbolOtherFixtureLabel(id)} ${count}`).join('・')
+  const chosen = candidates?.filter(c => c.state === 'chosen' && !c.otherFixture) ?? []
   const counted = candidates?.filter(c => c.state === 'counted').length ?? 0
   const confidenceSummary = (items: typeof store.symbolCandidates) => {
     const high = items?.filter(c => c.confidence === 'high').length ?? 0
@@ -99,10 +117,10 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
       for (let i = 0; i < pages.length; i++) {
         if (!current()) return
         const pageIndex = pages[i]
-        // Existing marks must be known before counted classification, including off-screen pages.
+        // Existing marks must be known before counted and other-fixture classification, including off-screen pages.
         await store.ensurePageLoaded(pageIndex, () => pool.listAnnotations(session.docId, pageIndex))
         if (!current()) return
-        const next = client.current.search({ docId: session.docId, pageIndex, samplePageIndex: sample.pageIndex, sampleRect: rect, verify, splitG,
+        const next = client.current.search({ docId: session.docId, pageIndex, samplePageIndex: sample.pageIndex, sampleRect: rect, verify, shapeCheck, splitG,
           options: { threshold, rotations, maxResults: 500 } }, (stage, done, total) => {
           if (current()) setProgress({ page: i + 1, total: pages.length, stage: stage === 'render' ? '描画中' : stage === 'vector' ? '線で照合中' : stage === 'verify' ? '画像で確認中' : '照合中',
             fraction: (i + (stage === 'render' ? .5 * done / Math.max(1, total) : stage === 'vector' ? .2 + .3 * done / Math.max(1, total) : .5 + .5 * done / Math.max(1, total))) / pages.length })
@@ -112,7 +130,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
         if (!current()) return
         const template = result.vectorDetails?.template
         if (template?.cleaned) setTemplateSummary({ segments: template.segments, removed: template.removed.wiring + template.removed.other + template.removed.thin })
-        if (result.method === 'vector' && !initializedLabels) { store.setSymbolCandidateFilters([result.sampleLabel]); initializedLabels = true }
+        if (result.method === 'vector' && !initializedLabels) { store.setSymbolCandidateFilters(result.sampleLabel===UNKNOWN_SYMBOL_LABEL?null:[result.sampleLabel]); initializedLabels = true }
         setMethods(methods => ({ ...methods, [pageIndex]: result.method })); task.current = null; store.appendSymbolCandidates(result.candidates); setCompletedPages(done => [...done, pageIndex])
       }
       if (current()) { setProgress(p => ({ ...p, fraction: 1 })); setMessage('検索が終わりました。候補を確認して選んでください') }
@@ -121,7 +139,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
   }
   const add = () => {
     if (busy || store.selectedFixtureId !== fixtureId) return
-    const selected = store.visibleSymbolCandidates?.filter(c => c.state === 'chosen') ?? []
+    const selected = store.visibleSymbolCandidates?.filter(c => c.state === 'chosen' && !c.otherFixture) ?? []
     if (!selected.length) return
     try {
       const ids = store.createCountMarks(fixtureId, selected.map(c => ({ pageIndex: c.pageIndex, center: c.center })))
@@ -134,6 +152,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
     onPointerDown={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()} onClick={e => e.stopPropagation()} onWheel={e => e.stopPropagation()}>
     <h2>同じ記号を探す</h2>
     <div className="symbol-search-sample"><img src={`data:image/png;base64,${sample.png}`} alt="探す記号の見本" /><span>{fixtureCode(fixture)} {fixture.name}</span></div>
+    <p>見本は器具本体だけを囲んでください。横の添字は自動で確認します。</p>
     <button type="button" onClick={onRecapture}>見本を囲み直す</button>
     <fieldset><legend>探す範囲</legend>
       {([['current', 'このページ'], ['specified', 'ページを指定'], ['all', 'すべてのページ']] as const).map(([value, label]) =>
@@ -149,6 +168,10 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
       onChange={e => { const enabled = e.target.checked; invalidate(); setVerify(enabled)
         try { localStorage.setItem('karu-pdf:symbol-search-verify', String(enabled)) } catch { /* Keep the in-memory preference. */ }
       }} />画像でも確認する</label>
+    <label title="線で探した候補の周りを描き、見本と円弧・外の枠・中の斜線・中の塗りを比べます。違う候補は初めは図面に出さず、分からない候補は要確認にします。検索が少し遅くなります。"><input type="checkbox" checked={shapeCheck}
+      onChange={e => { const enabled = e.target.checked; invalidate(); setShapeCheck(enabled)
+        try { localStorage.setItem('karu-pdf:symbol-search-shape', String(enabled)) } catch { /* Keep the in-memory preference. */ }
+      }} />形の細部（円弧・枠・斜線・塗り）も見本と比べる</label>
     <label className="symbol-search-threshold">似ている度合い <output>{threshold.toFixed(2)}</output>
       <input type="range" aria-label="似ている度合い" min="0.55" max="0.98" step="0.01" value={threshold}
         onChange={e => { invalidate(); setThreshold(Number(e.target.value)) }} /></label>
@@ -156,14 +179,19 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
       <p role="status">ページ {progress.page} / {progress.total}・{progress.stage}</p><progress aria-label="検索の進み" value={progress.fraction} max={1} /></>
       : <button type="button" onClick={() => void search()}>探す</button>}
     {candidates && <>
-      <p aria-live="polite">候補 {candidates.length} 件{confidenceSummary(candidates)}（拾い済み {counted} 件）</p>
+      <p aria-live="polite">候補 {candidates.length} 件{confidenceSummary(candidates)}（拾い済み {counted} 件）{otherCandidates.length > 0 ? `（他の項目で拾い済み ${otherCandidates.length} 件）` : ''}</p>
       {templateSummary && <p>見本の線 {templateSummary.segments} 本（細い背景線・配線・文字とみて {templateSummary.removed} 本を除きました）</p>}
       <fieldset className="symbol-search-labels"><legend>添字で種類を分ける</legend>
         {labelGroups.map(([label, count]) => <label key={label}><input type="checkbox" checked={store.symbolLabelFilter === null || store.symbolLabelFilter.includes(label)}
           onChange={e => { const selected = store.symbolLabelFilter ?? labelGroups.map(([value]) => value)
             store.setSymbolCandidateFilters(e.target.checked ? [...selected, label] : selected.filter(value => value !== label))
-          }} />{label || '添字なし'} {count}</label>)}
+          }} />{symbolLabelDisplay(label)} {count}</label>)}
       </fieldset>
+      {shapeDifferent.length > 0 ? <label><input type="checkbox" checked={store.symbolShapeFilter === 'all'}
+        onChange={e => store.setSymbolShapeFilter(e.target.checked ? 'all' : 'same')} />形の細部が見本と違う {shapeDifferent.length} 件も表示する（{shapeDifferenceSummary}）</label>
+        : shapeCompared && <p>形の細部も見本と比べました</p>}
+      {otherCandidates.length > 0 && <label><input type="checkbox" checked={store.symbolOtherFilter === 'show'}
+        onChange={e => store.setSymbolOtherFilter(e.target.checked ? 'show' : 'hide')} />他の項目で拾い済みの {otherCandidates.length} 件も表示する（{otherFixtureSummary}）</label>}
       <label>GC回路（G）: <select aria-label="GC回路（G）" value={store.symbolGcFilter}
         onChange={e => store.setSymbolCandidateFilters(store.symbolLabelFilter, e.target.value as 'all' | 'with' | 'without')}>
         <option value="all">すべて</option><option value="with">G あり</option><option value="without">G なし</option>
@@ -171,7 +199,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
       {searchPageCount === 1 && completedPages.length > 0 && <p>{methods[completedPages[0]] === 'vector' ? '線の情報で探しました' : '画像で探しました（線の情報が無いページ）'}</p>}
       {searchPageCount > 1 && <div className="symbol-search-pages">{pageCounts.map(([page, count]) => <button key={page} type="button" onClick={() => onPage(page)}>p.{page + 1} {methods[page] === 'vector' ? '線で探しました' : '画像で探しました（線の情報が無いページ）'} {count} 件{confidenceSummary(candidates.filter(c => c.pageIndex === page))}</button>)}</div>}
       <div className="symbol-search-actions"><button type="button" onClick={() => store.chooseSymbolCandidates(true)}>すべて選ぶ</button><button type="button" onClick={() => store.chooseSymbolCandidates(false)}>すべて外す</button></div>
-      <button type="button" disabled={busy || !candidates.some(c => c.confidence === 'high' && c.state === 'pending')}
+      <button type="button" disabled={busy || !candidates.some(c => c.confidence === 'high' && c.state === 'pending' && !c.otherFixture)}
         onClick={() => store.chooseHighConfidenceCandidates()}>確度の高い候補を選ぶ</button>
       <button type="button" disabled={busy || chosen.length === 0} onClick={add}>選んだ {chosen.length} 件を数量へ追加</button>
     </>}

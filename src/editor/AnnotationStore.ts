@@ -15,6 +15,7 @@ import type { CloudIntensity } from '../core/cloud'
 import { countFixtureId, type CountMark } from '../core/counts'
 import { nextCountStyle, serializeCountFixtures, type CountFixture } from '../core/countFixtures'
 import { DEFAULT_ANNOTATION_FILTER, filterShowsCountMarks, matchesAnnotationFilter, type AnnotationFilter } from './annotationFilter'
+import type { SymbolShapeDecision } from '../core/symbolShapeDecision'
 
 export type DrawingFilterReleaseReason = '数量拾いの印を数えるため' | '隠れている種類の書き込みを作ったため' | '次の未対応指摘を表示するため' | '数量拾いの印を表示するため'
 
@@ -23,6 +24,8 @@ export interface SymbolSearchCandidate {
   state: 'pending' | 'chosen' | 'counted'
   confidence?: 'high' | 'check'; imageScore?: number; extra?: number
   label: string; gc: boolean; around?: number; aroundCheck?: boolean
+  shape?: SymbolShapeDecision
+  otherFixture?: string
 }
 
 export type Kind = MeasureKind | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
@@ -264,60 +267,93 @@ export class AnnotationStore {
   symbolCandidates: SymbolSearchCandidate[] | null = null
   symbolLabelFilter: string[] | null = null
   symbolGcFilter: 'all' | 'with' | 'without' = 'all'
+  symbolShapeFilter: 'same' | 'all' = 'same'
+  symbolOtherFilter: 'hide' | 'show' = 'hide'
   isSymbolCandidateVisible(c: SymbolSearchCandidate): boolean {
     return (this.symbolLabelFilter === null || this.symbolLabelFilter.includes(c.label))
       && (this.symbolGcFilter === 'all' || (this.symbolGcFilter === 'with' ? c.gc : !c.gc))
+      && (this.symbolShapeFilter === 'all' || c.shape?.decision !== 'different')
+      && (this.symbolOtherFilter === 'show' || !c.otherFixture)
   }
   get visibleSymbolCandidates(): SymbolSearchCandidate[] | null { return this.symbolCandidates?.filter(c => this.isSymbolCandidateVisible(c)) ?? null }
   setSymbolCandidateFilters(labels: string[] | null, gc: 'all' | 'with' | 'without' = this.symbolGcFilter): void {
     this.symbolLabelFilter = labels === null ? null : [...labels]; this.symbolGcFilter = gc; this.notify(false)
   }
+  setSymbolShapeFilter(value: 'same' | 'all'): void {
+    this.symbolShapeFilter = value; this.notify(false)
+  }
+  setSymbolOtherFilter(value: 'hide' | 'show'): void {
+    this.symbolOtherFilter = value; this.notify(false)
+  }
+  symbolOtherFixtureLabel(fixtureId: string): string {
+    const fixture = this.getCountFixture(fixtureId)
+    return fixture ? fixtureCode(fixture) + ' ' + fixture.name : fixtureId
+  }
   private symbolCandidateFixture: string | null = null
   private symbolCandidateRadius = 0
 
   clearSymbolCandidates(): void {
-    if (this.symbolCandidates === null) return
+    if (this.symbolCandidates === null && this.symbolShapeFilter === 'same' && this.symbolOtherFilter === 'hide') return
     this.symbolCandidates = null; this.symbolCandidateFixture = null; this.symbolCandidateRadius = 0
-    this.symbolLabelFilter = null; this.symbolGcFilter = 'all'
+    this.symbolLabelFilter = null; this.symbolGcFilter = 'all'; this.symbolShapeFilter = 'same'; this.symbolOtherFilter = 'hide'
     this.notify(false)
   }
   beginSymbolCandidates(fixtureId: string, sampleRect: Rect): void {
     this.symbolCandidateFixture = fixtureId
     this.symbolCandidateRadius = Math.min(sampleRect[2] - sampleRect[0], sampleRect[3] - sampleRect[1]) / 2
-    this.symbolLabelFilter = null; this.symbolGcFilter = 'all'
+    this.symbolLabelFilter = null; this.symbolGcFilter = 'all'; this.symbolShapeFilter = 'same'; this.symbolOtherFilter = 'hide'
     this.symbolCandidates = []; this.notify(false)
   }
-  appendSymbolCandidates(candidates: Array<{ pageIndex: number; rect: Rect; center: Point; score: number; confidence?: 'high' | 'check'; imageScore?: number; extra?: number; label?: string; gc?: boolean; around?: number; aroundCheck?: boolean }>): void {
+  appendSymbolCandidates(candidates: Array<{ pageIndex: number; rect: Rect; center: Point; score: number; confidence?: 'high' | 'check'; imageScore?: number; extra?: number; label?: string; gc?: boolean; around?: number; aroundCheck?: boolean; shape?: SymbolShapeDecision }>): void {
     if (!this.symbolCandidates || this.symbolCandidateFixture !== this.selectedFixtureId) return
-    for (const c of candidates) this.symbolCandidates.push({ ...c, label: c.label ?? '', gc: c.gc ?? false, rect: [...c.rect], center: [...c.center], id: crypto.randomUUID(), state: 'pending' })
+    for (const c of candidates) this.symbolCandidates.push({ ...c, label: c.label ?? '', gc: c.gc ?? false, rect: [...c.rect], center: [...c.center],
+      shape: c.shape ? { decision: c.shape.decision, differences: [...c.shape.differences], unknown: [...c.shape.unknown] } : undefined,
+      id: crypto.randomUUID(), state: 'pending' })
     this.refreshSymbolCandidates(); this.notify(false)
   }
   toggleSymbolCandidate(id: string): void {
     const c = this.symbolCandidates?.find(c => c.id === id)
-    if (!c || c.state === 'counted' || !this.isSymbolCandidateVisible(c)) return
+    if (!c || c.state === 'counted' || c.otherFixture || !this.isSymbolCandidateVisible(c)) return
     c.state = c.state === 'chosen' ? 'pending' : 'chosen'; this.notify(false)
   }
   chooseSymbolCandidates(chosen: boolean): void {
     if (!this.symbolCandidates) return
-    for (const c of this.visibleSymbolCandidates ?? []) if (c.state !== 'counted') c.state = chosen ? 'chosen' : 'pending'
+    for (const c of this.visibleSymbolCandidates ?? []) if (c.state !== 'counted' && !c.otherFixture) c.state = chosen ? 'chosen' : 'pending'
     this.notify(false)
   }
   chooseHighConfidenceCandidates(): void {
     if (!this.symbolCandidates) return
-    for (const c of this.visibleSymbolCandidates ?? []) if (c.state === 'pending' && c.confidence === 'high') c.state = 'chosen'
+    for (const c of this.visibleSymbolCandidates ?? []) if (c.state === 'pending' && !c.otherFixture && c.confidence === 'high') c.state = 'chosen'
     this.notify(false)
   }
   private refreshSymbolCandidates(): void {
-    if (!this.symbolCandidates) return
+    if (!this.symbolCandidates?.length) return
     const marks = new Map<number, Point[]>()
+    const otherMarks = new Map<number, Array<{ center: Point; fixtureId: string }>>()
     for (const a of this.annotations.values()) {
-      if (a.deleted || !a.count || countFixtureId(a.count) !== this.symbolCandidateFixture) continue
-      const points = marks.get(a.pageIndex) ?? []; points.push([(a.rect[0] + a.rect[2]) / 2, (a.rect[1] + a.rect[3]) / 2]); marks.set(a.pageIndex, points)
+      if (a.deleted || !a.count) continue
+      const fixtureId = countFixtureId(a.count)
+      if (!fixtureId) continue
+      const center: Point = [(a.rect[0] + a.rect[2]) / 2, (a.rect[1] + a.rect[3]) / 2]
+      if (fixtureId === this.symbolCandidateFixture) {
+        const points = marks.get(a.pageIndex) ?? []; points.push(center); marks.set(a.pageIndex, points)
+      } else {
+        const points = otherMarks.get(a.pageIndex) ?? []; points.push({ center, fixtureId }); otherMarks.set(a.pageIndex, points)
+      }
     }
     for (const c of this.symbolCandidates) {
+      delete c.otherFixture
       const counted = marks.get(c.pageIndex)?.some(p => Math.hypot(p[0] - c.center[0], p[1] - c.center[1]) <= this.symbolCandidateRadius)
-      if (counted) c.state = 'counted'
-      else if (c.state === 'counted') c.state = 'pending'
+      if (counted) { c.state = 'counted'; continue }
+      if (c.state === 'counted') c.state = 'pending'
+      let nearestDistance = Infinity
+      for (const mark of otherMarks.get(c.pageIndex) ?? []) {
+        const distance = Math.hypot(mark.center[0] - c.center[0], mark.center[1] - c.center[1])
+        if (distance <= this.symbolCandidateRadius && distance < nearestDistance) {
+          nearestDistance = distance; c.otherFixture = mark.fixtureId
+        }
+      }
+      if (c.otherFixture && c.state === 'chosen') c.state = 'pending'
     }
   }
 
