@@ -1,4 +1,6 @@
 import { readDrawingInfo, writeDrawingInfo } from './drawingInfo'
+import { readCountFixtures, writeCountFixtures } from './countFixtures'
+import { readDocumentRoomRegions, readPageRoomSet, readRoomRegions, readRoomSets, translateRoomRegion, writeRoomRegions } from './rooms'
 import mupdf, { type PDFDocument, type PDFObject } from 'mupdf'
 import type { PageSize } from './mupdfDoc'
 
@@ -160,18 +162,82 @@ function rebuildAcroFormFields(document: PDFDocument, preservedAcroForm: PDFObje
   }
 }
 
-// MuPDF graftPage copies a fixed whitelist of page keys, excluding KaruDrawing.
+// MuPDF graftPage copies a fixed whitelist of page keys, so KaruDrawing, KaruRooms and KaruRoomSet are dropped.
+// A page that used a room set in its PDF takes the set's ranges along as its own ranges.
 function graftDrawingPage(target: PDFDocument, source: PDFDocument, pageIndex: number): void {
   const original = source.loadPage(pageIndex)
   try {
-    const info = readDrawingInfo(original), appended = target.countPages()
+    const info = readDrawingInfo(original)
+    const link = readPageRoomSet(original)
+    const shared = link
+      ? (readRoomSets(source).find(set => set.id === link.id)?.regions ?? [])
+        .map(region => translateRoomRegion(region, link.dx, link.dy))
+      : []
+    const rooms = [...readRoomRegions(original), ...shared].slice(0, 200)
+    if (rooms.length > 0) {
+      // Only pages that carry ranges pay for the scan of the target's range ids.
+      const usedIds = new Set<string>()
+      for (const [, regions] of readDocumentRoomRegions(target)) for (const region of regions) usedIds.add(region.id)
+      for (const set of readRoomSets(target)) for (const region of set.regions) usedIds.add(region.id)
+      for (const region of rooms) {
+        if (!region.id.length || usedIds.has(region.id)) {
+          do { region.id = crypto.randomUUID() } while (usedIds.has(region.id))
+        }
+        usedIds.add(region.id)
+      }
+    }
+    const appended = target.countPages()
     target.graftPage(-1, source, pageIndex)
-    if (info) {
+    if (info || rooms.length > 0) {
       const page = target.loadPage(appended)
-      try { writeDrawingInfo(target, page, info) } finally { page.destroy() }
+      try {
+        if (info) writeDrawingInfo(target, page, info)
+        if (rooms.length > 0) writeRoomRegions(target, page, rooms)
+      } finally { page.destroy() }
     }
   } finally { original.destroy() }
 }
+function remapCountFixtureSamples(
+  targetDocId: string,
+  target: PDFDocument,
+  cards: readonly PageLayoutCard[],
+): void {
+  let fixtures: ReturnType<typeof readCountFixtures>
+  try {
+    fixtures = readCountFixtures(target)
+  } catch {
+    return
+  }
+  if (fixtures.length === 0) return
+
+  const pages = new Map<number, { pageIndex: number; rotation: PageRotation }>()
+  cards.forEach((card, pageIndex) => {
+    if (card.source.kind !== 'page' || card.source.docId !== targetDocId) return
+    if (!pages.has(card.source.pageIndex)) {
+      pages.set(card.source.pageIndex, { pageIndex, rotation: card.rotation })
+    }
+  })
+
+  let changed = false
+  for (const fixture of fixtures) {
+    const sample = fixture.sample
+    if (!sample) continue
+    const page = pages.get(sample.pageIndex)
+    if (page && sample.pageIndex !== page.pageIndex) {
+      sample.pageIndex = page.pageIndex
+      changed = true
+    }
+    // rotatePage adds card.rotation to the original rotation.
+    if ((!page || page.rotation !== 0)
+      && (sample.rect !== undefined || sample.lines !== undefined)) {
+      delete sample.rect
+      delete sample.lines
+      changed = true
+    }
+  }
+  if (changed) writeCountFixtures(target, fixtures)
+}
+
 export function applyPageLayout(
   targetDocId: string,
   target: PDFDocument,
@@ -220,6 +286,7 @@ export function applyPageLayout(
     catch (error) { acroForm?.destroy(); throw error }
     finally { root.destroy() }
     rebuildAcroFormFields(target, acroForm)
+    remapCountFixtureSamples(targetDocId, target, cards)
     cards.forEach((card, index) => rotatePage(target, index, card.rotation))
   } finally {
     catalog.forEach(value => value.destroy())

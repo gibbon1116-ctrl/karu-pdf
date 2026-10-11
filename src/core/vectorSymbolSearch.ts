@@ -146,18 +146,30 @@ function boundaryWiring(lines: Float32Array, widths: Float32Array, rect: Rect, t
   return { wiring, protectedLines }
 }
 
-/** Cleanup is demand-only in the matching Worker. Dense/oversize templates fall
- * back intact, with bounded grid visits and neighbor comparisons. */
-export function prepareVectorTemplate(pageSegments: Float32Array, pageWidths: Float32Array, sampleRect: Rect): PreparedTemplate {
+function templateLineOffsets(pageSegments: Float32Array, pageWidths: Float32Array, sampleRect: Rect): number[] {
   if (pageSegments.length % 4 || pageWidths.length !== pageSegments.length / 4 || !pageSegments.every(Number.isFinite)
     || !pageWidths.every(v => Number.isFinite(v) && v >= 0)) throw Error('Invalid vector segments or widths')
   if (!sampleRect.every(Number.isFinite) || sampleRect[2] <= sampleRect[0] || sampleRect[3] <= sampleRect[1]) throw Error('Invalid template rectangle')
   const tol = defaultVectorTolerance(sampleRect)
-  let ids: number[] = []
+  const ids: number[] = []
   for (let i = 0; i < pageSegments.length; i += 4) {
     if (contains(sampleRect, pageSegments[i], pageSegments[i + 1], tol) && contains(sampleRect, pageSegments[i + 2], pageSegments[i + 3], tol)
       && Math.hypot(pageSegments[i + 2] - pageSegments[i], pageSegments[i + 3] - pageSegments[i + 1]) > 0) ids.push(i)
   }
+  return ids
+}
+
+/** Cleanup is demand-only in the matching Worker. Dense/oversize templates fall
+ * back intact, with bounded grid visits and neighbor comparisons. */
+export function prepareVectorTemplate(pageSegments: Float32Array, pageWidths: Float32Array, sampleRect: Rect): PreparedTemplate {
+  return prepareTemplateWithCandidates(pageSegments, pageWidths, sampleRect)
+}
+
+function prepareTemplateWithCandidates(pageSegments: Float32Array, pageWidths: Float32Array, sampleRect: Rect,
+  candidateLines?: { ids: number[]; kept: Set<number> }): PreparedTemplate {
+  const tol = defaultVectorTolerance(sampleRect)
+  let ids = templateLineOffsets(pageSegments, pageWidths, sampleRect)
+  if (candidateLines) candidateLines.ids = ids.map(i => i / 4)
   const total = ids.length, buckets = new Map<number, number>()
   for (const i of ids) if (pageWidths[i / 4] > 0) {
     const w = Math.round(pageWidths[i / 4] * 100) / 100
@@ -173,6 +185,10 @@ export function prepareVectorTemplate(pageSegments: Float32Array, pageWidths: Fl
   const lengths = ids.map(i => Math.hypot(pageSegments[i + 2] - pageSegments[i], pageSegments[i + 3] - pageSegments[i + 1]))
   const totalLength = lengths.reduce((a, b) => a + b, 0)
   const finish = (kept: number[], wiring = 0, other = 0): PreparedTemplate => {
+    if (candidateLines) {
+      candidateLines.kept.clear()
+      for (const i of kept) candidateLines.kept.add(ids[i / 4] / 4)
+    }
     const segments = new Float32Array(kept.flatMap(i => Array.from(original.subarray(i, i + 4))))
     const widths = new Float32Array(kept.map(i => originalWidths[i / 4]))
     const bounds: Rect = [Infinity, Infinity, -Infinity, -Infinity]
@@ -278,6 +294,43 @@ export function prepareVectorTemplate(pageSegments: Float32Array, pageWidths: Fl
   } catch { return fallback() }
 }
 
+/** Page line IDs before width filtering, and the IDs retained by automatic cleanup. */
+export function templateCandidateLines(pageSegments: Float32Array, pageWidths: Float32Array, sampleRect: Rect): {
+  ids: number[]; kept: Set<number>
+} {
+  const result = { ids: [] as number[], kept: new Set<number>() }
+  prepareTemplateWithCandidates(pageSegments, pageWidths, sampleRect, result)
+  return result
+}
+
+/** Uses the selected page-coordinate lines without automatic cleanup. */
+export function manualVectorTemplate(segments: Float32Array, widths: Float32Array, sampleRect: Rect, total: number): PreparedTemplate {
+  const count = segments.length / 4
+  if (segments.length % 4 || count < 2 || widths.length !== count
+    || !segments.every(Number.isFinite) || !widths.every(v => Number.isFinite(v) && v >= 0)) {
+    throw Error('Invalid manual vector segments or widths')
+  }
+  if (!sampleRect.every(Number.isFinite) || sampleRect[2] <= sampleRect[0] || sampleRect[3] <= sampleRect[1]) {
+    throw Error('Invalid template rectangle')
+  }
+  if (!Number.isSafeInteger(total) || total < count) throw Error('Invalid manual vector total')
+  const bounds: Rect = [Infinity, Infinity, -Infinity, -Infinity]
+  for (let i = 0; i < segments.length; i += 2) {
+    bounds[0] = Math.min(bounds[0], segments[i]); bounds[1] = Math.min(bounds[1], segments[i + 1])
+    bounds[2] = Math.max(bounds[2], segments[i]); bounds[3] = Math.max(bounds[3], segments[i + 1])
+  }
+  const weighted = Array.from(widths, (width, i) => ({
+    width, length: Math.hypot(segments[i * 4 + 2] - segments[i * 4], segments[i * 4 + 3] - segments[i * 4 + 1]),
+  })).filter(v => v.width > 0).sort((a, b) => a.width - b.width)
+  const half = weighted.reduce((n, v) => n + v.length, 0) / 2
+  let sum = 0
+  const strokeWidth = weighted.find(v => (sum += v.length) >= half)?.width ?? 0
+  return {
+    segments, widths, bounds, strokeWidth, tolerance: defaultVectorTolerance(bounds),
+    removed: { wiring: 0, other: total - count, thin: 0 }, total, cleaned: total > count,
+  }
+}
+
 /** Sparse spatial grid, with compact CSR offsets/ids. Visit crossed cells rather
  * than every cell in a diagonal's bounding box (long CAD lines stay inexpensive). */
 function spatialIndex(segments: Float32Array, size: number) {
@@ -343,7 +396,7 @@ function widthFiltered(segments: Float32Array, widths: Float32Array | undefined,
  * Template cleanup and width filtering are search-local; snap keeps the extracted arrays. */
 export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, options: Partial<VectorSymbolOptions> = {},
   sampleSegments: Float32Array = segments, sampleWidths: Float32Array = new Float32Array(sampleSegments.length / 4), segmentWidths?: Float32Array,
-  paint?: {sample:VectorPaint;target:VectorPaint}) {
+  paint?: {sample:VectorPaint;target:VectorPaint}, manual?: { segments: Float32Array; widths: Float32Array }) {
   const started = performance.now(), width = sampleRect[2] - sampleRect[0], height = sampleRect[3] - sampleRect[1]
   const initialTolerance = options.tolerance ?? defaultVectorTolerance(sampleRect)
   const threshold = options.threshold ?? .85, maxResults = options.maxResults ?? 2000
@@ -352,7 +405,9 @@ export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, opt
     || (options.region && (!options.region.every(Number.isFinite) || options.region[2] < options.region[0] || options.region[3] < options.region[1]))) throw Error('Invalid vector search options')
   if (segments.length % 4 || sampleSegments.length % 4 || !segments.every(Number.isFinite) || !sampleSegments.every(Number.isFinite)) throw Error('Invalid vector segments')
   if (segmentWidths && (segmentWidths.length !== segments.length / 4 || !segmentWidths.every(w => Number.isFinite(w) && w >= 0))) throw Error('Invalid vector widths')
-  const templateStarted = prepareVectorTemplate(sampleSegments, sampleWidths, sampleRect)
+  const templateStarted = manual
+    ? manualVectorTemplate(manual.segments, manual.widths, sampleRect, templateLineOffsets(sampleSegments, sampleWidths, sampleRect).length)
+    : prepareVectorTemplate(sampleSegments, sampleWidths, sampleRect)
   const samplePageSegments = widthFiltered(sampleSegments, sampleWidths, templateStarted.strokeWidth)
   const targetSegments = segments
   segments = widthFiltered(segments, segmentWidths, templateStarted.strokeWidth)
@@ -361,6 +416,9 @@ export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, opt
   const restrictStrokes = !!segmentWidths && templateStarted.strokeWidth > 0 && templateGeometry.widths.some(w => w > 0)
   const bounds = templateStarted.bounds, tolerance = options.tolerance ?? templateStarted.tolerance
   const comparePaint=paint?createPaintMatcher(paint.sample,paint.target,bounds,tolerance):undefined
+  // Sample paint still holds lines the user erased; compare only fills then. Line
+  // structure is already the erased template itself.
+  const fillOnly=!!manual&&templateStarted.removed.other>0
   const short = Math.max(.3, Math.min(bounds[2] - bounds[0], bounds[3] - bounds[1]))
   const templateIds: number[] = [], lengths = new Map<number, number[]>()
   let anchor = -1, longest = 0, totalLength = 0
@@ -453,10 +511,11 @@ export function vectorSymbolSearch(segments: Float32Array, sampleRect: Rect, opt
             // fill difference into an automatically accepted half turn.
             if(!options.rotations&&Math.abs(Math.sin(angle/2))>Math.sin(Math.PI/180))continue
             const comparison=comparePaint(match.center,match.angle)
-            if(comparison.known&&comparison.score<.9)continue
-            match.structureScore=comparison.known?comparison.lineScore:undefined
+            const paintScore=fillOnly?comparison.fillScore:comparison.score
+            if(comparison.known&&paintScore<.9)continue
+            match.structureScore=comparison.known&&!fillOnly?comparison.lineScore:undefined
             match.fillScore=comparison.known?comparison.fillScore:undefined
-            match.structureCheck=!comparison.known||comparison.score<.97
+            match.structureCheck=!comparison.known||paintScore<.97
           }
           candidates.push(match); transforms.set(match, [ox, oy, cos, sin])
         }

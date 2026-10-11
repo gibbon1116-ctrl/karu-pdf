@@ -11,6 +11,8 @@ let fixtureDialogPosition = { x: 0, y: 0 }
 export default function FixtureDialog({ initial, fixtures, editing, duplicate = false, hasMarks = false, onSave, onClose }: { initial: CountFixture; fixtures: readonly CountFixture[]; editing: boolean; duplicate?: boolean; hasMarks?: boolean; onSave(fixture: CountFixture): void; onClose(): void }) {
   const dialog = useRef<HTMLDialogElement>(null), [value, setValue] = useState(initial), [error, setError] = useState('')
   const [conditionInput, setConditionInput] = useState(''), [conditionError, setConditionError] = useState('')
+  const [openingWidth, setOpeningWidth] = useState(initial.opening ? String(initial.opening.widthM) : '')
+  const [openingHeight, setOpeningHeight] = useState(initial.opening ? String(initial.opening.heightM) : '')
   const [conditionDrafts, setConditionDrafts] = useState(initial.conditions ?? [])
   const conditionRenames = useRef(new Map<string, string>())
   const conditionOrigins = useRef<Array<string | undefined>>([...(initial.conditions ?? [])])
@@ -101,7 +103,19 @@ export default function FixtureDialog({ initial, fixtures, editing, duplicate = 
         if (conditionDrafts.some((text, i) => text !== value.conditions?.[i])) { setConditionError('候補の名前を編集したら「名前の変更」を押してください。'); return }
         const message = fixtureConditionsError(value)
         if (message) { setConditionError(message); return }
-        const f = { ...value, aggregation: quantityAggregation(value), spec: value.spec?.trim() || undefined, name: value.name.trim(), category: categories.find(c => c.trim() === value.category.trim()) ?? value.category.trim() }
+        let opening: CountFixture['opening']
+        if (quantityKind(value) === 'count') {
+          const width = openingWidth.trim(), height = openingHeight.trim()
+          if (!!width !== !!height) { setError('開口寸法は幅と高さの両方を入力してください。'); return }
+          if (width && height) {
+            const widthM = Number(width), heightM = Number(height)
+            if (!Number.isFinite(widthM) || widthM <= 0 || widthM > 100 || !Number.isFinite(heightM) || heightM <= 0 || heightM > 100) {
+              setError('開口寸法は0より大きく100以下の数値で入力してください。'); return
+            }
+            opening = { widthM, heightM }
+          }
+        }
+        const f = { ...value, opening, aggregation: quantityAggregation(value), spec: value.spec?.trim() || undefined, name: value.name.trim(), category: categories.find(c => c.trim() === value.category.trim()) ?? value.category.trim() }
         serializeCountFixtures(editing ? fixtures.map(p => p.id === f.id ? f : p) : [...fixtures, f])
         setFixtureConditionRenames(f, conditionRenames.current)
         onSave(f)
@@ -121,7 +135,7 @@ export default function FixtureDialog({ initial, fixtures, editing, duplicate = 
       <div className="fixture-dialog-body">
       <div className="fixture-dialog-details">
       <fieldset><legend>種別</legend>{(['count', 'length', 'area', 'volume'] as const).map(kind => <label key={kind}><input type="radio" name="quantity-kind" value={kind} checked={quantityKind(value) === kind} disabled={hasMarks} onChange={() => changeKind(kind)} />{{ count: '個数', length: '長さ', area: '面積', volume: '体積' }[kind]}</label>)}</fieldset>
-      {['area', 'volume'].includes(quantityKind(value)) && <fieldset><legend>拾い方</legend>{QUANTITY_METHODS[quantityKind(value)].map(method => <label key={method}><input type="radio" name="quantity-method" checked={quantityMethod(value) === method} disabled={hasMarks} onChange={() => setValue(v => ({ ...v, method, defaults: {} }))} />{{ polygon: '囲む', lengthHeight: '長さ×高さ', polygonDepth: '囲む×深さ', lengthWidthDepth: '長さ×幅×深さ', click: '', polyline: '' }[method]}</label>)}</fieldset>}
+      {['area', 'volume'].includes(quantityKind(value)) && <fieldset><legend>拾い方（拾うときの初期値。拾いバーで切り替えられます）</legend>{QUANTITY_METHODS[quantityKind(value)].map(method => <label key={method}><input type="radio" name="quantity-method" checked={quantityMethod(value) === method} onChange={() => setValue(v => ({ ...v, method, defaults: {} }))} />{{ polygon: '囲む', lengthHeight: '長さ×高さ', polygonDepth: '囲む×深さ', lengthWidthDepth: '長さ×幅×深さ', click: '', polyline: '' }[method]}</label>)}</fieldset>}
       {hasMarks && <p>拾いがあるため種別は変えられません</p>}
       <label>名称<input required maxLength={80} value={value.name} onChange={e => setValue({ ...value, name: e.currentTarget.value })} /></label>
       <label>略号<input maxLength={16} value={value.code} onChange={e => setValue({ ...value, code: e.currentTarget.value })} /></label>
@@ -143,6 +157,14 @@ export default function FixtureDialog({ initial, fixtures, editing, duplicate = 
           <button type="button" disabled={!value.sample} onClick={() => setValue(v => ({ ...v, sample: undefined }))}>見本を外す</button></div>
       </div>
       }
+      {quantityKind(value) === 'count' && <fieldset>
+        <legend>開口寸法（壁・塗装などの面積から差し引くとき）</legend>
+        <div className="fixture-fields">
+          <label>幅（m）<input aria-label="開口幅（m）" inputMode="decimal" value={openingWidth} onChange={e => { setOpeningWidth(e.currentTarget.value); setError('') }} /></label>
+          <label>高さ（m）<input aria-label="開口高さ（m）" inputMode="decimal" value={openingHeight} onChange={e => { setOpeningHeight(e.currentTarget.value); setError('') }} /></label>
+        </div>
+        <p>どちらも空欄なら開口寸法なしです。</p>
+      </fieldset>}
       {quantityMethod(value) === 'polyline' && <label>立上り・立下り（新しく拾うときの初期値）<input type="number" min="0" max="1000" step="0.01" value={value.defaults?.addM ?? 0} onChange={e => { const addM = Number(e.currentTarget.value); setValue(v => ({ ...v, defaults: { ...v.defaults, addM } })) }} /> m</label>}
       {quantityMethod(value) === 'polyline' && <>
         <label>その他の加算（初期値）<input title="図示されない付加長を、設計図書に指示がある場合だけ入れる。切り無駄・割増は入れない（単価に含まれる）" type="number" min="0" max="1000" step="0.01" value={value.defaults?.slackM ?? 0} onChange={e => { const slackM = Number(e.currentTarget.value); setValue(v => ({ ...v, defaults: { ...v.defaults, slackM: slackM || undefined } })) }} /> m</label>

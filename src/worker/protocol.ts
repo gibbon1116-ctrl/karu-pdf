@@ -349,6 +349,9 @@ export interface OpenResponse {
   pageDrawingInfos?: (DrawingInfo | null)[]
   pageScales?: (PageScale | null)[]
   pageScaleRegions?: Array<[number, import('../core/measure').ScaleRegion[]]>
+  pageRoomRegions?: Array<[number, import('../core/rooms').RoomRegion[]]>
+  roomSets?: import('../core/rooms').RoomSet[]
+  pageRoomSets?: Array<[number, import('../core/rooms').RoomSetLink]>
   type: 'opened'
   requestId: number
   pageCount: number
@@ -481,6 +484,9 @@ export interface PageLayoutResponse {
   pageDrawingInfos?: (DrawingInfo | null)[]
   pageScales?: (PageScale | null)[]
   pageScaleRegions?: Array<[number, import('../core/measure').ScaleRegion[]]>
+  pageRoomRegions?: Array<[number, import('../core/rooms').RoomRegion[]]>
+  roomSets?: import('../core/rooms').RoomSet[]
+  pageRoomSets?: Array<[number, import('../core/rooms').RoomSetLink]>
   type: 'pageLayoutApplied' | 'pageLayoutUndone' | 'headerFooterApplied' | 'headerFooterRemoved'
   requestId: number
   bytes: ArrayBuffer

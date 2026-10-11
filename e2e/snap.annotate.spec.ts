@@ -1,6 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
 import { snapPdf } from './snapFixtures'
 
+// The display settings sit in a folded section of the quantity tab (SPEC-S14); these tests use them.
+test.beforeEach(async ({ page }) => { await page.addInitScript(() => localStorage.setItem('karu-pdf:fixture-panel-settings-open', 'true')) })
+
 async function point(page: Page, x: number, y: number) {
   return page.getByTestId('annotation-layer-0').evaluate((el, p) => {
     const svg = el as SVGSVGElement, b = svg.getBoundingClientRect(), v = svg.viewBox.baseVal
@@ -85,7 +88,7 @@ test('図面の端点設定をオフにすると PDF の線には吸い付かず
 
 test('既存の数量拾いの頂点へ距離計測が吸い付く', async ({ page }) => {
   await open(page)
-  await page.getByRole('button', { name: '数量拾い', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('button', { name: '数量拾い', exact: true }).click();
   await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
   await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
   await page.getByRole('dialog', { name: '標準マスタから追加' }).getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
@@ -114,7 +117,7 @@ test('計測以外でも両方の場所で切り替えられ、既定オフと�
   await open(page)
   expect(await page.evaluate(() => localStorage.getItem('karu-pdf:snap'))).toBeNull()
   await expectSnap(page, false)
-  await page.getByRole('button', { name: '数量拾い', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('button', { name: '数量拾い', exact: true }).click();
   const checkbox = page.getByRole('checkbox', { name: 'スナップ（既存の頂点に合わせる）', exact: true })
   await expect(checkbox).not.toBeChecked()
   await page.keyboard.press('l')
@@ -128,12 +131,12 @@ test('計測以外でも両方の場所で切り替えられ、既定オフと�
   expect(await page.evaluate(() => localStorage.getItem('karu-pdf:snap'))).toBe('1')
   await open(page, true)
   await expectSnap(page, true)
-  await page.getByRole('button', { name: '数量拾い', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('button', { name: '数量拾い', exact: true }).click();
   await expect(checkbox).toBeChecked()
   await checkbox.uncheck()
   await open(page, true)
   await expectSnap(page, false)
-  await page.getByRole('button', { name: '数量拾い', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('button', { name: '数量拾い', exact: true }).click();
   await expect(checkbox).not.toBeChecked()
   expect(await page.evaluate(() => localStorage.getItem('karu-pdf:snap'))).toBe('0')
 })

@@ -52,6 +52,9 @@ export interface OpenResult {
   pageDrawingInfos?: (DrawingInfo | null)[]
   pageScales?: (PageScale | null)[]
   pageScaleRegions?: Array<[number, import('../core/measure').ScaleRegion[]]>
+  pageRoomRegions?: Array<[number, import('../core/rooms').RoomRegion[]]>
+  roomSets?: import('../core/rooms').RoomSet[]
+  pageRoomSets?: Array<[number, import('../core/rooms').RoomSetLink]>
   pageCount: number
   pageSizes: PageSize[]
   openMs: number
@@ -120,6 +123,9 @@ export interface PageLayoutResult {
   pageDrawingInfos?: (DrawingInfo | null)[]
   pageScales?: (PageScale | null)[]
   pageScaleRegions?: Array<[number, import('../core/measure').ScaleRegion[]]>
+  pageRoomRegions?: Array<[number, import('../core/rooms').RoomRegion[]]>
+  roomSets?: import('../core/rooms').RoomSet[]
+  pageRoomSets?: Array<[number, import('../core/rooms').RoomSetLink]>
   pageCount: number
   pageSizes: PageSize[]
   hasBackup: boolean
@@ -290,7 +296,7 @@ export class PdfWorkerPool {
       pageCount: first.pageCount,
       editRestriction: first.editRestriction,
       pageSizes: first.pageSizes,
-      pageDrawingInfos: first.pageDrawingInfos, pageScales: first.pageScales, pageScaleRegions: first.pageScaleRegions,
+      pageDrawingInfos: first.pageDrawingInfos, pageScales: first.pageScales, pageScaleRegions: first.pageScaleRegions, pageRoomRegions: first.pageRoomRegions, roomSets: first.roomSets, pageRoomSets: first.pageRoomSets,
       openMs: first.openMs,
       sizesMs: first.sizesMs,
     }
@@ -298,7 +304,7 @@ export class PdfWorkerPool {
 
   async openSource(docId: string, bytes: ArrayBuffer): Promise<OpenResult> {
     const response = await this.openOnSlot(this.slots[this.primaryWorkerIndex], docId, bytes)
-    return { editRestriction: response.editRestriction, pageCount: response.pageCount, pageSizes: response.pageSizes, pageDrawingInfos: response.pageDrawingInfos, pageScales: response.pageScales, pageScaleRegions: response.pageScaleRegions, openMs: response.openMs, sizesMs: response.sizesMs }
+    return { editRestriction: response.editRestriction, pageCount: response.pageCount, pageSizes: response.pageSizes, pageDrawingInfos: response.pageDrawingInfos, pageScales: response.pageScales, pageScaleRegions: response.pageScaleRegions, pageRoomRegions: response.pageRoomRegions, roomSets: response.roomSets, pageRoomSets: response.pageRoomSets, openMs: response.openMs, sizesMs: response.sizesMs }
   }
 
   async openSourceDisplays(docId: string, file: Blob): Promise<void> {
@@ -780,7 +786,7 @@ export class PdfWorkerPool {
     this.clearPageAssignments(docId)
     return {
       pageCount: response.pageCount,
-      pageSizes: response.pageSizes, pageDrawingInfos: response.pageDrawingInfos, pageScales: response.pageScales, pageScaleRegions: response.pageScaleRegions,
+      pageSizes: response.pageSizes, pageDrawingInfos: response.pageDrawingInfos, pageScales: response.pageScales, pageScaleRegions: response.pageScaleRegions, pageRoomRegions: response.pageRoomRegions, roomSets: response.roomSets, pageRoomSets: response.pageRoomSets,
       hasBackup: response.hasBackup,
       timings: {
         ...response.timings,
@@ -805,7 +811,7 @@ export class PdfWorkerPool {
     this.clearPageAssignments(docId)
     return {
       pageCount: response.pageCount,
-      pageSizes: response.pageSizes, pageDrawingInfos: response.pageDrawingInfos, pageScales: response.pageScales, pageScaleRegions: response.pageScaleRegions,
+      pageSizes: response.pageSizes, pageDrawingInfos: response.pageDrawingInfos, pageScales: response.pageScales, pageScaleRegions: response.pageScaleRegions, pageRoomRegions: response.pageRoomRegions, roomSets: response.roomSets, pageRoomSets: response.pageRoomSets,
       hasBackup: response.hasBackup,
       timings: {
         ...response.timings,
@@ -927,7 +933,7 @@ export class PdfWorkerPool {
     await this.reloadDisplayWorkers(docId, response.bytes)
     const displayReloadMs = performance.now() - reloadStarted
     this.clearPageAssignments(docId)
-    return { pageCount: response.pageCount, pageSizes: response.pageSizes, pageDrawingInfos: response.pageDrawingInfos, pageScales: response.pageScales, pageScaleRegions: response.pageScaleRegions, hasBackup: response.hasBackup, timings: {
+    return { pageCount: response.pageCount, pageSizes: response.pageSizes, pageDrawingInfos: response.pageDrawingInfos, pageScales: response.pageScales, pageScaleRegions: response.pageScaleRegions, pageRoomRegions: response.pageRoomRegions, roomSets: response.roomSets, pageRoomSets: response.pageRoomSets, hasBackup: response.hasBackup, timings: {
       ...response.timings, workerRoundTripMs, transferToMainMs: Math.max(0, workerRoundTripMs - response.timings.workerTotalMs), displayReloadMs, poolTotalMs: performance.now() - poolStarted,
     } }
   }

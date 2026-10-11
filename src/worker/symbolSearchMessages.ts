@@ -22,6 +22,7 @@ export interface VectorSearchMessage {
   type: 'vector-search'; id: number; segments: Float32Array; segmentWidths?: Float32Array; sampleSegments: Float32Array; sampleWidths: Float32Array; sampleRect: Rect
   options: Omit<Partial<VectorSymbolOptions>, 'shouldStop'>
   paint?: VectorPaint; samplePaint?: VectorPaint
+  sampleLines?: { segments: Float32Array; widths: Float32Array }
   features?: {complete:boolean;sampleComplete:boolean;samePage:boolean}
 }
 export interface VectorFeatureProbes { sample:SymbolVectorFeatureProbe; matches:SymbolVectorFeatureProbe[]; ms:number }
@@ -46,15 +47,15 @@ export type VectorSearchResult = ReturnType<typeof vectorSymbolSearch>
 export function searchVectorMessage(message: VectorSearchMessage): VectorSearchResult | null {
   const [x0, y0, x1, y1] = message.sampleRect
   const tolerance = defaultVectorTolerance(message.sampleRect)
-  let count = 0
-  for (let i=0; i<message.sampleSegments.length; i+=4) {
+  let count = message.sampleLines ? message.sampleLines.segments.length / 4 : 0
+  if (!message.sampleLines) for (let i=0; i<message.sampleSegments.length; i+=4) {
     const a=message.sampleSegments
     if (a[i]>=x0-tolerance && a[i]<=x1+tolerance && a[i+1]>=y0-tolerance && a[i+1]<=y1+tolerance
       && a[i+2]>=x0-tolerance && a[i+2]<=x1+tolerance && a[i+3]>=y0-tolerance && a[i+3]<=y1+tolerance
       && (a[i]!==a[i+2] || a[i+1]!==a[i+3])) count++
   }
   return count < 2 ? null : vectorSymbolSearch(message.segments, message.sampleRect, message.options, message.sampleSegments, message.sampleWidths, message.segmentWidths,
-    message.samplePaint&&message.paint?{sample:message.samplePaint,target:message.paint}:undefined)
+    message.samplePaint&&message.paint?{sample:message.samplePaint,target:message.paint}:undefined, message.sampleLines)
 }
 export function probeVectorMatches(message:VectorSearchMessage,result:VectorSearchResult|null,ownershipLimit=200_000):VectorFeatureProbes|undefined {
   if(!message.features||!result)return undefined

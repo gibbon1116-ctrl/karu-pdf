@@ -3,6 +3,9 @@ import mupdf from 'mupdf'
 import { readCountFixtures } from '../src/core/countFixtures'
 import { groupFixtures } from '../src/app/fixtureOrder'
 
+// The display settings sit in a folded section of the quantity tab (SPEC-S14); these tests use them.
+test.beforeEach(async ({ page }) => { await page.addInitScript(() => localStorage.setItem('karu-pdf:fixture-panel-settings-open', 'true')) })
+
 function blankPdf() {
   const doc = new mupdf.PDFDocument(), ref = doc.addPage([0, 0, 500, 500], 0, {}, '')
   try {
@@ -17,7 +20,7 @@ async function open(page: Page, presets = true) {
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '並び替え試験.pdf'), blankPdf())
   await page.evaluate(() => window.__karu!.setZoom(1))
   await expect(page.getByTestId('annotation-layer-0')).toBeVisible()
-  await page.getByRole('button', { name: '数量拾い', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('button', { name: '数量拾い', exact: true }).click();
   if (presets) {
     await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
     await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
@@ -124,7 +127,7 @@ test('category selection, visible steps, drag moves, Undo, and persisted categor
     expect(groups.find(g => g.category === 'コンセント')!.items[1].name).toBe('新LED')
   } finally { doc.destroy() }
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '再読込.pdf'), saved)
-  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click();
   await expect(panel(page).locator('.fixture-category button[aria-expanded]').first()).toHaveText('幹線（1）')
   await expect(category(page, 'コンセント').locator('.fixture-row-name').nth(1)).toHaveText('新LED')
 })
@@ -198,7 +201,7 @@ test('quantity values toggle leaves geometry/totals/drafts intact and saved PDF 
     try { let contents = ''; text.walk({ onChar: c => { contents += c } }); expect(contents).toBe('CV 2.54 m') } finally { text.destroy(); display.destroy() }
   } finally { annotations.forEach(a => a.destroy()); pdfPage.destroy(); doc.destroy() }
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '再読込.pdf'), saved)
-  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click();
   await expect(panel(page).getByLabel('図面に長さ・面積・体積の数値を表示')).toBeChecked()
   await expect(labels).toHaveText('CV 2.54 m')
 })

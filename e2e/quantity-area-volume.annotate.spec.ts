@@ -29,7 +29,7 @@ const names = {
  root: '根切り 根切り（囲む×深さ）', trench: '溝掘削 ケーブル・配管の溝掘削（長さ×幅×深さ）',
 }
 async function addPresets(page: Page) {
- await page.getByRole('button', { name: '数量拾い', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+ await page.getByRole('button', { name: '数量拾い', exact: true }).click();
  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
  const dialog = page.getByRole('dialog', { name: '標準マスタから追加' })
@@ -80,7 +80,8 @@ test('four area/volume methods: prompts, format Undo, totals, CSV and PDF reload
  await format.getByRole('button', { name: '項目を編集…' }).click()
  const editor = page.getByRole('dialog', { name: '項目を編集', exact: true })
  await expect(editor.getByRole('radio', { name: '面積', exact: true })).toBeDisabled()
- await expect(editor.getByRole('radio', { name: '囲む', exact: true })).toBeDisabled()
+ // The method is now the default for new pickups (SPEC-S17): it stays changeable after picking.
+ await expect(editor.getByRole('radio', { name: '囲む', exact: true })).toBeEnabled()
  await expect(editor.getByLabel('高さ（新しく拾うときの初期値）')).toHaveValue('')
  await expect(editor.locator('.quantity-preview')).toContainText('外部足場 24.00×H?=? m²')
  await editor.getByRole('button', { name: '閉じる', exact: true }).click()
@@ -98,7 +99,9 @@ test('four area/volume methods: prompts, format Undo, totals, CSV and PDF reload
  await expect(value(page,names.trench)).toHaveText('1.22')
  await expect(format.getByLabel('幅', { exact: true })).toHaveValue('0.60')
  await expect(format.getByLabel('深さ', { exact: true })).toHaveValue('0.80')
- await expect(format.getByLabel('項目を変更').locator('option')).toHaveCount(1)
+ // Any volume item can take a 長さ×幅×深さ pickup now (SPEC-S17), not only same-default ones.
+ await expect(format.getByLabel('項目を変更').locator('option')).toHaveCount(3)
+ await expect(format.getByLabel('項目を変更').locator('option', { hasText: '根切り' })).toHaveCount(1)
  await page.evaluate(() => { Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined }) })
  const downloaded = page.waitForEvent('download')
  await page.getByRole('button', { name: '数量をCSVに書き出す', exact: true }).click()
@@ -116,7 +119,7 @@ test('four area/volume methods: prompts, format Undo, totals, CSV and PDF reload
  const expectedLabels = await labels(page).allTextContents()
  const saved = await page.evaluate(async () => [...(await window.__karu!.saveToBytes())!])
  await page.evaluate(bytes => window.__karu!.openBytes(bytes, '再読込.pdf'), saved)
- await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+ await page.getByRole('tab', { name: '数量', exact: true }).click();
  await expect(labels(page)).toHaveText(expectedLabels)
  for (const [key, expected] of [['internal','6.45'],['external','8.89'],['root','7.74'],['trench','1.22']] as const) {
   const row = page.getByRole('button', { name: names[key], exact: true }).locator('..').locator('.fixture-row-count')
@@ -134,7 +137,7 @@ test('four area/volume methods: prompts, format Undo, totals, CSV and PDF reload
 
 test('item kind/method controls and dimension defaults round-trip, with line/fill previews', async ({ page }) => {
  await open(page)
- await page.getByRole('button', { name: '数量拾い', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+ await page.getByRole('button', { name: '数量拾い', exact: true }).click();
  await page.getByRole('button', { name: '項目を追加', exact: true }).click()
  const editor = page.getByRole('dialog', { name: '項目を追加', exact: true })
  await editor.getByLabel('名称', { exact: true }).fill('試験')

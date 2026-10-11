@@ -30,7 +30,7 @@ async function search(page:Page) {
   await expect(panel(page)).toContainText('検索が終わりました',{timeout:60_000})
 }
 
-test('他の項目で拾い済みの候補は初めは隠し、表示しても選択や数量追加に入れない',async({page})=>{
+test('他の項目で拾い済みの候補は初めは隠し、表示すると選択して現在の項目の数量へ追加できる',async({page})=>{
   test.setTimeout(180_000)
   await page.addInitScript(()=>{
     localStorage.removeItem('karu-pdf:symbol-search-shape')
@@ -76,10 +76,16 @@ test('他の項目で拾い済みの候補は初めは隠し、表示しても�
   await expect(candidates).toHaveCount(4)
   await expect(panel(page)).toContainText('候補 4 件')
   await expect(panel(page)).toContainText('（拾い済み 0 件）（他の項目で拾い済み 4 件）')
-  const showOther=panel(page).getByRole('checkbox',{name:'他の項目で拾い済みの 4 件も表示する（D 感知器A 4）',exact:true})
+  const showOther=panel(page).getByRole('checkbox',{name:'他の項目で拾い済みの 4 件も表示して拾えるようにする（D 感知器A 4）',exact:true})
   await expect(showOther).not.toBeChecked()
   await expect(page.locator('[data-testid="symbol-search-candidate"][data-other="true"]')).toHaveCount(0)
   expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count))).toEqual(marksA)
+
+  await panel(page).getByRole('button',{name:'すべて選ぶ',exact:true}).click()
+  await expect(page.locator('[data-testid="symbol-search-candidate"][data-state="chosen"]')).toHaveCount(4)
+  await expect(panel(page).getByRole('button',{name:'選んだ 4 件を数量へ追加',exact:true})).toBeEnabled()
+  await panel(page).getByRole('button',{name:'すべて外す',exact:true}).click()
+  await expect(page.locator('[data-testid="symbol-search-candidate"][data-state="chosen"]')).toHaveCount(0)
 
   await showOther.check()
   await expect(candidates).toHaveCount(8)
@@ -89,42 +95,72 @@ test('他の項目で拾い済みの候補は初めは隠し、表示しても�
   for(const c of await other.all()) {
     await expect(c).toHaveClass(/other-fixture/)
     await expect(c).toHaveAttribute('aria-label','記号の候補（他の項目で拾い済み）')
-    await expect(c).toHaveAttribute('aria-disabled','true')
-    await expect(c).toHaveAttribute('tabindex','-1')
+    expect(await c.getAttribute('aria-disabled')).toBeNull()
+    await expect(c).toHaveAttribute('tabindex','0')
     await expect(c.locator('title')).toContainText('・他の項目（D 感知器A）で拾い済み')
-    // aria-disabled blocks a normal click; force it to prove the store also refuses.
-    await c.click({force:true})
     await expect(c).toHaveAttribute('data-state','pending')
     await expect(c).toHaveAttribute('aria-pressed','false')
     expect(await c.locator('rect').evaluate(el=>getComputedStyle(el).stroke)).toBe('rgb(119, 119, 119)')
-    expect(await c.evaluate(el=>getComputedStyle(el).cursor)).toBe('default')
+    expect(await c.evaluate(el=>getComputedStyle(el).cursor)).toBe('pointer')
+    if(await c.getAttribute('data-confidence')==='check') {
+      await expect(c.locator('text.symbol-search-question')).toHaveText('?')
+    }
+    await c.click()
+    await expect(c).toHaveAttribute('data-state','chosen')
+    await expect(c).toHaveAttribute('aria-pressed','true')
+    expect(await c.locator('rect').evaluate(el=>getComputedStyle(el).stroke)).toBe('rgb(0, 129, 39)')
+    expect(await c.locator('rect').evaluate(el=>getComputedStyle(el).strokeDasharray)).toBe('none')
+    expect(await c.locator('text').evaluate(el=>getComputedStyle(el).fill)).toBe('rgb(0, 129, 39)')
   }
-  await expect(page.locator('[data-testid="symbol-search-candidate"][data-state="chosen"]')).toHaveCount(0)
+  await expect(page.locator('[data-testid="symbol-search-candidate"][data-state="chosen"]')).toHaveCount(4)
+  await expect(panel(page).getByRole('button',{name:'選んだ 4 件を数量へ追加',exact:true})).toBeEnabled()
   expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count))).toEqual(marksA)
 
   await showOther.uncheck()
   await expect(candidates).toHaveCount(4)
   await expect(other).toHaveCount(0)
+  await expect(page.locator('[data-testid="symbol-search-candidate"][data-state="chosen"]')).toHaveCount(0)
+  await expect(panel(page).getByRole('button',{name:'選んだ 0 件を数量へ追加',exact:true})).toBeDisabled()
   await showOther.check()
   await expect(candidates).toHaveCount(8)
   await expect(other).toHaveCount(4)
+  await expect(page.locator('[data-testid="symbol-search-candidate"][data-other="true"][data-state="pending"]')).toHaveCount(4)
   await panel(page).getByRole('button',{name:'すべて選ぶ',exact:true}).click()
-  await expect(page.locator('[data-testid="symbol-search-candidate"][data-state="chosen"]')).toHaveCount(4)
-  await expect(page.locator('[data-testid="symbol-search-candidate"][data-other="true"][data-state="chosen"]')).toHaveCount(0)
-  await panel(page).getByRole('button',{name:'選んだ 4 件を数量へ追加',exact:true}).click()
+  await expect(page.locator('[data-testid="symbol-search-candidate"][data-state="chosen"]')).toHaveCount(8)
+  await expect(page.locator('[data-testid="symbol-search-candidate"][data-other="true"][data-state="chosen"]')).toHaveCount(4)
+  await panel(page).getByRole('button',{name:'選んだ 8 件を数量へ追加',exact:true}).click()
 
   const marks=await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count))
-  expect(marks).toHaveLength(8)
+  expect(marks).toHaveLength(12)
   const idsA=marksA.map(a=>a.id)
   expect(marks.filter(a=>idsA.includes(a.id))).toEqual(marksA)
   const marksB=marks.filter(a=>!idsA.includes(a.id))
-  expect(marksB).toHaveLength(4)
-  expect(marksB.every(a=>(a.rect[1]+a.rect[3])/2>100)).toBe(true)
+  expect(marksB).toHaveLength(8)
+  const upperMarksB=marksB.filter(a=>(a.rect[1]+a.rect[3])/2<100)
+  expect(upperMarksB).toHaveLength(4)
+  expect(marksB.filter(a=>(a.rect[1]+a.rect[3])/2>100)).toHaveLength(4)
   const fixtureB=(marksB[0].count as {fixtureId:string}).fixtureId
   expect(typeof fixtureB).toBe('string')
   expect(fixtureB).not.toBe(fixtureA)
   expect(marksB.every(a=>(a.count as {fixtureId:string}).fixtureId===fixtureB)).toBe(true)
-  await expect(page.locator('[data-testid="symbol-search-candidate"][data-state="counted"]')).toHaveCount(4)
-  await expect(other).toHaveCount(4)
-  await expect(page.locator('[data-testid="symbol-search-candidate"][data-other="true"][data-state="chosen"]')).toHaveCount(0)
+  for(const a of marksA) {
+    const x=(a.rect[0]+a.rect[2])/2,y=(a.rect[1]+a.rect[3])/2
+    expect(upperMarksB.some(b=>Math.hypot((b.rect[0]+b.rect[2])/2-x,(b.rect[1]+b.rect[3])/2-y)<.001)).toBe(true)
+  }
+  await expect(page.locator('[data-testid="symbol-search-candidate"][data-state="counted"]')).toHaveCount(8)
+  await expect(other).toHaveCount(0)
+  await expect(page.locator('[data-testid="symbol-search-candidate"][data-state="chosen"]')).toHaveCount(0)
+  for(const c of await candidates.all()) {
+    await expect(c).toHaveAttribute('data-state','counted')
+    await expect(c).toHaveAttribute('aria-label','記号の候補（拾い済み）')
+    await expect(c).toHaveAttribute('aria-disabled','true')
+    await expect(c).toHaveAttribute('tabindex','-1')
+    expect(await c.locator('rect').evaluate(el=>getComputedStyle(el).stroke)).toBe('rgb(119, 119, 119)')
+    await c.click({force:true})
+    await expect(c).toHaveAttribute('data-state','counted')
+  }
+  await panel(page).getByRole('button',{name:'すべて選ぶ',exact:true}).click()
+  await expect(page.locator('[data-testid="symbol-search-candidate"][data-state="chosen"]')).toHaveCount(0)
+  await expect(panel(page).getByRole('button',{name:'選んだ 0 件を数量へ追加',exact:true})).toBeDisabled()
+  expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count))).toEqual(marks)
 })

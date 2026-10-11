@@ -1,6 +1,6 @@
 import { parseLocation } from './location'
 import type { Point } from './annotations'
-import { polygonArea, polylineLength } from './measure'
+import { polygonArea, polylineLength, validAreaHoles } from './measure'
 import { QUANTITY_METHODS, type QuantityMethod, type QuantityLineStyle } from './countFixtures'
 
 export type RouteScope = 'all' | 'noSlack' | 'rise'
@@ -16,11 +16,56 @@ export interface RouteConditions {
   slack?: string | null
 }
 export interface Rise { m: number; at?: number }
+export interface QuantityOpening { itemId?: string; widthM?: number; heightM?: number; count: number }
+export type OpeningSize = (itemId: string) => { widthM: number; heightM: number } | undefined
 export interface QuantityMark {
   version: 1; id: string; itemId: string; method: Exclude<QuantityMethod, 'click'>
   floor?: string; room?: string; count?: number; cond?: RouteConditions; extra?: Array<{ itemId: string; count: number; cond?: RouteConditions }>
   rises?: Rise[]; condition?: string
   addM?: number; slackM?: number; heightM?: number; widthM?: number; depthM?: number
+  holes?: Point[][]
+  openings?: QuantityOpening[]
+}
+// Only area marks with drawn exclusions may grow beyond the long-standing 8,000-character
+// route limit; that limit still guards route edits such as condition renames.
+const MAX_QUANTITY_MARK_LENGTH = 64_000
+const MAX_ROUTE_MARK_LENGTH = 8_000
+const markLengthLimit = (method: unknown) => method === 'polygon' || method === 'polygonDepth' ? MAX_QUANTITY_MARK_LENGTH : MAX_ROUTE_MARK_LENGTH
+export function validOpeningDimension(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 100
+}
+export function validQuantityOpenings(value: unknown): value is QuantityOpening[] {
+  return Array.isArray(value) && value.length <= 50 && Array.from(value).every(o =>
+    !!o && typeof o === 'object' && !Array.isArray(o)
+    && typeof o.count === 'number' && Number.isInteger(o.count) && o.count >= 1 && o.count <= 999
+    && (o.itemId === undefined || typeof o.itemId === 'string' && o.itemId.length >= 1 && o.itemId.length <= 80)
+    && (o.widthM === undefined || validOpeningDimension(o.widthM))
+    && (o.heightM === undefined || validOpeningDimension(o.heightM))
+    && (o.itemId !== undefined || validOpeningDimension(o.widthM) && validOpeningDimension(o.heightM)))
+}
+function quantityJson(value: unknown): string {
+  const raw = JSON.stringify(value)
+  if (raw.length > MAX_QUANTITY_MARK_LENGTH) throw new Error('数量拾いの保存データが文字数の上限を超えています。')
+  return raw
+}
+function quantityDeductions(mark: QuantityMark, mmPerPoint: number, openingSize?: OpeningSize): {
+  holes: number; openings: number; unknown: boolean; hasHoles: boolean; hasOpenings: boolean
+} {
+  const holes = mark.method === 'polygon' || mark.method === 'polygonDepth' ? mark.holes : undefined
+  const openings = mark.method === 'polygon' || mark.method === 'lengthHeight' ? mark.openings : undefined
+  let openingArea = 0, unknown = false
+  for (const opening of openings ?? []) {
+    const resolved = opening.itemId !== undefined ? openingSize?.(opening.itemId) : undefined
+    const size = resolved && validOpeningDimension(resolved.widthM) && validOpeningDimension(resolved.heightM)
+      ? resolved : opening
+    if (validOpeningDimension(size.widthM) && validOpeningDimension(size.heightM)) {
+      openingArea += size.widthM * size.heightM * opening.count
+    } else unknown = true
+  }
+  return {
+    holes: (holes ?? []).reduce((sum, points) => sum + polygonArea(points) * mmPerPoint ** 2 / 1e6, 0),
+    openings: openingArea, unknown, hasHoles: !!holes?.length, hasOpenings: !!openings?.length,
+  }
 }
 export function validCondition(v: unknown): v is string {
   return typeof v === 'string' && v.length >= 1 && v.length <= 30 && v.trim() === v && !/[\r\n\u2028\u2029]/.test(v)
@@ -82,12 +127,24 @@ export function quantityDimensions(method: QuantityMethod): readonly (keyof type
   return method === 'lengthHeight' ? ['heightM'] : method === 'polygonDepth' ? ['depthM'] : method === 'lengthWidthDepth' ? ['widthM', 'depthM'] : []
 }
 export function parseQuantityMark(raw: string | null): QuantityMark | null {
-  if (!raw || raw.length > 8000) return null
+  if (!raw || raw.length > MAX_QUANTITY_MARK_LENGTH) return null
   try {
     const v = JSON.parse(raw)
+    if (raw.length > markLengthLimit(v?.method)) return null
     if (!v || v.version !== 1 || !['id', 'itemId'].every(k => typeof v[k] === 'string' && v[k].length >= 1 && v[k].length <= 80)
       || !Object.values(QUANTITY_METHODS).flat().filter(m => m !== 'click').includes(v.method)) return null
     const result: QuantityMark = { version: 1, id: v.id, itemId: v.itemId, method: v.method }
+    if ((v.method === 'polygon' || v.method === 'polygonDepth') && validAreaHoles(v.holes)) {
+      result.holes = v.holes.map((points: Point[]) => points.map(p => [...p] as Point))
+    }
+    if ((v.method === 'polygon' || v.method === 'lengthHeight') && validQuantityOpenings(v.openings)) {
+      result.openings = v.openings.map((o: QuantityOpening) => ({
+        ...(o.itemId !== undefined ? { itemId: o.itemId } : {}),
+        ...(o.widthM !== undefined ? { widthM: o.widthM } : {}),
+        ...(o.heightM !== undefined ? { heightM: o.heightM } : {}),
+        count: o.count,
+      }))
+    }
     for (const k of ['addM', 'heightM', 'widthM', 'depthM'] as const) {
       if (v[k] === undefined || k === 'addM' && v.method === 'polyline' && v.rises !== undefined) continue
       if (typeof v[k] !== 'number' || !Number.isFinite(v[k]) || v[k] < 0 || v[k] > 1000) return null
@@ -150,7 +207,9 @@ function wireConditions(c: RouteConditions = {}): object | undefined {
 export function routeConditionsKey(c: RouteConditions = {}): string { return JSON.stringify(wireConditions(c) ?? {}) }
 export function serializeQuantityMark(mark: QuantityMark): string {
   const { cond: supplied, rises, extra, scope: legacyScope, ...base } = mark as QuantityMark & { scope?: RouteScope }
-  if (mark.method !== 'polyline') return JSON.stringify(base)
+  if (!(mark.method === 'polygon' || mark.method === 'polygonDepth') || !validAreaHoles(base.holes)) delete base.holes
+  if (!(mark.method === 'polygon' || mark.method === 'lengthHeight') || !validQuantityOpenings(base.openings)) delete base.openings
+  if (mark.method !== 'polyline') return quantityJson(base)
   const cond = supplied === undefined ? conditionsFromScope(legacyScope) : supplied
   if (supplied !== undefined && !validRouteConditions(supplied) || supplied === undefined && legacyScope !== undefined && !validRouteScope(legacyScope)) throw new Error('経路の施工条件が不正です。')
   for (const e of extra ?? []) {
@@ -159,9 +218,9 @@ export function serializeQuantityMark(mark: QuantityMark): string {
   }
   const rs = routeRises(mark), total = riseTotal(rs)
   // Legacy scope approximates unsupported masks: old apps can count excluded rises/plan.
-  // Old apps also reject addM > 1000 or JSON > 2000; the new reader supports all 20 rises.
+  // Old apps also reject addM > 1000 or JSON > 2000; the new reader supports all 20 rises and JSON up to 64,000 characters.
   const scope = (c: RouteConditions = {}): Exclude<RouteScope, 'all'> | undefined => c.plan === null && c.slack === null ? 'rise' : c.slack === null ? 'noSlack' : undefined
-  return JSON.stringify({ ...base, ...(rises !== undefined || mark.addM !== undefined ? { addM: total } : {}),
+  return quantityJson({ ...base, ...(rises !== undefined || mark.addM !== undefined ? { addM: total } : {}),
     // A zero singleton needs its array: addM=0 alone cannot preserve an explicit rise.
     ...(rises && (rises.length !== 1 || rises[0].at !== undefined || rises[0].m === 0) ? { rises } : {}),
     cond: wireConditions(cond), scope: scope(cond), extra: extra?.map(e => ({ itemId: e.itemId, count: e.count, cond: wireConditions(e.cond ?? conditionsFromScope((e as { scope?: RouteScope }).scope)), scope: scope(e.cond ?? conditionsFromScope((e as { scope?: RouteScope }).scope)) })) })
@@ -170,31 +229,38 @@ export function validRouteCount(n: unknown): n is number { return typeof n === '
 export function quantityPoints(method: QuantityMark['method']): 'polyline' | 'polygon' {
   return method === 'polygon' || method === 'polygonDepth' ? 'polygon' : 'polyline'
 }
-export function quantityValue(points: readonly Point[], mmPerPoint: number, mark: QuantityMark): number {
+export function quantityValue(points: readonly Point[], mmPerPoint: number, mark: QuantityMark, openingSize?: OpeningSize): number {
   const length = polylineLength(points) * mmPerPoint / 1000
   const area = polygonArea(points) * mmPerPoint ** 2 / 1e6
+  const deductions = quantityDeductions(mark, mmPerPoint, openingSize)
   switch (mark.method) {
     case 'polyline': return routeMemberLength(length, mark)
-    case 'polygon': return area
-    case 'lengthHeight': return length * (mark.heightM ?? 0)
-    case 'polygonDepth': return area * (mark.depthM ?? 0)
+    case 'polygon': return deductions.hasHoles || deductions.hasOpenings ? Math.max(0, area - deductions.holes - deductions.openings) : area
+    case 'lengthHeight': {
+      const gross = length * (mark.heightM ?? 0)
+      return deductions.hasOpenings ? Math.max(0, gross - deductions.openings) : gross
+    }
+    case 'polygonDepth': return deductions.hasHoles ? Math.max(0, area - deductions.holes) * (mark.depthM ?? 0) : area * (mark.depthM ?? 0)
     case 'lengthWidthDepth': return length * (mark.widthM ?? 0) * (mark.depthM ?? 0)
   }
 }
 const number = (n: number) => n.toLocaleString('ja-JP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-export function quantityLabel(points: readonly Point[], mmPerPoint: number, mark: QuantityMark & { scope?: RouteScope }, code: string, showCode: boolean, extraCode: (id: string) => string = id => id): string {
+export function quantityLabel(points: readonly Point[], mmPerPoint: number, mark: QuantityMark & { scope?: RouteScope }, code: string, showCode: boolean, extraCode: (id: string) => string = id => id, openingSize?: OpeningSize): string {
   if (mark.cond === undefined && mark.scope !== undefined) mark = { ...mark, cond: conditionsFromScope(mark.scope) }
   const length = number(polylineLength(points) * mmPerPoint / 1000)
   const area = number(polygonArea(points) * mmPerPoint ** 2 / 1e6)
-  const value = quantityDimensions(mark.method).some(key => mark[key] === undefined) ? '?' : number(quantityValue(points, mmPerPoint, mark))
+  const deductions = quantityDeductions(mark, mmPerPoint, openingSize)
+  const holeTerm = deductions.hasHoles ? `−${number(deductions.holes)}` : ''
+  const openingTerm = deductions.hasOpenings ? `−開口${number(deductions.openings)}${deductions.unknown ? '?' : ''}` : ''
+  const value = quantityDimensions(mark.method).some(key => mark[key] === undefined) ? '?' : number(quantityValue(points, mmPerPoint, mark, openingSize))
   const dimension = (key: keyof typeof QUANTITY_DIMENSIONS) => mark[key] === undefined ? '?' : number(mark[key])
   const addM = riseTotal(routeRises(mark))
   let label: string
   switch (mark.method) {
     case 'polyline': label = `${addM || mark.slackM ? `${length}${addM ? '+' + number(addM) : ''}${mark.slackM ? '+余' + number(mark.slackM) : ''}=` : ''}${value} m`; break
-    case 'polygon': label = `${value} m²`; break
-    case 'lengthHeight': label = `${length}×H${dimension('heightM')}=${value} m²`; break
-    case 'polygonDepth': label = `${area}×D${dimension('depthM')}=${value} m³`; break
+    case 'polygon': label = `${deductions.hasHoles || deductions.hasOpenings ? `${area}${holeTerm}${openingTerm}=` : ''}${value} m²`; break
+    case 'lengthHeight': label = `${length}×H${dimension('heightM')}${openingTerm}=${value} m²`; break
+    case 'polygonDepth': label = `${deductions.hasHoles ? `(${area}${holeTerm})` : area}×D${dimension('depthM')}=${value} m³`; break
     case 'lengthWidthDepth': label = `${length}×W${dimension('widthM')}×D${dimension('depthM')}=${value} m³`; break
   }
   if (mark.method === 'polyline' && ((mark.count ?? 1) !== 1 || mark.extra?.length)) {

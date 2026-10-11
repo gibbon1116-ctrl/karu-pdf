@@ -55,21 +55,16 @@ async function reloadPdf(page: Page) {
   await load(page, bytes)
 }
 
-test('拾うと管理を分け、モードと拾いバーの上下位置を再読込後も保つ', async ({ page }) => {
+test('数量タブは1つの画面で、拾いバーの上下位置を再読込後も保つ', async ({ page }) => {
   await setup(page)
-  await expect(panel(page).getByRole('button', { name: '拾う', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await expect(panel(page).getByRole('button', { name: /表示切替/ })).toHaveCount(0)
-  await expect(panel(page).getByRole('button', { name: '複製', exact: true })).toHaveCount(0)
-  await expect(panel(page).locator('.fixture-list-heading > span')).toHaveText(['項目', 'この図面', '全図面'])
-  await expect(panel(page).locator('.fixture-grip')).toHaveCount(0)
-  await expect(panel(page).locator('li[draggable="true"]')).toHaveCount(0)
-  await panel(page).getByRole('button', { name: '管理', exact: true }).click()
+  // The pickup and management views are merged (SPEC-S14): no mode buttons, every control at once.
+  await expect(panel(page).getByRole('button', { name: '拾う', exact: true })).toHaveCount(0)
+  await expect(panel(page).getByRole('button', { name: '管理', exact: true })).toHaveCount(0)
   await expect(panel(page).getByRole('button', { name: '複製', exact: true })).toBeVisible()
   await expect(panel(page).getByRole('button', { name: 'LED 照明の表示切替', exact: true })).toBeVisible()
   await expect(panel(page).locator('.fixture-list-heading > span')).toHaveCount(7)
+  await expect(panel(page).locator('li[draggable="true"]')).toHaveCount(3)
   await reloadPdf(page)
-  await expect(panel(page).getByRole('button', { name: '管理', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await panel(page).getByRole('button', { name: '拾う', exact: true }).click()
   await select(page, 'LED')
   await bar(page).getByRole('button', { name: '拾いバーを下に移す', exact: true }).click()
   await expect(page.locator('.pickup-bar-anchor')).toHaveClass(/pickup-bar-bottom/)

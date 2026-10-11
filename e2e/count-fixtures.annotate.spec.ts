@@ -3,6 +3,9 @@ import mupdf from 'mupdf'
 import { expect, test, type Page } from '@playwright/test'
 import { readCountFixtures, type CountFixture } from '../src/core/countFixtures'
 
+// The display settings sit in a folded section of the quantity tab (SPEC-S14); these tests use them.
+test.beforeEach(async ({ page }) => { await page.addInitScript(() => localStorage.setItem('karu-pdf:fixture-panel-settings-open', 'true')) })
+
 function blankPdf() {
   const doc = new mupdf.PDFDocument()
   try {
@@ -15,7 +18,7 @@ async function open(page: Page) {
   await page.waitForFunction(() => !!window.__karu)
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '項目試験.pdf'), blankPdf())
   await page.evaluate(() => window.__karu!.setZoom(1))
-  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click();
   await expect(page.getByRole('button', { name: '項目を追加', exact: true })).toBeEnabled()
 }
 async function clickPoint(page: Page, pageIndex: number, x: number, y: number, modifiers?: Array<'Shift'>) {
@@ -88,7 +91,7 @@ for (const openTab of ['数量', '書き込み'] as const) {
     await page.getByRole('button', { name: '適用', exact: true }).click()
     await expect(page.getByTestId('organize-view')).toBeHidden()
     if (openTab === '書き込み') await expect(page.locator('.annotation-rows > li')).toHaveCount(6)
-    await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+    await page.getByRole('tab', { name: '数量', exact: true }).click();
     const panel = page.getByTestId('fixture-panel')
     await expect(panel.locator('li[data-fixture-id]')).toHaveCount(2)
     await expect(page.getByRole('button', { name: 'B 項目B', exact: true })).toHaveAttribute('aria-pressed', 'true')
@@ -109,13 +112,13 @@ for (const openTab of ['数量', '書き込み'] as const) {
     await page.getByRole('button', { name: 'ページ▼' }).click()
     await page.getByRole('menuitem', { name: '直前のページ操作を元に戻す', exact: true }).click()
     await expect(page.locator('.annotation-rows > li')).toHaveCount(8)
-    await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+    await page.getByRole('tab', { name: '数量', exact: true }).click();
     await select(page, 'A 項目A'); await expect(panel).toContainText('全図面: 4個')
     await select(page, 'B 項目B'); await expect(panel).toContainText('全図面: 4個')
 
     await page.evaluate(async () => window.__karu!.closeTab(window.__karu!.listTabs()[0].docId))
     await page.evaluate(bytes => window.__karu!.openBytes(bytes, '整理を保存した図面.pdf'), saved)
-    await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+    await page.getByRole('tab', { name: '数量', exact: true }).click();
     await expect(panel.locator('li[data-fixture-id]')).toHaveCount(2)
     await select(page, 'A 項目A'); await expect(panel).toContainText('全図面: 3個')
     await select(page, 'B 項目B'); await expect(panel).toContainText('全図面: 3個')
@@ -146,7 +149,7 @@ test('項目を読み込んだ文書ではヘッダー・フッターの適用�
     await expect(headerFooter).toBeHidden()
     await expect(page.locator('.annotation-rows > li')).toHaveCount(2)
     await expect(page.locator('.annotation-rows')).toContainText('個数: 設定変更の項目')
-    await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+    await page.getByRole('tab', { name: '数量', exact: true }).click();
     await expect(page.getByRole('button', { name: 'T 設定変更の項目', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await expect(page.getByTestId('fixture-panel')).toContainText('全図面: 2個')
     await page.getByRole('tab', { name: '書き込み', exact: true }).click()
@@ -215,7 +218,7 @@ test('見出しだけで項目画面を移動し、追加・複製・編集で�
   await expect(page.getByRole('button', { name: 'M 編集後の項目', exact: true })).toBeVisible()
   await page.reload(); await page.waitForFunction(() => !!window.__karu)
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '再読込.pdf'), blankPdf())
-  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click();
   await page.getByRole('button', { name: '項目を追加', exact: true }).click()
   await expect(dialog).toBeVisible()
   expect(await dialog.evaluate(el => (el as HTMLElement).style.translate)).toMatch(/^0px( 0px)?$/)
@@ -248,7 +251,7 @@ test('crops original drawing without annotations, keeps drafts on Esc, and prese
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '見本元.pdf'), samplePdf())
   // Show the whole page so the drag points below are inside the viewer.
   await page.evaluate(() => window.__karu!.setZoom(1))
-  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click();
   await page.getByRole('button', { name: '項目を追加', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '項目を追加', exact: true })
   await expect(dialog).toBeVisible()
@@ -301,15 +304,18 @@ test('crops original drawing without annotations, keeps drafts on Esc, and prese
   expect([copy.style.shape, copy.style.fill, copy.style.color]).not.toEqual([original.style.shape, original.style.fill, original.style.color])
   const bytes = await page.evaluate(async () => [...(await window.__karu!.saveToBytes())!])
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '見本保存後.pdf'), bytes)
-  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click();
   await expect(page.getByTestId('fixture-panel').getByAltText('記号見本の見本', { exact: true })).toHaveAttribute('src', png!)
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '見本読込先.pdf'), blankPdf())
-  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click();
   await page.getByRole('button', { name: '他のPDFから読み込む', exact: true }).click()
   await page.getByLabel('読込元PDF', { exact: true }).selectOption({ label: '見本保存後.pdf' })
   await page.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
   const imported = (await savedFixtures(page)).find(f => f.name === original.name)!
-  expect(imported.sample).toEqual(original.sample); expect(imported.style).toEqual(original.style)
+  // A sample imported from another PDF keeps its image but not its location (SPEC-S07).
+  expect(original.sample?.rect).toHaveLength(4)
+  const { rect: _rect, ...originalImage } = original.sample!
+  expect(imported.sample).toEqual(originalImage); expect(imported.style).toEqual(original.style)
   await select(page, 'S 記号見本')
   await page.getByRole('button', { name: '編集', exact: true }).click()
   const edit = page.getByRole('dialog', { name: '項目を編集', exact: true })
@@ -374,12 +380,12 @@ test('fixture layout keeps counts and add actions in view at 1440x900 and restor
   await page.getByRole('tab', { name: 'ページ', exact: true }).click()
   const originalWidth = (await panel.boundingBox())!.width
   expect(originalWidth).toBeCloseTo(260, 0)
-  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click();
   expect((await panel.boundingBox())!.width).toBeGreaterThanOrEqual(340)
   await page.getByRole('tab', { name: '検索', exact: true }).click()
   expect((await panel.boundingBox())!.width).toBeCloseTo(originalWidth, 0)
   expect(await page.evaluate(() => localStorage.getItem('karu-pdf:side-panel-width'))).toBe('260')
-  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click();
 
   await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
   await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
@@ -482,7 +488,7 @@ test('custom style, duplication, bulk editing, multiple reassignment, undo, and 
   await expect(layer.locator('[data-count-shape="star"]')).toHaveCount(2)
   const saved = await page.evaluate(async () => [...(await window.__karu!.saveToBytes())!])
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '保存後.pdf'), saved)
-  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click(); await select(page, 'T 試験項目')
+  await page.getByRole('tab', { name: '数量', exact: true }).click(); await select(page, 'T 試験項目')
   await expect(page.getByTestId('fixture-panel')).toContainText('全図面: 2個')
   await expect(page.getByRole('button', { name: 'U 試験項目 のコピー', exact: true })).toBeVisible()
   await expect(page.getByTestId('annotation-layer-0').locator('[data-count-shape="star"]')).toHaveCount(2)
@@ -502,7 +508,7 @@ test('imports another open PDF without duplicate names/codes and keeps fixture d
   await page.locator('.tool-row').getByRole('button', { name: '元に戻す', exact: true }).click()
   await select(page, 'DS 片開き戸'); await expect(page.getByTestId('fixture-panel')).toContainText('全図面: 1個')
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '読込先.pdf'), blankPdf())
-  await page.getByRole('tab', { name: '数量', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('tab', { name: '数量', exact: true }).click();
   await page.getByRole('button', { name: '他のPDFから読み込む', exact: true }).click()
   await page.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
   await select(page, 'DS 片開き戸'); await expect(page.getByTestId('fixture-panel')).toContainText('全図面: 0個')
@@ -514,7 +520,7 @@ test('imports another open PDF without duplicate names/codes and keeps fixture d
 
 test('requires a fixture and warns for same-fixture clicks within 3mm without dropping the new mark', async ({ page }) => {
   await open(page)
-  await page.getByRole('button', { name: '数量拾い', exact: true }).click(); await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
+  await page.getByRole('button', { name: '数量拾い', exact: true }).click();
   await clickPoint(page, 0, 100, 100)
   expect(await page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter(a => a.count).length)).toBe(0)
   await expect(page.getByRole('status')).toContainText('数量拾いの一覧で項目を選んでください')

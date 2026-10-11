@@ -1,5 +1,5 @@
 import { routeMembers, conditionSuffix } from '../core/quantity'
-import { fixtureCode } from '../core/countFixtures'
+import { fixtureCode, fixtureDrawingCode } from '../core/countFixtures'
 import { quantityMethod } from '../core/countFixtures'
 import { constrainLinePoint, arrowHeadSize } from '../core/lineGeometry'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
@@ -24,6 +24,7 @@ import { CLEAR_EDITOR_SELECTION } from './interaction'
 import { ToolIcon } from '../ui/ToolIcon'
 import { CountMarker, countMarkerData, countSvgPath } from './countMarkers'
 import { countFixtureId } from '../core/counts'
+import { pickupPoint, polygonCentroid } from '../core/rooms'
 
 import { scaleLabel } from '../core/measure'
 export const ScaleRegionInteractionContext = createContext<{
@@ -764,7 +765,7 @@ export function AnnotationLayer(props: Props) {
       const annotation = props.store.create({
         pageIndex: props.pageIndex,
         kind: 'symbol',
-        count: fixture ? { version: 2, id: crypto.randomUUID(), fixtureId: fixture.id, ...props.store.pickupLocation(props.pageIndex) } : null,
+        count: fixture ? { version: 2, id: crypto.randomUUID(), fixtureId: fixture.id, ...props.store.pickupLocation(props.pageIndex, pickupPoint({ count: true, rect })) } : null,
         text: fixture ? `個数: ${fixtureCode(fixture)} ${fixture.name}`.trim() : '',
         rect,
         color: fixture?.style.color ?? format.color,
@@ -880,7 +881,7 @@ export function AnnotationLayer(props: Props) {
           <circle cx={(x0+x1)/2} cy={(y0+y1)/2} r={(x1-x0)*.45} fill="white" stroke={color(issueColor(annotation.issue, annotation.color))} strokeWidth={(x1-x0)*.06} />
           <text x={(x0+x1)/2} y={(y0+y1)/2 + issueFontSize(annotation.issue.number, x1-x0)*.3} textAnchor="middle" fontFamily="KaruBIZUDGothic" fontSize={issueFontSize(annotation.issue.number, x1-x0)}>{annotation.issue.number}</text>
         </g>}
-        {visible && annotation.measure && annotation.vertices && <MeasurementShape points={annotation.vertices} kind={annotation.measure.kind} text={annotation.quantity ? props.store.quantityText(annotation) : annotation.text} fontSize={annotation.fontSize} color={color(annotation.color)} width={annotation.borderWidth} opacity={annotation.opacity} dash={annotation.quantityDash} showText={!annotation.quantity || props.store.showQuantityValues} showFill={!selectedOverlay} routeComposition={annotation.quantity?.extra?.length ? { count: annotation.quantity.extra.length + 1, title: routeMembers(annotation.quantity).map(e => { const f = props.store.getCountFixture(e.itemId); return (f ? fixtureCode(f) : e.itemId) + (e.count === 1 ? '' : '×' + e.count) + conditionSuffix(e.cond) }).join('、') } : undefined} haloWidth={selected && annotation.opacity >= .99 ? annotation.borderWidth + 4 / Math.max(.01, props.zoom * CSS_PX_PER_PT) : undefined} />}
+        {visible && annotation.measure && annotation.vertices && <MeasurementShape points={annotation.vertices} kind={annotation.measure.kind} text={annotation.quantity ? props.store.quantityText(annotation) : annotation.text} fontSize={annotation.fontSize} color={color(annotation.color)} width={annotation.borderWidth} opacity={annotation.opacity} dash={annotation.quantityDash} holes={annotation.quantity ? annotation.quantity.holes : annotation.measure.holes} holesId={`measurement-holes-${props.docId}-${annotation.id}`} showText={!annotation.quantity || props.store.showQuantityValues} showFill={!selectedOverlay} routeComposition={annotation.quantity?.extra?.length ? { count: annotation.quantity.extra.length + 1, title: routeMembers(annotation.quantity).map(e => { const f = props.store.getCountFixture(e.itemId); return (f ? fixtureCode(f) : e.itemId) + (e.count === 1 ? '' : '×' + e.count) + conditionSuffix(e.cond) }).join('、') } : undefined} haloWidth={selected && annotation.opacity >= .99 ? annotation.borderWidth + 4 / Math.max(.01, props.zoom * CSS_PX_PER_PT) : undefined} />}
         {visible && annotation.kind === 'square' && <rect className="annotation-square" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && annotation.kind === 'circle' && <ellipse className="annotation-shape" cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} rx={(x1 - x0) / 2} ry={(y1 - y0) / 2} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && line && <>
@@ -897,7 +898,7 @@ export function AnnotationLayer(props: Props) {
         ) : annotation.kind === 'strikeout' ? (
           <line key={`${annotation.id}-quad-${index}`} className="annotation-text-mark-line" x1={(quad[0] + quad[4]) / 2} y1={(quad[1] + quad[5]) / 2} x2={(quad[2] + quad[6]) / 2} y2={(quad[3] + quad[7]) / 2} stroke={color(annotation.color)} />
         ) : null)}
-        {visible && fixture && annotation.count && <CountMarker style={fixture.style} code={fixtureCode(fixture)} showCode={visibleCount <= 1000} x={(x0 + x1) / 2} y={(y0 + y1) / 2} />}
+        {visible && fixture && annotation.count && <CountMarker style={fixture.style} code={fixtureDrawingCode(fixture)} showCode={visibleCount <= 1000} x={(x0 + x1) / 2} y={(y0 + y1) / 2} />}
         {visible && !fixture && annotation.kind === 'symbol' && symbolGlyph && <text
           className="annotation-symbol"
           x={(x0 + x1) / 2}
@@ -928,6 +929,15 @@ export function AnnotationLayer(props: Props) {
             return p && <circle data-testid="route-split-vertex" cx={p[0]} cy={p[1]} r={7 / props.zoom} fill="#fff4ae" stroke="#cf7b00" strokeWidth={2 / props.zoom} pointerEvents="none" />
           })()}
           {props.tool === 'select' && singleSelection && annotation.vertices?.map((p, i) => <rect key={i} className="annotation-resize-handle" data-testid={`measure-handle-${i}`} data-measure-vertex={i} data-annotation-id={annotation.id} x={p[0] - handleSize / 2} y={p[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
+          {props.tool === 'select' && singleSelection && !annotation.legacyChange && !annotation.count
+            && annotation.measure?.kind === 'area'
+            && (!annotation.quantity || annotation.quantity.method === 'polygon' || annotation.quantity.method === 'polygonDepth')
+            && annotation.vertices?.map((p, i, vertices) => {
+              const next = vertices[(i + 1) % vertices.length]
+              return <circle key={`midpoint-${i}`} className="annotation-midpoint-handle"
+                data-testid={`measure-midpoint-${i}`} data-measure-midpoint={i} data-annotation-id={annotation.id}
+                cx={p[0] / 2 + next[0] / 2} cy={p[1] / 2 + next[1] / 2} r={handleSize * .3} />
+            })}
           {props.tool === 'select' && singleSelection && positions.map(({ handle, x, y }) => <rect key={`${annotation.id}-${handle}`} className="annotation-resize-handle" data-testid={`resize-handle-${handle}`} data-annotation-id={annotation.id} data-resize-handle={handle} x={x - handleSize / 2} y={y - handleSize / 2} width={handleSize} height={handleSize} />)}
           {props.tool === 'select' && singleSelection && line && line.map((point, index) => <rect key={`${annotation.id}-line-${index}`} className="annotation-resize-handle" data-testid={`line-handle-${index === 0 ? 'start' : 'end'}`} data-annotation-id={annotation.id} data-line-handle={index === 0 ? 'start' : 'end'} x={point[0] - handleSize / 2} y={point[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
           {props.tool === 'select' && singleSelection && calloutLine && <rect className="annotation-resize-handle annotation-callout-handle" data-testid="callout-point-handle" data-annotation-id={annotation.id} data-callout-point="true" x={calloutLine[0][0] - handleSize / 2} y={calloutLine[0][1] - handleSize / 2} width={handleSize} height={handleSize} />}
@@ -960,14 +970,53 @@ export function AnnotationLayer(props: Props) {
     for (const a of orderedAnnotations) if (selectedIds.has(a.id)) displayItems.push(renderAnnotation(a))
   }
 
+  const roomEditTarget = props.store.roomEditTarget
+  const roomRegions = props.store.effectiveRoomRegions(props.pageIndex)
+  const aligningRoomSet = props.store.roomSetAlignPage === props.pageIndex
+  const alignedSet = aligningRoomSet ? props.store.getPageRoomSet(props.pageIndex) : undefined
+  const alignedLink = aligningRoomSet ? props.store.getPageRoomSetLink(props.pageIndex) : undefined
+  const alignedAnchor = alignedSet?.anchor
+    ? [
+      alignedSet.anchor[0] + (alignedLink?.dx ?? 0),
+      alignedSet.anchor[1] + (alignedLink?.dy ?? 0),
+    ]
+    : undefined
+  const anchorSize = 7 / Math.max(.01, props.zoom * CSS_PX_PER_PT)
+  const editingRoom = roomEditTarget?.pageIndex === props.pageIndex
+    ? roomRegions.find(({ region }) => region.id === roomEditTarget.id)?.region
+    : undefined
+  const renderRoomRegion = (region: NonNullable<typeof editingRoom>, editing: boolean, aligning = false) => {
+    const center = polygonCentroid(region.points)
+    const size = 11 / Math.max(.01, props.zoom * CSS_PX_PER_PT)
+    const handleSize = 8 / Math.max(.01, props.zoom * CSS_PX_PER_PT)
+    return <g key={region.id} className={`room-region${editing ? ' room-region-editing' : ''}${aligning ? ' room-region-aligning' : ''}`} data-room-id={region.id} pointerEvents="none">
+      <polygon points={region.points.map(point => point.join(',')).join(' ')}
+        fill="#007cbb" fillOpacity={editing || aligning ? '.12' : '.08'} stroke={aligning ? '#005580' : '#007cbb'} strokeWidth={editing || aligning ? '1.5' : '.75'}
+        strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
+      {center && <text className="room-region-label" x={center[0]} y={center[1]}
+        textAnchor="middle" dominantBaseline="central" fontSize={size}
+        fill="#007cbb" stroke="white" strokeWidth={size * .3} paintOrder="stroke">{region.name}</text>}
+      {editing && region.points.map((point, index) => <rect key={`vertex-${index}`}
+        className="annotation-resize-handle room-region-handle" data-room-vertex={index}
+        data-testid={`room-handle-${index}`}
+        x={point[0] - handleSize / 2} y={point[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
+      {editing && region.points.map((point, index, vertices) => {
+        const next = vertices[(index + 1) % vertices.length]
+        return <circle key={`midpoint-${index}`} className="annotation-midpoint-handle room-region-handle"
+          data-room-midpoint={index} data-testid={`room-midpoint-${index}`}
+          cx={point[0] / 2 + next[0] / 2} cy={point[1] / 2 + next[1] / 2} r={handleSize * .3} />
+      })}
+    </g>
+  }
+
   return <>
     <svg
       ref={svgRef}
-      className={`annotation-layer tool-${props.tool}${drawingRegion ? ' drawing-scale-region' : ''}`}
+      className={`annotation-layer tool-${props.tool}${drawingRegion ? ' drawing-scale-region' : ''}${props.store.roomCapturePage === props.pageIndex ? ' drawing-room-region' : ''}${editingRoom ? ' editing-room-region' : ''}${aligningRoomSet ? ' aligning-room-set' : ''}`}
       data-testid={`annotation-layer-${props.pageIndex}`}
       viewBox={`0 0 ${props.pageSize.width} ${props.pageSize.height}`}
       onPointerEnter={(event) => {
-        if (regionInteraction.drawPage !== null) return
+        if (regionInteraction.drawPage !== null || props.store.roomCapturePage !== null || props.store.roomEditTarget !== null || props.store.roomSetAlignPage !== null) return
         if (!TEXT_MARK_TOOLS.has(props.tool)) return
         pointerPointRef.current = pointInPage(event.currentTarget, event)
         ensureTextLines()
@@ -990,7 +1039,7 @@ export function AnnotationLayer(props: Props) {
         }
         const id = annotationIdFromTarget(event.target) ?? (compactCounts && props.tool === 'select'
           ? orderedAnnotations.findLast(a => a.count && start[0] >= a.rect[0] && start[0] <= a.rect[2] && start[1] >= a.rect[1] && start[1] <= a.rect[3])?.id ?? null : null)
-        if (props.tool === 'count') {
+        if (props.tool === 'count' && props.store.roomEditTarget === null) {
           props.store.prepareCountTool()
         }
         if (measurement.pointerDown(event, start)) return
@@ -1155,7 +1204,7 @@ export function AnnotationLayer(props: Props) {
       onPointerCancel={() => { clearRegionDrag(); if (!measurement.cancel()) finishDrag(false) }}
       onDoubleClick={(event) => {
         if (regionInteraction.drawPage !== null) return
-        if (measurement.doubleClick()) return
+        if (measurement.doubleClick(event)) return
         if (props.tool !== 'select') return
         const id = annotationIdFromTarget(event.target) ?? props.selectedId
         const annotation = id ? props.store.get(id) : undefined
@@ -1163,7 +1212,19 @@ export function AnnotationLayer(props: Props) {
       }}
     >
       <rect className="annotation-surface" x="0" y="0" width={props.pageSize.width} height={props.pageSize.height} />
+      {props.store.showRoomRegions && roomRegions.map(({ region, setId }) =>
+        region.id === editingRoom?.id || aligningRoomSet && setId === alignedSet?.id
+          ? null : renderRoomRegion(region, false))}
       {displayItems}
+      {aligningRoomSet && <g className="room-set-align-ranges" pointerEvents="none">
+        {roomRegions.filter(entry => entry.setId === alignedSet?.id)
+          .map(({ region }) => renderRoomRegion(region, false, true))}
+        {alignedAnchor && <path data-testid="room-set-anchor"
+          d={`M${alignedAnchor[0] - anchorSize},${alignedAnchor[1]}h${anchorSize * 2}M${alignedAnchor[0]},${alignedAnchor[1] - anchorSize}v${anchorSize * 2}`}
+          fill="none" stroke="#005580" strokeWidth="2"
+          vectorEffect="non-scaling-stroke" pointerEvents="none" />}
+      </g>}
+      {editingRoom && renderRoomRegion(editingRoom, true)}
       {(isMeasureTool(props.tool) || props.tool === 'count' || drawingRegion || regionInteraction.dialogPage === props.pageIndex) && props.store.scaleRegions.get(props.pageIndex)?.map(region => {
         const [x, y, right, bottom] = region.rect, size = 11 / Math.max(.01, props.zoom * CSS_PX_PER_PT)
         const label = [region.label, scaleLabel(region.scale).replace(/^(縮尺|約) /, '')].filter(Boolean).join(' ')
@@ -1191,12 +1252,20 @@ export function AnnotationLayer(props: Props) {
         vectorEffect="non-scaling-stroke" pointerEvents="none" aria-hidden="true" />)}
     </svg>
     {measurement.dialog}
+    {props.store.symbolSearchArea?.pageIndex === props.pageIndex && <svg className="annotation-layer symbol-search-area-layer"
+      viewBox={`0 0 ${props.pageSize.width} ${props.pageSize.height}`} pointerEvents="none" aria-hidden="true">
+      <rect className="symbol-search-area" data-testid={`symbol-search-area-${props.pageIndex}`}
+        x={props.store.symbolSearchArea.rect[0]} y={props.store.symbolSearchArea.rect[1]}
+        width={props.store.symbolSearchArea.rect[2] - props.store.symbolSearchArea.rect[0]}
+        height={props.store.symbolSearchArea.rect[3] - props.store.symbolSearchArea.rect[1]}
+        vectorEffect="non-scaling-stroke" pointerEvents="none" />
+    </svg>}
     {props.store.visibleSymbolCandidates?.some(c => c.pageIndex === props.pageIndex) && <svg className="annotation-layer symbol-search-candidates"
       data-testid={`symbol-search-candidates-${props.pageIndex}`} viewBox={`0 0 ${props.pageSize.width} ${props.pageSize.height}`}>
       {props.store.visibleSymbolCandidates!.filter(c => c.pageIndex === props.pageIndex).map(c => <g key={c.id}
         data-testid="symbol-search-candidate" data-candidate-id={c.id} data-state={c.state} data-confidence={c.confidence} data-shape={c.shape?.decision ?? 'none'} data-other={c.otherFixture ? 'true' : undefined}
         className={`symbol-search-candidate ${c.state}${c.shape?.decision === 'different' ? ' shape-different' : ''}${c.otherFixture ? ' other-fixture' : ''}`}
-        role="button" aria-label={`記号の候補${c.otherFixture ? '（他の項目で拾い済み）' : c.state === 'counted' ? '（拾い済み）' : ''}`} aria-pressed={c.state === 'chosen'} aria-disabled={c.state === 'counted' || !!c.otherFixture} tabIndex={c.state === 'counted' || c.otherFixture ? -1 : 0}
+        role="button" aria-label={`記号の候補${c.otherFixture ? '（他の項目で拾い済み）' : c.state === 'counted' ? '（拾い済み）' : ''}`} aria-pressed={c.state === 'chosen'} aria-disabled={c.state === 'counted' ? true : undefined} tabIndex={c.state === 'counted' ? -1 : 0}
         onPointerDown={e => { e.preventDefault(); e.stopPropagation() }} onPointerUp={e => { e.preventDefault(); e.stopPropagation() }}
         onDoubleClick={e => { e.preventDefault(); e.stopPropagation() }} onClick={e => { e.preventDefault(); e.stopPropagation(); props.store.toggleSymbolCandidate(c.id) }}
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); props.store.toggleSymbolCandidate(c.id) } }}>
@@ -1206,7 +1275,7 @@ export function AnnotationLayer(props: Props) {
             : c.shape?.decision === 'unknown' ? `・形の細部は不明（${c.shape.unknown.map(feature => ({ topArc: '円弧', annexFrame: '外の枠', interiorLines: '中の斜線', interior: '中の塗り' }[feature])).join('・')}）` : ''}
           {c.otherFixture ? `・他の項目（${props.store.symbolOtherFixtureLabel(c.otherFixture)}）で拾い済み` : ''}</title>
         <rect x={c.rect[0]} y={c.rect[1]} width={c.rect[2] - c.rect[0]} height={c.rect[3] - c.rect[1]} vectorEffect="non-scaling-stroke" />
-        {c.state === 'pending' && !c.otherFixture && c.confidence === 'check' && <text className="symbol-search-question" x={c.rect[2]} y={c.rect[1]} textAnchor="end"
+        {c.state === 'pending' && c.confidence === 'check' && <text className="symbol-search-question" x={c.rect[2]} y={c.rect[1]} textAnchor="end"
           fontSize={Math.min(c.rect[2] - c.rect[0], c.rect[3] - c.rect[1]) * .65}>?</text>}
         {c.state === 'chosen' && <text x={c.center[0]} y={c.center[1]} textAnchor="middle" dominantBaseline="central" fontSize={Math.min(c.rect[2] - c.rect[0], c.rect[3] - c.rect[1]) * .75}>✓</text>}
       </g>)}

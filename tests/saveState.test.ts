@@ -8,7 +8,7 @@ import { stableJson } from '../src/core/stableJson'
 
 const scale: PageScale = { denominator: 100, paper: 'PDF', source: 'ratio', mmPerPoint: 25.4 / 72 * 100, unit: 'm', decimals: 2 }
 const fixture = (): CountFixture => ({ id: 'cv', code: 'CV', name: 'ケーブル', category: '電線', kind: 'length', method: 'polyline', order: 0, style: nextCountStyle([]) })
-const emptySummary = { annotations: 0, fixtures: false, scales: [], drawings: [] }
+const emptySummary = { annotations: 0, fixtures: false, scales: [], drawings: [], rooms: [], roomSets: false }
 function session() {
   return new DocumentSession({ docId: 'test', name: '保存状態.pdf', byteLength: 100, handle: null, pageSizes: Array.from({ length: 12 }, () => ({ width: 500, height: 500 })) })
 }
@@ -103,7 +103,7 @@ describe('保存対象のスナップショット', () => {
     store.setDrawingInfo([1], { number: 'A-02', numberManual: true })
     const edits = store.toEdits()
     store.markApplied({ created: [], errors: edits.map((_, editIndex) => ({ editIndex })) })
-    expect(store.dirtySummary()).toEqual({ annotations: 1, fixtures: true, scales: [2], drawings: [1] })
+    expect(store.dirtySummary()).toEqual({ annotations: 1, fixtures: true, scales: [2], drawings: [1], rooms: [], roomSets: false })
     expect(store.isDirty()).toBe(true)
     expect(store.toEdits()).toEqual(edits)
   })
@@ -118,7 +118,69 @@ describe('保存対象のスナップショット', () => {
     store.setScale([0], { ...scale, denominator: 50 }, false)
     store.setDrawingInfo([0], { number: 'A-02', numberManual: true })
     store.markApplied({ created: [], errors: [] })
-    expect(store.dirtySummary()).toEqual({ annotations: 0, fixtures: true, scales: [0], drawings: [0] })
+    expect(store.dirtySummary()).toEqual({ annotations: 0, fixtures: true, scales: [0], drawings: [0], rooms: [], roomSets: false })
+  })
+})
+
+describe('部屋の組の保存状態', () => {
+  const region = { id: 'shared-region', name: '事務室', points: [[0, 0], [100, 0], [100, 100]] as Point[] }
+  const set = { id: 'shared-set', name: '1階', regions: [region] }
+
+  it('includes changed links in rooms and set changes in the description', () => {
+    const doc = session(), store = doc.annotationStore
+    store.loadRoomSets([set], [[0, { id: set.id }]])
+    expect(store.dirtySummary()).toEqual(emptySummary)
+    store.useRoomSet(2, set.id)
+    expect(store.dirtySummary()).toEqual({ ...emptySummary, rooms: [2] })
+    expect(doc.dirtyDescription()).toBe('部屋の範囲（3ページ）')
+    store.renameRoomSet(set.id, '共通の部屋')
+    expect(store.dirtySummary()).toEqual({ ...emptySummary, rooms: [2], roomSets: true })
+    expect(doc.dirtyDescription()).toBe('部屋の範囲（3ページ）、部屋の組')
+    store.undo()
+    store.undo()
+    expect(store.dirtySummary()).toEqual(emptySummary)
+  })
+
+  it('keeps set and link changes made during saving dirty', () => {
+    const store = new AnnotationStore()
+    store.loadRoomSets([set], [[0, { id: set.id }]])
+    store.renameRoomSet(set.id, '保存する名前')
+    store.useRoomSet(1, set.id)
+    store.toEdits()
+    store.renameRoomSet(set.id, '保存中に変更')
+    store.useRoomSet(1, null)
+    store.markApplied({ created: [], errors: [] })
+    expect(store.dirtySummary()).toEqual({ ...emptySummary, rooms: [1], roomSets: true })
+    expect(store.toEdits()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'setRoomSets', sets: [expect.objectContaining({ name: '保存中に変更' })] }),
+      { kind: 'setPageRoomSet', pageIndex: 1, setId: null },
+    ]))
+  })
+
+  it('keeps failed set and detached-link edits dirty', () => {
+    const store = new AnnotationStore()
+    store.loadRoomSets([set], [[0, { id: set.id }], [2, { id: set.id }]])
+    store.deleteRoomSet(set.id)
+    const edits = store.toEdits()
+    expect(edits).toEqual([
+      { kind: 'setRoomSets', pageIndex: 0, sets: [] },
+      { kind: 'setPageRoomSet', pageIndex: 0, setId: null },
+      { kind: 'setPageRoomSet', pageIndex: 2, setId: null },
+    ])
+    store.markApplied({ created: [], errors: edits.map((_, editIndex) => ({ editIndex })) })
+    expect(store.dirtySummary()).toEqual({ ...emptySummary, rooms: [0, 2], roomSets: true })
+    expect(store.toEdits()).toEqual(edits)
+    apply(store)
+    expect(store.dirtySummary()).toEqual(emptySummary)
+  })
+
+  it('does not invalidate saved page rendering for set or link edits', () => {
+    const doc = session()
+    doc.recordSavedRendering([
+      { kind: 'setRoomSets', pageIndex: 0, sets: [set] },
+      { kind: 'setPageRoomSet', pageIndex: 2, setId: set.id },
+    ], [])
+    expect(doc.savedPageRevisions.size).toBe(0)
   })
 })
 
@@ -131,10 +193,11 @@ describe('未保存内容とキャッシュ', () => {
     store.setCountFixtures([fixture()])
     store.setScale([2, 0], scale, false)
     store.setDrawingInfo([1], { name: '平面図', nameManual: true })
-    expect(store.dirtySummary()).toEqual({ annotations: 1, fixtures: true, scales: [0, 2], drawings: [1] })
-    expect(doc.dirtyDescription()).toBe('書き込み・数量の拾い 1件、数量拾いの項目、縮尺（1・3ページ）、図面番号・図面名称（2ページ）')
+    store.setRoomRegions(1, [{ id: 'r1', name: '事務室', points: [[0, 0], [10, 0], [10, 10]] }])
+    expect(store.dirtySummary()).toEqual({ annotations: 1, fixtures: true, scales: [0, 2], drawings: [1], rooms: [1], roomSets: false })
+    expect(doc.dirtyDescription()).toBe('書き込み・数量の拾い 1件、数量拾いの項目、縮尺（1・3ページ）、図面番号・図面名称（2ページ）、部屋の範囲（2ページ）')
     doc.fileOutdated = true
-    expect(doc.dirtyDescription()).toBe('書き込み・数量の拾い 1件、数量拾いの項目、縮尺（1・3ページ）、図面番号・図面名称（2ページ）、ページの編集・まだ保存していない文書')
+    expect(doc.dirtyDescription()).toBe('書き込み・数量の拾い 1件、数量拾いの項目、縮尺（1・3ページ）、図面番号・図面名称（2ページ）、部屋の範囲（2ページ）、ページの編集・まだ保存していない文書')
     apply(store, [81])
     expect(doc.dirtyDescription()).toBe('ページの編集・まだ保存していない文書')
     doc.fileOutdated = false

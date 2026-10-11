@@ -114,6 +114,12 @@
     "maxOccurrences": 2
   },
   {
+    "file": "dist-fixed/assets/MeasurementOverlay-*.js",
+    "string": "http://www.w3.org/2000/svg",
+    "reason": "SVG の名前空間識別子（計測・部屋の範囲の重ね描き）。数量タブが部屋の範囲の画面を読み込むため、計測の重ね描きが別のチャンクになった。取得先ではない。",
+    "maxOccurrences": 1
+  },
+  {
     "file": "dist-fixed/assets/App-*.js",
     "string": "XMLHttpRequest",
     "reason": "MuPDF/Emscripten の file: 読み取り用フォールバック。固定版は内部サーバーの HTTP(S) を使用する。",
@@ -250,5 +256,239 @@
     "string": "http://www.w3.org/XML/1998/namespace",
     "maxOccurrences": 3,
     "reason": "XML の名前空間識別子。取得先ではない。"
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/package/2006/relationships",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://purl.org/dc/elements/1.1/",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://purl.org/dc/terms/",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://www.w3.org/2001/XMLSchema-instance",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/package/2006/content-types",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/package/2006/relationships",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://purl.org/dc/elements/1.1/",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://purl.org/dc/terms/",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://www.w3.org/2001/XMLSchema-instance",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/package/2006/content-types",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/package/2006/relationships",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://purl.org/dc/elements/1.1/",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://purl.org/dc/terms/",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://www.w3.org/2001/XMLSchema-instance",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/package/2006/content-types",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
   }
 ]

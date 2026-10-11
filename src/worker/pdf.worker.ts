@@ -13,6 +13,7 @@ import { paintBuffers } from '../core/vectorPaint'
 import { extractLabelPage } from './labelExtract'
 import { ComparePageCache, renderComparePixels } from './compareRender'
 import { readDocumentScaleMetadata } from '../core/measure'
+import { readDocumentRoomMetadata } from '../core/rooms'
 import { applyEdits, listAnnotations } from '../core/annotations'
 import { readCountFixtures } from '../core/countFixtures'
 import { applyEditsAtomically, applyAndSaveAtomically, pdfOperation } from '../core/editTransaction'
@@ -417,6 +418,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         pageSizes: opened.pageSizes,
         pageDrawingInfos: includeMetadata ? readDocumentDrawingInfos(pdf) : [],
         ...(includeMetadata ? readDocumentScaleMetadata(pdf) : { pageScales: [], pageScaleRegions: [] }),
+        ...(includeMetadata ? readDocumentRoomMetadata(pdf) : { pageRoomRegions: [], roomSets: [], pageRoomSets: [] }),
         openMs: opened.openMs,
         sizesMs: opened.sizesMs,
       })
@@ -676,6 +678,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
           type: 'pageLayoutApplied', requestId: request.requestId, bytes,
           pageCount: pageSizes.length,
           pageSizes, pageDrawingInfos: readDocumentDrawingInfos(reopenedDocument), ...readDocumentScaleMetadata(reopenedDocument),
+          ...readDocumentRoomMetadata(reopenedDocument),
           hasBackup: true,
           timings: {
             backupMs,
@@ -723,7 +726,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         const bytes = saved.buffer as ArrayBuffer
         post({
           type: request.type === 'applyHeaderFooter' ? 'headerFooterApplied' : 'headerFooterRemoved', requestId: request.requestId, bytes,
-          pageCount: pageSizes.length, pageSizes, pageDrawingInfos: readDocumentDrawingInfos(reopenedDocument), ...readDocumentScaleMetadata(reopenedDocument), hasBackup: true,
+          pageCount: pageSizes.length, pageSizes, pageDrawingInfos: readDocumentDrawingInfos(reopenedDocument), ...readDocumentScaleMetadata(reopenedDocument), ...readDocumentRoomMetadata(reopenedDocument), hasBackup: true,
           timings: { backupMs, assembleMs, exportMs, primaryReloadMs, pageMetadataMs, workerTotalMs: performance.now() - workerStarted },
         }, [bytes])
       } catch (error) {
@@ -750,6 +753,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         type: 'pageLayoutUndone', requestId: request.requestId, bytes,
         pageCount: pageSizes.length,
         pageSizes, pageDrawingInfos: readDocumentDrawingInfos(restoredDocument), ...readDocumentScaleMetadata(restoredDocument),
+        ...readDocumentRoomMetadata(restoredDocument),
         hasBackup: false,
         timings: {
           backupMs: 0,

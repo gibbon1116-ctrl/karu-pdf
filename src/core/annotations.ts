@@ -1,5 +1,6 @@
-import { fixtureCode } from './countFixtures'
+import { fixtureCode, fixtureDrawingCode } from './countFixtures'
 import { writeDrawingInfo, type DrawingInfo } from './drawingInfo'
+import { writePageRoomSet, writeRoomRegions, writeRoomSets, type RoomRegion, type RoomSet } from './rooms'
 import { parseQuantityMark, serializeQuantityMark, quantityPoints, quantityDashes, type QuantityMark } from './quantity'
 import { QUANTITY_DASHES, type QuantityLineStyle } from './countFixtures'
 import { arrowHeadSize } from './lineGeometry'
@@ -29,7 +30,7 @@ import { parseIssue, issueColor, issueFontSize, type Issue } from './issues'
 import { parseCount, type CountMark } from './counts'
 import { writeCountFixtures, type CountFixture } from './countFixtures'
 import { countMarkerData } from '../editor/countMarkers'
-import { createMeasureDictionary, invertMatrix, measureBounds, measureLabel, measureText, pageUnitFactor, readMeasureSettings, transformMeasurePoint, writePageScale, writeScaleRegions, type ScaleRegion, type MeasureKind, type MeasureSettings, type PageScale } from './measure'
+import { createMeasureDictionary, invertMatrix, measureBounds, measureLabel, measureText, normalizeMeasureSettings, pageUnitFactor, readMeasureSettings, transformMeasurePoint, writePageScale, writeScaleRegions, type ScaleRegion, type MeasureKind, type MeasureSettings, type PageScale } from './measure'
 
 export type Rect = [number, number, number, number]
 export type RGB = [number, number, number]
@@ -119,6 +120,9 @@ export type AnnotationEdit =
   | { kind: 'createLegacyChange'; pageIndex: number; data: LegacyChangeData }
   | { kind: 'setDrawingInfo'; pageIndex: number; info: DrawingInfo | null }
   | { kind: 'setScaleRegions'; pageIndex: number; regions: ScaleRegion[] }
+  | { kind: 'setRoomRegions'; pageIndex: number; regions: RoomRegion[] }
+  | { kind: 'setRoomSets'; pageIndex: 0; sets: RoomSet[] }
+  | { kind: 'setPageRoomSet'; pageIndex: number; setId: string | null; dx?: number; dy?: number }
   | { kind: 'setPageScale'; pageIndex: number; scale: PageScale | null }
   | { kind: 'createMeasure'; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number; quantity?: QuantityMark | null; quantityDash?: QuantityLineStyle['dash'] }
   | { kind: 'updateMeasure'; objNum: number; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number; quantity?: QuantityMark | null; quantityDash?: QuantityLineStyle['dash'] }
@@ -160,7 +164,7 @@ interface AppearanceTask {
   countFixture?: CountFixture
   issue?: Issue
   visibleRect?: Rect
-  measurement?: { points: Point[]; kind: MeasureKind; rect: Rect; opacity: number; dash?: QuantityLineStyle['dash'] }
+  measurement?: { points: Point[]; kind: MeasureKind; rect: Rect; opacity: number; dash?: QuantityLineStyle['dash']; holes?: Point[][] }
   editIndex: number
   page: PDFPage
   annotation: PDFAnnotation
@@ -1033,6 +1037,49 @@ function referenceAppearanceFromPage(doc: PDFDocument, page: PDFPage, annotation
   }
 }
 
+function drawMeasurementHoles(device: DisplayListDevice, points: Point[], holes: Point[][], color: RGB, borderWidth: number): void {
+  const outer = new mupdf.Path()
+  const width = Math.max(.25, borderWidth / 2)
+  const outline = new mupdf.StrokeState({ lineWidth: width, lineJoin: 'Round', lineCap: 'Butt', miterLimit: 10, dashes: [3, 3] })
+  const hatchStroke = new mupdf.StrokeState({ lineWidth: width, lineJoin: 'Round', lineCap: 'Butt', miterLimit: 10 })
+  let outerClipped = false
+  try {
+    polygon(outer, points)
+    device.clipPath(outer, false, mupdf.Matrix.identity)
+    outerClipped = true
+    for (const hole of holes) {
+      const path = new mupdf.Path(), hatch = new mupdf.Path()
+      let holeClipped = false
+      try {
+        polygon(path, hole)
+        device.fillPath(path, false, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, color, .08)
+        device.strokePath(path, outline, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, color, 1)
+        const xs = hole.map(p => p[0]), ys = hole.map(p => p[1])
+        const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys)
+        const span = maxX - minX + maxY - minY
+        if (Number.isFinite(span) && span > 0) {
+          const spacing = Math.max(6, span / 512)
+          device.clipPath(path, false, mupdf.Matrix.identity)
+          holeClipped = true
+          // Bound hatch work even for very large, but finite, coordinates.
+          const count = Math.min(512, Math.ceil(span / spacing))
+          for (let i = 0; i <= count; i++) {
+            const level = minX + minY + i * spacing
+            hatch.moveTo(level - minY, minY)
+            hatch.lineTo(level - maxY, maxY)
+          }
+          device.strokePath(hatch, hatchStroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, color, .45)
+        }
+      } finally {
+        if (holeClipped) device.popClip()
+        hatch.destroy(); path.destroy()
+      }
+    }
+  } finally {
+    if (outerClipped) device.popClip()
+    hatchStroke.destroy(); outline.destroy(); outer.destroy()
+  }
+}
 function drawMeasurement(device: DisplayListDevice, text: InstanceType<typeof mupdf.Text>, task: AppearanceTask, font: FontResource, fallback?: FontResource): void {
   const measurement = task.measurement!
   const points = measurement.points
@@ -1051,6 +1098,9 @@ function drawMeasurement(device: DisplayListDevice, text: InstanceType<typeof mu
     }
     device.strokePath(path, stroke, mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB, task.color, 1)
   } finally { stroke.destroy(); path.destroy() }
+  if (measurement.kind === 'area' && measurement.holes?.length) {
+    drawMeasurementHoles(device, points, measurement.holes, task.color, task.borderWidth)
+  }
   const { anchor, angle } = measureLabel(points, measurement.kind, task.fontSize)
   const encoded = [...task.text].map(c => encodeCharacter(font.font, c, fallback?.font))
   const width = encoded.reduce((sum, c) => sum + c.advance * task.fontSize, 0)
@@ -1101,7 +1151,7 @@ function drawIssue(device: DisplayListDevice, text: InstanceType<typeof mupdf.Te
 }
 
 function drawCountMarker(device: DisplayListDevice, text: InstanceType<typeof mupdf.Text>, task: AppearanceTask, font: FontResource, fallback?: FontResource): void {
-  const fixture = task.countFixture!, s = fixture.style, top = s.showCode && fixtureCode(fixture) ? s.size * .7 * 1.2 : 0
+  const fixture = task.countFixture!, s = fixture.style, top = s.showCode && fixtureDrawingCode(fixture) ? s.size * .7 * 1.2 : 0
   const data = countMarkerData(s, s.size / 2 + 1, top + s.size / 2 + 1)
   const draw = (polygons: Point[][], fill: boolean, rgb: RGB, width: number, close = true) => {
     const path = new mupdf.Path(), stroke = new mupdf.StrokeState({ lineWidth: width, lineJoin: 'Round', lineCap: 'Butt', miterLimit: 10 })
@@ -1113,9 +1163,9 @@ function drawCountMarker(device: DisplayListDevice, text: InstanceType<typeof mu
   }
   if (data.bright) draw(data.outline, false, [64 / 255, 64 / 255, 64 / 255], 1.8)
   draw(data.fills, true, s.color, .8); draw(data.outline, false, s.color, .8); draw(data.strokes, false, s.color, .8, false)
-  if (s.showCode && fixtureCode(fixture)) {
+  if (s.showCode && fixtureDrawingCode(fixture)) {
     let x = data.code.x
-    for (const char of [...fixtureCode(fixture)].map(c => encodeCharacter(font.font, c, fallback?.font))) {
+    for (const char of [...fixtureDrawingCode(fixture)].map(c => encodeCharacter(font.font, c, fallback?.font))) {
       text.showGlyph(char.font, [data.code.size, 0, 0, -data.code.size, x, data.code.y], char.glyph, char.unicode)
       x += char.advance * data.code.size
     }
@@ -1316,7 +1366,7 @@ function installTemporaryAppearances(
     const countTemplates = new Map<string, number>()
     for (const task of tasks) {
       // Round the size: e.g. 10 * .7 carries float noise that differs by position and would split templates.
-      const key = task.countFixture ? JSON.stringify([task.countFixture.style, fixtureCode(task.countFixture), Math.round(task.width * 1000) / 1000, Math.round(task.height * 1000) / 1000]) : null
+      const key = task.countFixture ? JSON.stringify([task.countFixture.style, fixtureDrawingCode(task.countFixture), Math.round(task.width * 1000) / 1000, Math.round(task.height * 1000) / 1000]) : null
       const cached = key ? countTemplates.get(key) : undefined
       if (cached !== undefined) { task.temporaryPageIndex = cached; continue }
       const fontResource = fontResources[task.fontName]
@@ -1453,6 +1503,18 @@ export function applyEdits(
         writeScaleRegions(doc, page, edit.regions)
         continue
       }
+      if (edit.kind === 'setRoomRegions') {
+        writeRoomRegions(doc, page, edit.regions)
+        continue
+      }
+      if (edit.kind === 'setRoomSets') {
+        writeRoomSets(doc, edit.sets)
+        continue
+      }
+      if (edit.kind === 'setPageRoomSet') {
+        writePageRoomSet(doc, page, edit.setId, edit.dx, edit.dy)
+        continue
+      }
       if (edit.kind === 'setPageScale') {
         writePageScale(doc, page, edit.scale)
         continue
@@ -1507,6 +1569,9 @@ export function applyEdits(
         const type = edit.measure.kind === 'distance' ? 'Line' : edit.measure.kind === 'perimeter' ? 'PolyLine' : 'Polygon'
         if (edit.vertices.length < (type === 'Polygon' ? 3 : 2) || (type === 'Line' && edit.vertices.length !== 2)
           || edit.vertices.some(p => p.some(n => !Number.isFinite(n))) || !Number.isFinite(edit.measure.mmPerPoint) || edit.measure.mmPerPoint <= 0) throw new Error('計測の点または縮尺が不正です。')
+        const settings = normalizeMeasureSettings(edit.measure)
+        const quantity = edit.quantity ? parseQuantityMark(serializeQuantityMark(edit.quantity)) : null
+        if (edit.quantity && (!quantity || (quantityPoints(quantity.method) === 'polygon' ? type !== 'Polygon' : type !== 'PolyLine'))) throw new Error('数量拾いの値が不正です。')
         annotation = isNew ? page.createAnnotation(type) : lookupAnnotation(edit.pageIndex, 'objNum' in edit ? edit.objNum : -1)
         if (!annotation || annotation.getType() !== type) throw new Error('計測の注釈が見つかりません。')
         const rect = measureBounds(edit.vertices, edit.measure.kind, edit.text, edit.fontSize)
@@ -1518,7 +1583,7 @@ export function applyEdits(
         annotation.setOpacity(edit.opacity)
         annotation.setContents(edit.text)
         annotation.update()
-        const object = annotation.getObject(), measure = createMeasureDictionary(doc, edit.measure, pageUnitFactor(page))
+        const object = annotation.getObject(), measure = createMeasureDictionary(doc, settings, pageUnitFactor(page))
         try {
           const inv = invertMatrix(page.getTransform())
           const a = transformMeasurePoint([rect[0], rect[1]], inv), b = transformMeasurePoint([rect[2], rect[3]], inv)
@@ -1527,12 +1592,10 @@ export function applyEdits(
           setPdfNumberArray(doc, object, 'Rect', [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])])
           setPdfName(doc, object, 'IT', type === 'Line' ? 'LineDimension' : type === 'PolyLine' ? 'PolyLineDimension' : 'PolygonDimension')
           object.put('Measure', measure)
-          setPdfString(doc, object, 'KaruMeasure', JSON.stringify(edit.measure))
+          setPdfString(doc, object, 'KaruMeasure', JSON.stringify(settings))
           setPdfNumber(doc, object, 'KaruMeasureFontSize', edit.fontSize)
-          if (edit.quantity) {
-            const mark = parseQuantityMark(serializeQuantityMark(edit.quantity))
-            if (!mark || (quantityPoints(mark.method) === 'polygon' ? type !== 'Polygon' : type !== 'PolyLine')) throw new Error('数量拾いの値が不正です。')
-            setPdfString(doc, object, 'KaruQuantity', serializeQuantityMark(mark))
+          if (quantity) {
+            setPdfString(doc, object, 'KaruQuantity', serializeQuantityMark(quantity))
             if (edit.quantityDash && edit.quantityDash !== 'solid') setPdfString(doc, object, 'KaruQuantityDash', edit.quantityDash)
             else object.delete('KaruQuantityDash')
           } else { object.delete('KaruQuantity'); object.delete('KaruQuantityDash') }
@@ -1545,7 +1608,10 @@ export function applyEdits(
         appearances.push({ editIndex, page, annotation, width: rect[2] - rect[0], height: rect[3] - rect[1], text: edit.text, fontSize: edit.fontSize,
           color: edit.color, fontName: 'BIZUDGothic', textRect: [0, 0, rect[2] - rect[0], rect[3] - rect[1]], backgroundColor: null, borderColor: null,
           borderWidth: edit.borderWidth, textOpacity: 1, boxOpacity: 1, calloutLine: null,
-          measurement: { dash: edit.quantityDash, points: edit.vertices.map(p => [p[0] - rect[0], p[1] - rect[1]]), kind: edit.measure.kind, rect, opacity: edit.opacity } })
+          measurement: { dash: edit.quantityDash, points: edit.vertices.map(p => [p[0] - rect[0], p[1] - rect[1]]), kind: edit.measure.kind, rect, opacity: edit.opacity,
+            ...((quantity ? quantity.holes : settings.holes)?.length ? {
+              holes: (quantity ? quantity.holes! : settings.holes!).map(points => points.map(p => [p[0] - rect[0], p[1] - rect[1]] as Point)),
+            } : {}) } })
         keepForAppearance = true
         continue
       }
@@ -1644,7 +1710,7 @@ export function applyEdits(
         } finally { countObject.destroy() }
         if (edit.count && edit.countFixture) {
           const f = edit.countFixture, s = f.style, fs = s.size * .7
-          const top = s.showCode && fixtureCode(f) ? fs * 1.2 : 0, extra = s.showCode ? [...fixtureCode(f)].length * fs : 0
+          const top = s.showCode && fixtureDrawingCode(f) ? fs * 1.2 : 0, extra = s.showCode ? [...fixtureDrawingCode(f)].length * fs : 0
           const visibleRect: Rect = [edit.rect[0] - 1, edit.rect[1] - top - 1, edit.rect[0] + s.size + extra + 1, edit.rect[1] + s.size + 1]
           annotation.setRect(visibleRect); annotation.setColor(s.color); annotation.setOpacity(s.opacity)
           const obj = annotation.getObject()

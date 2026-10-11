@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { QuantityTableContext } from './QuantityBreakdown'
 const QuantityTable = lazy(() => import('./QuantityTable'))
 import { SplitView, type SplitController, type SplitWorkspaceProps } from './SplitView'
@@ -61,7 +61,75 @@ interface Props {
   organize: OrganizeWorkspaceState | null
 }
 
+const FORMAT_WIDTH_KEY = 'karu-pdf:format-panel-width'
+const FORMAT_MIN_WIDTH = 210
+const FORMAT_MAX_WIDTH = 560
+const FORMAT_VIEWER_WIDTH = 500
+
+function formatPanelMaximumWidth(): number {
+  return Math.max(FORMAT_MIN_WIDTH, Math.min(FORMAT_MAX_WIDTH, Math.floor(window.innerWidth * .45)))
+}
+
+function initialFormatPanelWidth(): number {
+  try {
+    const stored = localStorage.getItem(FORMAT_WIDTH_KEY)
+    if (stored === null || !stored.trim()) return FORMAT_MIN_WIDTH
+    const value = Number(stored)
+    if (!Number.isFinite(value) || value < FORMAT_MIN_WIDTH || value > FORMAT_MAX_WIDTH) return FORMAT_MIN_WIDTH
+    return Math.min(Math.round(value), formatPanelMaximumWidth())
+  } catch { return FORMAT_MIN_WIDTH }
+}
+
 export function DocumentWorkspace(props: Props) {
+  const workspaceRef = useRef<HTMLDivElement>(null)
+  const [formatWidth, setFormatWidth] = useState(initialFormatPanelWidth)
+  const [formatMaximum, setFormatMaximum] = useState(formatPanelMaximumWidth)
+  const formatWidthRef = useRef(formatWidth)
+  // The width the user chose; a narrow window only clamps it, so it comes back when the window widens.
+  const formatPreferredRef = useRef(formatWidth)
+  const formatDragRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null)
+  const formatWidthLimit = useCallback(() => {
+    const maximum = formatPanelMaximumWidth()
+    const workspace = workspaceRef.current
+    if (!workspace) return maximum
+    const side = workspace.querySelector<HTMLElement>(':scope > .side-panel')
+    const available = Math.floor(workspace.clientWidth - (side?.getBoundingClientRect().width ?? 0) - FORMAT_VIEWER_WIDTH)
+    return Math.max(FORMAT_MIN_WIDTH, Math.min(maximum, available))
+  }, [])
+  const resizeFormatPanel = useCallback((value: number) => {
+    const maximum = formatWidthLimit()
+    const next = Math.max(FORMAT_MIN_WIDTH, Math.min(maximum, Math.round(value)))
+    formatWidthRef.current = next
+    setFormatWidth(next)
+    setFormatMaximum(maximum)
+  }, [formatWidthLimit])
+  const saveFormatPanelWidth = useCallback(() => {
+    formatPreferredRef.current = formatWidthRef.current
+    try { localStorage.setItem(FORMAT_WIDTH_KEY, String(formatWidthRef.current)) } catch { /* 表示は続ける。 */ }
+  }, [])
+  const finishFormatPanelDrag = useCallback(() => {
+    if (!formatDragRef.current) return
+    formatDragRef.current = null
+    saveFormatPanelWidth()
+  }, [saveFormatPanelWidth])
+
+  useEffect(() => {
+    const resize = () => resizeFormatPanel(formatPreferredRef.current)
+    resize()
+    window.addEventListener('resize', resize)
+    const observer = new ResizeObserver(resize)
+    const workspace = workspaceRef.current
+    if (workspace) {
+      observer.observe(workspace)
+      const side = workspace.querySelector<HTMLElement>(':scope > .side-panel')
+      if (side) observer.observe(side)
+    }
+    return () => {
+      window.removeEventListener('resize', resize)
+      observer.disconnect()
+    }
+  }, [resizeFormatPanel, props.showThumbnails, props.organize])
+
   const [tableOpen, setTableOpen] = useState(false), [tableHeight, setTableHeight] = useState(40)
   const panelActions = useRef<{ breakdown(id: string): void; csv(): void } | null>(null)
   const pendingPanelAction = useRef<((actions: NonNullable<typeof panelActions.current>) => void) | null>(null)
@@ -159,7 +227,8 @@ export function DocumentWorkspace(props: Props) {
 
   return (
     <QuantityTableContext.Provider value={tableControls}>
-    <div className={`document-workspace${props.showThumbnails ? '' : ' thumbnails-hidden'}${props.showFormat ? '' : ' format-hidden'}`}>
+    <div ref={workspaceRef} className={`document-workspace${props.showThumbnails ? '' : ' thumbnails-hidden'}${props.showFormat ? '' : ' format-hidden'}`}
+      style={{ '--format-panel-width': `${formatWidth}px` } as CSSProperties}>
       {props.showThumbnails && <SidePanel
         session={props.session}
         pool={props.pool}
@@ -237,14 +306,49 @@ export function DocumentWorkspace(props: Props) {
         <QuantityTable session={props.session} pool={props.pool} height={tableHeight} onHeightChange={setTableHeight} onClose={closeTable} />
       </Suspense>}
       </div>
-      {props.showFormat && !props.session.editRestriction && <FormatPanel
-        selected={selected}
-        tool={props.tool}
-        store={props.session.annotationStore}
-        pool={props.pool}
-        defaults={props.formatDefaults}
-        onDefaultsChange={props.onFormatDefaultsChange}
-      />}
+      {props.showFormat && !props.session.editRestriction && <div className="format-panel-slot">
+        <FormatPanel
+          selected={selected}
+          tool={props.tool}
+          store={props.session.annotationStore}
+          pool={props.pool}
+          defaults={props.formatDefaults}
+          onDefaultsChange={props.onFormatDefaultsChange}
+        />
+        <div className="format-panel-resizer" role="separator" aria-label="右の欄の幅" aria-orientation="vertical"
+          aria-valuemin={FORMAT_MIN_WIDTH} aria-valuemax={formatMaximum} aria-valuenow={formatWidth} tabIndex={0}
+          onKeyDown={event => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+            event.preventDefault()
+            event.stopPropagation()
+            resizeFormatPanel(formatWidthRef.current + (event.key === 'ArrowLeft' ? 10 : -10))
+            saveFormatPanelWidth()
+          }}
+          onPointerDown={event => {
+            if (event.button !== 0) return
+            event.preventDefault()
+            event.stopPropagation()
+            event.currentTarget.setPointerCapture(event.pointerId)
+            formatDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: formatWidthRef.current }
+          }}
+          onPointerMove={event => {
+            const drag = formatDragRef.current
+            if (!drag || drag.pointerId !== event.pointerId) return
+            resizeFormatPanel(drag.startWidth + drag.startX - event.clientX)
+          }}
+          onPointerUp={event => {
+            if (formatDragRef.current?.pointerId !== event.pointerId) return
+            finishFormatPanelDrag()
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+          }}
+          onPointerCancel={event => {
+            if (formatDragRef.current?.pointerId === event.pointerId) finishFormatPanelDrag()
+          }}
+          onLostPointerCapture={event => {
+            if (formatDragRef.current?.pointerId === event.pointerId) finishFormatPanelDrag()
+          }}
+        />
+      </div>}
       {props.debug && <DebugPanel pool={props.pool} cache={scheduler.cache} />}
     </div>
     </QuantityTableContext.Provider>

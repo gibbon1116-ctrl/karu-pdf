@@ -58,7 +58,6 @@ async function addCVAndEdit(page: Page) {
   await master.getByRole('button', { name: '選んだ項目を追加（1件）', exact: true }).click()
   const panel = page.getByTestId('fixture-panel')
   await panel.getByRole('button', { name: cvName, exact: true }).click()
-  await panel.getByRole('button', { name: '管理', exact: true }).click()
   await panel.getByRole('button', { name: '編集', exact: true }).click()
   return page.getByRole('dialog', { name: '項目を編集', exact: true })
 }

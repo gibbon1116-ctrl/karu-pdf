@@ -1,6 +1,6 @@
 import type { Point } from './annotations'
 import { countFixtureId, type CountMark } from './counts'
-import { quantityMethod, type CountFixture } from './countFixtures'
+import { fixtureOpeningSize, quantityMethod, type CountFixture } from './countFixtures'
 import { quantityValue, routeMembers, routePortions, type QuantityMark, type RoutePart } from './quantity'
 import { normalizeFloor } from './location'
 import { polylineLength } from './measure'
@@ -45,6 +45,7 @@ export class QuantityIndex {
   private readonly emptyRoutes = new Map<string, QuantityEntry[]>()
   static build(annotations: Iterable<IndexedAnnotation>, fixtures: readonly CountFixture[]): QuantityIndex {
     const index = new QuantityIndex(), lengths = new Set(fixtures.filter(f => quantityMethod(f) === 'polyline').map(f => f.id))
+    const openingSize = fixtureOpeningSize(fixtures)
     const add = (entry: QuantityEntry) => {
       const list = index.items.get(entry.itemId)
       if (list) list.push(entry); else index.items.set(entry.itemId, [entry])
@@ -77,7 +78,7 @@ export class QuantityIndex {
             }
             for (const { lengthM, ...portion } of portions) add({ ...common, ...portion, itemId: member.itemId, value: lengthM * member.count, routeCount: member.count })
           }
-        } else add({ ...common, itemId: q.itemId, value: quantityValue(a.vertices, a.measure.mmPerPoint, q), condition: q.condition })
+        } else add({ ...common, itemId: q.itemId, value: quantityValue(a.vertices, a.measure.mmPerPoint, q, openingSize), condition: q.condition })
       } else if (a.count) {
         const c = a.count
         const entry = { itemId: countFixtureId(c), annotationId: a.id, pageIndex: a.pageIndex, value: 1, ...(c.version === 2 ? { floor: c.floor, room: c.room, condition: c.condition } : {}) }

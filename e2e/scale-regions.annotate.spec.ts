@@ -25,7 +25,6 @@ async function drag(page: Page, a: [number, number], b: [number, number]) {
 async function pickup(page: Page, a: [number, number], b: [number, number]) { await click(page, ...a); await click(page, ...b); await page.keyboard.press('Enter') }
 async function cable(page: Page) {
   await page.getByRole('button', { name: '数量拾い', exact: true }).click()
-  await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
   await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
   await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
   await page.getByRole('dialog', { name: '標準マスタから追加' }).getByRole('button', { name: '選んだ項目を追加', exact: true }).click()

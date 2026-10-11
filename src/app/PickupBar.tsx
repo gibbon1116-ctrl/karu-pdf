@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { fixtureCode, quantityKind, QUANTITY_UNITS } from '../core/countFixtures'
+import { fixtureCode, quantityKind, QUANTITY_METHODS, QUANTITY_UNITS } from '../core/countFixtures'
 import { FixtureUiContext, type DocumentSession } from './documentModel'
 import FixtureQuickList, { FixtureSwatch, pickupFixtureId } from './fixtureQuickList'
 import { groupFixtures } from './fixtureOrder'
@@ -43,6 +43,14 @@ export default function PickupBar({ session }: { session: DocumentSession }) {
         {current ? <><FixtureSwatch fixture={current} /><span><strong>{fixtureCode(current)}</strong> {current.name}</span></> : store.selectedPickupsOnly() ? `${store.selectedIds().length}件を選択中` : '項目を選んでください'}
       </button>
       <button type="button" aria-label="次の項目" title="次の項目（]）" disabled={!next} onClick={() => next && select(next.id)}>▶</button>
+      {current && (quantityKind(current) === 'area' || quantityKind(current) === 'volume') && <div className="pickup-methods" role="group" aria-label="計上方法" style={{ display: 'flex', gap: 4 }}>
+        {[...QUANTITY_METHODS[quantityKind(current)]].sort((a, b) => {
+          if (quantityKind(current) !== 'area') return 0
+          return a === 'lengthHeight' ? -1 : b === 'lengthHeight' ? 1 : 0
+        }).map(method => <button key={method} type="button" aria-pressed={store.pickupMethod(current) === method} onClick={() => store.setPickupMethod(current.id, method)}>
+          {{ polygon: '囲む', lengthHeight: '長さ×高さ', polygonDepth: '囲む×深さ', lengthWidthDepth: '長さ×幅×深さ', click: '', polyline: '' }[method]}
+        </button>)}
+      </div>}
       {current && <span className="pickup-bar-totals" aria-live="polite"><span title={`この図面 ${format(index.byPage(current.id).get(session.view.page - 1) ?? 0)}`}>この図面 <strong>{format(index.byPage(current.id).get(session.view.page - 1) ?? 0)}</strong></span><span title={`全図面 ${format(index.total(current.id))}`}>全図面 <strong>{format(index.total(current.id))}</strong></span></span>}
       {current && quantityKind(current) === 'count' && symbolSearch && <button type="button" aria-label="同じ記号を探す" onClick={() => symbolSearch.start(session, current.id)}>同じ記号を探す</button>}
       <button type="button" aria-label="元に戻す" title="元に戻す（Ctrl+Z）" disabled={!store.canUndo()} onClick={event => {

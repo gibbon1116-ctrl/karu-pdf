@@ -116,7 +116,10 @@ export function buildQuantityTableData(index: QuantityIndex, fixtures: readonly 
 
 /** Filtering is a projection of cached aggregates; no entries are revisited. */
 export function projectQuantityTable(data: readonly TableItem[], mode: QuantityTableMode, filters: QuantityTableFilters,
-  drawingInfo: (page: number) => DrawingInfo | null, display: QuantityTableDisplay = {}) {
+  drawingInfo: (page: number) => DrawingInfo | null, display: QuantityTableDisplay = {}, columnLimit = 80) {
+  if (columnLimit !== Infinity && (!Number.isInteger(columnLimit) || columnLimit < 0)) {
+    throw new RangeError('集計表の列の上限は0以上の整数またはInfinityで指定してください')
+  }
   const search = (filters.search ?? '').trim().toLocaleLowerCase()
   const items = data.filter(({ fixture: f, hasUnset }) => (!filters.unsetOnly || hasUnset) && (!filters.category || f.category === filters.category)
     && (!filters.kind || quantityKind(f) === filters.kind)
@@ -130,7 +133,7 @@ export function projectQuantityTable(data: readonly TableItem[], mode: QuantityT
     const [af, ar] = JSON.parse(a) as string[], [bf, br] = JSON.parse(b) as string[]
     return floorOrder(af, bf) || ar.localeCompare(br, 'ja', { numeric: true })
   })
-  const columns: QuantityTableColumn[] = ordered.slice(0, 80).map(key => {
+  const columns: QuantityTableColumn[] = ordered.slice(0, columnLimit).map(key => {
     if (mode === 'page') {
       const pageIndex = Number(key), info = drawingInfo(pageIndex)
       return { key, pageIndex, heading: info?.number || `p.${pageIndex + 1}`, subheading: info?.name ?? '' }
@@ -161,6 +164,20 @@ export function buildQuantityTable(index: QuantityIndex, fixtures: readonly Coun
 const ROW_HEIGHT = 32, HEADER_HEIGHT = 56, OVERSCAN = 4
 const HEIGHT_KEY = 'karu-pdf:quantity-table-height'
 
+interface QuantityWorkbookWritable {
+  write(data: Blob): Promise<void>
+  close(): Promise<void>
+  abort?(): Promise<void>
+}
+interface QuantityWorkbookFileHandle {
+  createWritable(): Promise<QuantityWorkbookWritable>
+}
+interface QuantityWorkbookPickerOptions {
+  suggestedName: string
+  types: { description: string; accept: Record<string, string[]> }[]
+}
+type QuantityWorkbookPicker = (options: QuantityWorkbookPickerOptions) => Promise<QuantityWorkbookFileHandle>
+
 export default function QuantityTable({ session, pool, height, onHeightChange, onClose }: {
   session: DocumentSession; pool: PdfWorkerPool; height: number; onHeightChange(n: number): void; onClose(): void
 }) {
@@ -186,6 +203,8 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
   const scrollRef = useRef<HTMLDivElement>(null), closeRef = useRef<HTMLButtonElement>(null)
   const alive = useRef(true), busyRef = useRef(false)
   const [busy, setBusy] = useState(false), [error, setError] = useState('')
+  const xlsxBusyRef = useRef(false)
+  const [xlsxBusy, setXlsxBusy] = useState(false)
   const [cursors, setCursors] = useState<Record<string, ReviewCursor>>({})
   useEffect(() => {
     alive.current = true; closeRef.current?.focus()
@@ -225,6 +244,58 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
   const resize = (n: number) => {
     const clamped = Math.max(20, Math.min(70, n)); onHeightChange(clamped)
     try { localStorage.setItem(HEIGHT_KEY, String(clamped)) } catch { /* Optional UI preference. */ }
+  }
+  const exportXlsx = async () => {
+    if (xlsxBusyRef.current) return
+    xlsxBusyRef.current = true; setXlsxBusy(true); setError('')
+    let writable: QuantityWorkbookWritable | undefined
+    try {
+      const pdfName = session.name
+      const fileName = `${pdfName.replace(/\.pdf$/i, '')}_数量集計表.xlsx`
+      const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      const fixtures = [...store.getCountFixtures()]
+      const drawingInfo = (page: number) => info.get(page) ?? null
+      const options = { data, mode, filters, display: { allConditions, expanded }, drawingInfo, pdfName, index, fixtures }
+      const picker = (window as unknown as { showSaveFilePicker?: QuantityWorkbookPicker }).showSaveFilePicker
+      // Invoke the picker before awaiting import(), while user activation is present.
+      const handle = picker ? await picker.call(window, {
+        suggestedName: fileName,
+        types: [{ description: 'Excelのブック', accept: { [mime]: ['.xlsx'] } }],
+      }) : undefined
+      if (!alive.current) return
+      const { createQuantityWorkbook } = await import('./quantityXlsx')
+      if (!alive.current) return
+      const bytes = createQuantityWorkbook(options)
+      const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: mime })
+      if (handle) {
+        writable = await handle.createWritable()
+        await writable.write(blob)
+        await writable.close()
+        writable = undefined
+      } else {
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url; link.download = fileName
+        try {
+          document.body.appendChild(link)
+          link.click()
+        } finally {
+          link.remove()
+          window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+        }
+      }
+    } catch (e) {
+      if (writable?.abort) {
+        try { await writable.abort() } catch { /* Keep the original failure. */ }
+      }
+      const cancelled = typeof e === 'object' && e !== null && 'name' in e && e.name === 'AbortError'
+      if (!cancelled && alive.current) {
+        setError(`Excelへの書き出しに失敗しました：${e instanceof Error ? e.message : String(e)}`)
+      }
+    } finally {
+      xlsxBusyRef.current = false
+      if (alive.current) setXlsxBusy(false)
+    }
   }
   const go = async (item: TableItem, column: QuantityTableColumn | null, condition?: string) => {
     if (busyRef.current || !navigation) return
@@ -277,22 +348,23 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
       </select>
       <input type="search" aria-label="集計表の名称・略号を検索" placeholder="名称・略号を検索" value={filters.search ?? ''} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))} />
       <button onClick={() => { fixtureUi?.open(); controls?.showCsv() }}>CSVに書き出す</button>
+      <button disabled={xlsxBusy} onClick={() => void exportXlsx()}>Excelに書き出す</button>
       <button ref={closeRef} onClick={onClose} aria-label="集計表を閉じる">閉じる</button>
     </div>
     {table.omittedColumns > 0 && <p className="quantity-table-notice" role="status">ほか {table.omittedColumns} 列。分類・種別・検索で絞り込むか、CSV で確かめてください</p>}
     {error && <p role="alert">{error}</p>}
     <div className="quantity-table-scroll" ref={scrollRef} onScroll={e => setViewport({ top: e.currentTarget.scrollTop, height: e.currentTarget.clientHeight })}>
-      <table aria-label="数量の集計" aria-rowcount={table.rows.length + 1} style={{ width: 434 + table.columns.length * 140 }}>
-        <colgroup>{[44, 100, 150, 50, 90].map((width, i) => <col key={i} style={{ width }} />)}{table.columns.map(c => <col key={c.key} style={{ width: 140 }} />)}</colgroup>
-        <thead><tr aria-rowindex={1}>{['見本', '略号', '名称', '単位', '全図面'].map((label, i) => <th key={label} scope="col" className={`quantity-table-fixed quantity-table-fixed-${i}`}>{label}</th>)}
+      <table aria-label="数量の集計" aria-rowcount={table.rows.length + 1} style={{ width: 524 + table.columns.length * 140 }}>
+        <colgroup>{[44, 100, 150, 90, 50, 90].map((width, i) => <col key={i} style={{ width }} />)}{table.columns.map(c => <col key={c.key} style={{ width: 140 }} />)}</colgroup>
+        <thead><tr aria-rowindex={1}>{['見本', '略号', '名称', '規格', '単位', '全図面'].map((label, i) => <th key={label} scope="col" className={`quantity-table-fixed quantity-table-fixed-${i}`}>{label}</th>)}
           {table.columns.map(c => <th key={c.key} scope="col" data-column-key={c.key}><span title={c.heading}>{c.heading}</span><small title={c.subheading}>{c.subheading}</small></th>)}
         </tr></thead>
         <tbody>
-          {first > 0 && <tr className="quantity-table-spacer" aria-hidden="true"><td colSpan={5 + table.columns.length} style={{ height: first * ROW_HEIGHT }} /></tr>}
+          {first > 0 && <tr className="quantity-table-spacer" aria-hidden="true"><td colSpan={6 + table.columns.length} style={{ height: first * ROW_HEIGHT }} /></tr>}
           {table.rows.slice(first, end).map((row, offset) => {
             const item = row.item
             if (!item) return <tr key={`category:${row.category}`} className="quantity-table-category" aria-rowindex={first + offset + 2}>
-              <th colSpan={5} className="quantity-table-fixed" scope="rowgroup">{row.category}</th>{table.columns.length > 0 && <td colSpan={table.columns.length} />}
+              <th colSpan={6} className="quantity-table-fixed" scope="rowgroup">{row.category}</th>{table.columns.length > 0 && <td colSpan={table.columns.length} />}
             </tr>
             const f = item.fixture
             const condition = row.conditionKey, isCondition = condition !== undefined
@@ -305,13 +377,14 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
                 ? <img src={`data:image/png;base64,${f.sample.png}`} alt={`${f.name}の見本`} />
                 : <svg viewBox="-14 -14 28 28" aria-hidden="true"><CountMarker style={{ ...f.style, size: 24, opacity: 1 }} showCode={false} /></svg>
                 : <QuantitySwatch fixture={f} />}</td>
-              <th scope="row" title={isCondition ? '' : fixtureCode(f)} className="quantity-table-fixed quantity-table-fixed-1">{isCondition ? '' : fixtureCode(f)}</th>
+              <th scope="row" title={isCondition ? '' : f.code} className="quantity-table-fixed quantity-table-fixed-1">{isCondition ? '' : f.code}</th>
               <td title={isCondition ? condition || '未設定' : f.name} className="quantity-table-fixed quantity-table-fixed-2">
                 {isCondition ? `└ ${condition || '未設定'}` : <>{item.byCondition.size >= 2 && <button aria-label={`${f.name}の施工条件を${isExpanded ? '折りたたむ' : '展開'}`}
                   aria-expanded={isExpanded} disabled={!!filters.unsetOnly} onClick={() => setExpanded(previous => ({ ...previous, [f.id]: !isExpanded }))}>{isExpanded ? '▾' : '▸'}</button>}{f.name}</>}
               </td>
-              <td className="quantity-table-fixed quantity-table-fixed-3">{QUANTITY_UNITS[quantityKind(f)]}</td>
-              <td className="quantity-table-fixed quantity-table-fixed-4" title={isCondition && quantityKind(f) === 'length' ? quantityPartSummary(aggregate) : undefined}>
+              <td title={isCondition ? '' : f.spec ?? ''} className="quantity-table-fixed quantity-table-fixed-3">{isCondition ? '' : f.spec ?? ''}</td>
+              <td className="quantity-table-fixed quantity-table-fixed-4">{QUANTITY_UNITS[quantityKind(f)]}</td>
+              <td className="quantity-table-fixed quantity-table-fixed-5" title={isCondition && quantityKind(f) === 'length' ? quantityPartSummary(aggregate) : undefined}>
                 <button disabled={aggregate.total === 0 || (isCondition && busy)} aria-label={`${fixtureCode(f)} ${f.name}${isCondition ? ` ${condition || '未設定'}` : ''}の全図面の内訳`}
                   onClick={() => { if (isCondition) void go(item, null, condition); else { fixtureUi?.open(); controls?.showBreakdown(f.id) } }}>
                   {aggregate.total === 0 ? '' : format(f, aggregate.total)}
@@ -329,7 +402,7 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
               })}
             </tr>
           })}
-          {end < table.rows.length && <tr className="quantity-table-spacer" aria-hidden="true"><td colSpan={5 + table.columns.length} style={{ height: (table.rows.length - end) * ROW_HEIGHT }} /></tr>}
+          {end < table.rows.length && <tr className="quantity-table-spacer" aria-hidden="true"><td colSpan={6 + table.columns.length} style={{ height: (table.rows.length - end) * ROW_HEIGHT }} /></tr>}
         </tbody>
       </table>
       {table.rows.length === 0 && <p>該当する項目はありません</p>}

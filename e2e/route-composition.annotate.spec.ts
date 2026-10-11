@@ -4,6 +4,9 @@ import { listAnnotations } from '../src/core/annotations'
 import { readCountFixtures } from '../src/core/countFixtures'
 import { writePageScale } from '../src/core/measure'
 
+// The display settings sit in a folded section of the quantity tab (SPEC-S14); these tests use them.
+test.beforeEach(async ({ page }) => { await page.addInitScript(() => localStorage.setItem('karu-pdf:fixture-panel-settings-open', 'true')) })
+
 // All PDFs and saved bytes remain in memory; this suite writes no fixture files.
 function blankPdf() {
   const doc = new mupdf.PDFDocument()
@@ -111,7 +114,6 @@ test('経路構成、1クリック追加、原子的Undo、条数、主の変更
   await expect(page.locator('.route-composition-badge text')).toHaveText('3')
   await expect(page.locator('.route-composition-badge title')).toContainText('EM-CE 5.5sq-3C×2、IV 5.5sq、PF28')
   await expect(page.locator('.route-composition-badge')).toHaveAttribute('pointer-events', 'none')
-  await panel(page).getByRole('button', { name: '管理', exact: true }).click()
   await panel(page).getByLabel('図面に長さ・面積・体積の数値を表示', { exact: true }).uncheck()
   await expect(page.locator('.measurement-label')).toHaveCount(0)
   await expect(page.locator('.route-composition-badge text')).toHaveText('3')
@@ -173,7 +175,6 @@ test('よく使う構成を別の経路と新しい経路に使い、解除・�
   expect(itemsOf((await routes(page))[1])).toEqual(itemsOf(composition))
   await page.keyboard.press('Control+z'); expect((await routes(page))[1].extra).toBeUndefined()
   await page.keyboard.press('Control+y'); expect(itemsOf((await routes(page))[1])).toEqual(itemsOf(composition))
-  await panel(page).getByRole('button', { name: '拾う', exact: true }).click()
   await panel(page).getByRole('region', { name: 'よく使う構成', exact: true }).getByRole('button', { name: '幹線A', exact: true }).click()
   await expect(page.locator('.pickup-template').filter({ hasText: /^構成:/ })).toContainText('構成: 幹線A')
   await draw(page, 380)
@@ -185,7 +186,6 @@ test('よく使う構成を別の経路と新しい経路に使い、解除・�
 
   const bytes = await saveBytes(page)
   await page.reload(); await open(page, bytes)
-  await panel(page).getByRole('button', { name: '拾う', exact: true }).click()
   await expect(panel(page).getByRole('region', { name: 'よく使う構成', exact: true }).getByRole('button', { name: '幹線A', exact: true })).toBeVisible()
   await selectRoute(page, 220)
   await format(page).getByRole('button', { name: 'よく使う構成', exact: true }).click()
@@ -254,7 +254,6 @@ test('別のPDFに構成の項目を作り、同じ項目の再選択では雛�
   await sets.getByRole('button', { name: '登録', exact: true }).click()
   await page.keyboard.press('Escape')
   await open(page, blankPdf())
-  await panel(page).getByRole('button', { name: '拾う', exact: true }).click()
   await panel(page).getByRole('region', { name: 'よく使う構成', exact: true }).getByRole('button', { name: '別PDF幹線', exact: true }).click()
   await expect(panel(page).locator('.fixture-row-code')).toHaveCount(3)
   await row(page, 'EM-CE 5.5sq-3C', 'ケーブル').click()

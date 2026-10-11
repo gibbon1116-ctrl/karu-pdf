@@ -44,7 +44,6 @@ async function load(page: Page, bytes: number[]) {
   await page.evaluate(b => window.__karu!.openBytes(b, '集計表試験.pdf'), bytes)
   await page.evaluate(() => window.__karu!.setZoom(1))
   await page.getByRole('tab', { name: '数量', exact: true }).click()
-  await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
   await expect(page.getByTestId('fixture-panel').getByRole('button', { name: 'LED LED', exact: true })).toBeVisible()
   await expect.poll(() => page.evaluate(() => window.__karu!.getDrawingScanMetrics().scanning)).toBe(false)
   await page.evaluate(() => {
@@ -70,7 +69,6 @@ test('wide table, location reveal/cycling, filters, resize persistence, CSV and 
   await expect(table(page)).toHaveCount(0)
   const before = (await page.getByTestId('viewer').boundingBox())!
   // The launcher is available in both quantity-panel modes.
-  await page.getByTestId('fixture-panel').getByRole('button', { name: '拾う', exact: true }).click()
   await page.getByRole('button', { name: '集計表を開く', exact: true }).click()
   await expect(table(page)).toBeVisible()
   const viewer = (await page.getByTestId('viewer').boundingBox())!, region = (await table(page).boundingBox())!
@@ -79,7 +77,7 @@ test('wide table, location reveal/cycling, filters, resize persistence, CSV and 
   expect(Math.abs(region.y - (viewer.y + viewer.height))).toBeLessThan(2)
   expect(Math.abs(region.width - viewer.width)).toBeLessThan(2)
   await expect(page.getByTestId('annotation-layer-0')).toBeVisible()
-  await expect(row(page).locator('.quantity-table-fixed-4 button')).toHaveText('6')
+  await expect(row(page).locator('.quantity-table-fixed-5 button')).toHaveText('6')
   const headers = table(page).getByRole('columnheader')
   await expect(headers.filter({ hasText: 'p.1' })).toHaveCount(1)
   await expect(headers.filter({ hasText: 'E-101' })).toContainText('1階電灯設備平面図')
@@ -139,7 +137,7 @@ test('wide table, location reveal/cycling, filters, resize persistence, CSV and 
   expect(Math.abs((await table(page).boundingBox())!.height - resized)).toBeLessThan(3)
 
   // The all-document cell uses the existing sidebar breakdown.
-  await row(page).locator('.quantity-table-fixed-4 button').click()
+  await row(page).locator('.quantity-table-fixed-5 button').click()
   const breakdown = page.getByTestId('quantity-breakdown')
   await expect(breakdown).toBeVisible()
   await table(page).getByRole('button', { name: '集計表を閉じる', exact: true }).click()
@@ -160,7 +158,7 @@ test('renders only viewport rows, fixes headings/left columns and limits 100 dra
   await page.getByRole('button', { name: '集計表を開く', exact: true }).click()
   await expect(table(page)).toBeVisible()
   await expect(table(page).getByRole('status')).toContainText('ほか 20 列。')
-  await expect(table(page).getByRole('columnheader')).toHaveCount(85)
+  await expect(table(page).getByRole('columnheader')).toHaveCount(86)
   expect(await table(page).locator('tr[data-fixture-id]').count()).toBeLessThan(50)
   const scroll = table(page).locator('.quantity-table-scroll'), fixed = row(page).locator('.quantity-table-fixed-1')
   const left = (await fixed.boundingBox())!.x
@@ -175,11 +173,36 @@ test('renders only viewport rows, fixes headings/left columns and limits 100 dra
   expect(Math.abs(header.y - viewport.y)).toBeLessThan(1)
   await table(page).getByLabel('集計表の種別', { exact: true }).selectOption('length')
   await expect(row(page, 'cv')).toBeVisible()
-  await expect(table(page).getByRole('columnheader')).toHaveCount(6)
+  await expect(table(page).getByRole('columnheader')).toHaveCount(7)
   await expect(table(page).getByRole('status')).toHaveCount(0)
   await expect(row(page, 'cv').locator('button[data-column-key="1"]')).toHaveText('10.00')
   await row(page, 'cv').locator('button[data-column-key="1"]').click()
   await expect(page.getByTestId('annotation-layer-1').locator('polyline.annotation-selection-path')).toHaveCount(1)
   await expect(page.getByTestId('annotation-layer-1').locator('.annotation-selection')).toHaveCount(0)
   await expect(page.getByTestId('quantity-pickup-flash')).toHaveJSProperty('tagName', 'polyline')
+})
+
+test('Excel export writes the displayed table with every drawing column', async ({ page }) => {
+  test.setTimeout(120_000)
+  // Use the download fallback; a native save dialog cannot be driven headless.
+  await page.addInitScript(() => { delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker })
+  await page.goto('/karu-pdf/?test=1&workers=2&warm=0'); await load(page, await drawingPdf(0, 100))
+  await page.getByRole('button', { name: '集計表を開く', exact: true }).click()
+  await expect(table(page).locator('thead th[data-column-key]')).toHaveCount(80)
+  const download = page.waitForEvent('download')
+  await table(page).getByRole('button', { name: 'Excelに書き出す', exact: true }).click()
+  const file = await download
+  expect(file.suggestedFilename()).toBe('集計表試験_数量集計表.xlsx')
+  const bytes = await fs.readFile(await file.path())
+  expect(bytes.subarray(0, 2).toString('latin1')).toBe('PK')
+  // Stored (uncompressed) entries: the sheet XML is readable in place.
+  const text = bytes.toString('utf8')
+  expect(text).toContain('<sheet name="集計表"')
+  expect(text).toContain('<sheet name="明細"')
+  // 5 fixed columns + 100 drawing columns: the last heading is column DA (105th).
+  expect(text).toContain('r="DB4"')
+  expect(text).not.toContain('r="DC4"')
+  expect(text).toContain('E-101')
+  await expect(table(page).getByRole('button', { name: 'Excelに書き出す', exact: true })).toBeEnabled()
+  await expect(table(page).getByRole('alert')).toHaveCount(0)
 })

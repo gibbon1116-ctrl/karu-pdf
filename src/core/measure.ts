@@ -9,8 +9,22 @@ export interface MeasureSettings {
   unit: 'mm' | 'm'
   mmPerPoint: number
   decimals: number | null
+  holes?: Point[][]
 }
-export interface PageScale extends Omit<MeasureSettings, 'kind'> {
+export function validAreaHoles(value: unknown): value is Point[][] {
+  return Array.isArray(value) && value.length <= 50 && Array.from(value).every(points =>
+    Array.isArray(points) && points.length >= 3 && points.length <= 500
+    && Array.from(points).every(p => Array.isArray(p) && p.length === 2
+      && Array.from(p).every(n => typeof n === 'number' && Number.isFinite(n))))
+}
+export function normalizeMeasureSettings(settings: MeasureSettings): MeasureSettings {
+  if (settings.holes === undefined) return settings
+  const result = { ...settings }
+  if (settings.kind !== 'area' || !validAreaHoles(settings.holes)) delete result.holes
+  else result.holes = settings.holes.map(points => points.map(p => [...p] as Point))
+  return result
+}
+export interface PageScale extends Omit<MeasureSettings, 'kind' | 'holes'> {
   denominator: number
   paper: Paper
   source: 'ratio' | 'calibration' | 'standard'
@@ -92,6 +106,11 @@ export function measureText(points: readonly Point[], settings: MeasureSettings)
   const value = area ? polygonArea(points) * settings.mmPerPoint ** 2 / 1e6
     : polylineLength(points) * settings.mmPerPoint / (settings.unit === 'm' ? 1000 : 1)
   const digits = settings.decimals ?? (area || settings.unit === 'm' ? 2 : 0)
+  if (area && settings.holes?.length && validAreaHoles(settings.holes)) {
+    const excluded = settings.holes.reduce((sum, hole) => sum + polygonArea(hole) * settings.mmPerPoint ** 2 / 1e6, 0)
+    const format = new Intl.NumberFormat('ja-JP', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+    return `${format.format(value)}−${format.format(excluded)}=${format.format(Math.max(0, value - excluded))} m²`
+  }
   const number = new Intl.NumberFormat('ja-JP', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value)
   return `${settings.kind === 'perimeter' ? '合計 ' : ''}${number} ${area ? 'm²' : settings.unit}`
 }
@@ -151,7 +170,7 @@ export function validScale(value: unknown): value is PageScale {
 }
 export function readMeasureSettings(object: PDFObject, kind: MeasureKind, pageUnits = 1): MeasureSettings | null {
   const custom = stringAt(object, 'KaruMeasure')
-  if (custom) try { const v = JSON.parse(custom); if (validScale({ ...v, denominator: 1, paper: 'PDF', source: 'standard' }) && v.kind === kind) return { ...v } } catch { /* Standard fallback. */ }
+  if (custom) try { const v = JSON.parse(custom); if (validScale({ ...v, denominator: 1, paper: 'PDF', source: 'standard' }) && v.kind === kind) return normalizeMeasureSettings({ ...v }) } catch { /* Standard fallback. */ }
   const subtype = object.get('Measure', 'Subtype')
   try { if (!subtype.isName() || subtype.asName() !== 'RL') return null } finally { subtype.destroy() }
   const raw = object.get('Measure', 'X', 0)

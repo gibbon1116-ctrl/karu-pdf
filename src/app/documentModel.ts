@@ -159,6 +159,8 @@ export class DocumentSession {
     if (summary.fixtures) parts.push('数量拾いの項目')
     if (summary.scales.length) parts.push(`縮尺（${pages(summary.scales)}）`)
     if (summary.drawings.length) parts.push(`図面番号・図面名称（${pages(summary.drawings)}）`)
+    if (summary.rooms.length) parts.push(`部屋の範囲（${pages(summary.rooms)}）`)
+    if (summary.roomSets) parts.push('部屋の組')
     if (this.fileOutdated) parts.push('ページの編集・まだ保存していない文書')
     return parts.join('、')
   }
@@ -186,13 +188,13 @@ export class DocumentSession {
 
   recordSavedRendering(edits: readonly AnnotationEdit[], errors: readonly { editIndex: number }[]): void {
     const failed = new Set(errors.map(error => error.editIndex))
-    const pages = new Set(edits.flatMap((edit, index) => !failed.has(index) && edit.kind !== 'setDrawingInfo' && edit.kind !== 'setPageScale' && edit.kind !== 'setScaleRegions' && edit.kind !== 'setCountFixtures' ? [edit.pageIndex] : []))
+    const pages = new Set(edits.flatMap((edit, index) => !failed.has(index) && edit.kind !== 'setDrawingInfo' && edit.kind !== 'setPageScale' && edit.kind !== 'setScaleRegions' && edit.kind !== 'setRoomRegions' && edit.kind !== 'setRoomSets' && edit.kind !== 'setPageRoomSet' && edit.kind !== 'setCountFixtures' ? [edit.pageIndex] : []))
     if (pages.size) this.vectorCache.clear()
     this.savedRevision += 1
     for (const page of pages) this.savedPageRevisions.set(page, this.savedRevision)
   }
 
-  updateAfterPageLayout(pageSizes: PageSize[], canUndoOrganize: boolean, scales?: import('../core/measure').PageScale[] | (import('../core/measure').PageScale | null)[], drawings?: (DrawingInfo | null)[], regions?: Array<[number, import('../core/measure').ScaleRegion[]]>): void {
+  updateAfterPageLayout(pageSizes: PageSize[], canUndoOrganize: boolean, scales?: import('../core/measure').PageScale[] | (import('../core/measure').PageScale | null)[], drawings?: (DrawingInfo | null)[], regions?: Array<[number, import('../core/measure').ScaleRegion[]]>, rooms?: Array<[number, import('../core/rooms').RoomRegion[]]>, roomSets?: import('../core/rooms').RoomSet[], pageRoomSets?: Array<[number, import('../core/rooms').RoomSetLink]>): void {
     this.cancelDrawingScan()
     this.viewHistory.clear()
     this.savedPageRevisions.clear()
@@ -204,6 +206,8 @@ export class DocumentSession {
     this.annotationStore.reset(true)
     if (scales) this.annotationStore.loadScales(scales)
     this.annotationStore.loadScaleRegions(regions ?? [])
+    this.annotationStore.loadRoomRegions(rooms ?? [])
+    this.annotationStore.loadRoomSets(roomSets ?? [], pageRoomSets ?? [])
     if (drawings) this.annotationStore.loadDrawingInfos(drawings)
     this.view.page = Math.min(Math.max(1, this.view.page), pageSizes.length)
     this.view.scrollLeft = 0

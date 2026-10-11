@@ -1,6 +1,6 @@
 import type { PDFDocument } from 'mupdf'
-import type { RGB } from './annotations'
-import { validRouteScope, conditionsFromScope, normalizeRouteConditions, validRouteConditions, parseQuantityMark, serializeQuantityMark, validCondition, type RouteConditions } from './quantity'
+import type { RGB, Rect } from './annotations'
+import { validRouteScope, conditionsFromScope, normalizeRouteConditions, validRouteConditions, parseQuantityMark, serializeQuantityMark, validCondition, validOpeningDimension, type OpeningSize, type RouteConditions } from './quantity'
 
 export const COUNT_SHAPES = ['circle', 'doubleCircle', 'square', 'roundedSquare', 'triangle', 'invertedTriangle', 'diamond', 'pentagon', 'hexagon', 'octagon', 'star', 'plus', 'cross', 'hourglass'] as const
 export const COUNT_FILLS = ['none', 'solid', 'half', 'dot', 'hatch'] as const
@@ -9,8 +9,11 @@ export const COUNT_OPACITIES = [1, 0.8, 0.75, 0.5, 0.25] as const
 export type CountShape = typeof COUNT_SHAPES[number]
 export type CountFill = typeof COUNT_FILLS[number]
 export interface CountStyle { shape: CountShape; fill: CountFill; color: RGB; size: number; opacity: number; showCode: boolean }
-export interface CountFixtureSample { png: string; width: number; height: number; pageIndex: number }
-export interface CountFixture { conditions?: string[]; routeDefaults?: RouteConditions; defaultCondition?: string; spec?: string; aggregation?: 'location' | 'document'; kind?: QuantityKind; method?: QuantityMethod; defaults?: QuantityDefaults; line?: QuantityLineStyle; id: string; name: string; code: string; category: string; style: CountStyle; memo?: string; order: number; sample?: CountFixtureSample }
+export interface CountFixtureSample {
+  png: string; width: number; height: number; pageIndex: number; rect?: Rect
+  lines?: { segments: number[]; widths: number[] }
+}
+export interface CountFixture { conditions?: string[]; routeDefaults?: RouteConditions; defaultCondition?: string; spec?: string; aggregation?: 'location' | 'document'; kind?: QuantityKind; method?: QuantityMethod; defaults?: QuantityDefaults; line?: QuantityLineStyle; id: string; name: string; code: string; category: string; style: CountStyle; memo?: string; order: number; sample?: CountFixtureSample; opening?: { widthM: number; heightM: number } }
 export type QuantityKind = 'count' | 'length' | 'area' | 'volume'
 export type QuantityMethod = 'click' | 'polyline' | 'polygon' | 'lengthHeight' | 'polygonDepth' | 'lengthWidthDepth'
 export const QUANTITY_METHODS: Record<QuantityKind, readonly QuantityMethod[]> = { count: ['click'], length: ['polyline'], area: ['polygon', 'lengthHeight'], volume: ['polygonDepth', 'lengthWidthDepth'] }
@@ -22,7 +25,23 @@ export interface QuantityLineStyle { width: typeof QUANTITY_LINE_WIDTHS[number];
 export interface QuantityLineAppearance { color: RGB; line: QuantityLineStyle }
 export function quantityAggregation(f: CountFixture): 'location' | 'document' { return f.aggregation ?? (quantityKind(f) === 'count' ? 'location' : 'document') }
 export function fixtureCode(f: Pick<CountFixture, 'code' | 'spec'>): string { return [f.code, f.spec].filter(Boolean).join(' ') }
+// Drawings show the specification only on line pickups, where it is the size (CV 38sq-3C); marks and area labels show the code alone.
+export function fixtureDrawingCode(f: Pick<CountFixture, 'code' | 'spec' | 'kind'>): string { return f.kind === 'length' ? fixtureCode(f) : f.code }
 export function quantityKind(f: CountFixture): QuantityKind { return f.kind ?? 'count' }
+export function parseFixtureOpening(value: unknown): CountFixture['opening'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const opening = value as { widthM?: unknown; heightM?: unknown }
+  return validOpeningDimension(opening.widthM) && validOpeningDimension(opening.heightM)
+    ? { widthM: opening.widthM, heightM: opening.heightM } : undefined
+}
+export function fixtureOpeningSize(fixtures: readonly CountFixture[]): OpeningSize {
+  const sizes = new Map<string, NonNullable<CountFixture['opening']>>()
+  for (const fixture of fixtures) {
+    const opening = quantityKind(fixture) === 'count' ? parseFixtureOpening(fixture.opening) : undefined
+    if (opening) sizes.set(fixture.id, opening)
+  }
+  return itemId => sizes.get(itemId)
+}
 export function quantityMethod(f: CountFixture): QuantityMethod { return f.method ?? QUANTITY_METHODS[quantityKind(f)][0] }
 export function quantityLine(f: CountFixture): QuantityLineStyle { return f.line ?? { width: 1.5, dash: 'solid' } }
 export function sameFixtureAppearance(a: CountFixture, b: CountFixture): boolean {
@@ -43,7 +62,21 @@ export function parseCountFixtureSample(value: unknown): CountFixtureSample | un
     if (bytes.length < 33 || btoa(bytes) !== s.png || ![137, 80, 78, 71, 13, 10, 26, 10].every((b, i) => bytes.charCodeAt(i) === b)) return undefined
     const uint32 = (offset: number) => Array.from({ length: 4 }, (_, i) => bytes.charCodeAt(offset + i)).reduce((n, b) => n * 256 + b, 0)
     if (uint32(8) !== 13 || bytes.slice(12, 16) !== 'IHDR' || uint32(16) !== s.width || uint32(20) !== s.height) return undefined
-    return { png: s.png, width: s.width, height: s.height, pageIndex: s.pageIndex }
+    const rect = Array.isArray(s.rect) && s.rect.length === 4
+      && s.rect.every(v => typeof v === 'number' && Number.isFinite(v))
+      && s.rect[2] > s.rect[0] && s.rect[3] > s.rect[1]
+      ? [...s.rect] as Rect : undefined
+    const lines = rect && s.lines && Array.isArray(s.lines.segments) && Array.isArray(s.lines.widths)
+      && s.lines.segments.length % 4 === 0
+      && s.lines.segments.length >= 8 && s.lines.segments.length <= 256 * 4
+      && s.lines.widths.length === s.lines.segments.length / 4
+      && s.lines.segments.every(v => typeof v === 'number' && Number.isFinite(v))
+      && s.lines.widths.every(v => typeof v === 'number' && Number.isFinite(v) && v >= 0)
+      ? { segments: [...s.lines.segments], widths: [...s.lines.widths] } : undefined
+    return {
+      png: s.png, width: s.width, height: s.height, pageIndex: s.pageIndex,
+      ...(rect ? { rect } : {}), ...(lines ? { lines } : {}),
+    }
   } catch { return undefined }
 }
 export const COUNT_COLORS = ['#E60012', '#FF7F00', '#FFD400', '#8FD400', '#00A040', '#00B8A9', '#00B7EB', '#0068B7', '#1D2088', '#7B2CBF', '#E4007F', '#FF66B2', '#A0522D', '#808000', '#606060', '#000000', '#FF4D4D', '#FFB347', '#FFF04D', '#66E066', '#66D9FF', '#6699FF', '#B388FF', '#FF99CC'] as const
@@ -165,14 +198,15 @@ export function parseCountFixtures(raw: string | null): CountFixture[] {
       if (routeDefaults === null || fixtureConditionsError({ ...f, routeDefaults })) continue
       ids.add(f.id)
       const sample = parseCountFixtureSample(f.sample)
-      result.push({ ...(f.conditions !== undefined ? { conditions: [...f.conditions] } : {}), ...(routeDefaults !== undefined ? { routeDefaults } : {}), ...(f.defaultCondition !== undefined ? { defaultCondition: f.defaultCondition } : {}), ...(f.spec?.trim() ? { spec: f.spec.trim() } : {}), ...(f.aggregation !== undefined ? { aggregation: f.aggregation } : {}), ...(f.kind !== undefined ? { kind: f.kind } : {}), ...(f.method !== undefined ? { method: f.method } : {}), ...(f.defaults !== undefined ? { defaults: { ...f.defaults } } : {}), ...(f.line !== undefined ? { line: { ...f.line } } : {}), id: f.id, name: f.name.trim(), code: f.code, category: f.category.trim(), memo: f.memo, order: f.order, ...(sample ? { sample } : {}), style: { shape: s.shape, fill: s.fill, color: [...s.color] as RGB, size: s.size, opacity: s.opacity, showCode: s.showCode } })
+      const opening = kind === 'count' ? parseFixtureOpening(f.opening) : undefined
+      result.push({ ...(f.conditions !== undefined ? { conditions: [...f.conditions] } : {}), ...(routeDefaults !== undefined ? { routeDefaults } : {}), ...(f.defaultCondition !== undefined ? { defaultCondition: f.defaultCondition } : {}), ...(f.spec?.trim() ? { spec: f.spec.trim() } : {}), ...(f.aggregation !== undefined ? { aggregation: f.aggregation } : {}), ...(f.kind !== undefined ? { kind: f.kind } : {}), ...(f.method !== undefined ? { method: f.method } : {}), ...(f.defaults !== undefined ? { defaults: { ...f.defaults } } : {}), ...(f.line !== undefined ? { line: { ...f.line } } : {}), id: f.id, name: f.name.trim(), code: f.code, category: f.category.trim(), memo: f.memo, order: f.order, ...(sample ? { sample } : {}), ...(opening ? { opening } : {}), style: { shape: s.shape, fill: s.fill, color: [...s.color] as RGB, size: s.size, opacity: s.opacity, showCode: s.showCode } })
     }
     return result.sort((a, b) => a.order - b.order)
   } catch { return [] }
 }
 export function serializeCountFixtures(fixtures: readonly CountFixture[]): string {
   for (const f of fixtures) { const error = fixtureConditionsError(f); if (error) throw new Error(error) }
-  const raw = JSON.stringify({ version: 1, fixtures: fixtures.map(f => ({ ...f, routeDefaults: f.routeDefaults === undefined ? undefined : wireFixtureRouteDefaults(f.routeDefaults), routeScope: f.routeDefaults?.plan === null && f.routeDefaults?.slack === null ? 'rise' : f.routeDefaults?.slack === null ? 'noSlack' : undefined, defaults: f.defaults ? { ...f.defaults, slackM: f.defaults.slackM === 0 ? undefined : f.defaults.slackM } : undefined, spec: f.spec?.trim() || undefined })).map(f => f.kind === 'count' && f.method === undefined && f.defaults === undefined && f.line === undefined ? { ...f, kind: undefined } : f) })
+  const raw = JSON.stringify({ version: 1, fixtures: fixtures.map(f => ({ ...f, opening: quantityKind(f) === 'count' ? parseFixtureOpening(f.opening) : undefined, routeDefaults: f.routeDefaults === undefined ? undefined : wireFixtureRouteDefaults(f.routeDefaults), routeScope: f.routeDefaults?.plan === null && f.routeDefaults?.slack === null ? 'rise' : f.routeDefaults?.slack === null ? 'noSlack' : undefined, defaults: f.defaults ? { ...f.defaults, slackM: f.defaults.slackM === 0 ? undefined : f.defaults.slackM } : undefined, spec: f.spec?.trim() || undefined })).map(f => f.kind === 'count' && f.method === undefined && f.defaults === undefined && f.line === undefined ? { ...f, kind: undefined } : f) })
   if (fixtures.some(f => f.spec !== undefined && (typeof f.spec !== 'string' || f.spec.length > 40)) || fixtures.length > MAX_COUNT_FIXTURES || fixtures.some(f => f.sample !== undefined && !parseCountFixtureSample(f.sample)) || new TextEncoder().encode(raw).length > MAX_COUNT_FIXTURE_BYTES || parseCountFixtures(raw).length !== fixtures.length) throw new Error('数量拾いの値・件数・容量が上限を超えています。')
   return raw
 }

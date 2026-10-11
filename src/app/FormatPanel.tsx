@@ -1,8 +1,8 @@
 import { LocationInput } from './LocationInput'
 import { RouteItems, ConditionSelect, addRouteCandidate, addQuantityCandidate } from './RouteItems'
-import { routeMembers, type PartCondition, type RoutePart, quantityLabel, quantityPoints, quantityDimensions, QUANTITY_DIMENSIONS } from '../core/quantity'
+import { routeMembers, type PartCondition, type RoutePart, type QuantityOpening, quantityLabel, quantityPoints, quantityDimensions, QUANTITY_DIMENSIONS } from '../core/quantity'
 import { polygonArea, polylineLength } from '../core/measure'
-import { fixtureCode, quantityMethod } from '../core/countFixtures'
+import { fixtureCode, fixtureDrawingCode, quantityKind, quantityMethod, QUANTITY_METHODS } from '../core/countFixtures'
 import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { SYMBOL_OPTIONS, type RGB, type SymbolName } from '../core/annotations'
@@ -17,6 +17,7 @@ import { SnippetPanel } from './SnippetPanel'
 import { FixtureUiContext } from './documentModel'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 import { QuantityValueInput } from '../editor/QuantityValueInput'
+import { groupFixtures } from './fixtureOrder'
 
 const COLORS: Array<{ name: string; value: RGB; css: string }> = [
   { name: '赤', value: [1, 0, 0], css: '#e00000' },
@@ -188,16 +189,20 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
       {quantity?.method === 'polyline' && activeSelection?.measure && activeSelection.vertices && store.selectedIds().length === 1 && <RouteItems annotation={activeSelection} store={store} />}
       {store.selectedIds().length >= 2 && store.selectedIds().every(id => store.get(id)?.quantity?.method === 'polyline') && <BulkRouteConditions key={store.selectedIds().join(',')} store={store} />}
       {store.selectedPickupsOnly() && fixture && quantity?.method !== 'polyline' && store.selectedIds().every(id => { const a = store.get(id); return a?.quantity ? a.quantity.method !== 'polyline' && a.quantity.itemId === fixture.id : !!a?.count && store.fixtureForCount(a.count)?.id === fixture.id }) && <PickupCondition key={fixture.id + store.selectedIds().join(',')} store={store} fixture={fixture} />}
-      {fixture ? <><p>{fixtureCode(fixture)} {fixture.name}</p>{quantityMethod(fixture) === 'click' ? <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + fixture.style.size * (1 + .7 * fixtureCode(fixture).length))} 50`} aria-label="印の見本"><CountMarker style={fixture.style} code={fixtureCode(fixture)} /></svg> : <QuantitySwatch fixture={fixture} />}
+      {fixture ? <><p>{fixtureCode(fixture)} {fixture.name}</p>{quantityMethod(fixture) === 'click' ? <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + fixture.style.size * (1 + .7 * fixtureDrawingCode(fixture).length))} 50`} aria-label="印の見本"><CountMarker style={fixture.style} code={fixtureDrawingCode(fixture)} /></svg> : <QuantitySwatch fixture={fixture} />}
         <button onClick={() => fixtureUi?.edit(fixture.id)}>項目を編集…</button></> : <button onClick={() => fixtureUi?.open()}>数量拾いの一覧で項目を選んでください</button>}
       {store.selectedPickupsOnly() && <PickupLocation key={store.selectedIds().join(',') + ':' + store.getSnapshot()} store={store} />}
       {(activeSelection?.count || quantity) && <label>項目を変更<select aria-label="項目を変更" value={fixture?.id ?? ''} onChange={e => setPickupError(store.reassignCounts(store.selectedIds(), e.currentTarget.value) ?? '')}>
-        {!fixture && <option value="">項目を選んでください</option>}{store.getCountFixtures().filter(f => quantityMethod(f) === (quantity?.method ?? 'click')).map(f => <option key={f.id} value={f.id}>{fixtureCode(f)} {f.name}</option>)}
+        {!fixture && <option value="">項目を選んでください</option>}{store.getCountFixtures().filter(f => quantity && (quantity.method === 'polygon' || quantity.method === 'lengthHeight' || quantity.method === 'polygonDepth' || quantity.method === 'lengthWidthDepth')
+          ? store.selectedIds().every(id => { const a = store.get(id); return !!a?.quantity && QUANTITY_METHODS[quantityKind(f)].includes(a.quantity.method) })
+          : quantityMethod(f) === (quantity?.method ?? 'click')).map(f => <option key={f.id} value={f.id}>{fixtureCode(f)} {f.name}</option>)}
       </select></label>}
       {quantity && activeSelection?.measure && activeSelection.vertices && store.selectedIds().length === 1 && <>
         {quantity.method !== 'polyline' && <p>{quantityPoints(quantity.method) === 'polygon' ? '面積' : '長さ'}　{(quantityPoints(quantity.method) === 'polygon' ? polygonArea(activeSelection.vertices) * activeSelection.measure.mmPerPoint ** 2 / 1e6 : polylineLength(activeSelection.vertices) * activeSelection.measure.mmPerPoint / 1000).toFixed(2)} {quantityPoints(quantity.method) === 'polygon' ? 'm²' : 'm'}</p>}
         {quantityDimensions(quantity.method).map(key => <QuantityValueInput key={activeSelection.id + key} label={QUANTITY_DIMENSIONS[key]} value={quantity[key] ?? 0} commit={n => store.updateQuantityValues(activeSelection.id, { [key]: n })} />)}
-        {quantity.method !== 'polyline' && <p>この拾い　{quantityLabel(activeSelection.vertices, activeSelection.measure.mmPerPoint, quantity, '', false)}</p>}
+        {quantity.method !== 'polyline' && <p>この拾い　{quantityLabel(activeSelection.vertices, activeSelection.measure.mmPerPoint, quantity, '', false, undefined, id => store.openingSize(id))}</p>}
+        {(quantity.method === 'polygon' || quantity.method === 'polygonDepth') && <AreaHoles key={'holes:' + activeSelection.id} annotation={activeSelection} store={store} />}
+        {(quantity.method === 'polygon' || quantity.method === 'lengthHeight') && <QuantityOpenings key={'openings:' + activeSelection.id} annotation={activeSelection} store={store} />}
       </>}
     </aside>
   }
@@ -272,6 +277,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     </label>}
     {target === 'square' && <button type="button" className="whiteout-button" title="上に白い四角を重ねて見えなくします。下の文字やデータはファイルに残ります" onClick={makeWhiteout}>白塗りにする</button>}
     {measureTarget && values && <label>文字の大きさ<select aria-label="文字の大きさ" value={values.fontSize} onChange={event => void changeText({ fontSize: Number(event.currentTarget.value) })}>{FONT_SIZES.map(v => <option key={v} value={v}>{v} pt</option>)}</select></label>}
+    {activeSelection?.measure?.kind === 'area' && !activeSelection.quantity && !activeSelection.count && !activeSelection.legacyChange && activeSelection.vertices && store.selectedIds().length === 1 && <AreaHoles key={'holes:' + activeSelection.id} annotation={activeSelection} store={store} />}
     {textTarget && values && <>
       <label>
         文字の透明度
@@ -315,6 +321,174 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     </fieldset>}
     {target && <p className="format-target">{activeSelection ? '選択中の書き込み' : '次に作る書き込み'}</p>}
   </aside>
+}
+
+function AreaHoles({ annotation, store }: { annotation: EditableAnnotation; store: AnnotationStore }) {
+  const [error, setError] = useState('')
+  const holes = annotation.quantity?.holes ?? annotation.measure?.holes ?? []
+  const drawing = store.areaHoleTarget === annotation.id
+  return <fieldset className="area-holes">
+    <legend>除外範囲</legend>
+    <ol style={{ paddingLeft: 20, maxHeight: 280, overflowY: 'auto' }}>
+      {holes.map((hole, index) => <li key={index}>
+        <div className="area-hole-row">
+          <span>除外 {index + 1}　{(polygonArea(hole) * annotation.measure!.mmPerPoint ** 2 / 1e6).toFixed(2)} m²</span>
+          <button type="button" aria-label={'除外' + (index + 1) + 'を削除'} onClick={() => setError(store.setAreaHoles(annotation.id, holes.filter((_, i) => i !== index)) ?? '')}>削除</button>
+        </div>
+      </li>)}
+    </ol>
+    <button type="button" disabled={!drawing && holes.length >= 50} onClick={() => {
+      setError('')
+      if (drawing) store.endAreaHoles()
+      else if (!store.startAreaHoles(annotation.id)) setError('除外する拾いまたは計測の面積を1つ選んでください。')
+    }}>{drawing ? '囲み終える' : '除外範囲を囲む'}</button>
+    {holes.length >= 50 && <p>除外範囲は50個までです。</p>}
+    {error && <p role="alert">{error}</p>}
+  </fieldset>
+}
+
+interface OpeningDraft {
+  key: number
+  value: QuantityOpening
+  saved?: QuantityOpening
+}
+
+function QuantityOpenings({ annotation, store }: { annotation: EditableAnnotation; store: AnnotationStore }) {
+  const sequence = useRef(0)
+  const makeRows = (openings: readonly QuantityOpening[]): OpeningDraft[] => openings.map(opening => ({
+    key: ++sequence.current, value: { ...opening }, saved: { ...opening },
+  }))
+  const [rows, setRows] = useState<OpeningDraft[]>(() => makeRows(annotation.quantity?.openings ?? []))
+  const [error, setError] = useState('')
+  const serialized = JSON.stringify(annotation.quantity?.openings ?? [])
+  const lastSaved = useRef(serialized)
+  useEffect(() => {
+    // Preserve unfinished rows across our own commits and fixture updates.
+    // Undo/Redo or an external opening edit replaces the local draft.
+    if (serialized === lastSaved.current) return
+    lastSaved.current = serialized
+    setRows(makeRows(annotation.quantity?.openings ?? []))
+    setError('')
+  }, [serialized])
+
+  const groups = groupFixtures(store.getCountFixtures().filter(f => !!store.openingSize(f.id))).sort((a, b) =>
+    a.category === '建具' && b.category !== '建具' ? -1 : b.category === '建具' && a.category !== '建具' ? 1 : 0)
+  const selectable = new Set(groups.flatMap(group => group.items.map(f => f.id)))
+  const validDimension = (value: number | undefined): value is number => value !== undefined && Number.isFinite(value) && value > 0 && value <= 100
+  const complete = (opening: QuantityOpening) => Number.isInteger(opening.count) && opening.count >= 1 && opening.count <= 999
+    && (!!opening.itemId || validDimension(opening.widthM) && validDimension(opening.heightM))
+  const size = (opening: QuantityOpening) => {
+    const current = opening.itemId ? store.openingSize(opening.itemId) : undefined
+    const widthM = current?.widthM ?? opening.widthM, heightM = current?.heightM ?? opening.heightM
+    return validDimension(widthM) && validDimension(heightM) ? { widthM, heightM } : undefined
+  }
+  const area = (opening: QuantityOpening) => {
+    const dimensions = size(opening)
+    return dimensions ? dimensions.widthM * dimensions.heightM * opening.count : undefined
+  }
+  const persist = (next: OpeningDraft[]) => {
+    const openings = next.flatMap(row => row.saved ? [{ ...row.saved }] : [])
+    const previous = lastSaved.current
+    lastSaved.current = JSON.stringify(openings)
+    const reason = store.setQuantityOpenings(annotation.id, openings)
+    if (reason) { lastSaved.current = previous; setError(reason); return false }
+    setRows(next)
+    setError('')
+    return true
+  }
+  const change = (key: number, value: QuantityOpening) => {
+    const next = rows.map(row => row.key === key ? { ...row, value, saved: complete(value) ? { ...value } : row.saved } : row)
+    persist(next)
+  }
+  const areas = rows.map(row => area(row.value))
+  const total = areas.every(value => value !== undefined) ? areas.reduce<number>((sum, value) => sum + value!, 0).toFixed(2) : '?'
+
+  return <fieldset className="quantity-openings">
+    <legend>開口部（差し引く）</legend>
+    {!groups.length && <p>開口寸法のある建具がありません。項目の編集で個数の項目に開口寸法を入れると選べます</p>}
+    <ol className="quantity-opening-list">
+      {rows.map((row, index) => {
+        const opening = row.value, label = '開口部' + (index + 1)
+        const missingFixture = opening.itemId && !selectable.has(opening.itemId) ? store.getCountFixture(opening.itemId) : undefined
+        const rowArea = area(opening)
+        return <li key={row.key} className="quantity-opening-row">
+          <label>種類<select aria-label={label + 'の種類'} value={opening.itemId ?? ''} onChange={event => {
+            const itemId = event.currentTarget.value
+            if (!itemId) { change(row.key, { count: opening.count }); return }
+            const dimensions = store.openingSize(itemId)
+            if (dimensions) change(row.key, { itemId, ...dimensions, count: opening.count })
+          }}>
+            <option value="">寸法を入力</option>
+            {opening.itemId && !selectable.has(opening.itemId) && <option value={opening.itemId}>{missingFixture ? `${fixtureCode(missingFixture)} ${missingFixture.name}` : opening.itemId}（開口寸法不明）</option>}
+            {groups.map(group => <optgroup key={group.category} label={group.category}>
+              {group.items.map(fixture => {
+                const dimensions = store.openingSize(fixture.id)!
+                return <option key={fixture.id} value={fixture.id}>{fixtureCode(fixture)} {fixture.name}（{dimensions.widthM.toFixed(2)}×{dimensions.heightM.toFixed(2)}）</option>
+              })}
+            </optgroup>)}
+          </select></label>
+          {!opening.itemId && <div className="quantity-opening-size">
+            <OpeningValueInput label="幅（m）" ariaLabel={label + 'の幅（m）'} value={opening.widthM} commit={widthM => change(row.key, { ...opening, widthM })} />
+            <OpeningValueInput label="高さ（m）" ariaLabel={label + 'の高さ（m）'} value={opening.heightM} commit={heightM => change(row.key, { ...opening, heightM })} />
+          </div>}
+          <OpeningValueInput label="箇所数" ariaLabel={label + 'の箇所数'} value={opening.count} integer commit={count => {
+            if (count !== undefined) change(row.key, { ...opening, count })
+          }} />
+          <div className="quantity-opening-summary">
+            <span>{rowArea === undefined ? '?' : rowArea.toFixed(2)} m²</span>
+            <button type="button" aria-label={label + 'を削除'} onClick={() => persist(rows.filter(candidate => candidate.key !== row.key))}>削除</button>
+          </div>
+          {!complete(opening) && <p role="status">幅と高さを入力すると確定します。</p>}
+        </li>
+      })}
+    </ol>
+    <button type="button" disabled={rows.length >= 50} onClick={() => {
+      setRows(previous => [...previous, { key: ++sequence.current, value: { count: 1 } }])
+      setError('')
+    }}>開口部を追加</button>
+    {rows.length >= 50 && <p>開口部は50件までです。</p>}
+    <p>合計　{total} m²</p>
+    {error && <p role="alert">{error}</p>}
+  </fieldset>
+}
+
+function OpeningValueInput({ label, ariaLabel, value, integer = false, commit }: {
+  label: string
+  ariaLabel: string
+  value: number | undefined
+  integer?: boolean
+  commit(value: number | undefined): void
+}) {
+  const display = (number: number | undefined) => number === undefined ? '' : integer ? String(number) : number.toFixed(2)
+  const [text, setText] = useState(() => display(value))
+  const [error, setError] = useState('')
+  useEffect(() => { setText(display(value)); setError('') }, [value, integer])
+  const finish = () => {
+    if (!text.trim()) {
+      if (integer) { setError('箇所数は1〜999の整数で入力してください。'); return }
+      setError(''); commit(undefined); return
+    }
+    const number = Number(text)
+    if (!Number.isFinite(number) || (integer ? !Number.isInteger(number) || number < 1 || number > 999 : number <= 0 || number > 100)) {
+      setError(integer ? '箇所数は1〜999の整数で入力してください。' : '寸法は0より大きく100以下で入力してください。')
+      return
+    }
+    setError('')
+    setText(display(number))
+    commit(number)
+  }
+  return <label className="quantity-opening-value">
+    {label}
+    <input aria-label={ariaLabel} type="number" min={integer ? 1 : 0} max={integer ? 999 : 100} step={integer ? 1 : 'any'} value={text}
+      onChange={event => { setText(event.currentTarget.value); setError('') }} onBlur={finish}
+      onKeyDown={event => {
+        if (event.key !== 'Enter') return
+        event.preventDefault()
+        event.stopPropagation()
+        event.currentTarget.blur()
+      }} />
+    {error && <span role="alert">{error}</span>}
+  </label>
 }
 
 function PickupLocation({ store }: { store: AnnotationStore }) {

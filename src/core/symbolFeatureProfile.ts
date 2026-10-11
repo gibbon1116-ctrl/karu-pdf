@@ -57,8 +57,38 @@ export class SymbolFeatureGeometry {
     this.complete = complete && segments.length / 4 <= 400_000
     this.segments = segments; this.widths = widths
     this.byY = new Uint32Array(this.complete ? segments.length / 4 : 0)
-    for (let i=0;i<this.byY.length;i++) this.byY[i]=i*4
-    this.byY.sort((a,b)=>Math.min(segments[a+1],segments[a+3])-Math.min(segments[b+1],segments[b+3]))
+    if (this.byY.length) {
+      // Float32 coordinates already have an exact Float32 minimum. Convert
+      // that minimum to an unsigned, numerically ordered key; both zeros tie.
+      const values = new Float32Array(this.byY.length)
+      const keys = new Uint32Array(values.buffer)
+      for (let i=0;i<this.byY.length;i++) {
+        this.byY[i]=i*4
+        values[i]=Math.min(segments[i*4+1],segments[i*4+3])
+        const bits=keys[i]===0x80000000 ? 0 : keys[i]
+        keys[i]=(bits&0x80000000 ? ~bits : bits^0x80000000)>>>0
+      }
+      // Four stable LSD passes retain the original line order for equal keys.
+      // All scratch arrays belong only to this constructor invocation.
+      let source:Uint32Array=this.byY,target:Uint32Array=new Uint32Array(this.byY.length)
+      const counts=new Uint32Array(256)
+      for(let shift=0;shift<32;shift+=8){
+        counts.fill(0)
+        for(let i=0;i<source.length;i++)counts[(keys[source[i]>>>2]>>>shift)&255]++
+        let offset=0
+        for(let bucket=0;bucket<counts.length;bucket++){
+          const count=counts[bucket]
+          counts[bucket]=offset
+          offset+=count
+        }
+        for(let i=0;i<source.length;i++){
+          const index=source[i],bucket=(keys[index>>>2]>>>shift)&255
+          target[counts[bucket]++]=index
+        }
+        const previous=source
+        source=target;target=previous
+      }
+    }
   }
   get indexBytes(): number { return this.byY.byteLength }
   /** Conservative y window; accepted local lines are at most maxLength long.
@@ -142,20 +172,73 @@ export function probeSymbolVectorFeatures(geometry: SymbolFeatureGeometry, pose:
     const gap=Math.max(2,.15*long)
     const close=(a:Point,b:Point)=>(a[0]-b[0])**2+(a[1]-b[1])**2<=gap**2
     const turn = Math.sin(Math.PI/60)
-    for(let i=0;i<all.length;i++)for(let j=i+1;j<all.length;j++){
+    const join=(i:number,j:number)=>{
       const a=all[i],b=all[j]
       // Matching strokes are assessed individually: an aligned body mark must
       // not inherit a remote endpoint from wiring that stops at the outline.
-      if(symbolStrokeMatches(a.width,strokeWidth)||symbolStrokeMatches(b.width,strokeWidth))continue
-      if(Math.abs(a.width-b.width)>.1*Math.max(a.width,b.width))continue
-      if(!close(a.a,b.a)&&!close(a.a,b.b)&&!close(a.b,b.a)&&!close(a.b,b.b))continue
+      if(symbolStrokeMatches(a.width,strokeWidth)||symbolStrokeMatches(b.width,strokeWidth))return
+      if(Math.abs(a.width-b.width)>.1*Math.max(a.width,b.width))return
+      if(!close(a.a,b.a)&&!close(a.a,b.b)&&!close(a.b,b.a)&&!close(a.b,b.b))return
       const ax=a.b[0]-a.a[0],ay=a.b[1]-a.a[1],bx=b.b[0]-b.a[0],by=b.b[1]-b.a[1]
-      if(Math.abs(ax*by-ay*bx)>turn*a.len*b.len)continue
+      if(Math.abs(ax*by-ay*bx)>turn*a.len*b.len)return
       const onA=(p:Point)=>Math.abs(ax*(p[1]-a.a[1])-ay*(p[0]-a.a[0]))<=tolerance*a.len
       const onB=(p:Point)=>Math.abs(bx*(p[1]-b.a[1])-by*(p[0]-b.a[0]))<=tolerance*b.len
-      if(!(onA(b.a)&&onA(b.b)||onB(a.a)&&onB(a.b)))continue
+      if(!(onA(b.a)&&onA(b.b)||onB(a.a)&&onB(a.b)))return
       const ra=root(i),rb=root(j)
       if(ra!==rb)parent[rb]=ra
+    }
+    const grid=new Map<number,Map<number,number[]>>()
+    const cells:Array<Array<[number,number]>>=[]
+    // A small conservative registration halo covers rounding at cell borders,
+    // including a distance rounded down by the original squared-distance test.
+    // It broadens candidate enumeration only; join retains every old predicate.
+    const endpointCells=(p:Point):Array<[number,number]>|undefined=>{
+      const x=p[0]/gap,y=p[1]/gap
+      if(!Number.isFinite(x)||!Number.isFinite(y)||Math.abs(x)>0x100000000||Math.abs(y)>0x100000000)return undefined
+      const margin=Math.max(gap,Math.abs(p[0]),Math.abs(p[1]))*(32*Number.EPSILON)
+      const x0=Math.floor((p[0]-margin)/gap),x1=Math.floor((p[0]+margin)/gap)
+      const y0=Math.floor((p[1]-margin)/gap),y1=Math.floor((p[1]+margin)/gap)
+      const result:Array<[number,number]>=[]
+      for(let xx=x0;xx<=x1;xx++)for(let yy=y0;yy<=y1;yy++)result.push([xx,yy])
+      return result
+    }
+    // Overflowing squared distances and unsafe grid coordinates retain the
+    // original enumeration, rather than changing its floating-point semantics.
+    let useGrid=Number.isFinite(gap*gap)
+    for(let i=0;useGrid&&i<all.length;i++){
+      cells[i]=[]
+      if(symbolStrokeMatches(all[i].width,strokeWidth))continue
+      const aCells=endpointCells(all[i].a),bCells=endpointCells(all[i].b)
+      if(!aCells||!bCells){useGrid=false;break}
+      for(const [x,y] of [...aCells,...bCells]){
+        if(cells[i].some(cell=>cell[0]===x&&cell[1]===y))continue
+        cells[i].push([x,y])
+        let column=grid.get(x)
+        if(!column){column=new Map<number,number[]>();grid.set(x,column)}
+        let bucket=column.get(y)
+        if(!bucket){bucket=[];column.set(y,bucket)}
+        bucket.push(i)
+      }
+    }
+    if(useGrid){
+      const seen=new Uint16Array(all.length)
+      for(let i=0;i<all.length;i++){
+        for(const [x,y] of cells[i])for(let dx=-1;dx<=1;dx++){
+          const column=grid.get(x+dx)
+          if(!column)continue
+          for(let dy=-1;dy<=1;dy++){
+            const bucket=column.get(y+dy)
+            if(!bucket)continue
+            for(const j of bucket){
+              if(j<=i||seen[j]===i+1)continue
+              seen[j]=i+1
+              join(i,j)
+            }
+          }
+        }
+      }
+    }else{
+      for(let i=0;i<all.length;i++)for(let j=i+1;j<all.length;j++)join(i,j)
     }
     const enters = new Uint8Array(all.length), remote = new Uint8Array(all.length)
     const outside=(p:Point)=>p[0]<-out||p[1]<-out||p[0]>w+out||p[1]>h+out

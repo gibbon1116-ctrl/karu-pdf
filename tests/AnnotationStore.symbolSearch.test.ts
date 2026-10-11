@@ -17,6 +17,199 @@ async function setup() {
 }
 
 describe('visual search count marks', () => {
+  it('keeps hidden other-fixture candidates out of individual, bulk, and high-confidence selection', async () => {
+    const store = await setup()
+    store.createCountMarks('other', [{ pageIndex: 0, center: [30, 40] }])
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([
+      { ...candidate(30, 40), confidence: 'high' },
+      { ...candidate(70, 40), confidence: 'high' },
+    ])
+    const [other, ordinary] = store.symbolCandidates!
+
+    expect(store.symbolOtherFilter).toBe('hide')
+    expect(other.otherFixture).toBe('other')
+    expect(store.visibleSymbolCandidates).toEqual([ordinary])
+
+    store.toggleSymbolCandidate(other.id)
+    expect(other.state).toBe('pending')
+    store.chooseSymbolCandidates(true)
+    expect(other.state).toBe('pending')
+    expect(ordinary.state).toBe('chosen')
+    store.chooseSymbolCandidates(false)
+    expect(other.state).toBe('pending')
+    expect(ordinary.state).toBe('pending')
+    store.chooseHighConfidenceCandidates()
+    expect(other.state).toBe('pending')
+    expect(ordinary.state).toBe('chosen')
+  })
+
+  it('allows shown other-fixture candidates in individual, bulk, and high-confidence selection and preserves selection on refresh', async () => {
+    const store = await setup()
+    store.createCountMarks('other', [
+      { pageIndex: 0, center: [30, 40] },
+      { pageIndex: 0, center: [70, 40] },
+    ])
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([
+      { ...candidate(30, 40), confidence: 'high' },
+      { ...candidate(70, 40), confidence: 'check' },
+      { ...candidate(110, 40), confidence: 'high' },
+    ])
+    const [highOther, checkOther, ordinary] = store.symbolCandidates!
+    store.setSymbolOtherFilter('show')
+
+    expect(store.visibleSymbolCandidates).toEqual([highOther, checkOther, ordinary])
+    store.toggleSymbolCandidate(highOther.id)
+    expect(highOther.state).toBe('chosen')
+    store.toggleSymbolCandidate(highOther.id)
+    expect(highOther.state).toBe('pending')
+    store.toggleSymbolCandidate(checkOther.id)
+    expect(checkOther.state).toBe('chosen')
+    store.toggleSymbolCandidate(checkOther.id)
+    expect(checkOther.state).toBe('pending')
+
+    store.chooseSymbolCandidates(true)
+    expect(store.symbolCandidates!.map(c => c.state)).toEqual(['chosen', 'chosen', 'chosen'])
+    store.chooseSymbolCandidates(false)
+    expect(store.symbolCandidates!.map(c => c.state)).toEqual(['pending', 'pending', 'pending'])
+    store.chooseHighConfidenceCandidates()
+    expect(highOther.state).toBe('chosen')
+    expect(checkOther.state).toBe('pending')
+    expect(ordinary.state).toBe('chosen')
+
+    store.appendSymbolCandidates([candidate(150, 40)])
+    expect(highOther.otherFixture).toBe('other')
+    expect(highOther.state).toBe('chosen')
+    expect(checkOther.otherFixture).toBe('other')
+    expect(checkOther.state).toBe('pending')
+    expect(ordinary.state).toBe('chosen')
+  })
+
+  it('clears chosen other-fixture candidates when hiding them and leaves ordinary selections intact', async () => {
+    const store = await setup()
+    store.createCountMarks('other', [{ pageIndex: 0, center: [30, 40] }])
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([candidate(30, 40), candidate(70, 40)])
+    const [other, ordinary] = store.symbolCandidates!
+    store.setSymbolOtherFilter('show')
+    store.chooseSymbolCandidates(true)
+
+    expect(other.state).toBe('chosen')
+    expect(ordinary.state).toBe('chosen')
+    store.setSymbolOtherFilter('hide')
+    expect(other.state).toBe('pending')
+    expect(ordinary.state).toBe('chosen')
+    expect(store.visibleSymbolCandidates).toEqual([ordinary])
+    expect(store.visibleSymbolCandidates!.filter(c => c.state === 'chosen')).toEqual([ordinary])
+
+    store.toggleSymbolCandidate(other.id)
+    expect(other.state).toBe('pending')
+    store.setSymbolOtherFilter('show')
+    expect(store.visibleSymbolCandidates).toEqual([other, ordinary])
+    expect(other.state).toBe('pending')
+    expect(ordinary.state).toBe('chosen')
+  })
+
+  it('keeps same-fixture counted candidates unselectable when other fixtures are shown and gives counted state priority after adding', async () => {
+    const store = await setup()
+    store.createCountMarks('other', [
+      { pageIndex: 0, center: [30, 40] },
+      { pageIndex: 0, center: [70, 40] },
+    ])
+    store.createCountMarks('led', [{ pageIndex: 0, center: [30, 40] }])
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([
+      { ...candidate(30, 40), confidence: 'high' },
+      { ...candidate(70, 40), confidence: 'high' },
+    ])
+    const [counted, other] = store.symbolCandidates!
+    store.setSymbolOtherFilter('show')
+
+    expect(counted.state).toBe('counted')
+    expect(counted.otherFixture).toBeUndefined()
+    expect(other.otherFixture).toBe('other')
+    store.toggleSymbolCandidate(counted.id)
+    expect(counted.state).toBe('counted')
+    store.chooseSymbolCandidates(true)
+    expect(counted.state).toBe('counted')
+    expect(other.state).toBe('chosen')
+    store.chooseSymbolCandidates(false)
+    expect(counted.state).toBe('counted')
+    expect(other.state).toBe('pending')
+    store.chooseHighConfidenceCandidates()
+    expect(counted.state).toBe('counted')
+    expect(other.state).toBe('chosen')
+
+    const ids = store.createCountMarks('led', [{ pageIndex: other.pageIndex, center: other.center }])
+    expect(ids).toHaveLength(1)
+    expect(other.state).toBe('counted')
+    expect(other.otherFixture).toBeUndefined()
+    store.toggleSymbolCandidate(other.id)
+    store.chooseSymbolCandidates(true)
+    store.chooseHighConfidenceCandidates()
+    expect(store.symbolCandidates!.map(c => c.state)).toEqual(['counted', 'counted'])
+  })
+
+  it('sets and removes the transient search area with non-dirty notifications and ignores unchanged bounds', async () => {
+    const store = await setup()
+    expect(store.symbolSearchArea).toBeNull()
+    const notify = vi.spyOn(store as unknown as { notify(changed: boolean): void }, 'notify')
+    const changed = vi.fn()
+    const unsubscribe = store.subscribe(changed)
+    const area = { pageIndex: 1, rect: [10, 20, 110, 80] as Rect }
+
+    store.setSymbolSearchArea(area)
+    expect(store.symbolSearchArea).toEqual(area)
+    expect(store.symbolSearchArea).not.toBe(area)
+    expect(store.symbolSearchArea?.rect).not.toBe(area.rect)
+    expect(notify).toHaveBeenCalledTimes(1)
+    expect(notify).toHaveBeenLastCalledWith(false)
+    expect(changed).toHaveBeenCalledTimes(1)
+
+    store.setSymbolSearchArea({ pageIndex: area.pageIndex, rect: [...area.rect] })
+    expect(notify).toHaveBeenCalledTimes(1)
+    expect(changed).toHaveBeenCalledTimes(1)
+
+    store.setSymbolSearchArea(null)
+    expect(store.symbolSearchArea).toBeNull()
+    expect(notify).toHaveBeenCalledTimes(2)
+    expect(notify).toHaveBeenLastCalledWith(false)
+    expect(changed).toHaveBeenCalledTimes(2)
+    expect(notify.mock.calls.every(([dirty]) => dirty === false)).toBe(true)
+
+    unsubscribe()
+    notify.mockRestore()
+  })
+
+  it('clears the search area even without candidates and also clears it together with candidates', async () => {
+    const store = await setup()
+    const area = { pageIndex: 0, rect: [10, 20, 110, 80] as Rect }
+    expect(store.symbolCandidates).toBeNull()
+    store.setSymbolSearchArea(area)
+    const notify = vi.spyOn(store as unknown as { notify(changed: boolean): void }, 'notify')
+
+    store.clearSymbolCandidates()
+    expect(store.symbolSearchArea).toBeNull()
+    expect(store.symbolCandidates).toBeNull()
+    expect(notify).toHaveBeenCalledTimes(1)
+    expect(notify).toHaveBeenLastCalledWith(false)
+
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([candidate(40, 50)])
+    store.setSymbolSearchArea(area)
+    expect(store.symbolCandidates).toHaveLength(1)
+    notify.mockClear()
+
+    store.clearSymbolCandidates()
+    expect(store.symbolSearchArea).toBeNull()
+    expect(store.symbolCandidates).toBeNull()
+    expect(notify).toHaveBeenCalledTimes(1)
+    expect(notify).toHaveBeenLastCalledWith(false)
+
+    notify.mockRestore()
+  })
+
   it('filters labels and G for toggling, bulk selection, high confidence and quantity addition without deleting candidates', async () => {
     const store=await setup()
     store.beginSymbolCandidates('led',sampleRect)
@@ -161,7 +354,7 @@ describe('other-fixture candidates', () => {
     expect(store.canUndo()).toBe(false)
     expect(store.quantityIndex().total('other')).toBe(0)
   })
-  it('blocks other-fixture candidates in all three selection actions even when shown and excludes them from quantity addition', async () => {
+  it('lets shown other-fixture candidates join all three selection actions and quantity addition (SPEC-S15)', async () => {
     const store = await setup()
     const ids = store.createCountMarks('other', [{ pageIndex: 0, center: [40, 50] }])
     const originalMark = JSON.stringify(store.get(ids[0]))
@@ -170,27 +363,33 @@ describe('other-fixture candidates', () => {
       { ...candidate(40, 50), confidence: 'high' },
       { ...candidate(80, 50), confidence: 'high' },
     ])
-    store.setSymbolOtherFilter('show')
-    expect(store.visibleSymbolCandidates).toHaveLength(2)
-    const blockedId = store.symbolCandidates![0].id
-    store.toggleSymbolCandidate(blockedId)
-    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'pending'])
-
+    // Hidden: not selectable and not part of "choose all".
     store.chooseSymbolCandidates(true)
     expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'chosen'])
     store.chooseSymbolCandidates(false)
-    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'pending'])
 
+    store.setSymbolOtherFilter('show')
+    expect(store.visibleSymbolCandidates).toHaveLength(2)
+    const otherId = store.symbolCandidates![0].id
+    store.toggleSymbolCandidate(otherId)
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['chosen', 'pending'])
+    store.chooseSymbolCandidates(false)
+    store.chooseSymbolCandidates(true)
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['chosen', 'chosen'])
+    store.chooseSymbolCandidates(false)
     store.chooseHighConfidenceCandidates()
-    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'chosen'])
-    const selected = store.visibleSymbolCandidates!.filter(c => c.state === 'chosen' && !c.otherFixture)
-    expect(selected.map(c => c.center)).toEqual([[80, 50]])
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['chosen', 'chosen'])
+
+    const selected = store.visibleSymbolCandidates!.filter(c => c.state === 'chosen')
+    expect(selected.map(c => c.center)).toEqual([[40, 50], [80, 50]])
     store.createCountMarks('led', selected.map(c => ({ pageIndex: c.pageIndex, center: c.center })))
-    expect(store.quantityIndex().total('led')).toBe(1)
+    expect(store.quantityIndex().total('led')).toBe(2)
     expect(store.quantityIndex().total('other')).toBe(1)
     expect(JSON.stringify(store.get(ids[0]))).toBe(originalMark)
-    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'counted'])
-    expect(store.symbolCandidates![0].otherFixture).toBe('other')
+    // Same-fixture marks take precedence: both are counted and can no longer be chosen.
+    expect(store.symbolCandidates?.map(c => c.state)).toEqual(['counted', 'counted'])
+    store.toggleSymbolCandidate(otherId)
+    expect(store.symbolCandidates![0].state).toBe('counted')
   })
   it('uses the nearest other-fixture mark on the same page and includes the radius boundary', async () => {
     const store = await setup()
@@ -225,7 +424,7 @@ describe('other-fixture candidates', () => {
     expect(store.symbolCandidates![0]).not.toHaveProperty('otherFixture')
     expect(store.visibleSymbolCandidates).toHaveLength(1)
   })
-  it('removes otherFixture after undo and allows selection, then blocks it again after redo', async () => {
+  it('removes otherFixture after undo and allows selection, then hides it again after redo until shown', async () => {
     const store = await setup()
     store.createCountMarks('other', [{ pageIndex: 0, center: [40, 50] }])
     store.beginSymbolCandidates('led', sampleRect)
@@ -246,7 +445,7 @@ describe('other-fixture candidates', () => {
     expect(store.visibleSymbolCandidates).toHaveLength(0)
     store.setSymbolOtherFilter('show')
     store.toggleSymbolCandidate(id)
-    expect(store.symbolCandidates![0].state).toBe('pending')
+    expect(store.symbolCandidates![0].state).toBe('chosen')
     expect(store.quantityIndex().total('led')).toBe(0)
     expect(store.quantityIndex().total('other')).toBe(1)
   })

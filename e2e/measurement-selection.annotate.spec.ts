@@ -40,7 +40,6 @@ async function open(page: Page, vertexCount = 3) {
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '経路選択.pdf'), await drawingPdf(vertexCount))
   await page.evaluate(() => window.__karu!.setZoom(1))
   await page.getByRole('tab', { name: '数量', exact: true }).click()
-  await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
   await expect(layer(page)).toBeVisible()
   await page.getByRole('button', { name: '選択', exact: true }).click()
 }

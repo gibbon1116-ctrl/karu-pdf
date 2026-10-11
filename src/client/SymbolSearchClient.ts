@@ -17,6 +17,7 @@ import type { SymbolSearchMessage, SymbolSearchResponse, WorkerSearchOptions } f
 export interface SymbolSearchRequest {
   docId: string; pageIndex: number; sampleRect: Rect; samplePageIndex: number
   searchRect?: Rect; options?: Partial<SymbolSearchOptions>; verify?: boolean; splitG?: boolean; shapeCheck?: boolean
+  sampleLines?: { segments: Float32Array; widths: Float32Array }
 }
 export interface SymbolCandidate { pageIndex: number; rect: Rect; center: Point; score: number; rotation: number
   confidence?: 'high' | 'check'; imageScore?: number; extra?: number; around?: number; aroundCheck?: boolean; label?: string; gc?: boolean
@@ -171,6 +172,9 @@ export class SymbolSearchClient {
           const response = await vectorWorkerTask({ type: 'vector-search', id: run.id, segments: target.segments,
             segmentWidths: target.widths,
             sampleSegments: samplePage.segments, sampleWidths: samplePage.widths, sampleRect: request.sampleRect,
+            ...(request.sampleLines ? { sampleLines: {
+              segments: request.sampleLines.segments.slice(), widths: request.sampleLines.widths.slice(),
+            } } : {}),
             paint:target.paint,samplePaint:samplePage.paint,
             ...(request.shapeCheck?{features:{complete:!target.truncated&&target.kind==='vector',sampleComplete:!samplePage.truncated&&samplePage.kind==='vector',samePage:request.pageIndex===request.samplePageIndex}}:{}),
             options: { threshold: request.options?.threshold ?? .85, rotations: request.options?.rotations ?? false,

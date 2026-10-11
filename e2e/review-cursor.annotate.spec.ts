@@ -34,7 +34,6 @@ async function open(page: Page, scrollable = false) {
   await page.evaluate(b => window.__karu!.openBytes(b, '確認位置試験.pdf'), await drawingPdf(scrollable))
   await page.evaluate(() => window.__karu!.setZoom(1))
   await page.getByRole('tab', { name: '数量', exact: true }).click()
-  await page.getByTestId('fixture-panel').getByRole('button', { name: '管理', exact: true }).click()
   await expect(page.getByRole('button', { name: '項目を追加', exact: true })).toBeEnabled()
   await expect.poll(() => page.evaluate(() => window.__karu!.getDrawingScanMetrics().scanning)).toBe(false)
 }
@@ -58,7 +57,7 @@ for (const view of ['table', 'breakdown'] as const) {
       await breakdown(page).getByRole('button', { name: 'ページ別', exact: true }).click()
     }
     const button = view === 'table' ? cell(page) : breakdown(page).locator('[data-page-index="0"]')
-    const total = view === 'table' ? row(page).locator('.quantity-table-fixed-4 button') : breakdown(page).locator('.quantity-breakdown-total')
+    const total = view === 'table' ? row(page).locator('.quantity-table-fixed-5 button') : breakdown(page).locator('.quantity-breakdown-total')
     const assertTotal = async (n: number) => expect(total).toHaveText(view === 'table' ? String(n) : `合計 ${n} 個`)
     await button.click(); await expect(button).toContainText('1 / 5')
     const ids = await orderedIds(page)
@@ -101,7 +100,7 @@ test('table: deletion preserves scrolled viewport and category/kind filters', as
   const top = await scroll.evaluate(e => e.scrollTop)
   expect(top).toBeGreaterThan(0)
   await page.keyboard.press('Delete')
-  await expect(row(page).locator('.quantity-table-fixed-4 button')).toHaveText('4')
+  await expect(row(page).locator('.quantity-table-fixed-5 button')).toHaveText('4')
   await expect.poll(() => scroll.evaluate(e => e.scrollTop)).toBe(top)
   await expect(table(page).getByLabel('集計表の分類', { exact: true })).toHaveValue('電気')
   await expect(table(page).getByLabel('集計表の種別', { exact: true })).toHaveValue('count')

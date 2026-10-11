@@ -3,7 +3,7 @@ import { stableJson } from '../core/stableJson'
 import { floorFromDrawingName, normalizeFloor } from '../core/location'
 import { mergeAutomaticDrawingInfo, type DrawingInfo } from '../core/drawingInfo'
 import { validRouteScope, type RouteScope, validRouteCount, validRouteConditions, routeConditionsKey, normalizeRouteConditions, conditionsFromScope, withRouteScope, routeMembers, routeRises, validRises, riseTotal, validCondition, quantityLabel, quantityDimensions, parseQuantityMark, serializeQuantityMark, type RouteConditions, type RoutePart, type PartCondition, type Rise, type QuantityMark } from '../core/quantity'
-import { fixtureConditionRenames, fixtureCode, quantityKind, quantityMethod, quantityLine, type QuantityLineStyle } from '../core/countFixtures'
+import { fixtureConditionRenames, fixtureCode, fixtureDrawingCode, quantityKind, quantityMethod, quantityLine, type QuantityLineStyle } from '../core/countFixtures'
 import { symbolRectFromDrag, nearestCalloutEdgePoint, type AnnotationColor, type AnnotationEdit, type AnnotationInfo, type LegacyChangeData, type Point, type Rect, type RGB, type SymbolName } from '../core/annotations'
 import type { Quad } from 'mupdf'
 import type { FontName } from '../core/fontMetrics'
@@ -16,6 +16,9 @@ import { countFixtureId, type CountMark } from '../core/counts'
 import { nextCountStyle, serializeCountFixtures, type CountFixture } from '../core/countFixtures'
 import { DEFAULT_ANNOTATION_FILTER, filterShowsCountMarks, matchesAnnotationFilter, type AnnotationFilter } from './annotationFilter'
 import type { SymbolShapeDecision } from '../core/symbolShapeDecision'
+import { parseRoomRegions, parseRoomSets, parseRoomSetLink, pickupPoint, pointInRoomRegion, roomAt, translateRoomRegion, type RoomRegion, type RoomSet, type RoomSetLink } from '../core/rooms'
+
+const EMPTY_EFFECTIVE_ROOM_REGIONS: Array<{ region: RoomRegion; setId?: string }> = []
 
 export type DrawingFilterReleaseReason = '数量拾いの印を数えるため' | '隠れている種類の書き込みを作ったため' | '次の未対応指摘を表示するため' | '数量拾いの印を表示するため'
 
@@ -71,7 +74,7 @@ type ScaleChange = { pageIndex: number; scale: PageScale | null }
 type DrawingChange = { pageIndex: number; info: DrawingInfo | null }
 type RouteTemplate = { itemId: string; extra: NonNullable<QuantityMark['extra']>; count: number; cond?: RouteConditions; name: string }
 type PickupMemory = Array<{ itemId: string; cond?: RouteConditions; condition?: string; conditionSet?: boolean; members?: RouteTemplate }>
-type HistoryState = AnnotationState[] & { routeTemplate?: RouteTemplate | null; pickupMemory?: PickupMemory; drawings?: DrawingChange[]; scales?: ScaleChange[]; scaleRegions?: Array<{ pageIndex: number; regions: ScaleRegion[] }>; issueMaximum?: number; fixtures?: CountFixture[] }
+type HistoryState = AnnotationState[] & { routeTemplate?: RouteTemplate | null; pickupMemory?: PickupMemory; drawings?: DrawingChange[]; scales?: ScaleChange[]; scaleRegions?: Array<{ pageIndex: number; regions: ScaleRegion[] }>; roomRegions?: Array<{ pageIndex: number; regions: RoomRegion[] }>; roomSets?: RoomSet[]; pageRoomSets?: Array<[number, RoomSetLink]>; issueMaximum?: number; fixtures?: CountFixture[] }
 interface AnnotationState extends Omit<EditableAnnotation, 'dirty'> {}
 interface StoredAnnotation extends AnnotationState {
   deleted: boolean
@@ -222,6 +225,8 @@ export interface DirtySummary {
   fixtures: boolean
   scales: number[]
   drawings: number[]
+  rooms: number[]
+  roomSets: boolean
 }
 
 export class AnnotationStore {
@@ -265,10 +270,19 @@ export class AnnotationStore {
   selectedFixtureId: string | null = null
   // Allocated only by explicit visual search; excluded from persisted/history states.
   symbolCandidates: SymbolSearchCandidate[] | null = null
+  symbolSearchArea: { pageIndex: number; rect: Rect } | null = null
   symbolLabelFilter: string[] | null = null
   symbolGcFilter: 'all' | 'with' | 'without' = 'all'
   symbolShapeFilter: 'same' | 'all' = 'same'
   symbolOtherFilter: 'hide' | 'show' = 'hide'
+  setSymbolSearchArea(area: { pageIndex: number; rect: Rect } | null): void {
+    const current = this.symbolSearchArea
+    if (current === null && area === null) return
+    if (current && area && current.pageIndex === area.pageIndex
+      && current.rect.every((value, index) => value === area.rect[index])) return
+    this.symbolSearchArea = area ? { pageIndex: area.pageIndex, rect: [...area.rect] } : null
+    this.notify(false)
+  }
   isSymbolCandidateVisible(c: SymbolSearchCandidate): boolean {
     return (this.symbolLabelFilter === null || this.symbolLabelFilter.includes(c.label))
       && (this.symbolGcFilter === 'all' || (this.symbolGcFilter === 'with' ? c.gc : !c.gc))
@@ -283,7 +297,11 @@ export class AnnotationStore {
     this.symbolShapeFilter = value; this.notify(false)
   }
   setSymbolOtherFilter(value: 'hide' | 'show'): void {
-    this.symbolOtherFilter = value; this.notify(false)
+    this.symbolOtherFilter = value
+    if (value === 'hide') {
+      for (const c of this.symbolCandidates ?? []) if (c.otherFixture && c.state === 'chosen') c.state = 'pending'
+    }
+    this.notify(false)
   }
   symbolOtherFixtureLabel(fixtureId: string): string {
     const fixture = this.getCountFixture(fixtureId)
@@ -293,8 +311,8 @@ export class AnnotationStore {
   private symbolCandidateRadius = 0
 
   clearSymbolCandidates(): void {
-    if (this.symbolCandidates === null && this.symbolShapeFilter === 'same' && this.symbolOtherFilter === 'hide') return
-    this.symbolCandidates = null; this.symbolCandidateFixture = null; this.symbolCandidateRadius = 0
+    if (this.symbolCandidates === null && this.symbolSearchArea === null && this.symbolShapeFilter === 'same' && this.symbolOtherFilter === 'hide') return
+    this.symbolCandidates = null; this.symbolSearchArea = null; this.symbolCandidateFixture = null; this.symbolCandidateRadius = 0
     this.symbolLabelFilter = null; this.symbolGcFilter = 'all'; this.symbolShapeFilter = 'same'; this.symbolOtherFilter = 'hide'
     this.notify(false)
   }
@@ -313,17 +331,17 @@ export class AnnotationStore {
   }
   toggleSymbolCandidate(id: string): void {
     const c = this.symbolCandidates?.find(c => c.id === id)
-    if (!c || c.state === 'counted' || c.otherFixture || !this.isSymbolCandidateVisible(c)) return
+    if (!c || c.state === 'counted' || !this.isSymbolCandidateVisible(c)) return
     c.state = c.state === 'chosen' ? 'pending' : 'chosen'; this.notify(false)
   }
   chooseSymbolCandidates(chosen: boolean): void {
     if (!this.symbolCandidates) return
-    for (const c of this.visibleSymbolCandidates ?? []) if (c.state !== 'counted' && !c.otherFixture) c.state = chosen ? 'chosen' : 'pending'
+    for (const c of this.visibleSymbolCandidates ?? []) if (c.state !== 'counted') c.state = chosen ? 'chosen' : 'pending'
     this.notify(false)
   }
   chooseHighConfidenceCandidates(): void {
     if (!this.symbolCandidates) return
-    for (const c of this.visibleSymbolCandidates ?? []) if (c.state === 'pending' && !c.otherFixture && c.confidence === 'high') c.state = 'chosen'
+    for (const c of this.visibleSymbolCandidates ?? []) if (c.state === 'pending' && c.confidence === 'high') c.state = 'chosen'
     this.notify(false)
   }
   private refreshSymbolCandidates(): void {
@@ -353,7 +371,7 @@ export class AnnotationStore {
           nearestDistance = distance; c.otherFixture = mark.fixtureId
         }
       }
-      if (c.otherFixture && c.state === 'chosen') c.state = 'pending'
+      if (this.symbolOtherFilter === 'hide' && c.otherFixture && c.state === 'chosen') c.state = 'pending'
     }
   }
 
@@ -365,7 +383,7 @@ export class AnnotationStore {
     const after: HistoryState = []
     for (const { pageIndex, center } of points) {
       const a = this.create({ pageIndex, kind: 'symbol', rect: symbolRectFromDrag(center, center, false, fixture.style.size),
-        count: { version: 2, id: crypto.randomUUID(), fixtureId, ...this.pickupLocation(pageIndex) },
+        count: { version: 2, id: crypto.randomUUID(), fixtureId, ...this.pickupLocation(pageIndex, center) },
         text: `個数: ${fixtureCode(fixture)} ${fixture.name}`.trim(), color: fixture.style.color, symbol: 'circle', opacity: fixture.style.opacity,
         deferHistory: true, deferNotify: true })
       this.pendingCreations.delete(a.id); after.push(cloneState(this.annotations.get(a.id)!))
@@ -381,6 +399,182 @@ export class AnnotationStore {
     if (!t) return { cond: this.newRouteConditions(itemId) }
     return { count: t.count, cond: structuredClone(this.routeTemplate?.itemId === itemId ? t.cond ?? f.routeDefaults ?? {} : this.lastRouteConditions.get(itemId) ?? t.cond ?? f.routeDefaults ?? {}), extra: t.extra.filter(e => { const f = this.getCountFixture(e.itemId); return f && quantityMethod(f) === 'polyline' }).map(e => ({ ...e, cond: structuredClone(this.routeTemplate?.itemId === itemId ? e.cond ?? this.getCountFixture(e.itemId)?.routeDefaults ?? {} : this.lastRouteConditions.get(e.itemId) ?? e.cond ?? this.getCountFixture(e.itemId)?.routeDefaults ?? {}) })) }
   }
+  private readonly pickupMethods = new Map<string, import('../core/countFixtures').QuantityMethod>()
+  pickupMethod(fixture: CountFixture): import('../core/countFixtures').QuantityMethod {
+    const selected = this.pickupMethods.get(fixture.id)
+    return selected && this.supportsPickupMethod(fixture, selected) ? selected : quantityMethod(fixture)
+  }
+  supportsPickupMethod(fixture: CountFixture, method: import('../core/countFixtures').QuantityMethod): boolean {
+    // Equivalent to membership in QUANTITY_METHODS[quantityKind(fixture)].
+    // Keep count/length reassignment restricted to their existing methods.
+    switch (quantityKind(fixture)) {
+      case 'count': return method === 'click'
+      case 'length': return method === 'polyline'
+      case 'area': return method === 'polygon' || method === 'lengthHeight'
+      case 'volume': return method === 'polygonDepth' || method === 'lengthWidthDepth'
+    }
+  }
+  setPickupMethod(itemId: string, method: import('../core/countFixtures').QuantityMethod): void {
+    const fixture = this.getCountFixture(itemId)
+    if (!fixture || !this.supportsPickupMethod(fixture, method) || this.pickupMethods.get(itemId) === method) return
+    this.pickupMethods.set(itemId, method)
+    this.notify(false)
+  }
+
+  private areaHoleId: string | null = null
+  get areaHoleTarget(): string | null { return this.areaHoleId }
+  startAreaHoles(id: string): boolean {
+    const annotation = this.get(id), selected = this.selectedIds()
+    if (!annotation || annotation.legacyChange || !annotation.vertices || !annotation.measure
+      || selected.length !== 1 || selected[0] !== id
+      || (annotation.quantity
+        ? annotation.quantity.method !== 'polygon' && annotation.quantity.method !== 'polygonDepth'
+        : !!annotation.count || annotation.measure.kind !== 'area')) return false
+    if (this.areaHoleId === id) return true
+    this.endRoomSetAlign(false)
+    this.roomCaptureIndex = null
+    this.roomEditState = null
+    this.roomEditCompletion = null
+    this.areaHoleId = id
+    this.notify(false)
+    return true
+  }
+  endAreaHoles(): void {
+    if (this.areaHoleId === null) return
+    this.areaHoleId = null
+    this.notify(false)
+  }
+
+  private roomEditState: { pageIndex: number; id: string; points: Point[] } | null = null
+  private roomEditCompletion: { pageIndex: number; region: RoomRegion } | null = null
+  get roomEditTarget(): { pageIndex: number; id: string } | null {
+    const active = this.roomEditState
+    // History restoration can remove a region without calling setRoomRegions.
+    if (active && !this.effectiveRoomRegions(active.pageIndex).some(({ region }) => region.id === active.id)) {
+      this.roomEditState = null
+      this.roomEditCompletion = null
+    }
+    return this.roomEditState
+  }
+  startRoomEdit(pageIndex: number, id: string): boolean {
+    if (!Number.isInteger(pageIndex) || pageIndex < 0) return false
+    const region = this.effectiveRoomRegions(pageIndex).find(({ region }) => region.id === id)?.region
+    if (!region) return false
+    const active = this.roomEditTarget
+    if (active?.pageIndex === pageIndex && active.id === id) return true
+    this.endRoomSetAlign(false)
+    this.roomCaptureIndex = null
+    this.areaHoleId = null
+    this.roomEditCompletion = null
+    this.roomEditState = { pageIndex, id, points: region.points.map(point => [...point] as Point) }
+    this.notify(false)
+    return true
+  }
+  endRoomEdit(confirm = true): void {
+    const active = this.roomEditTarget
+    this.roomEditCompletion = null
+    if (!active) return
+    const initial = this.roomEditState!
+    const region = this.effectiveRoomRegions(active.pageIndex).find(({ region }) => region.id === active.id)?.region
+    this.roomEditState = null
+    if (confirm && region && (region.points.length !== initial.points.length
+      || region.points.some((point, index) => point[0] !== initial.points[index][0]
+        || point[1] !== initial.points[index][1]))) {
+      this.roomEditCompletion = { pageIndex: active.pageIndex, region: structuredClone(region) }
+    }
+    this.notify(false)
+  }
+  takeRoomEditCompletion(pageIndex: number): { pageIndex: number; region: RoomRegion } | null {
+    if (this.roomEditCompletion?.pageIndex !== pageIndex) return null
+    const completion = this.roomEditCompletion
+    this.roomEditCompletion = null
+    return completion
+  }
+
+  private roomCaptureIndex: number | null = null
+  get roomCapturePage(): number | null { return this.roomCaptureIndex }
+  startRoomCapture(pageIndex: number): boolean {
+    if (!Number.isInteger(pageIndex) || pageIndex < 0) return false
+    if (this.roomCaptureIndex === pageIndex) return true
+    this.endRoomSetAlign(false)
+    this.areaHoleId = null
+    this.roomEditState = null
+    this.roomEditCompletion = null
+    this.roomCaptureIndex = pageIndex
+    this.notify(false)
+    return true
+  }
+  endRoomCapture(): void {
+    if (this.roomCaptureIndex === null) return
+    this.roomCaptureIndex = null
+    this.notify(false)
+  }
+  private roomSetAlignState: {
+    pageIndex: number; setId: string; dx: number; dy: number
+  } | null = null
+  private roomSetAlignCompletion: {
+    pageIndex: number; setId: string; dx: number; dy: number
+  } | null = null
+
+  get roomSetAlignPage(): number | null {
+    const active = this.roomSetAlignState
+    if (active && (this.pageRoomSets.get(active.pageIndex)?.id !== active.setId
+      || !this.getPageRoomSet(active.pageIndex))) {
+      this.roomSetAlignState = null
+      this.roomSetAlignCompletion = null
+    }
+    return this.roomSetAlignState?.pageIndex ?? null
+  }
+
+  startRoomSetAlign(pageIndex: number): boolean {
+    if (!Number.isInteger(pageIndex) || pageIndex < 0) return false
+    const link = this.getPageRoomSetLink(pageIndex)
+    if (!link || !this.getPageRoomSet(pageIndex)) return false
+    if (this.roomSetAlignPage === pageIndex) return true
+    this.roomCaptureIndex = null
+    this.roomEditState = null
+    this.roomEditCompletion = null
+    this.areaHoleId = null
+    this.roomSetAlignCompletion = null
+    this.roomSetAlignState = {
+      pageIndex, setId: link.id, dx: link.dx ?? 0, dy: link.dy ?? 0,
+    }
+    this.notify(false)
+    return true
+  }
+
+  endRoomSetAlign(confirm = true): void {
+    const pageIndex = this.roomSetAlignPage
+    const active = this.roomSetAlignState
+    if (pageIndex === null || !active) return
+    const link = this.getPageRoomSetLink(pageIndex)
+    this.roomSetAlignState = null
+    this.roomSetAlignCompletion = null
+    if (confirm && link?.id === active.setId
+      && ((link.dx ?? 0) !== active.dx || (link.dy ?? 0) !== active.dy)) {
+      this.roomSetAlignCompletion = {
+        pageIndex, setId: link.id, dx: link.dx ?? 0, dy: link.dy ?? 0,
+      }
+    }
+    this.notify(false)
+  }
+
+  takeRoomSetAlignCompletion(pageIndex: number): {
+    pageIndex: number; setId: string; dx: number; dy: number
+  } | null {
+    if (this.roomSetAlignCompletion?.pageIndex !== pageIndex) return null
+    const completion = this.roomSetAlignCompletion
+    this.roomSetAlignCompletion = null
+    return completion
+  }
+
+  showRoomRegions = true
+  setShowRoomRegions(value: boolean): void {
+    if (this.showRoomRegions === value) return
+    this.showRoomRegions = value
+    this.notify(false)
+  }
+
   private recentFixtures: readonly string[] = []
   get recentFixtureIds(): readonly string[] { return this.recentFixtures }
   rememberRouteFixture(id: string): void { this.rememberFixture(id); this.notify(false) }
@@ -411,6 +605,15 @@ export class AnnotationStore {
   readonly scaleRegions = new Map<number, ScaleRegion[]>()
   private readonly scaleRegionBaselines = new Map<number, ScaleRegion[]>()
   private pendingScaleRegions: Array<{ pageIndex: number; regions: ScaleRegion[]; editIndex: number }> = []
+  readonly roomRegions = new Map<number, RoomRegion[]>()
+  private readonly roomRegionBaselines = new Map<number, RoomRegion[]>()
+  private pendingRoomRegions: Array<{ pageIndex: number; regions: RoomRegion[]; editIndex: number }> = []
+  private roomSets: RoomSet[] = []
+  private roomSetBaseline: RoomSet[] = []
+  private pendingRoomSets: { sets: RoomSet[]; editIndex: number } | null = null
+  readonly pageRoomSets = new Map<number, RoomSetLink>()
+  private readonly pageRoomSetBaselines = new Map<number, RoomSetLink>()
+  private pendingPageRoomSets: Array<{ pageIndex: number; setId: RoomSetLink | null; editIndex: number }> = []
   private readonly scales = new Map<number, PageScale | null>()
   private readonly scaleBaselines = new Map<number, PageScale | null>()
   private pendingScales: Array<ScaleChange & { editIndex: number }> = []
@@ -494,6 +697,15 @@ export class AnnotationStore {
     this.drawings.clear(); this.drawingBaselines.clear(); this.drawingDirtyBaselines.clear(); this.automaticDrawings.clear(); this.pendingDrawings = []
     this.scales.clear(); this.scaleBaselines.clear(); this.pendingScales = []
     this.scaleRegions.clear(); this.scaleRegionBaselines.clear(); this.pendingScaleRegions = []
+    this.roomRegions.clear(); this.roomRegionBaselines.clear(); this.pendingRoomRegions = []
+    this.roomSets = []; this.roomSetBaseline = []; this.pendingRoomSets = null
+    this.pageRoomSets.clear(); this.pageRoomSetBaselines.clear(); this.pendingPageRoomSets = []
+    this.roomSetAlignState = null
+    this.roomSetAlignCompletion = null
+    this.roomCaptureIndex = null
+    this.roomEditState = null
+    this.roomEditCompletion = null
+    if (!preserveFixtureVisibility) this.showRoomRegions = true
     this.annotations.clear()
     this.baselines.clear()
     this.touchedByPage.clear()
@@ -627,6 +839,355 @@ export class AnnotationStore {
     this.history.push({ before, after }); this.notify()
   }
 
+  loadRoomRegions(entries: readonly [number, RoomRegion[]][]): void {
+    this.roomSetAlignState = null
+    this.roomSetAlignCompletion = null
+    this.roomEditState = null
+    this.roomEditCompletion = null
+    this.roomRegions.clear(); this.roomRegionBaselines.clear()
+    for (const [pageIndex, regions] of entries) {
+      if (!Number.isInteger(pageIndex) || pageIndex < 0) continue
+      const valid = parseRoomRegions(regions)
+      if (!valid.length) continue
+      this.roomRegions.set(pageIndex, valid)
+      this.roomRegionBaselines.set(pageIndex, structuredClone(valid))
+    }
+    this.notify(false)
+  }
+  getRoomRegions(pageIndex: number): RoomRegion[] {
+    return structuredClone(this.roomRegions.get(pageIndex) ?? [])
+  }
+  setRoomRegions(pageIndex: number, regions: RoomRegion[]): void {
+    const next = parseRoomRegions(regions)
+    if (!Number.isInteger(pageIndex) || pageIndex < 0 || next.length !== regions.length) throw new Error('部屋の範囲が不正です（1ページ200個まで、部屋名は1〜40文字、階は40文字まで、点は3〜500点）。')
+    const old = this.getRoomRegions(pageIndex)
+    if (stableJson(old) === stableJson(next)) return
+    const pages = new Map(this.roomRegions)
+    pages.set(pageIndex, next)
+    this.validateRoomRegionIds(this.roomSets, pages)
+    const before: HistoryState = [], after: HistoryState = []
+    before.roomRegions = [{ pageIndex, regions: old }]
+    after.roomRegions = [{ pageIndex, regions: structuredClone(next) }]
+    this.roomRegions.set(pageIndex, next)
+    if (this.roomEditState?.pageIndex === pageIndex
+      && !this.effectiveRoomRegions(pageIndex).some(({ region }) => region.id === this.roomEditState!.id)) {
+      this.roomEditState = null
+      this.roomEditCompletion = null
+    }
+    this.history.push({ before, after })
+    this.notify(false)
+  }
+  loadRoomSets(sets: readonly RoomSet[], links: readonly [number, RoomSetLink][]): void {
+    this.roomSetAlignState = null
+    this.roomSetAlignCompletion = null
+    this.roomEditState = null
+    this.roomEditCompletion = null
+    this.roomSets = parseRoomSets({ version: 1, sets })
+    this.roomSetBaseline = structuredClone(this.roomSets)
+    this.pendingRoomSets = null
+    this.pageRoomSets.clear()
+    this.pageRoomSetBaselines.clear()
+    this.pendingPageRoomSets = []
+    const validIds = new Set(this.roomSets.map(set => set.id))
+    for (const [pageIndex, rawLink] of links) {
+      const link = parseRoomSetLink(rawLink)
+      if (!Number.isInteger(pageIndex) || pageIndex < 0
+        || !link || !validIds.has(link.id)) continue
+      this.pageRoomSets.set(pageIndex, link)
+      this.pageRoomSetBaselines.set(pageIndex, structuredClone(link))
+    }
+    this.notify(false)
+  }
+
+  getRoomSets(): RoomSet[] {
+    return structuredClone(this.roomSets)
+  }
+
+  getPageRoomSet(pageIndex: number): RoomSet | undefined {
+    const link = this.pageRoomSets.get(pageIndex)
+    return link ? this.roomSets.find(set => set.id === link.id) : undefined
+  }
+
+  getPageRoomSetLink(pageIndex: number): RoomSetLink | undefined {
+    const link = this.pageRoomSets.get(pageIndex)
+    return link ? { ...link } : undefined
+  }
+
+  setRoomSetOffset(pageIndex: number, dx: number, dy: number): void {
+    const current = this.getPageRoomSetLink(pageIndex)
+    if (!current || !this.getPageRoomSet(pageIndex)) return
+    const link = parseRoomSetLink({ id: current.id, dx, dy })
+    if (!link) throw new Error('部屋の組の結び付けが不正です。')
+    const links = new Map(this.pageRoomSets)
+    links.set(pageIndex, link)
+    this.changeRoomSets(this.roomSets, links)
+  }
+
+  setRoomSetAnchor(pageIndex: number, point: Point): void {
+    const set = this.getPageRoomSet(pageIndex)
+    const link = this.getPageRoomSetLink(pageIndex)
+    if (!set || !link) return
+    const anchor: Point = [point[0] - (link.dx ?? 0), point[1] - (link.dy ?? 0)]
+    if (!anchor.every(Number.isFinite)) throw new Error('部屋の組の支点が不正です。')
+    this.changeRoomSets(this.roomSets.map(current => current.id === set.id
+      ? { ...current, anchor } : current))
+  }
+
+  effectiveRoomRegions(pageIndex: number): Array<{ region: RoomRegion; setId?: string }> {
+    const local = this.roomRegions.get(pageIndex)
+    const set = this.getPageRoomSet(pageIndex)
+    if (!local?.length && !set?.regions.length) return EMPTY_EFFECTIVE_ROOM_REGIONS
+    const link = this.pageRoomSets.get(pageIndex)
+    return [
+      ...(local ?? []).map(region => ({ region })),
+      ...(set?.regions ?? []).map(region => ({
+        region: translateRoomRegion(region, link?.dx, link?.dy), setId: set!.id,
+      })),
+    ]
+  }
+
+  suggestedRoomSets(pageIndex: number): RoomSet[] {
+    if (this.getPageRoomSet(pageIndex)) return []
+    const floor = normalizeFloor(floorFromDrawingName(this.getDrawingInfo(pageIndex)?.name ?? '') ?? '')
+    return floor
+      ? structuredClone(this.roomSets.filter(set => set.floor === floor))
+      : []
+  }
+
+  private validateRoomRegionIds(
+    sets: readonly RoomSet[],
+    pages: ReadonlyMap<number, RoomRegion[]>,
+  ): void {
+    const ids = new Set<string>()
+    const check = (region: RoomRegion) => {
+      if (!region.id.length || ids.has(region.id)) {
+        throw new Error('部屋の範囲の id が重なっています。')
+      }
+      ids.add(region.id)
+    }
+    for (const regions of pages.values()) for (const region of regions) check(region)
+    for (const set of sets) for (const region of set.regions) check(region)
+  }
+
+  private changeRoomSets(
+    proposed: readonly RoomSet[],
+    links: ReadonlyMap<number, RoomSetLink> = this.pageRoomSets,
+    pageChanges: Array<{ pageIndex: number; regions: RoomRegion[] }> = [],
+  ): void {
+    const sets = parseRoomSets({ version: 1, sets: proposed })
+    if (stableJson(sets) !== stableJson(proposed)) {
+      throw new Error('部屋の組が不正です（100組まで、名前は1〜40文字、階は40文字まで、範囲は1組200個まで）。')
+    }
+    const validIds = new Set(sets.map(set => set.id))
+    const normalizedLinks = new Map<number, RoomSetLink>()
+    for (const [pageIndex, rawLink] of links) {
+      const link = parseRoomSetLink(rawLink)
+      if (!Number.isInteger(pageIndex) || pageIndex < 0
+        || !link || !validIds.has(link.id)) {
+        throw new Error('部屋の組の結び付けが不正です。')
+      }
+      normalizedLinks.set(pageIndex, link)
+    }
+    const pages = new Map(this.roomRegions)
+    for (const item of pageChanges) pages.set(item.pageIndex, item.regions)
+    this.validateRoomRegionIds(sets, pages)
+
+    const before: HistoryState = [], after: HistoryState = []
+    if (stableJson(sets) !== stableJson(this.roomSets)) {
+      before.roomSets = structuredClone(this.roomSets)
+      after.roomSets = structuredClone(sets)
+    }
+    const oldLinks = [...this.pageRoomSets].sort(([a], [b]) => a - b)
+    const newLinks = [...normalizedLinks].sort(([a], [b]) => a - b)
+    if (stableJson(oldLinks) !== stableJson(newLinks)) {
+      before.pageRoomSets = structuredClone(oldLinks)
+      after.pageRoomSets = structuredClone(newLinks)
+    }
+    const changedPages = pageChanges.filter(item =>
+      stableJson(item.regions) !== stableJson(this.roomRegions.get(item.pageIndex) ?? []))
+    if (changedPages.length) {
+      before.roomRegions = changedPages.map(item => ({
+        pageIndex: item.pageIndex, regions: this.getRoomRegions(item.pageIndex),
+      }))
+      after.roomRegions = structuredClone(changedPages)
+    }
+    if (!before.roomSets && !before.pageRoomSets && !before.roomRegions) return
+
+    this.roomSets = sets
+    this.pageRoomSets.clear()
+    for (const [pageIndex, link] of newLinks) this.pageRoomSets.set(pageIndex, { ...link })
+    for (const item of changedPages) this.roomRegions.set(item.pageIndex, structuredClone(item.regions))
+    // Also closes an edit whose shared region disappeared or was detached.
+    void this.roomEditTarget
+    void this.roomSetAlignPage
+    this.history.push({ before, after })
+    this.notify(false)
+  }
+
+  addRoomRegion(pageIndex: number, region: RoomRegion, toSet: boolean): void {
+    if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+      throw new Error('ページ番号が不正です。')
+    }
+    const valid = parseRoomRegions([region])[0]
+    if (!valid) throw new Error('部屋の範囲が不正です。')
+    const usedIds = new Set<string>()
+    for (const regions of this.roomRegions.values()) {
+      for (const current of regions) usedIds.add(current.id)
+    }
+    for (const set of this.roomSets) {
+      for (const current of set.regions) usedIds.add(current.id)
+    }
+    if (!valid.id.length || usedIds.has(valid.id)) {
+      do { valid.id = crypto.randomUUID() } while (usedIds.has(valid.id))
+    }
+    if (!toSet) {
+      this.setRoomRegions(pageIndex, [...this.getRoomRegions(pageIndex), valid])
+      return
+    }
+    const set = this.getPageRoomSet(pageIndex)
+    if (!set) throw new Error('この図面は部屋の組を使っていません。')
+    const link = this.pageRoomSets.get(pageIndex)
+    const shared = translateRoomRegion(valid, -(link?.dx ?? 0), -(link?.dy ?? 0))
+    this.changeRoomSets(this.roomSets.map(current => current.id === set.id
+      ? { ...current, regions: [...current.regions, shared] } : current))
+  }
+
+  updateRoomRegion(pageIndex: number, region: RoomRegion): void {
+    const entry = this.effectiveRoomRegions(pageIndex).find(current => current.region.id === region.id)
+    if (!entry) return
+    const valid = parseRoomRegions([region])[0]
+    if (!valid) throw new Error('部屋の範囲が不正です。')
+    if (!entry.setId) {
+      this.setRoomRegions(pageIndex, this.getRoomRegions(pageIndex).map(current =>
+        current.id === valid.id ? valid : current))
+      return
+    }
+    const link = this.pageRoomSets.get(pageIndex)
+    const shared = translateRoomRegion(valid, -(link?.dx ?? 0), -(link?.dy ?? 0))
+    this.changeRoomSets(this.roomSets.map(set => set.id === entry.setId
+      ? { ...set, regions: set.regions.map(current => current.id === valid.id ? shared : current) }
+      : set))
+  }
+
+  removeRoomRegion(pageIndex: number, id: string): void {
+    const entry = this.effectiveRoomRegions(pageIndex).find(current => current.region.id === id)
+    if (!entry) return
+    if (!entry.setId) {
+      this.setRoomRegions(pageIndex, this.getRoomRegions(pageIndex).filter(region => region.id !== id))
+      return
+    }
+    this.changeRoomSets(this.roomSets.map(set => set.id === entry.setId
+      ? { ...set, regions: set.regions.filter(region => region.id !== id) } : set))
+  }
+
+  createRoomSetFromPage(pageIndex: number, name: string, floor?: string): RoomSet {
+    if (!Number.isInteger(pageIndex) || pageIndex < 0) throw new Error('ページ番号が不正です。')
+    if (this.getPageRoomSet(pageIndex)) throw new Error('この図面はすでに部屋の組を使っています。')
+    const regions = this.getRoomRegions(pageIndex)
+    if (!regions.length) throw new Error('この図面には部屋の範囲がありません。')
+    const normalizedFloor = normalizeFloor(floor ?? '')
+    let id: string
+    do { id = crypto.randomUUID() } while (this.roomSets.some(set => set.id === id))
+    const set: RoomSet = {
+      id, name: name.trim(),
+      ...(normalizedFloor ? { floor: normalizedFloor } : {}),
+      regions,
+    }
+    const links = new Map(this.pageRoomSets)
+    links.set(pageIndex, { id })
+    this.changeRoomSets([...this.roomSets, set], links, [{ pageIndex, regions: [] }])
+    return structuredClone(set)
+  }
+
+  useRoomSet(pageIndex: number, setId: string | null): void {
+    if (!Number.isInteger(pageIndex) || pageIndex < 0) throw new Error('ページ番号が不正です。')
+    if (setId !== null && !this.roomSets.some(set => set.id === setId)) {
+      throw new Error('部屋の組が見つかりません。')
+    }
+    const links = new Map(this.pageRoomSets)
+    if (setId === null) links.delete(pageIndex)
+    else if (links.get(pageIndex)?.id !== setId) links.set(pageIndex, { id: setId })
+    this.changeRoomSets(this.roomSets, links)
+  }
+
+  renameRoomSet(setId: string, name: string, floor?: string): void {
+    if (!this.roomSets.some(set => set.id === setId)) return
+    const normalizedFloor = normalizeFloor(floor ?? '')
+    this.changeRoomSets(this.roomSets.map(set => {
+      if (set.id !== setId) return set
+      return {
+        id: set.id, name: name.trim(),
+        ...(normalizedFloor ? { floor: normalizedFloor } : {}),
+        ...(set.anchor ? { anchor: [...set.anchor] as Point } : {}),
+        regions: set.regions,
+      }
+    }))
+  }
+
+  deleteRoomSet(setId: string): void {
+    if (!this.roomSets.some(set => set.id === setId)) return
+    const links = new Map([...this.pageRoomSets].filter(([, link]) => link.id !== setId))
+    this.changeRoomSets(this.roomSets.filter(set => set.id !== setId), links)
+  }
+
+  roomSetPickupChanges(pageIndex: number): Array<{ id: string; region: RoomRegion }> {
+    const set = this.getPageRoomSet(pageIndex)
+    if (!set?.regions.length) return []
+    const effective = this.effectiveRoomRegions(pageIndex)
+    const regions = effective.map(entry => entry.region)
+    const shared = effective.filter(entry => entry.setId === set.id).map(entry => entry.region)
+    const changes: Array<{ id: string; region: RoomRegion }> = []
+    for (const annotation of this.annotations.values()) {
+      if (annotation.deleted || annotation.legacyChange || annotation.pageIndex !== pageIndex
+        || !annotation.count && !annotation.quantity) continue
+      const point = pickupPoint(annotation)
+      if (!point || !shared.some(region => pointInRoomRegion(region, point))) continue
+      const region = roomAt(regions, point)
+      if (!region) continue
+      const mark = (annotation.quantity ?? annotation.count) as { room?: string; floor?: string }
+      if ((mark.room ?? '') !== region.name
+        || !!region.floor && normalizeFloor(mark.floor ?? '') !== normalizeFloor(region.floor)) {
+        changes.push({ id: annotation.id, region: structuredClone(region) })
+      }
+    }
+    return changes
+  }
+
+  applyRoomSetPickupLocations(pageIndex: number, setId: string): void {
+    if (this.getPageRoomSet(pageIndex)?.id !== setId) return
+    const targets = new Map(this.roomSetPickupChanges(pageIndex).map(({ id, region }) => [id, region] as const))
+    if (!targets.size) return
+    // One mutation keeps every pickup's room in a single undo step, using the same rules as updatePickupLocation.
+    this.mutateMany([...targets.keys()], a => {
+      const region = targets.get(a.id)!
+      if (a.count?.version === 1) a.count = { version: 2, id: a.count.id, fixtureId: countFixtureId(a.count) }
+      const mark = a.quantity ?? (a.count?.version === 2 ? a.count : null)
+      if (!mark) return
+      mark.room = region.name
+      if (region.floor) mark.floor = normalizeFloor(region.floor)
+    })
+  }
+
+  getRoomNames(): string[] {
+    const names = new Set(this.quantityIndex().locations().rooms)
+    for (const pageIndex of new Set([...this.roomRegions.keys(), ...this.pageRoomSets.keys()])) {
+      for (const { region } of this.effectiveRoomRegions(pageIndex)) names.add(region.name)
+    }
+    for (const set of this.roomSets) for (const region of set.regions) names.add(region.name)
+    return [...names].sort((a, b) => a.localeCompare(b, 'ja'))
+  }
+  pickupsInRoom(pageIndex: number, region: RoomRegion): string[] {
+    const effective = this.effectiveRoomRegions(pageIndex).find(entry => entry.region.id === region.id)?.region ?? region
+    const ids: string[] = []
+    for (const annotation of this.annotations.values()) {
+      if (annotation.deleted || annotation.legacyChange || annotation.pageIndex !== pageIndex
+        || !annotation.count && !annotation.quantity) continue
+      const point = pickupPoint(annotation)
+      if (point && pointInRoomRegion(effective, point)) ids.push(annotation.id)
+    }
+    return ids
+  }
+
   getScale(pageIndex: number): PageScale | null { const s = this.scales.get(pageIndex); return s ? { ...s } : null }
 
   getCountFixtures(): CountFixture[] { return structuredClone(this.fixtures) }
@@ -687,22 +1248,33 @@ export class AnnotationStore {
     if (key === 'floor') this.currentFloor = normalizeFloor(value); else this.currentRoom = value.trim()
     this.notify(false)
   }
-  pickupLocation(pageIndex: number): { floor?: string; room?: string } {
-    const floor = normalizeFloor(this.currentFloor) || floorFromDrawingName(this.getDrawingInfo(pageIndex)?.name ?? '')
-    return { ...(floor ? { floor } : {}), ...(this.currentRoom.trim() ? { room: this.currentRoom.trim() } : {}) }
+  pickupLocation(pageIndex: number, point?: Point): { floor?: string; room?: string } {
+    const regions = point ? this.effectiveRoomRegions(pageIndex) : undefined
+    const region = point && regions?.length ? roomAt(regions.map(entry => entry.region), point) : undefined
+    const floor = region?.floor || normalizeFloor(this.currentFloor) || floorFromDrawingName(this.getDrawingInfo(pageIndex)?.name ?? '')
+    const room = region?.name ?? this.currentRoom.trim()
+    return { ...(floor ? { floor } : {}), ...(room ? { room } : {}) }
   }
-  updatePickupLocation(ids: readonly string[], key: 'floor' | 'room', value: string): void {
-    if (value.length > 40) return
-    const text = key === 'floor' ? normalizeFloor(value) : value.trim()
+  updatePickupLocation(ids: readonly string[], key: 'floor' | 'room', value: string, additional?: Partial<Record<'floor' | 'room', string>>): void {
+    const values = { ...additional, [key]: value }
+    const changes: Array<['floor' | 'room', string]> = []
+    for (const locationKey of ['floor', 'room'] as const) {
+      const raw = values[locationKey]
+      if (raw === undefined) continue
+      if (raw.length > 40) return
+      changes.push([locationKey, locationKey === 'floor' ? normalizeFloor(raw) : raw.trim()])
+    }
     const eligible = ids.filter(id => {
       const a = this.annotations.get(id), mark = a?.quantity ?? (a?.count?.version === 2 ? a.count : a?.count ? {} : null)
-      return !!mark && ((mark as { floor?: string; room?: string })[key] ?? '') !== text
+      return !!mark && changes.some(([locationKey, text]) => ((mark as { floor?: string; room?: string })[locationKey] ?? '') !== text)
     })
     this.mutateMany(eligible, a => {
       // Upgrade legacy count marks on their first location edit.
       if (a.count?.version === 1) a.count = { version: 2, id: a.count.id, fixtureId: countFixtureId(a.count) }
       const mark = a.quantity ?? (a.count?.version === 2 ? a.count : null)
-      if (mark) { if (text) mark[key] = text; else delete mark[key] }
+      if (mark) for (const [locationKey, text] of changes) {
+        if (text) mark[locationKey] = text; else delete mark[locationKey]
+      }
     })
   }
   readonly lastRouteConditions = new Map<string, RouteConditions>()
@@ -944,8 +1516,10 @@ export class AnnotationStore {
     for (const a of this.annotations.values()) if (!a.deleted && !a.legacyChange && a.pageIndex === pageIndex && a.issue && a.issue.recordKind !== 'change' && a.objNum !== null) result.push(a.objNum)
     return result
   }
-  setCountFixtures(fixtures: CountFixture[], removeIds: readonly string[] = []): void {
-    if (!removeIds.length && stableJson(fixtures) === stableJson(this.fixtures)) return
+  setCountFixtures(fixtures: CountFixture[], removeIds: readonly string[] = [], refreshIds: readonly string[] = []): void {
+    const fixturesChanged = stableJson(fixtures) !== stableJson(this.fixtures)
+    if (!removeIds.length && !refreshIds.length && !fixturesChanged) return
+    const refresh = new Set(refreshIds)
     serializeCountFixtures(fixtures)
     const before: HistoryState = [], after: HistoryState = []
     before.fixtures = this.getCountFixtures(); after.fixtures = structuredClone(fixtures)
@@ -976,31 +1550,49 @@ export class AnnotationStore {
     if (renames.size) { after.pickupMemory = this.pickupMemory(memoryIds); after.routeTemplate = structuredClone(this.routeTemplate) }
     const appearance = (f: CountFixture | undefined) => f ? stableJson([f.name, f.code, f.spec, f.style, f.line]) : ''
     const changed = new Set(fixtures.filter(f => appearance(f) !== appearance(this.getCountFixture(f.id))).map(f => f.id))
+    // Walls that deduct a fitting keep its size in their saved label: refresh them when it changes.
+    const openingKey = (f: CountFixture | undefined) => stableJson(f?.opening ?? null)
+    const openingChanged = new Set(fixtures.filter(f => openingKey(f) !== openingKey(this.getCountFixture(f.id))).map(f => f.id))
     this.fixtures = structuredClone(fixtures)
     this.recentFixtures = this.recentFixtures.filter(id => fixtures.some(f => f.id === id))
     for (const a of this.annotations.values()) if (!a.deleted && (a.count || a.quantity)) {
       const id = a.quantity?.itemId ?? countFixtureId(a.count!)
       const routeIds = [id, ...(a.quantity?.extra ?? []).map(e => e.itemId)]
-      if (!routeIds.some(id => removeIds.includes(id) || changed.has(id) || renames.has(id))) continue
+      const openingIds = (a.quantity?.openings ?? []).flatMap(o => o.itemId ? [o.itemId] : [])
+      const affected = routeIds.some(id => removeIds.includes(id) || changed.has(id) || renames.has(id))
+        || openingIds.some(id => openingChanged.has(id) || removeIds.includes(id))
+      const refreshedText = a.quantity && routeIds.some(id => refresh.has(id)) ? this.quantityText(a) : undefined
+      const refreshQuantity = refreshedText !== undefined && refreshedText !== a.text
+      const countFixture = a.count && !a.quantity ? this.getCountFixture(id) : undefined
+      const refreshCount = refresh.has(id) && !!countFixture?.spec && !!countFixture.style.showCode
+      if (!affected && !refreshQuantity && !refreshCount) continue
       before.push(cloneState(a))
-      if (a.quantity?.method !== 'polyline' && a.quantity?.condition !== undefined) a.quantity.condition = renameCondition(id, a.quantity.condition) as string
-      if (a.count?.version === 2 && a.count.condition !== undefined) a.count.condition = renameCondition(id, a.count.condition) as string
-      if (a.quantity) {
-        if (a.quantity.method === 'polyline') {
-          a.quantity.cond = renameRoute(a.quantity.itemId, a.quantity.cond)
-          a.quantity.extra = a.quantity.extra?.map(e => ({ ...e, cond: renameRoute(e.itemId, e.cond) }))
-        }
-        const remaining = routeMembers(a.quantity).filter(e => !removeIds.includes(e.itemId))
-        if (!remaining.length) { a.deleted = true; this.selection.delete(a.id) }
-        else {
-          const [main, ...extra] = remaining
-          a.quantity = { ...a.quantity, itemId: main.itemId, cond: main.cond, count: a.quantity.method === 'polyline' && main.count !== 1 ? main.count : undefined, extra: extra.length ? extra : undefined }
-          this.applyFixtureToQuantity(a, this.getCountFixture(main.itemId)!); after.push(cloneState(a))
-        }
-      } else if (removeIds.includes(id)) { a.deleted = true; this.selection.delete(a.id) }
-      else { this.applyFixtureToMark(a, this.getCountFixture(id)!); after.push(cloneState(a)) }
+      if (!affected && a.quantity) {
+        // Refresh only the saved label and its bounds; keep the pickup's other settings.
+        a.text = refreshedText!
+        if (a.vertices && a.measure) a.rect = measureBounds(a.vertices, a.measure.kind, a.text, a.fontSize)
+        after.push(cloneState(a))
+      } else {
+        if (a.quantity?.method !== 'polyline' && a.quantity?.condition !== undefined) a.quantity.condition = renameCondition(id, a.quantity.condition) as string
+        if (a.count?.version === 2 && a.count.condition !== undefined) a.count.condition = renameCondition(id, a.count.condition) as string
+        if (a.quantity) {
+          if (a.quantity.method === 'polyline') {
+            a.quantity.cond = renameRoute(a.quantity.itemId, a.quantity.cond)
+            a.quantity.extra = a.quantity.extra?.map(e => ({ ...e, cond: renameRoute(e.itemId, e.cond) }))
+          }
+          const remaining = routeMembers(a.quantity).filter(e => !removeIds.includes(e.itemId))
+          if (!remaining.length) { a.deleted = true; this.selection.delete(a.id) }
+          else {
+            const [main, ...extra] = remaining
+            a.quantity = { ...a.quantity, itemId: main.itemId, cond: main.cond, count: a.quantity.method === 'polyline' && main.count !== 1 ? main.count : undefined, extra: extra.length ? extra : undefined }
+            this.applyFixtureToQuantity(a, this.getCountFixture(main.itemId)!); after.push(cloneState(a))
+          }
+        } else if (removeIds.includes(id)) { a.deleted = true; this.selection.delete(a.id) }
+        else { this.applyFixtureToMark(a, this.getCountFixture(id)!); after.push(cloneState(a)) }
+      }
       this.markTouched(a); a.revision++
     }
+    if (!fixturesChanged && !removeIds.length && !before.length) return
     this.history.push({ before, after }); this.pruneHiddenSelection(); this.notify()
   }
   reassignCounts(ids: readonly string[], fixtureId: string): string | undefined {
@@ -1014,7 +1606,7 @@ export class AnnotationStore {
     const before: HistoryState = [], after: HistoryState = []
     for (const id of ids) {
       const a = this.annotations.get(id)
-      if (!a || a.deleted || !(a.count && quantityKind(fixture) === 'count' || a.quantity && quantityMethod(fixture) === a.quantity.method)) continue
+      if (!a || a.deleted || !(a.count && quantityKind(fixture) === 'count' || a.quantity && this.supportsPickupMethod(fixture, a.quantity.method))) continue
       before.push(cloneState(a)); if (a.quantity) {
         const match = a.quantity.extra?.find(e => e.itemId === fixtureId)
         if (match) {
@@ -1028,12 +1620,86 @@ export class AnnotationStore {
     if (before.length) this.history.push({ before, after })
     this.pruneHiddenSelection(); this.notify()
   }
+  openingSize(itemId: string): { widthM: number; heightM: number } | undefined {
+    const fixture = this.getCountFixture(itemId), opening = fixture?.opening
+    if (!fixture || (fixture.kind ?? 'count') !== 'count' || !opening
+      || !Number.isFinite(opening.widthM) || opening.widthM <= 0 || opening.widthM > 100
+      || !Number.isFinite(opening.heightM) || opening.heightM <= 0 || opening.heightM > 100) return undefined
+    return { widthM: opening.widthM, heightM: opening.heightM }
+  }
+  setAreaHoles(id: string, holes: readonly (readonly import('../core/annotations').Point[])[]): string | undefined {
+    const current = this.get(id)
+    if (!current || current.legacyChange || !current.vertices || !current.measure
+      || (current.quantity
+        ? current.quantity.method !== 'polygon' && current.quantity.method !== 'polygonDepth'
+        : !!current.count || current.measure.kind !== 'area')) return 'この書き込みには除外範囲を設定できません。'
+    if (holes.length > 50) return '除外範囲は50個までです。'
+    if (holes.some(hole => hole.length < 3 || hole.length > 500)) return '除外範囲は3点以上500点以下で囲んでください。'
+    if (holes.some(hole => hole.some(point => point.length !== 2 || !Number.isFinite(point[0]) || !Number.isFinite(point[1])))) return '除外範囲の点が不正です。'
+
+    const outer = current.vertices
+    const inside = (point: import('../core/annotations').Point): boolean => {
+      let result = false
+      for (let i = 0, j = outer.length - 1; i < outer.length; j = i++) {
+        const a = outer[j], b = outer[i]
+        const dx = b[0] - a[0], dy = b[1] - a[1], length = Math.hypot(dx, dy)
+        const epsilon = 1e-7
+        if (length <= epsilon) {
+          if (Math.hypot(point[0] - a[0], point[1] - a[1]) <= epsilon) return true
+        } else {
+          const cross = (point[0] - a[0]) * dy - (point[1] - a[1]) * dx
+          const dot = (point[0] - a[0]) * dx + (point[1] - a[1]) * dy
+          if (Math.abs(cross) <= epsilon * length && dot >= -epsilon * length && dot <= length * length + epsilon * length) return true
+        }
+        if ((a[1] > point[1]) !== (b[1] > point[1])
+          && point[0] < (b[0] - a[0]) * (point[1] - a[1]) / (b[1] - a[1]) + a[0]) result = !result
+      }
+      return result
+    }
+    // Moving the outer vertices must not move or discard existing holes.
+    // Validate containment only for newly supplied/changed hole geometry.
+    const previous = new Set((current.quantity?.holes ?? current.measure.holes ?? []).map(hole => JSON.stringify(hole)))
+    if (holes.some(hole => !previous.has(JSON.stringify(hole)) && hole.some(point => !inside(point)))) return '除外範囲は外形の内側を囲んでください'
+
+    const next: import('../core/annotations').Point[][] = holes.map(hole => hole.map(point => [point[0], point[1]]))
+    this.mutate(id, a => {
+      if (a.quantity) {
+        a.quantity = { ...a.quantity, holes: next.length ? next : undefined }
+        if (!next.length) delete a.quantity.holes
+      } else {
+        a.measure = { ...a.measure!, holes: next.length ? next : undefined }
+        if (!next.length) delete a.measure.holes
+      }
+      a.text = this.quantityText(a)
+      a.rect = measureBounds(a.vertices!, a.measure!.kind, a.text, a.fontSize)
+    })
+    return undefined
+  }
+  setQuantityOpenings(id: string, openings: readonly import('../core/quantity').QuantityOpening[]): string | undefined {
+    const current = this.get(id)
+    if (!current || current.legacyChange || !current.vertices || !current.measure
+      || !current.quantity || (current.quantity.method !== 'polygon' && current.quantity.method !== 'lengthHeight')) return 'この拾いには開口部を設定できません。'
+    if (openings.length > 50) return '開口部は50件までです。'
+    const validDimension = (value: number | undefined) => value === undefined || Number.isFinite(value) && value > 0 && value <= 100
+    if (openings.some(opening => !Number.isInteger(opening.count) || opening.count < 1 || opening.count > 999
+      || opening.itemId !== undefined && (typeof opening.itemId !== 'string' || !opening.itemId.trim())
+      || !validDimension(opening.widthM) || !validDimension(opening.heightM)
+      || !opening.itemId && (opening.widthM === undefined || opening.heightM === undefined))) return '開口部の幅・高さは0より大きく100以下、箇所数は1〜999の整数で入力してください。'
+    const next = openings.map(opening => ({ ...opening }))
+    this.mutate(id, a => {
+      a.quantity = { ...a.quantity!, openings: next.length ? next : undefined }
+      if (!next.length) delete a.quantity.openings
+      a.text = this.quantityText(a)
+      a.rect = measureBounds(a.vertices!, a.measure!.kind, a.text, a.fontSize)
+    })
+    return undefined
+  }
   quantityText(a: Pick<EditableAnnotation, 'quantity' | 'vertices' | 'measure' | 'text'>, points = a.vertices): string {
     if (!points || !a.measure) return a.text
     if (!a.quantity) return measureText(points, a.measure)
     const f = this.getCountFixture(a.quantity.itemId)
     if (!f) return a.text
-    return quantityLabel(points, a.measure.mmPerPoint, a.quantity, fixtureCode(f), f.style.showCode, id => { const item = this.getCountFixture(id); return item ? fixtureCode(item) : id })
+    return quantityLabel(points, a.measure.mmPerPoint, a.quantity, fixtureDrawingCode(f), f.style.showCode, id => { const item = this.getCountFixture(id); return item ? fixtureDrawingCode(item) : id }, id => this.openingSize(id))
   }
   private applyFixtureToQuantity(a: StoredAnnotation, fixture: CountFixture): void {
     a.quantity = { ...a.quantity!, itemId: fixture.id }
@@ -1603,7 +2269,7 @@ export class AnnotationStore {
     const step = this.history.undo()
     if (!step) return
     this.restoreMany(step.before, step.after)
-    this.notify(!!(step.before.length || step.after.length || step.before.fixtures || step.before.scales || step.before.scaleRegions))
+    this.notify(!!(step.before.length || step.after.length || step.before.fixtures || step.before.scales || step.before.scaleRegions || step.before.roomRegions || step.before.roomSets || step.before.pageRoomSets))
   }
 
   updateIssueText(id: string, text: string): void {
@@ -1626,7 +2292,7 @@ export class AnnotationStore {
     const step = this.history.redo()
     if (!step) return
     this.restoreMany(step.after, step.before)
-    this.notify(!!(step.before.length || step.after.length || step.after.fixtures || step.after.scales || step.after.scaleRegions))
+    this.notify(!!(step.before.length || step.after.length || step.after.fixtures || step.after.scales || step.after.scaleRegions || step.after.roomRegions || step.after.roomSets || step.after.pageRoomSets))
   }
 
   touchedObjNums(pageIndex: number): number[] {
@@ -1664,6 +2330,28 @@ export class AnnotationStore {
     const result: AnnotationEdit[] = [...edits, ...this.pendingScales.map(({ pageIndex, scale }) => ({ kind: 'setPageScale' as const, pageIndex, scale }))]
     this.pendingScaleRegions = [...this.scaleRegions].filter(([i, regions]) => stableJson(regions) !== stableJson(this.scaleRegionBaselines.get(i) ?? [])).map(([pageIndex, regions], i) => ({ pageIndex, regions: structuredClone(regions), editIndex: result.length + i }))
     result.push(...this.pendingScaleRegions.map(({ pageIndex, regions }) => ({ kind: 'setScaleRegions' as const, pageIndex, regions })))
+    this.pendingRoomRegions = [...this.roomRegions].filter(([i, regions]) => stableJson(regions) !== stableJson(this.roomRegionBaselines.get(i) ?? [])).map(([pageIndex, regions], i) => ({ pageIndex, regions: structuredClone(regions), editIndex: result.length + i }))
+    result.push(...this.pendingRoomRegions.map(({ pageIndex, regions }) => ({ kind: 'setRoomRegions' as const, pageIndex, regions })))
+    this.pendingRoomSets = null
+    if (stableJson(this.roomSets) !== stableJson(this.roomSetBaseline)) {
+      const sets = this.getRoomSets()
+      this.pendingRoomSets = { sets, editIndex: result.length }
+      result.push({ kind: 'setRoomSets', pageIndex: 0, sets })
+    }
+    this.pendingPageRoomSets = [...new Set([...this.pageRoomSets.keys(), ...this.pageRoomSetBaselines.keys()])]
+      .sort((a, b) => a - b)
+      .filter(pageIndex => stableJson(this.pageRoomSets.get(pageIndex) ?? null)
+        !== stableJson(this.pageRoomSetBaselines.get(pageIndex) ?? null))
+      .map((pageIndex, i) => ({
+        pageIndex,
+        setId: this.getPageRoomSetLink(pageIndex) ?? null,
+        editIndex: result.length + i,
+      }))
+    result.push(...this.pendingPageRoomSets.map(({ pageIndex, setId }) => ({
+      kind: 'setPageRoomSet' as const, pageIndex, setId: setId?.id ?? null,
+      ...(setId?.dx !== undefined ? { dx: setId.dx } : {}),
+      ...(setId?.dy !== undefined ? { dy: setId.dy } : {}),
+    })))
     this.pendingDrawings = [...this.drawings].filter(([i, info]) => stableJson(info) !== stableJson(this.drawingBaselines.get(i) ?? null)).map(([pageIndex, info], i) => ({ pageIndex, info: info ? { ...info } : null, editIndex: result.length + i }))
     result.push(...this.pendingDrawings.map(({ pageIndex, info }) => ({ kind: 'setDrawingInfo' as const, pageIndex, info })))
     this.pendingFixtureSave = null
@@ -1684,6 +2372,18 @@ export class AnnotationStore {
     this.pendingScales = []
     for (const item of this.pendingScaleRegions) if (!failed.has(item.editIndex)) this.scaleRegionBaselines.set(item.pageIndex, structuredClone(item.regions))
     this.pendingScaleRegions = []
+    for (const item of this.pendingRoomRegions) if (!failed.has(item.editIndex)) this.roomRegionBaselines.set(item.pageIndex, structuredClone(item.regions))
+    this.pendingRoomRegions = []
+    if (this.pendingRoomSets && !failed.has(this.pendingRoomSets.editIndex)) {
+      this.roomSetBaseline = structuredClone(this.pendingRoomSets.sets)
+    }
+    this.pendingRoomSets = null
+    for (const item of this.pendingPageRoomSets) {
+      if (failed.has(item.editIndex)) continue
+      if (item.setId === null) this.pageRoomSetBaselines.delete(item.pageIndex)
+      else this.pageRoomSetBaselines.set(item.pageIndex, item.setId)
+    }
+    this.pendingPageRoomSets = []
     for (const item of this.pendingDrawings) if (!failed.has(item.editIndex)) { this.drawingBaselines.set(item.pageIndex, item.info); this.drawingDirtyBaselines.set(item.pageIndex, this.automaticDrawings.has(item.pageIndex) ? mergeAutomaticDrawingInfo(item.info, this.automaticDrawings.get(item.pageIndex)!) : item.info) }
     this.pendingDrawings = []
     let createdIndex = 0
@@ -1713,7 +2413,7 @@ export class AnnotationStore {
 
   isDirty(): boolean {
     const summary = this.dirtySummary()
-    return summary.annotations > 0 || summary.fixtures || summary.scales.length > 0 || summary.drawings.length > 0
+    return summary.annotations > 0 || summary.fixtures || summary.scales.length > 0 || summary.drawings.length > 0 || summary.rooms.length > 0 || summary.roomSets
   }
 
   dirtySummary(): DirtySummary {
@@ -1723,6 +2423,13 @@ export class AnnotationStore {
       fixtures: stableJson(this.fixtures) !== this.fixtureBaseline,
       scales: [...new Set([...this.scales].filter(([i, scale]) => stableJson(scale) !== stableJson(this.scaleBaselines.get(i) ?? null)).map(([i]) => i).concat([...this.scaleRegions].filter(([i, regions]) => stableJson(regions) !== stableJson(this.scaleRegionBaselines.get(i) ?? [])).map(([i]) => i)))].sort((a, b) => a - b),
       drawings: [...this.drawings].filter(([i, info]) => stableJson(info) !== stableJson(this.drawingDirtyBaselines.get(i) ?? null)).map(([i]) => i).sort((a, b) => a - b),
+      rooms: [...new Set([
+        ...[...this.roomRegions].filter(([i, regions]) => stableJson(regions) !== stableJson(this.roomRegionBaselines.get(i) ?? [])).map(([i]) => i),
+        ...[...new Set([...this.pageRoomSets.keys(), ...this.pageRoomSetBaselines.keys()])]
+          .filter(i => stableJson(this.pageRoomSets.get(i) ?? null)
+            !== stableJson(this.pageRoomSetBaselines.get(i) ?? null)),
+      ])].sort((a, b) => a - b),
+      roomSets: stableJson(this.roomSets) !== stableJson(this.roomSetBaseline),
     }
     this.dirtyCache = { version: this.version, summary }
     return summary
@@ -1788,6 +2495,14 @@ export class AnnotationStore {
     if (target.issueMaximum !== undefined) this.issueNumbers.renumber(target.issueMaximum)
     for (const item of target.scales ?? []) this.scales.set(item.pageIndex, item.scale ? { ...item.scale } : null)
     for (const item of target.scaleRegions ?? []) this.scaleRegions.set(item.pageIndex, structuredClone(item.regions))
+    for (const item of target.roomRegions ?? []) this.roomRegions.set(item.pageIndex, structuredClone(item.regions))
+    if (target.roomSets) this.roomSets = structuredClone(target.roomSets)
+    if (target.pageRoomSets) {
+      this.pageRoomSets.clear()
+      for (const [pageIndex, setId] of target.pageRoomSets) this.pageRoomSets.set(pageIndex, { ...setId })
+    }
+    void this.roomEditTarget
+    void this.roomSetAlignPage
     const targetById = new Map(target.map((state) => [state.id, state]))
     const ids = new Set([...target.map((state) => state.id), ...counterpart.map((state) => state.id)])
     for (const id of ids) {
@@ -1947,7 +2662,7 @@ export class AnnotationStore {
     step: HistoryStep<HistoryState>,
     mapper: (state: AnnotationState) => AnnotationState,
   ): HistoryStep<HistoryState> {
-    return { before: Object.assign(step.before.map(mapper), { routeTemplate: step.before.routeTemplate, pickupMemory: step.before.pickupMemory, drawings: step.before.drawings, scales: step.before.scales, scaleRegions: step.before.scaleRegions, issueMaximum: step.before.issueMaximum, fixtures: step.before.fixtures }), after: Object.assign(step.after.map(mapper), { routeTemplate: step.after.routeTemplate, pickupMemory: step.after.pickupMemory, drawings: step.after.drawings, scales: step.after.scales, scaleRegions: step.after.scaleRegions, issueMaximum: step.after.issueMaximum, fixtures: step.after.fixtures }) }
+    return { before: Object.assign(step.before.map(mapper), { routeTemplate: step.before.routeTemplate, pickupMemory: step.before.pickupMemory, drawings: step.before.drawings, scales: step.before.scales, scaleRegions: step.before.scaleRegions, roomRegions: step.before.roomRegions, roomSets: step.before.roomSets, pageRoomSets: step.before.pageRoomSets, issueMaximum: step.before.issueMaximum, fixtures: step.before.fixtures }), after: Object.assign(step.after.map(mapper), { routeTemplate: step.after.routeTemplate, pickupMemory: step.after.pickupMemory, drawings: step.after.drawings, scales: step.after.scales, scaleRegions: step.after.scaleRegions, roomRegions: step.after.roomRegions, roomSets: step.after.roomSets, pageRoomSets: step.after.pageRoomSets, issueMaximum: step.after.issueMaximum, fixtures: step.after.fixtures }) }
   }
 
   private markTouched(annotation: AnnotationState): void {

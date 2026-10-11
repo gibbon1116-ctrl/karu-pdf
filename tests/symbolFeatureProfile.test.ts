@@ -513,3 +513,400 @@ it('counts shifted out-of-mask cells as white without shrinking the denominator 
   expect(compareSymbolFills(a,b)).toBe('unknown')
   expect(compareSymbolFills(b,a)).toBe('unknown')
 })
+
+// S10 snapshots only the changed algorithms: comparator-based indexing and
+// exhaustive ownership pairing. Attachment processing remains shared with the
+// unchanged production path, but runs against the independently sorted index.
+type S10Point=[number,number]
+type S10Rect=[number,number,number,number]
+type S10Line=[number,number,number,number,number]
+
+class S10ReferenceGeometry extends SymbolFeatureGeometry {
+  override readonly complete:boolean
+  private readonly referenceByY:Uint32Array
+
+  constructor(segments:Float32Array,widths?:Float32Array,complete=false){
+    if (segments.length % 4 || widths && widths.length !== segments.length / 4 || !segments.every(Number.isFinite)
+      || widths && !widths.every(w=>Number.isFinite(w)&&w>=0)) throw Error('Invalid symbol feature geometry')
+    super(segments,widths,false)
+    this.complete = complete && segments.length / 4 <= 400_000
+    this.referenceByY = new Uint32Array(this.complete ? segments.length / 4 : 0)
+    for (let i=0;i<this.referenceByY.length;i++) this.referenceByY[i]=i*4
+    this.referenceByY.sort((a,b)=>Math.min(segments[a+1],segments[a+3])-Math.min(segments[b+1],segments[b+3]))
+  }
+
+  override get indexBytes():number{return this.referenceByY.byteLength}
+
+  override range(y0:number,y1:number,maxLength:number):Uint32Array {
+    const bound=(y:number)=>{let lo=0,hi=this.referenceByY.length;while(lo<hi){const mid=(lo+hi)>>>1,i=this.referenceByY[mid];if(Math.min(this.segments[i+1],this.segments[i+3])<y)lo=mid+1;else hi=mid}return lo}
+    return this.referenceByY.subarray(bound(y0-maxLength),bound(y1+1e-6))
+  }
+}
+
+function s10StrokeMatches(width:number,strokeWidth:number):boolean {
+  return !strokeWidth || !width || width >= .5*strokeWidth-1e-6 && width <= 2*strokeWidth+1e-6
+}
+
+function s10ToWorld(p:S10Point,body:SymbolBodyPose):S10Point {
+  const c=Math.cos(body.angle*Math.PI/180),s=Math.sin(body.angle*Math.PI/180)
+  const dx=p[0]-body.width/2,dy=p[1]-body.height/2
+  return [body.center[0]+c*dx-s*dy,body.center[1]+s*dx+c*dy]
+}
+
+function s10ClipLine(a:S10Point,b:S10Point,rect:S10Rect):[number,number]|undefined {
+  let lo=0,hi=1
+  for(let axis=0;axis<2;axis++){
+    const d=b[axis]-a[axis]
+    if(!d){if(a[axis]<rect[axis]||a[axis]>rect[axis+2])return undefined}
+    else{
+      const u=(rect[axis]-a[axis])/d,v=(rect[axis+2]-a[axis])/d
+      lo=Math.max(lo,Math.min(u,v));hi=Math.min(hi,Math.max(u,v))
+      if(lo>hi)return undefined
+    }
+  }
+  return [lo,hi]
+}
+
+function s10ReferenceProbe(geometry:S10ReferenceGeometry,body:SymbolBodyPose,strokeWidth=0):ReturnType<typeof probeSymbolVectorFeatures> {
+  const probe=probeSymbolVectorFeatures(geometry,body,strokeWidth)
+  if(!probe.complete)return probe
+  const result={...probe}
+  delete result.ownership
+  const {segments,widths}=geometry
+  const w=body.width,h=body.height,long=Math.max(w,h),cx=w/2,cy=h/2
+  const region:S10Rect=[-long*.6,-long*.6,w+long*.6,h+long*.6]
+  const corners=[[region[0],region[1]],[region[2],region[1]],[region[2],region[3]],[region[0],region[3]]]
+    .map(p=>s10ToWorld(p as S10Point,body))
+  const world:S10Rect=[Math.min(...corners.map(p=>p[0])),Math.min(...corners.map(p=>p[1])),Math.max(...corners.map(p=>p[0])),Math.max(...corners.map(p=>p[1]))]
+  const cos=Math.cos(body.angle*Math.PI/180),sin=Math.sin(body.angle*Math.PI/180)
+  const canonical=(x:number,y:number):S10Point=>[cos*(x-body.center[0])+sin*(y-body.center[1])+cx,-sin*(x-body.center[0])+cos*(y-body.center[1])+cy]
+  const all:Array<{a:S10Point;b:S10Point;len:number;width:number}>=[]
+  let ownershipLimited=false
+  for(const i of geometry.range(world[1],world[3],long*8)){
+    if (Math.max(segments[i],segments[i+2]) < world[0] || Math.min(segments[i],segments[i+2]) > world[2]
+      || Math.max(segments[i+1],segments[i+3]) < world[1] || Math.min(segments[i+1],segments[i+3]) > world[3]) continue
+    const width=widths?.[i/4]??0
+    const a=canonical(segments[i],segments[i+1]),b=canonical(segments[i+2],segments[i+3])
+    const len=Math.hypot(b[0]-a[0],b[1]-a[1])
+    if (!len || len > long * 8 || Math.max(a[0], b[0]) < region[0] || Math.min(a[0], b[0]) > region[2]
+      || Math.max(a[1], b[1]) < region[1] || Math.min(a[1], b[1]) > region[3]) continue
+    if(!ownershipLimited){
+      if(all.length===512)ownershipLimited=true
+      else all.push({a,b,len,width})
+    }
+  }
+  const tolerance=Math.max(.08,Math.min(.25,Math.min(w,h)*.035))
+  const out=Math.max(2*tolerance,.04*long,.3),m=Math.max(2*tolerance,.15*Math.min(w,h))
+  if(!ownershipLimited&&w>2*m&&h>2*m){
+    const core:S10Rect=[m,m,w-m,h-m],bodyRect:S10Rect=[-tolerance,-tolerance,w+tolerance,h+tolerance]
+    const parent=new Uint16Array(all.length)
+    for(let i=0;i<parent.length;i++)parent[i]=i
+    const root=(i:number)=>{while(parent[i]!==i){parent[i]=parent[parent[i]];i=parent[i]}return i}
+    const gap=Math.max(2,.15*long)
+    const close=(a:S10Point,b:S10Point)=>(a[0]-b[0])**2+(a[1]-b[1])**2<=gap**2
+    const turn = Math.sin(Math.PI/60)
+    for(let i=0;i<all.length;i++)for(let j=i+1;j<all.length;j++){
+      const a=all[i],b=all[j]
+      // Matching strokes are assessed individually: an aligned body mark must
+      // not inherit a remote endpoint from wiring that stops at the outline.
+      if(s10StrokeMatches(a.width,strokeWidth)||s10StrokeMatches(b.width,strokeWidth))continue
+      if(Math.abs(a.width-b.width)>.1*Math.max(a.width,b.width))continue
+      if(!close(a.a,b.a)&&!close(a.a,b.b)&&!close(a.b,b.a)&&!close(a.b,b.b))continue
+      const ax=a.b[0]-a.a[0],ay=a.b[1]-a.a[1],bx=b.b[0]-b.a[0],by=b.b[1]-b.a[1]
+      if(Math.abs(ax*by-ay*bx)>turn*a.len*b.len)continue
+      const onA=(p:S10Point)=>Math.abs(ax*(p[1]-a.a[1])-ay*(p[0]-a.a[0]))<=tolerance*a.len
+      const onB=(p:S10Point)=>Math.abs(bx*(p[1]-b.a[1])-by*(p[0]-b.a[0]))<=tolerance*b.len
+      if(!(onA(b.a)&&onA(b.b)||onB(a.a)&&onB(a.b)))continue
+      const ra=root(i),rb=root(j)
+      if(ra!==rb)parent[rb]=ra
+    }
+    const enters=new Uint8Array(all.length),remote=new Uint8Array(all.length)
+    const outside=(p:S10Point)=>p[0]<-out||p[1]<-out||p[0]>w+out||p[1]>h+out
+    for(let i=0;i<all.length;i++){
+      const line=all[i],at=root(i),part=s10ClipLine(line.a,line.b,core)
+      if(part&&part[1]>part[0])enters[at]=1
+      if(outside(line.a)||outside(line.b))remote[at]=1
+    }
+    const ownership:NonNullable<ReturnType<typeof probeSymbolVectorFeatures>['ownership']>={foreign:[],owned:[],strokeWidth}
+    for(let i=0;i<all.length;i++){
+      const line=all[i],at=root(i),value={a:line.a,b:line.b,width:line.width}
+      if(enters[at]&&remote[at])ownership.foreign.push(value)
+      else if(s10ClipLine(line.a,line.b,bodyRect))ownership.owned.push(value)
+    }
+    result.ownership=ownership
+  }
+  return result
+}
+
+function s10Random(seed:number):()=>number {
+  let state=seed>>>0
+  return ()=>{
+    state=(Math.imul(state,1664525)+1013904223)>>>0
+    return state/0x100000000
+  }
+}
+
+function s10WorldGeometry(lines:S10Line[],body:SymbolBodyPose):{segments:Float32Array;widths:Float32Array} {
+  const segments:number[]=[],widths:number[]=[]
+  for(const [x0,y0,x1,y1,width] of lines){
+    segments.push(...s10ToWorld([x0,y0],body),...s10ToWorld([x1,y1],body))
+    widths.push(width)
+  }
+  return {segments:new Float32Array(segments),widths:new Float32Array(widths)}
+}
+
+function s10ExpectProbe(segments:Float32Array,widths:Float32Array|undefined,body:SymbolBodyPose,strokeWidth:number,complete=true){
+  const before=segments.slice(),beforeWidths=widths?.slice()
+  const geometry=new SymbolFeatureGeometry(segments,widths,complete)
+  const reference=new S10ReferenceGeometry(segments,widths,complete)
+  const actual=probeSymbolVectorFeatures(geometry,body,strokeWidth)
+  expect(actual).toEqual(s10ReferenceProbe(reference,body,strokeWidth))
+  expect(segments).toEqual(before);expect(widths).toEqual(beforeWidths)
+  expect(geometry.segments).toBe(segments);expect(geometry.widths).toBe(widths)
+  return actual
+}
+
+it('S10 retains the exact stable comparator order for Float32 minima and every range window',()=>{
+  const random=s10Random(0x51010)
+  const words=new Uint32Array(1024),floats=new Float32Array(words.buffer)
+  for(let i=0;i<words.length;i++){
+    let bits=(random()*0x100000000)>>>0
+    if((bits&0x7f800000)===0x7f800000)bits=(bits&0xff7fffff)>>>0
+    words[i]=bits
+  }
+  const special=[-0,+0,-1,1,-3.4e38,3.4e38,2**-149,-(2**-149),-16,16]
+  for(const count of [1,2,46,211,512,1024,4096]){
+    const segments=new Float32Array(count*4)
+    for(let i=0;i<count;i++){
+      const y=i%3===0?special[i%special.length]:floats[i%floats.length]
+      segments[i*4]=i-1000
+      segments[i*4+1]=y
+      segments[i*4+2]=1000-i
+      segments[i*4+3]=i%4===0?y:i%3===0?y:floats[(i*17+7)%floats.length]
+    }
+    const before=segments.slice()
+    const actual=new SymbolFeatureGeometry(segments,undefined,true)
+    const reference=new S10ReferenceGeometry(segments,undefined,true)
+    expect(actual.range(-Infinity,Infinity,0)).toEqual(reference.range(-Infinity,Infinity,0))
+    expect(actual.indexBytes).toBe(count*Uint32Array.BYTES_PER_ELEMENT)
+    for(const [y0,y1,maxLength] of [
+      [-Infinity,Infinity,0],[-0,+0,0],[-1,1,0],[-100,20,3],
+      [-3.4e38,-1e20,1e20],[1e20,3.4e38,1e20],
+      [0,0,2**-149],[16,16,0],[5,-5,0]
+    ]){
+      expect(actual.range(y0,y1,maxLength)).toEqual(reference.range(y0,y1,maxLength))
+    }
+    expect(segments).toEqual(before)
+  }
+})
+
+it('S10 keeps interleaved negative and positive zero ties in original segment order',()=>{
+  const segments=new Float32Array([
+    0,-0,1,+0,
+    2,+0,3,+0,
+    4,-0,5,-0,
+    6,+0,7,-0,
+    8,-1,9,-1,
+    10,1,11,1
+  ])
+  const geometry=new SymbolFeatureGeometry(segments,undefined,true)
+  expect(Array.from(geometry.range(-Infinity,Infinity,0))).toEqual([16,0,4,8,12,20])
+  expect(geometry.range(-Infinity,Infinity,0))
+    .toEqual(new S10ReferenceGeometry(segments,undefined,true).range(-Infinity,Infinity,0))
+})
+
+it('S10 preserves validation even without an index and preserves the 400000-segment index limit',()=>{
+  const invalid:Array<[Float32Array,Float32Array|undefined]>=[
+    [new Float32Array([0,0,1]),undefined],
+    [new Float32Array([0,0,NaN,1]),undefined],
+    [new Float32Array([0,Infinity,1,1]),undefined],
+    [new Float32Array([0,0,1,1]),new Float32Array(0)],
+    [new Float32Array([0,0,1,1]),new Float32Array([-1])],
+    [new Float32Array([0,0,1,1]),new Float32Array([NaN])],
+    [new Float32Array([0,0,1,1]),new Float32Array([Infinity])]
+  ]
+  for(const complete of [false,true])for(const [segments,widths] of invalid){
+    expect(()=>new SymbolFeatureGeometry(segments,widths,complete)).toThrow('Invalid symbol feature geometry')
+    expect(()=>new S10ReferenceGeometry(segments,widths,complete)).toThrow('Invalid symbol feature geometry')
+  }
+  const segments=new Float32Array([0,-1,1,1]),widths=new Float32Array([0])
+  const incomplete=new SymbolFeatureGeometry(segments,widths,false)
+  expect(incomplete.complete).toBe(false);expect(incomplete.indexBytes).toBe(0)
+  expect(incomplete.range(-Infinity,Infinity,0)).toHaveLength(0)
+  expect(incomplete.segments).toBe(segments);expect(incomplete.widths).toBe(widths)
+  for(const count of [400_000,400_001]){
+    const large=new Float32Array(count*4)
+    const actual=new SymbolFeatureGeometry(large,undefined,true)
+    const reference=new S10ReferenceGeometry(large,undefined,true)
+    expect(actual.complete).toBe(count===400_000)
+    expect(actual.indexBytes).toBe(count===400_000?count*4:0)
+    expect(actual.range(-Infinity,Infinity,0)).toEqual(reference.range(-Infinity,Infinity,0))
+  }
+// 400,000 lines: several seconds under full-suite load.
+}, 30_000)
+
+it('S10 matches the complete reference probe for seeded geometry, rotations and stroke widths',()=>{
+  const random=s10Random(0x51020)
+  const angles=[0,2,37,90,183,270,-45]
+  const strokes=[0,.1,.7,2.4]
+  const counts=[0,1,14,46,64,211,256,257]
+  for(let trial=0;trial<32;trial++){
+    const body:SymbolBodyPose={
+      center:[-150+random()*300,-150+random()*300],
+      width:10+random()*20,height:4+random()*12,angle:angles[trial%angles.length]
+    }
+    const w=body.width,h=body.height,long=Math.max(w,h)
+    const lines:S10Line[]=[]
+    for(let i=0;i<counts[trial%counts.length];i++){
+      let x0:number,y0:number,x1:number,y1:number
+      if(i%5===0){
+        x0=-long*.4+(i%11)*long*.1;y0=h*.5
+        x1=x0+long*.08;y1=y0
+      }else if(i%5===1){
+        x0=w*.2;y0=h*.8;x1=w*.8;y1=h*.2
+      }else{
+        x0=-long*.5+random()*(w+long)
+        y0=-long*.5+random()*(h+long)
+        x1=x0+(random()-.5)*long
+        y1=y0+(random()-.5)*long
+      }
+      const width=[0,.1,.11,.12,.35,.7,1.4,2.4][Math.floor(random()*8)]
+      if(i%7===0)lines.push([x1,y1,x0,y0,width])
+      else lines.push([x0,y0,x1,y1,width])
+    }
+    const data=s10WorldGeometry(lines,body)
+    s10ExpectProbe(data.segments,data.widths,body,strokes[trial%strokes.length])
+    if(trial%8===0){
+      s10ExpectProbe(data.segments,undefined,body,.7)
+      s10ExpectProbe(data.segments,data.widths,body,.7,false)
+    }
+  }
+})
+
+it('S10 compares ordered arc, frame, interior and ownership arrays against the reference',()=>{
+  for(const angle of [0,2,37,90,183,-45]){
+    const body:SymbolBodyPose={center:[-30,60],width:20,height:12,angle}
+    const lines:S10Line[]=[
+      [0,0,3,-4,.7],[3,-4,10,-6,.7],[10,-6,17,-4,.7],[17,-4,20,0,.7],
+      [-8,3,28,3,.7],[-8,9,28,9,.7],
+      [6,9,10,6,.7],[10,6,14,3,.7],
+      [0,0,20,0,.7],[20,0,20,12,.7],[20,12,0,12,.7],[0,12,0,0,.7],
+      [-7,6,-2,6,.1],[-.6,6,4.4,6,.1],[5.8,6,10.8,6,.1],
+      [12.2,6,17.2,6,.1],[18.6,6,23.6,6,.1],
+      [7,8,13,4,.35]
+    ]
+    const data=s10WorldGeometry(lines,body)
+    for(const strokeWidth of [0,.35,.7,2.4]){
+      const actual=s10ExpectProbe(data.segments,data.widths,body,strokeWidth)
+      expect(actual.complete).toBe(true)
+      expect(actual.ownership).toBeDefined()
+      if(angle===0&&strokeWidth===.7){
+        expect(actual.topArc).toBe('present')
+        expect(actual.annexFrame).toBe('present')
+        expect(actual.interiorLines).toHaveLength(1)
+        expect(actual.ownership!.foreign).toHaveLength(7)
+      }
+    }
+  }
+})
+
+it('S10 preserves ownership immediately below, at and above its 512-segment limit',()=>{
+  for(const count of [511,512,513])for(const angle of [0,37,90,183]){
+    const body:SymbolBodyPose={center:[-50,25],width:20,height:12,angle}
+    const lines:S10Line[]=[]
+    for(let i=0;i<count;i++){
+      if(i<13){
+        const x=-7+i*2.5
+        lines.push([x,6,x+1.2,6,.1])
+      }else{
+        const at=i-13,x=.5+(at%25)*.72,y=1+Math.floor(at/25)*.45
+        lines.push(i%2?[x,y,x+.55,y,.1]:[x+.55,y,x,y,.1])
+      }
+    }
+    const data=s10WorldGeometry(lines,body)
+    for(const strokeWidth of [.7,2.4]){
+      const actual=s10ExpectProbe(data.segments,data.widths,body,strokeWidth)
+      expect(actual.complete).toBe(true)
+      if(count<=512){
+        expect(actual.ownership).toBeDefined()
+        expect(actual.ownership!.foreign.length+actual.ownership!.owned.length).toBe(count)
+        expect(actual.ownership!.foreign.length).toBeGreaterThanOrEqual(13)
+      }else{
+        expect(actual).not.toHaveProperty('ownership')
+      }
+    }
+  }
+})
+
+it('S10 preserves local truncation before ownership processing',()=>{
+  const body:SymbolBodyPose={center:[10,6],width:20,height:12,angle:0}
+  for(const count of [256,257]){
+    const lines:S10Line[]=Array.from({length:count},(_,i)=>[4,2+i*.02,5,2+i*.02,.7])
+    const data=s10WorldGeometry(lines,body)
+    const actual=s10ExpectProbe(data.segments,data.widths,body,.7)
+    expect(actual.complete).toBe(count===256)
+    if(count===257)expect(actual).not.toHaveProperty('ownership')
+  }
+})
+
+it('S10 preserves close, width, parallel and collinearity thresholds around endpoint cells',()=>{
+  const body:SymbolBodyPose={center:[10,6],width:20,height:12,angle:0}
+  const random=s10Random(0x51030)
+  const lines:S10Line[]=[]
+  for(const boundary of [-9,-6,-3,-0,+0,3,6,9,12,15,18,21,24]){
+    for(const offset of [-1e-6,0,1e-6]){
+      const x=boundary+offset
+      lines.push([x-1,6,x,6,.1])
+      lines.push([x+3,6,x+4,6,.1])
+      lines.push([x+3-1e-6,6,x+4-1e-6,6,.1])
+      lines.push([x+3+1e-6,6,x+4+1e-6,6,.1])
+    }
+  }
+  for(let i=0;i<80;i++){
+    const x=-8+random()*34,y=2+random()*8
+    const angle=[0,Math.PI/60-1e-6,Math.PI/60,Math.PI/60+1e-6][i%4]
+    const width=[.1,.11,.111111,.111112,.7][i%5]
+    lines.push([x,y,x+Math.cos(angle),y+Math.sin(angle),width])
+  }
+  const data=s10WorldGeometry(lines,body)
+  for(const strokeWidth of [.7,2.4]){
+    const actual=s10ExpectProbe(data.segments,data.widths,body,strokeWidth)
+    expect(actual.complete).toBe(true)
+    expect(actual.ownership).toBeDefined()
+  }
+})
+
+it('S10 retains original floating-point ownership semantics when squared gap overflows',()=>{
+  const body:SymbolBodyPose={center:[0,0],width:1e155,height:12,angle:0}
+  const segments=new Float32Array([
+    0,-7,0,-4,
+    0,-1,0,2,
+    0,5,0,8,
+    1,-1,1,2
+  ])
+  const widths=new Float32Array([.1,.1,.1,.11])
+  const actual=s10ExpectProbe(segments,widths,body,.7)
+  expect(actual.complete).toBe(true)
+  expect(actual.ownership).toBeDefined()
+})
+
+it('S10 matches reference probes for huge and negative page coordinates and empty cores',()=>{
+  const segments=new Float32Array([
+    -3e38,-3e38,-2.9e38,-2.9e38,
+    3e38,3e38,2.9e38,2.9e38,
+    -1e20,0,1e20,0,
+    -0,+0,+0,-0,
+    0,-1,0,1
+  ])
+  const widths=new Float32Array([.1,.7,.1,0,.1])
+  const bodies:SymbolBodyPose[]=[
+    {center:[0,0],width:20,height:12,angle:0},
+    {center:[-3e38,-3e38],width:1e38,height:1e38,angle:37},
+    {center:[3e38,3e38],width:1e38,height:1e38,angle:90},
+    {center:[0,0],width:1e308,height:1e308,angle:45},
+    {center:[0,0],width:20,height:.2,angle:0}
+  ]
+  for(const body of bodies)for(const strokeWidth of [0,.7,2.4]){
+    s10ExpectProbe(segments,widths,body,strokeWidth)
+  }
+})

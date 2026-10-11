@@ -73,10 +73,13 @@ import './styles.css'
 const FixtureDialog = lazy(() => import('./app/FixtureDialog'))
 const SymbolSearchPanel = lazy(() => import('./app/SymbolSearchPanel'))
 
+import { fixtureSampleRectFitsPage, fixtureSamplesMatch } from './app/fixtureSampleMatch'
+
 declare global {
   interface Window {
     __karu?: {
       getExternalSendRecords: typeof getExternalSendRecords
+      getCountFixtures(): import('./core/countFixtures').CountFixture[]
       snapVertexProbe(pageIndex: number, count?: number): unknown
       vectorProbe(pageIndex: number): Promise<{
         kind: import('./core/vectorPaths').PageKind; segmentCount: number; truncated: boolean
@@ -271,9 +274,14 @@ export default function App() {
   const [scaleRegionDrawing, setScaleRegionDrawing] = useState<{ session: DocumentSession; pageIndex: number } | null>(null)
   const [scaleTracing, setScaleTracing] = useState(false)
   const [scalePoints, setScalePoints] = useState<Point[] | null>(null)
-  const [sampleCapture, setSampleCapture] = useState<{ docId: string; busy: boolean; rect?: Rect; symbolFixtureId?: string; resolve(sample: CountFixtureSample | null): void } | null>(null)
+  const [sampleCapture, setSampleCapture] = useState<({ docId: string; busy: boolean; rect?: Rect } & (
+    { area?: false; symbolFixtureId?: string; resolve(sample: CountFixtureSample | null): void }
+    | { area: true; symbolFixtureId?: never; resolveArea(area: { pageIndex: number; rect: Rect } | null): void }
+  )) | null>(null)
   const [symbolSearch, setSymbolSearch] = useState<SymbolSearchSelection | null>(null)
   const symbolSearchDisposeRef = useRef<(() => void) | null>(null)
+  const symbolSearchRequestRef = useRef(0)
+  const symbolSearchValidationDisposeRef = useRef<(() => void) | null>(null)
   const sampleCaptureRef = useRef<typeof sampleCapture>(null)
   const [sampleMessage, setSampleMessage] = useState('')
   const [tool, setTool] = useState<EditorTool>('select')
@@ -394,33 +402,120 @@ export default function App() {
   const finishSampleCapture = useCallback((sample: CountFixtureSample | null) => {
     const pending = sampleCaptureRef.current
     sampleCaptureRef.current = null; setSampleCapture(null); setSampleMessage('')
-    pending?.resolve(sample)
+    if (!pending) return
+    if (pending.area === true) pending.resolveArea(null)
+    else pending.resolve(sample)
   }, [])
-  const registerSymbolSearchDispose = useCallback((dispose: (() => void) | null) => { symbolSearchDisposeRef.current = dispose }, [])
+  const registerSymbolSearchDispose = useCallback((dispose: (() => void) | null) => {
+    symbolSearchDisposeRef.current = dispose
+    if (!dispose && sampleCaptureRef.current?.area) finishSampleCapture(null)
+  }, [finishSampleCapture])
   const releaseSymbolSearch = useCallback(() => {
+    symbolSearchRequestRef.current++
+    const validationDispose = symbolSearchValidationDisposeRef.current
+    symbolSearchValidationDisposeRef.current = null; validationDispose?.()
     const dispose = symbolSearchDisposeRef.current; symbolSearchDisposeRef.current = null; dispose?.()
   }, [])
   const closeSymbolSearch = useCallback(() => {
     releaseSymbolSearch()
     setSymbolSearch(null)
-    if (sampleCaptureRef.current?.symbolFixtureId) finishSampleCapture(null)
+    if (sampleCaptureRef.current?.symbolFixtureId || sampleCaptureRef.current?.area) finishSampleCapture(null)
   }, [finishSampleCapture, releaseSymbolSearch])
-  const startSymbolSearch = useCallback((session: DocumentSession, fixtureId: string) => {
-    const fixture = session.annotationStore.getCountFixture(fixtureId)
+  const startSymbolSearch = useCallback((session: DocumentSession, fixtureId: string, options: { capture?: boolean } = {}) => {
+    const store = session.annotationStore
+    const fixture = store.getCountFixture(fixtureId)
     if (session !== activeRef.current || session.editRestriction || comparison || organizeRef.current || !fixture || quantityKind(fixture) !== 'count') return
-    releaseSymbolSearch(); finishSampleCapture(null); setSymbolSearch(null); session.annotationStore.clearSymbolCandidates()
-    session.annotationStore.selectFixture(fixtureId)
+    releaseSymbolSearch(); finishSampleCapture(null); setSymbolSearch(null); store.clearSymbolCandidates()
+    store.selectFixture(fixtureId)
+    const requestId = symbolSearchRequestRef.current
     const pageRevision = session.pageRevision, sideTab = session.sidePanelTab
-    const pending: NonNullable<typeof sampleCapture> = { docId: session.docId, busy: false, symbolFixtureId: fixtureId, resolve: sample => {
-      if (sample && pending.rect && activeRef.current === session && session.pageRevision === pageRevision && session.sidePanelTab === sideTab && !organizeRef.current && session.annotationStore.selectedFixtureId === fixtureId)
-        setSymbolSearch({ session, fixtureId, sample, rect: pending.rect })
-    } }
-    sampleCaptureRef.current = pending; setSampleCapture(pending)
-    setSampleMessage('探す記号を四角で囲んでください（Esc で中止）')
-  }, [comparison, finishSampleCapture, releaseSymbolSearch])
+    const sameRect = (a: Rect | undefined, b: Rect | undefined): boolean =>
+      a === undefined ? b === undefined : b !== undefined && a.every((value, index) => value === b[index])
+    const isCurrent = (): boolean => {
+      const currentFixture = store.getCountFixture(fixtureId)
+      return symbolSearchRequestRef.current === requestId
+        && activeRef.current === session && session.pageRevision === pageRevision
+        && session.sidePanelTab === sideTab && !session.editRestriction && !organizeRef.current
+        && store.selectedFixtureId === fixtureId && !!currentFixture && quantityKind(currentFixture) === 'count'
+    }
+    const beginCapture = (message: string) => {
+      if (!isCurrent()) return
+      const pending: NonNullable<typeof sampleCapture> = {
+        docId: session.docId, busy: false, symbolFixtureId: fixtureId,
+        resolve: sample => {
+          if (!sample || !pending.rect || !isCurrent()) return
+          const currentFixture = store.getCountFixture(fixtureId)!
+          const nextSample = { ...sample }
+          delete nextSample.lines
+          if (currentFixture.sample?.png !== sample.png || !sameRect(currentFixture.sample?.rect, sample.rect)
+            || currentFixture.sample?.lines !== undefined) {
+            try {
+              store.setCountFixtures(store.getCountFixtures().map(f => f.id === fixtureId ? { ...f, sample: nextSample } : f))
+              showStatus('見本を項目に登録しました（Ctrl+Z で戻せます）')
+            } catch (reason) {
+              const message = reason instanceof Error ? reason.message : String(reason)
+              showStatus(`見本を項目に登録できませんでした：${message}`)
+            }
+          }
+          if (isCurrent()) setSymbolSearch({ session, fixtureId, sample: nextSample, rect: pending.rect })
+        },
+      }
+      sampleCaptureRef.current = pending; setSampleCapture(pending)
+      setSampleMessage(message)
+    }
+    const captureMessage = '探す記号を四角で囲んでください（Esc で中止）'
+    const mismatchMessage = '登録した見本の場所が図面と合わないため、探す記号を四角で囲んでください（Esc で中止）'
+    const savedSample = fixture.sample
+    if (options.capture || !savedSample?.rect) {
+      beginCapture(captureMessage)
+      return
+    }
+    const rect: Rect = [...savedSample.rect]
+    if (!Number.isSafeInteger(savedSample.pageIndex) || savedSample.pageIndex < 0
+      || savedSample.pageIndex >= session.pageSizes.length
+      || !fixtureSampleRectFitsPage(rect, session.pageSizes[savedSample.pageIndex])) {
+      beginCapture(mismatchMessage)
+      return
+    }
+    const sameSavedSample = (): boolean => {
+      const current = store.getCountFixture(fixtureId)?.sample
+      return current?.png === savedSample.png && current.width === savedSample.width
+        && current.height === savedSample.height && current.pageIndex === savedSample.pageIndex
+        && sameRect(current.rect, rect)
+    }
+    const validationDispose = store.subscribe(() => {
+      if (isCurrent() && sameSavedSample()) return
+      if (symbolSearchRequestRef.current === requestId) symbolSearchRequestRef.current++
+      const dispose = symbolSearchValidationDisposeRef.current
+      symbolSearchValidationDisposeRef.current = null; dispose?.()
+    })
+    symbolSearchValidationDisposeRef.current = validationDispose
+    void (async () => {
+      try {
+        const renderedSample = await pool.renderFixtureSample(session.docId, savedSample.pageIndex, rect)
+        if (!isCurrent() || !sameSavedSample()) return
+        const matches = await fixtureSamplesMatch(savedSample, renderedSample)
+        if (!isCurrent() || !sameSavedSample()) return
+        if (matches) {
+          setSymbolSearch({ session, fixtureId, sample: savedSample, rect })
+          showStatus('登録済みの見本で探します。替えるときは「見本を囲み直す」を押してください')
+        } else beginCapture(mismatchMessage)
+      } catch {
+        if (isCurrent() && sameSavedSample()) beginCapture(mismatchMessage)
+      } finally {
+        if (symbolSearchValidationDisposeRef.current === validationDispose) {
+          symbolSearchValidationDisposeRef.current = null
+          validationDispose()
+        }
+      }
+    })()
+  }, [comparison, finishSampleCapture, releaseSymbolSearch, pool, showStatus])
   const requestFixtureSample = useCallback((): Promise<CountFixtureSample | null> => {
     const session = activeRef.current
     if (!session || session.editRestriction || comparison || organizeRef.current) return Promise.reject(new Error('通常の図面表示で見本を切り取ってください。'))
+    symbolSearchRequestRef.current++
+    const validationDispose = symbolSearchValidationDisposeRef.current
+    symbolSearchValidationDisposeRef.current = null; validationDispose?.()
     finishSampleCapture(null)
     return new Promise(resolve => {
       const pending = { docId: session.docId, busy: false, resolve }
@@ -428,15 +523,44 @@ export default function App() {
       setSampleMessage('切り取る範囲を四角で囲んでください（Esc で中止）')
     })
   }, [comparison, finishSampleCapture])
+  const requestSymbolSearchArea = useCallback((): Promise<{ pageIndex: number; rect: Rect } | null> => {
+    const session = activeRef.current, currentSearch = symbolSearch
+    if (!session || !currentSearch || currentSearch.session !== session || session.editRestriction || comparison || organizeRef.current
+      || session.annotationStore.selectedFixtureId !== currentSearch.fixtureId) return Promise.resolve(null)
+    const fixture = session.annotationStore.getCountFixture(currentSearch.fixtureId)
+    if (!fixture || quantityKind(fixture) !== 'count') return Promise.resolve(null)
+    finishSampleCapture(null)
+    const pageRevision = session.pageRevision, sideTab = session.sidePanelTab
+    return new Promise(resolveArea => {
+      const pending: NonNullable<typeof sampleCapture> = {
+        docId: session.docId, busy: false, area: true,
+        resolveArea: area => {
+          resolveArea(area && activeRef.current === session && session.pageRevision === pageRevision
+            && session.sidePanelTab === sideTab && !organizeRef.current
+            && session.annotationStore.selectedFixtureId === currentSearch.fixtureId ? area : null)
+        },
+      }
+      sampleCaptureRef.current = pending; setSampleCapture(pending)
+      setSampleMessage('探す範囲を四角で囲んでください（Esc で中止）')
+    })
+  }, [symbolSearch, comparison, finishSampleCapture])
   const completeFixtureSample = useCallback((pageIndex: number, rect: import('./core/annotations').Rect) => {
     const pending = sampleCaptureRef.current
     if (!pending || pending.busy) return
     if (Math.min(rect[2] - rect[0], rect[3] - rect[1]) < 2 * 72 / 25.4) {
-      setSampleMessage('範囲が小さすぎます。切り取る範囲を四角で囲んでください（Esc で中止）'); return
+      setSampleMessage(pending.area === true
+        ? '範囲が小さすぎます。探す範囲を四角で囲んでください（Esc で中止）'
+        : '範囲が小さすぎます。切り取る範囲を四角で囲んでください（Esc で中止）')
+      return
     }
-    pending.rect = rect; pending.busy = true; setSampleMessage('見本の画像を作っています…（Esc で中止）')
+    if (pending.area === true) {
+      sampleCaptureRef.current = null; setSampleCapture(null); setSampleMessage('')
+      pending.resolveArea({ pageIndex, rect })
+      return
+    }
+    pending.rect = [...rect]; pending.busy = true; setSampleMessage('見本の画像を作っています…（Esc で中止）')
     void pool.renderFixtureSample(pending.docId, pageIndex, rect).then(sample => {
-      if (sampleCaptureRef.current === pending) finishSampleCapture(sample)
+      if (sampleCaptureRef.current === pending) finishSampleCapture({ ...sample, rect: [...rect] })
     }).catch(reason => {
       if (sampleCaptureRef.current !== pending) return
       pending.busy = false; setSampleMessage(`${String(reason)} 切り取る範囲を四角で囲んでください（Esc で中止）`)
@@ -446,8 +570,11 @@ export default function App() {
   useLayoutEffect(() => {
     finishSampleCapture(null)
     closeSymbolSearch()
-    return () => finishSampleCapture(null)
-  }, [active?.docId, active?.pageRevision, active?.sidePanelTab, comparison, organize, finishSampleCapture, closeSymbolSearch])
+    return () => {
+      releaseSymbolSearch()
+      finishSampleCapture(null)
+    }
+  }, [active?.docId, active?.pageRevision, active?.sidePanelTab, comparison, organize, finishSampleCapture, closeSymbolSearch, releaseSymbolSearch])
   useEffect(() => {
     const session = symbolSearch?.session ?? (sampleCapture?.symbolFixtureId ? active : null)
     const fixtureId = symbolSearch?.fixtureId ?? sampleCapture?.symbolFixtureId
@@ -693,6 +820,8 @@ export default function App() {
       session.fileOutdated = created
       session.annotationStore.loadScales(result.pageScales ?? [])
       session.annotationStore.loadScaleRegions(result.pageScaleRegions ?? [])
+      session.annotationStore.loadRoomRegions(result.pageRoomRegions ?? [])
+      session.annotationStore.loadRoomSets(result.roomSets ?? [], result.pageRoomSets ?? [])
       session.annotationStore.loadDrawingInfos(result.pageDrawingInfos ?? [])
       tabs.add(session)
       activeRef.current = session
@@ -1190,9 +1319,9 @@ export default function App() {
     return inserted
   }, [pool])
 
-  const finishPageLayout = useCallback((session: DocumentSession, result: { pageSizes: typeof session.pageSizes; hasBackup: boolean; pageScales?: (import('./core/measure').PageScale | null)[]; pageScaleRegions?: Array<[number, ScaleRegion[]]>; pageDrawingInfos?: (import('./core/drawingInfo').DrawingInfo | null)[] }) => {
+  const finishPageLayout = useCallback((session: DocumentSession, result: { pageSizes: typeof session.pageSizes; hasBackup: boolean; pageScales?: (import('./core/measure').PageScale | null)[]; pageScaleRegions?: Array<[number, ScaleRegion[]]>; pageRoomRegions?: Array<[number, import('./core/rooms').RoomRegion[]]>; roomSets?: import('./core/rooms').RoomSet[]; pageRoomSets?: Array<[number, import('./core/rooms').RoomSetLink]>; pageDrawingInfos?: (import('./core/drawingInfo').DrawingInfo | null)[] }) => {
     const reloadFixtures = session.annotationStore.fixturesReady
-    session.updateAfterPageLayout(result.pageSizes, result.hasBackup, result.pageScales, result.pageDrawingInfos, result.pageScaleRegions)
+    session.updateAfterPageLayout(result.pageSizes, result.hasBackup, result.pageScales, result.pageDrawingInfos, result.pageScaleRegions, result.pageRoomRegions, result.roomSets, result.pageRoomSets)
     activeRef.current = session
     setPage(session.view.page)
     setZoom(session.view.zoom)
@@ -1576,6 +1705,7 @@ export default function App() {
     const extractVectors = pool.extractVectors
     pool.extractVectors = options => { vectorExtractionRequests.current++; return extractVectors.call(pool, options) }
     window.__karu = {
+      getCountFixtures: () => (activeRef.current?.annotationStore.getCountFixtures() ?? []).map(f => structuredClone(f)),
       vectorProbe: async pageIndex => {
         const session = tabs.active, size = session?.pageSizes[pageIndex]
         if (!session || !size) throw Error('No page')
@@ -1988,7 +2118,7 @@ export default function App() {
           } : null}
           />
           {symbolSearch?.session === active && !organize && <Suspense fallback={null}><SymbolSearchPanel key={`${active.docId}:${symbolSearch.fixtureId}`} selection={symbolSearch} pool={pool}
-            onClose={closeSymbolSearch} onRecapture={() => startSymbolSearch(active, symbolSearch.fixtureId)}
+            onClose={closeSymbolSearch} onRecapture={() => startSymbolSearch(active, symbolSearch.fixtureId, { capture: true })} onRequestArea={requestSymbolSearchArea}
             onPage={index => viewerRef.current?.scrollToPage(index)} onStatus={showStatus} registerDispose={registerSymbolSearchDispose} /></Suspense>}
           </FixtureUiContext.Provider>
           </QuantityNavigationContext.Provider>

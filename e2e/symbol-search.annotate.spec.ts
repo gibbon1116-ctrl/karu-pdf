@@ -82,6 +82,9 @@ async function open(page: Page, pageCount = 1, withHatching = false) {
 async function capture(page: Page, viaBar = false) {
   const source = viaBar ? page.getByRole('toolbar', { name: '拾いバー' }) : quantity(page)
   await source.getByRole('button', { name: '同じ記号を探す', exact: true }).click()
+  // A registered sample opens the panel directly (SPEC-S07); recapture to exercise drawing.
+  await expect(page.locator('.fixture-sample-instruction').or(panel(page))).toBeVisible()
+  if (await panel(page).isVisible()) await panel(page).getByRole('button', { name: '見本を囲み直す' }).click()
   await expect(page.locator('.fixture-sample-instruction')).toContainText('探す記号を四角で囲んでください（Esc で中止）')
   const svg = page.getByTestId('fixture-sample-selection-0')
   const points = await svg.evaluate(el => {
