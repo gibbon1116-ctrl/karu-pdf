@@ -1,5 +1,6 @@
 import { LocationInput } from './LocationInput'
 import { RouteItems, ConditionSelect, addRouteCandidate, addQuantityCandidate } from './RouteItems'
+import { CountItems } from './CountItems'
 import { routeMembers, type PartCondition, type RoutePart, type QuantityOpening, quantityLabel, quantityPoints, quantityDimensions, QUANTITY_DIMENSIONS } from '../core/quantity'
 import { polygonArea, polylineLength } from '../core/measure'
 import { fixtureCode, fixtureDrawingCode, quantityKind, quantityMethod, QUANTITY_METHODS } from '../core/countFixtures'
@@ -189,6 +190,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
       {quantity?.method === 'polyline' && activeSelection?.measure && activeSelection.vertices && store.selectedIds().length === 1 && <RouteItems annotation={activeSelection} store={store} />}
       {store.selectedIds().length >= 2 && store.selectedIds().every(id => store.get(id)?.quantity?.method === 'polyline') && <BulkRouteConditions key={store.selectedIds().join(',')} store={store} />}
       {store.selectedPickupsOnly() && fixture && quantity?.method !== 'polyline' && store.selectedIds().every(id => { const a = store.get(id); return a?.quantity ? a.quantity.method !== 'polyline' && a.quantity.itemId === fixture.id : !!a?.count && store.fixtureForCount(a.count)?.id === fixture.id }) && <PickupCondition key={fixture.id + store.selectedIds().join(',')} store={store} fixture={fixture} />}
+      {store.selectedIds().length === 1 && activeSelection?.count && !activeSelection.quantity && fixture && <CountItems key={activeSelection.id + ':' + fixture.id} annotation={activeSelection} store={store} />}
       {fixture ? <><p>{fixtureCode(fixture)} {fixture.name}</p>{quantityMethod(fixture) === 'click' ? <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + fixture.style.size * (1 + .7 * fixtureDrawingCode(fixture).length))} 50`} aria-label="印の見本"><CountMarker style={fixture.style} code={fixtureDrawingCode(fixture)} /></svg> : <QuantitySwatch fixture={fixture} />}
         <button onClick={() => fixtureUi?.edit(fixture.id)}>項目を編集…</button></> : <button onClick={() => fixtureUi?.open()}>数量拾いの一覧で項目を選んでください</button>}
       {store.selectedPickupsOnly() && <PickupLocation key={store.selectedIds().join(',') + ':' + store.getSnapshot()} store={store} />}

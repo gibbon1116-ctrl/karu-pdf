@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { countHex, fixtureCode, type CountFixture } from '../core/countFixtures'
-import { routeMemberLength, routeRises, routePortions, riseCondition, validCondition, type PartCondition, type RoutePart } from '../core/quantity'
+import { countHex, fixtureLabelCode, quantityMethod, type CountFixture } from '../core/countFixtures'
+import { routeMemberLength, routeRises, routePortions, riseCondition, validCondition, validRoutePerM, routePerMSuffix, type PartCondition, type RoutePart } from '../core/quantity'
 import { polylineLength } from '../core/measure'
+import { backfillDetail, calculateBackfillVolume } from '../core/backfill'
 import type { AnnotationStore, EditableAnnotation } from '../editor/AnnotationStore'
 import { QuantitySwatch } from '../editor/countMarkers'
 import { QuantityValueInput } from '../editor/QuantityValueInput'
@@ -79,29 +80,70 @@ export function RouteItems({ annotation: a, store }: { annotation: EditableAnnot
       <div className="route-slack" title="図示されない付加長を、設計図書に指示がある場合だけ入れる。切り無駄・割増は入れない（単価に含まれる）"><QuantityValueInput label="その他の加算" value={q.slackM ?? 0} commit={n => store.updateQuantityValues(a.id, { slackM: n })} /></div>
     </div>
     {routes.map((e, i) => {
-      const f = store.getCountFixture(e.itemId), code = f ? fixtureCode(f) : e.itemId, length = routeMemberLength(planM, q, e.cond)
-      const portions = routePortions(planM, q, e.cond), perRise = Array.isArray(e.cond.rise) || individual.has(e.itemId)
-      const detail = (['plan', 'rise', 'slack'] as const).flatMap(part => {
+      const f = store.getCountFixture(e.itemId), code = f ? fixtureLabelCode(f) : e.itemId
+      const identity = `${code} ${f?.name ?? ''}`.trim()
+      const trench = i > 0 && !!f && quantityMethod(f) === 'lengthWidthDepth'
+      const length = routeMemberLength(planM, trench ? {} : q, e.cond)
+      const portions = routePortions(planM, trench ? {} : q, e.cond)
+      const perRise = Array.isArray(e.cond.rise) || individual.has(e.itemId)
+      const dimension = (value: number | undefined) =>
+        value !== undefined && Number.isFinite(value) && value > 0 ? value : 0
+      const widthM = dimension(f?.defaults?.widthM)
+      const depthM = dimension(f?.defaults?.depthM)
+      const perM = e.perM ?? 1
+      const backfill = trench && f?.backfill?.deductPipes
+        ? calculateBackfillVolume(planM, q, e, f, id => store.getCountFixture(id))
+        : undefined
+      const rawQuantity = backfill?.valueM3
+        ?? length * e.count * perM * (trench ? widthM * depthM : 1)
+      const detail = (backfill ? backfillDetail(backfill) : (['plan', 'rise', 'slack'] as const).flatMap(part => {
         const values = portions.filter(p => p.part === part)
         return values.length ? [(part === 'plan' ? '平面 ' : part === 'rise' ? '立上り ' : 'その他 ') + values.reduce((n, p) => n + p.lengthM, 0).toFixed(2)] : []
-      }).join(' ＋ ') + ' ＝ ' + length.toFixed(2) + ' m' + (e.count > 1 ? '（×' + e.count + '条 ' + (length * e.count).toFixed(2) + ' m）' : '')
+      }).join(' ＋ ') + ' ＝ ' + length.toFixed(2) + ' m'
+        + (e.count > 1 ? '（×' + e.count + '条 ' + (length * e.count).toFixed(2) + ' m）' : '')
+        + (perM !== 1
+          ? `；${code}${routePerMSuffix(perM)} → ${(length * e.count * perM).toFixed(3)} m` : '')
+        + (trench
+          ? ` × 幅 ${widthM.toFixed(2)}m × 深さ ${depthM.toFixed(2)}m ＝ ${rawQuantity.toFixed(2)} ㎥` : ''))
+        + (f?.convert ? `（≒ ${(rawQuantity * f.convert.factor).toFixed(2)} ${f.convert.unit}）` : '')
       const condition = (part: 'plan' | 'rise' | 'slack', label: string, riseIndex?: number) => f && <ConditionSelect key={label} fixture={f} label={label} value={part === 'rise' ? riseCondition(e.cond, riseIndex ?? 0) : e.cond[part]} allowExclude
         commit={value => store.setRouteCondition([a.id], e.itemId, part, value, riseIndex)} add={value => addRouteCandidate(store, [a.id], e.itemId, part, value, riseIndex)} />
       return <div className={'route-item' + (i === 0 ? ' route-item-main' : '') + (routeHighlighted(feedback, a.id, e.itemId) ? ' route-item-added' : '')} key={a.id + e.itemId} style={i === 0 && f ? { borderLeftColor: countHex(f.style.color) } : undefined}>
         <div className="route-item-heading"><span className="route-role" style={i === 0 && f ? { background: countHex(f.style.color), color: 'white' } : undefined}>{i === 0 ? '主' : '追加'}</span>
           {f && <QuantitySwatch fixture={f} />}<span className="route-item-identity" title={code + ' ' + (f?.name ?? '')}><strong>{code}</strong><small title={f?.name}>{f?.name}</small></span>
-          {i > 0 && <><button type="button" aria-label={code + 'を主にする'} title="主にする" onClick={() => { store.setRouteMembers(a.id, [e, ...routes.filter(x => x.itemId !== e.itemId)]); announceRoute(store, a.id, null, code + ' を主にしました') }}>主</button><button type="button" aria-label={code + 'を外す'} title="外す" onClick={() => { store.setRouteMembers(a.id, routes.filter(x => x.itemId !== e.itemId)); announceRoute(store, a.id, null, code + ' を外しました（Ctrl+Z で戻せます）') }}>×</button></>}
+          {i > 0 && <><button type="button" aria-label={code + 'を主にする'}
+            disabled={trench || perM !== 1}
+            title={trench || perM !== 1 ? '体積・1m あたりの係数がある項目は追加の線要素として使います' : '主にする'}
+            onClick={() => { store.setRouteMembers(a.id, [e, ...routes.filter(x => x.itemId !== e.itemId)]); announceRoute(store, a.id, null, code + ' を主にしました') }}>主</button><button type="button" aria-label={code + 'を外す'} title="外す" onClick={() => { store.setRouteMembers(a.id, routes.filter(x => x.itemId !== e.itemId)); announceRoute(store, a.id, null, code + ' を外しました（Ctrl+Z で戻せます）') }}>×</button></>}
         </div>
         <div className="route-item-values"><RouteCount value={e.count} code={code} commit={n => changeRouteCount(store, a, e.itemId, n)} /><span>条</span></div>
+        {i > 0 && <RoutePerM identity={identity} value={e.perM}
+          spiral={f?.name.includes('スパイラル') ?? false}
+          commit={value => {
+            const current = store.get(a.id)
+            if (!current?.quantity) return
+            store.setRouteMembers(a.id, routeEntries(current).map(member => {
+              if (member.itemId !== e.itemId) return member
+              const next = { ...member }
+              if (value === undefined) delete next.perM
+              else next.perM = value
+              return next
+            }))
+          }} />}
+        {trench && (!widthM || !depthM) &&
+          <small role="status">幅・深さを項目に入れてください</small>}
+        {trench && <small>平面の長さだけで計算します。</small>}
         {condition('plan', '平面')}
-        {rises.length >= 2 && <label className="route-individual"><input type="checkbox" aria-label={code + 'の立上りごとに選ぶ'} checked={perRise} onChange={event => {
+        {!trench && rises.length >= 2 && <label className="route-individual"><input type="checkbox" aria-label={code + 'の立上りごとに選ぶ'} checked={perRise} onChange={event => {
           const checked = event.currentTarget.checked
           setIndividual(old => { const next = new Set(old); if (checked) next.add(e.itemId); else next.delete(e.itemId); return next })
           if (!checked) store.setRouteCondition([a.id], e.itemId, 'rise', riseCondition(e.cond, 0))
         }} />立上りごとに選ぶ</label>}
-        {rises.length > 0 && (perRise ? rises.map((r, j) => condition('rise', '立上り' + (j + 1) + '（' + r.m.toFixed(2) + ' m）', j)) : condition('rise', '立上り'))}
-        {(q.slackM ?? 0) > 0 && condition('slack', 'その他')}
+        {!trench && rises.length > 0 && (perRise ? rises.map((r, j) => condition('rise', '立上り' + (j + 1) + '（' + r.m.toFixed(2) + ' m）', j)) : condition('rise', '立上り'))}
+        {!trench && (q.slackM ?? 0) > 0 && condition('slack', 'その他')}
         <div className="route-item-length" title={detail}>{detail}</div>
+        {backfill?.warnings.map((warning, index) =>
+          <small role="status" key={index}>{warning}</small>)}
         {!!f?.conditions?.length && portions.some(p => p.condition === undefined) && <small className="route-unset">施工条件が未設定</small>}
       </div>
     })}
@@ -125,6 +167,85 @@ export function addQuantityCandidate(store: AnnotationStore, ids: readonly strin
   return store.addConditionAndSetQuantity(itemId, value, ids)
 }
 
+function RoutePerM({ identity, value, spiral, commit }: {
+  identity: string
+  value?: number
+  spiral: boolean
+  commit(value: number | undefined): void
+}) {
+  const display = (number: number | undefined) =>
+    number === undefined ? '' : number.toFixed(3)
+  const [draft, setDraft] = useState(() => display(value))
+  const [calculating, setCalculating] = useState(false)
+  const [diameter, setDiameter] = useState('')
+  const [pitch, setPitch] = useState('')
+  const [error, setError] = useState('')
+  useEffect(() => {
+    setDraft(display(value))
+    setError('')
+  }, [value])
+  const applyDraft = () => {
+    const text = draft.trim()
+    const next = text === '' ? undefined : Number(text)
+    if (next !== undefined && !validRoutePerM(next)) {
+      setError('1m あたりは0より大きく10000以下、小数3桁までで入れてください。')
+      setDraft(display(value))
+      return
+    }
+    setError('')
+    setDraft(display(next))
+    if (next !== value) commit(next)
+  }
+  return <div className="route-per-m">
+    <label>1m あたり<input type="number" min="0.001" max="10000" step="0.001"
+      aria-label={`${identity}の1mあたり`} placeholder="1"
+      value={draft}
+      onChange={event => { setDraft(event.currentTarget.value); setError('') }}
+      onBlur={applyDraft}
+      onWheel={event => event.currentTarget.blur()}
+      onKeyDown={event => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          event.stopPropagation()
+          event.currentTarget.blur()
+        }
+      }} /></label>
+    {spiral && <button type="button" aria-expanded={calculating}
+      onClick={() => { setCalculating(previous => !previous); setError('') }}>
+      径とピッチから
+    </button>}
+    {spiral && calculating && <div className="route-spiral-calculator">
+      <label>径（m）<input inputMode="decimal" aria-label={`${identity}の径（m）`}
+        value={diameter} onChange={event => { setDiameter(event.currentTarget.value); setError('') }} /></label>
+      <label>ピッチ（m）<input inputMode="decimal" aria-label={`${identity}のピッチ（m）`}
+        value={pitch} onChange={event => { setPitch(event.currentTarget.value); setError('') }} /></label>
+      <button type="button" onClick={() => {
+        const d = Number(diameter.trim())
+        const p = Number(pitch.trim())
+        if (!Number.isFinite(d) || d <= 0 || !Number.isFinite(p) || p <= 0) {
+          setError('径とピッチは0より大きい有限の数で入れてください。')
+          return
+        }
+        const calculated = Math.PI * d / p
+        if (!Number.isFinite(calculated) || calculated > 10000) {
+          setError('計算した1m あたりが10000を超えています。')
+          return
+        }
+        const next = Number(calculated.toFixed(3))
+        if (!validRoutePerM(next)) {
+          setError('計算した1m あたりは0.001以上にしてください。')
+          return
+        }
+        commit(next)
+        setDraft(display(next))
+        setError('')
+        setCalculating(false)
+      }}>1m あたりに入れる</button>
+    </div>}
+    {error && <small role="alert">{error}</small>}
+  </div>
+}
+
 function RouteCount({ value, code, commit }: { value: number; code: string; commit(n: number): void }) {
   const input = useRef<HTMLInputElement>(null)
   useEffect(() => { if (input.current) input.current.value = String(value) }, [value])
@@ -143,7 +264,26 @@ function RouteCount({ value, code, commit }: { value: number; code: string; comm
 }
 function RouteSetsDialog({ store, annotation: a, onClose }: { store: AnnotationStore; annotation: EditableAnnotation; onClose(): void }) {
   const sets = useRouteSets(), root = useRef<HTMLDivElement>(null)
-  const currentItems = routeEntries(a).flatMap(e => { const f = store.getCountFixture(e.itemId); return f ? [{ code: f.code, spec: f.spec, name: f.name, category: f.category, count: e.count, cond: e.cond }] : [] })
+  const currentItems = routeEntries(a).flatMap(e => {
+    const f = store.getCountFixture(e.itemId)
+    if (!f) return []
+    const trench = quantityMethod(f) === 'lengthWidthDepth'
+    return [{
+      code: f.code, spec: f.spec, name: f.name, category: f.category,
+      count: e.count, cond: e.cond,
+      ...(e.perM !== undefined ? { perM: e.perM } : {}),
+      ...(trench ? {
+        method: 'lengthWidthDepth' as const,
+        defaults: {
+          ...(f.defaults?.widthM !== undefined ? { widthM: f.defaults.widthM } : {}),
+          ...(f.defaults?.depthM !== undefined ? { depthM: f.defaults.depthM } : {}),
+        },
+      } : {}),
+      ...(f.convert !== undefined ? { convert: { ...f.convert } } : {}),
+      ...(f.breakdown !== undefined ? { breakdown: { ...f.breakdown } } : {}),
+      ...(f.summary !== undefined ? { summary: f.summary.map(field => ({ ...field })) } : {}),
+    }]
+  })
   const [name, setName] = useState(() => routeSetSummary({ items: currentItems }).slice(0, 40)), [renaming, setRenaming] = useState<string | null>(null), [rename, setRename] = useState(''), [error, setError] = useState('')
   useEffect(() => {
     const outside = (e: PointerEvent) => { if (!root.current?.contains(e.target as Node)) onClose() }

@@ -27,11 +27,7 @@ async function addCable(page: Page) {
   await page.getByRole('button', { name: '数量拾い', exact: true }).click();
   await expect(page.getByRole('tab', { name: '数量', exact: true })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByTestId('fixture-panel').getByRole('heading', { name: '数量拾い' })).toBeVisible()
-  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
-  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '標準マスタから追加' })
-  await expect(dialog.getByText('電線・ケーブル／CV ケーブル（CV）（長さ・m）', { exact: true })).toBeVisible()
-  await dialog.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
+  await page.evaluate(field => window.__karu!.addFixturePresets(field), '電気設備')
   await page.getByRole('button', { name: 'CV ケーブル（CV）', exact: true }).click()
 }
 const value = (page: Page) => page.getByRole('button', { name: 'CV ケーブル（CV）', exact: true }).locator('.fixture-row-count').first()

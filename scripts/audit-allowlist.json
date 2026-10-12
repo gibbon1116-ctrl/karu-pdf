@@ -490,5 +490,17 @@
     "string": "http://schemas.openxmlformats.org/package/2006/content-types",
     "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
     "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/crossings.ts",
+    "string": "Segment",
+    "reason": "交差の計算の線分（幾何の segment）の型名・変数名。分析サービス Segment ではなく、通信はしない。",
+    "maxOccurrences": 6
+  },
+  {
+    "file": "src/core/crossings.ts",
+    "string": "segment",
+    "reason": "交差の計算の線分（幾何の segment）の型名・変数名。分析サービス Segment ではなく、通信はしない。",
+    "maxOccurrences": 11
   }
 ]

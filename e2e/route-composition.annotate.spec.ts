@@ -8,13 +8,13 @@ import { writePageScale } from '../src/core/measure'
 test.beforeEach(async ({ page }) => { await page.addInitScript(() => localStorage.setItem('karu-pdf:fixture-panel-settings-open', 'true')) })
 
 // All PDFs and saved bytes remain in memory; this suite writes no fixture files.
-function blankPdf() {
+function blankPdf(mmPerPoint = 25.4 / 72 * 100) {
   const doc = new mupdf.PDFDocument()
   try {
     const ref = doc.addPage([0, 0, 500, 500], 0, {}, '')
     try { doc.insertPage(-1, ref) } finally { ref.destroy() }
     const page = doc.loadPage(0)
-    try { writePageScale(doc, page, { denominator: 100, paper: 'PDF', source: 'ratio', mmPerPoint: 25.4 / 72 * 100, unit: 'm', decimals: 2 }) } finally { page.destroy() }
+    try { writePageScale(doc, page, { denominator: mmPerPoint * 72 / 25.4, paper: 'PDF', source: 'ratio', mmPerPoint, unit: 'm', decimals: 2 }) } finally { page.destroy() }
     const buffer = doc.saveToBuffer('compress')
     try { return [...buffer.asUint8Array()] } finally { buffer.destroy() }
   } finally { doc.destroy() }
@@ -37,13 +37,17 @@ async function open(page: Page, bytes = blankPdf()) {
   await page.getByRole('tab', { name: '数量', exact: true }).click()
   await expect(panel(page).getByRole('button', { name: '項目を追加', exact: true })).toBeEnabled()
 }
-async function addFixture(page: Page, code: string, spec: string, name: string) {
+async function addFixture(
+  page: Page, code: string, spec: string, name: string,
+  configure?: (dialog: ReturnType<Page['getByRole']>) => Promise<void>,
+) {
   await panel(page).getByRole('button', { name: '項目を追加', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '項目を追加', exact: true })
   await dialog.getByLabel('略号', { exact: true }).fill(code)
   await dialog.getByLabel('規格', { exact: true }).fill(spec)
   await dialog.getByLabel('名称', { exact: true }).fill(name)
   await dialog.getByRole('radio', { name: '長さ', exact: true }).check()
+  if (configure) await configure(dialog)
   await dialog.getByRole('button', { name: '追加する', exact: true }).click()
 }
 async function setup(page: Page) {
@@ -274,4 +278,228 @@ test('別のPDFに構成の項目を作り、同じ項目の再選択では雛�
     expect(listAnnotations(doc, 0)[0].contents).toContain('IV 5.5sq')
     expect(listAnnotations(doc, 0)[0].contents).not.toContain((await routes(page))[0].extra![0].itemId)
   } finally { doc.destroy() }
+})
+
+test('SPEC-B27: 埋設管25mに標準マスタの溝掘削を追加し12.00㎥を保存する', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto('/karu-pdf/?test=1&workers=2&warm=0')
+  await open(page, blankPdf(1000))
+  await addFixture(page, 'FEP', '', '埋設管')
+  await row(page, 'FEP', '埋設管').click()
+  await point(page, 100, 220)
+  await point(page, 125, 220)
+  await page.keyboard.press('Enter')
+  await expect(format(page).getByText('経路構成', { exact: true })).toBeVisible()
+
+  await format(page).getByRole('button', { name: '線要素を追加', exact: true }).click()
+  await picker(page).getByLabel('線要素を検索', { exact: true }).fill('ケーブル・配管の溝掘削')
+  const master = picker(page).locator('section').filter({
+    has: page.getByRole('heading', { name: '標準マスタ', exact: true }),
+  })
+  await master.getByRole('button').filter({ hasText: 'ケーブル・配管の溝掘削' }).first().click()
+  await expect(picker(page)).toHaveCount(0)
+  const trenchRow = format(page).locator('.route-item')
+    .filter({ hasText: 'ケーブル・配管の溝掘削' })
+  await expect(trenchRow).toContainText('12.00 ㎥')
+  await expect(trenchRow).toContainText('平面の長さだけで計算します。')
+  await expect(trenchRow.getByRole('button', { name: /を主にする$/u })).toBeDisabled()
+
+  const total = panel(page).getByRole('button')
+    .filter({ hasText: 'ケーブル・配管の溝掘削' }).first()
+    .locator('..').locator('.fixture-row-count').last()
+  await expect(total).toHaveText('12.00')
+  await format(page).getByRole('button', { name: '＋ 立上り・立下りを足す', exact: true }).click()
+  await format(page).getByLabel('立上り・立下り1', { exact: true }).fill('3')
+  await format(page).getByLabel('立上り・立下り1', { exact: true }).press('Enter')
+  await format(page).getByLabel('その他の加算', { exact: true }).fill('2')
+  await format(page).getByLabel('その他の加算', { exact: true }).press('Enter')
+  await expect(total).toHaveText('12.00')
+
+  const bytes = await saveBytes(page)
+  const doc = new mupdf.PDFDocument(new Uint8Array(bytes))
+  try {
+    // 標準マスタの名前は「ケーブル・配管の溝掘削（長さ×幅×深さ）」。
+    const f = readCountFixtures(doc).find(f => f.name.startsWith('ケーブル・配管の溝掘削'))!
+    expect(f).toMatchObject({
+      kind: 'volume', method: 'lengthWidthDepth',
+      defaults: { widthM: 0.6, depthM: 0.8 },
+    })
+    expect(listAnnotations(doc, 0)[0].quantity!.extra).toContainEqual(
+      expect.objectContaining({ itemId: f.id, count: 1, cond: { rise: null, slack: null } }),
+    )
+  } finally { doc.destroy() }
+  await open(page, bytes)
+  await expect(total).toHaveText('12.00')
+})
+
+test('SPEC-B27: 線の柱とスパイラル筋の径・ピッチ計算、t換算と再読込', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto('/karu-pdf/?test=1&workers=2&warm=0')
+  await open(page, blankPdf(1000))
+  await addFixture(page, '柱', '', '柱', async dialog => {
+    // コンクリートの項目でない「柱」は RC 部材の欄が閉じて始まる。
+    await dialog.locator('.fixture-rc').evaluate(element => { (element as HTMLDetailsElement).open = true })
+    await dialog.getByLabel('RC 部材にする', { exact: true }).check()
+    await expect(dialog.getByLabel('部材の種類', { exact: true })).toHaveValue('column')
+    await dialog.getByLabel('幅 b（mm）', { exact: true }).fill('600')
+    await dialog.getByLabel('せい D（mm）', { exact: true }).fill('600')
+    await expect(dialog.locator('.fixture-rc').getByLabel('高さ（mm）', { exact: true })).toHaveCount(0)
+  })
+  await addFixture(page, 'SP', 'D10', 'スパイラル筋', async dialog => {
+    await dialog.locator('details.fixture-convert > summary').click()
+    await dialog.getByLabel('数量を換算する', { exact: true }).check()
+    await dialog.getByLabel('換算後の単位', { exact: true }).selectOption('t')
+    await dialog.getByLabel('換算の係数', { exact: true }).fill('0.00056')
+    await dialog.getByLabel('換算の根拠', { exact: true }).fill('D10 0.56kg/m ÷ 1000')
+  })
+  await row(page, '柱', '柱').click()
+  await point(page, 100, 220)
+  await point(page, 110, 220)
+  await page.keyboard.press('Enter')
+  await addLine(page, 'スパイラル', 'SP D10')
+
+  const spiralRow = format(page).locator('.route-item').filter({ hasText: 'スパイラル筋' })
+  const factor = spiralRow.getByLabel('SP D10 スパイラル筋の1mあたり', { exact: true })
+  await expect(factor).toHaveValue('')
+  await spiralRow.getByRole('button', { name: '径とピッチから', exact: true }).click()
+  await spiralRow.getByLabel('SP D10 スパイラル筋の径（m）', { exact: true }).fill('0.6')
+  await spiralRow.getByLabel('SP D10 スパイラル筋のピッチ（m）', { exact: true }).fill('0.1')
+  await spiralRow.getByRole('button', { name: '1m あたりに入れる', exact: true }).click()
+  await expect(factor).toHaveValue('18.850')
+  await expect(spiralRow).toContainText('SP D10 ×18.850/m')
+  await expect(spiralRow).toContainText(/18[89].[0-9]{3} m/)
+  const total = row(page, 'SP D10', 'スパイラル筋')
+    .locator('..').locator('.fixture-row-count').last()
+  await expect(total).toHaveText('0.11')
+
+  const before = (await routes(page))[0]
+  expect(before.extra![0].perM).toBe(18.85)
+  const bytes = await saveBytes(page)
+  const doc = new mupdf.PDFDocument(new Uint8Array(bytes))
+  try {
+    expect(readCountFixtures(doc).find(f => f.code === '柱')!.rc).toMatchObject({
+      kind: 'column', widthMm: 600, depthMm: 600,
+    })
+    expect(listAnnotations(doc, 0)[0].quantity!.extra![0].perM).toBe(18.85)
+    expect(listAnnotations(doc, 0)[0].contents).toContain('SP D10 ×18.850/m')
+  } finally { doc.destroy() }
+  await open(page, bytes)
+  expect((await routes(page))[0]).toEqual(before)
+  await expect(total).toHaveText('0.11')
+  await page.getByRole('button', { name: '選択', exact: true }).click()
+  await point(page, 105, 220)
+  await expect(factor).toHaveValue('18.850')
+})
+
+test('SPEC-B29: 項目の深さ変更を既存の拾いへ反映し1回のUndoで戻す', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto('/karu-pdf/?test=1&workers=2&warm=0')
+  await open(page, blankPdf(1000))
+  await addFixture(page, '溝', '', '溝掘削', async dialog => {
+    await dialog.getByRole('radio', { name: '体積', exact: true }).check()
+    await dialog.getByRole('radio', { name: '長さ×幅×深さ', exact: true }).check()
+    await dialog.getByLabel('幅（新しく拾うときの初期値）', { exact: true }).fill('0.6')
+    await dialog.getByLabel('深さ（新しく拾うときの初期値）', { exact: true }).fill('0.8')
+  })
+  const fixtureRow = row(page, '溝', '溝掘削').locator('..')
+  const total = fixtureRow.locator('.fixture-row-count').last()
+  await row(page, '溝', '溝掘削').click()
+  await point(page, 100, 220)
+  await point(page, 110, 220)
+  await page.keyboard.press('Enter')
+  await expect(total).toHaveText('4.80')
+
+  // 項目の「編集」は一覧の上の、選んだ項目の操作にある。
+  await panel(page).getByRole('button', { name: '編集', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '項目を編集', exact: true })
+  await dialog.getByLabel('深さ（新しく拾うときの初期値）', { exact: true }).fill('1.2')
+  const propagate = dialog.getByRole('checkbox', {
+    name: '既存の拾い 1 件の幅・深さ・高さも新しい値にする', exact: true,
+  })
+  await expect(propagate).toBeChecked()
+  await dialog.getByRole('button', { name: '変更する', exact: true }).click()
+  await expect(total).toHaveText('7.20')
+  expect((await routes(page))[0]).toMatchObject({ widthM: 0.6, depthM: 1.2 })
+  await expect(page.locator('.measurement-label')).toContainText('7.20')
+
+  await page.keyboard.press('Control+z')
+  await expect(total).toHaveText('4.80')
+  expect((await routes(page))[0].depthM).toBe(0.8)
+  await expect(page.locator('.measurement-label')).toContainText('4.80')
+
+  await page.keyboard.press('Control+y')
+  await expect(total).toHaveText('7.20')
+  const doc = new mupdf.PDFDocument(new Uint8Array(await saveBytes(page)))
+  try {
+    expect(readCountFixtures(doc).find(f => f.code === '溝')?.defaults?.depthM).toBe(1.2)
+    expect(listAnnotations(doc, 0)[0].quantity?.depthM).toBe(1.2)
+  } finally { doc.destroy() }
+})
+
+test('SPEC-B29: 地中管路内ケーブルと埋設FEPの経路で管を控除し保存する', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto('/karu-pdf/?test=1&workers=2&warm=0')
+  await open(page, blankPdf(1000))
+  const addPlanCondition = async (
+    dialog: ReturnType<Page['getByRole']>, condition: string,
+  ) => {
+    await dialog.getByLabel('追加する施工条件', { exact: true }).fill(condition)
+    await dialog.locator('.fixture-conditions')
+      .getByRole('button', { name: '追加', exact: true }).click()
+    await dialog.getByLabel('平面の既定', { exact: true })
+      .selectOption('condition:' + condition)
+  }
+  await addFixture(page, 'CV', '', 'ケーブル', async dialog => {
+    await addPlanCondition(dialog, '地中管路内')
+  })
+  await addFixture(page, 'FEP65', '', '波付硬質合成樹脂管', async dialog => {
+    await addPlanCondition(dialog, '地中埋設')
+    await dialog.locator('details.fixture-attributes > summary').click()
+    await dialog.getByLabel('外径（mm）', { exact: true }).fill('82')
+  })
+  await addFixture(page, '埋戻し', '', '溝埋戻し', async dialog => {
+    await dialog.getByRole('radio', { name: '体積', exact: true }).check()
+    await dialog.getByRole('radio', { name: '長さ×幅×深さ', exact: true }).check()
+    await dialog.getByLabel('幅（新しく拾うときの初期値）', { exact: true }).fill('0.6')
+    await dialog.getByLabel('深さ（新しく拾うときの初期値）', { exact: true }).fill('1.2')
+    await dialog.getByLabel('埋戻し: 同じ経路の管の体積を引く', { exact: true }).check()
+    await expect(dialog.getByLabel('引く管の施工条件（含む語）', { exact: true }))
+      .toHaveValue('埋設')
+  })
+
+  await row(page, 'CV', 'ケーブル').click()
+  await point(page, 100, 220)
+  await point(page, 110, 220)
+  await page.keyboard.press('Enter')
+  await addLine(page, 'FEP65', 'FEP65')
+  await addLine(page, '溝埋戻し', '埋戻し')
+
+  const backfillRow = format(page).locator('.route-item').filter({ hasText: '溝埋戻し' })
+  await expect(backfillRow).toContainText('− 管 FEP65')
+  await expect(backfillRow).toContainText('φ82mm')
+  await expect(backfillRow).toContainText('7.15 ㎥')
+  await expect(backfillRow).not.toContainText('− 管 CV')
+  const total = row(page, '埋戻し', '溝埋戻し')
+    .locator('..').locator('.fixture-row-count').last()
+  await expect(total).toHaveText('7.15')
+  await expect(page.locator('.measurement-label')).toContainText('−管 0.05')
+
+  const bytes = await saveBytes(page)
+  const doc = new mupdf.PDFDocument(new Uint8Array(bytes))
+  try {
+    expect(readCountFixtures(doc).find(f => f.code === '埋戻し')?.backfill)
+      .toEqual({ deductPipes: true, conditionIncludes: ['埋設'] })
+    expect(readCountFixtures(doc).find(f => f.code === 'FEP65')?.attributes?.outerDiameterMm)
+      .toBe(82)
+    expect(listAnnotations(doc, 0)[0].contents).toContain('−管 0.05')
+    expect(listAnnotations(doc, 0)[0].contents).toContain('7.15 ㎥')
+  } finally { doc.destroy() }
+  await open(page, bytes)
+  await expect(total).toHaveText('7.15')
+  // この経路は x 100〜110 なので、線の上（105）を選ぶ。
+  await page.getByRole('button', { name: '選択', exact: true }).click()
+  await point(page, 105, 220)
+  await expect(format(page).getByText('経路構成', { exact: true })).toBeVisible()
+  await expect(backfillRow).toContainText('− 管 FEP65')
+  await expect(backfillRow).toContainText('7.15 ㎥')
 })

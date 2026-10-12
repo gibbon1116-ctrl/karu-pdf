@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { fixtureCode, quantityKind, QUANTITY_METHODS, QUANTITY_UNITS } from '../core/countFixtures'
+import { fixtureCode, fixtureLabelCode, quantityDecimals, quantityKind, QUANTITY_METHODS, quantityUnit } from '../core/countFixtures'
 import { FixtureUiContext, type DocumentSession } from './documentModel'
 import FixtureQuickList, { FixtureSwatch, pickupFixtureId } from './fixtureQuickList'
 import { groupFixtures } from './fixtureOrder'
@@ -14,7 +14,7 @@ export default function PickupBar({ session }: { session: DocumentSession }) {
   const store = session.annotationStore, ui = useContext(FixtureUiContext)
   const symbolSearch = useContext(SymbolSearchContext)
   const version = useSyncExternalStore(store.subscribe, store.getSnapshot)
-  const fixtures = useMemo(() => store.getCountFixtures(), [store, version])
+  const fixtures = useMemo(() => store.getCountFixtures().filter(f => !f.link), [store, version])
   const currentId = pickupFixtureId(store)
   const current = fixtures.find(f => f.id === currentId)
   const ordered = useMemo(() => groupFixtures(fixtures).flatMap(group => group.items), [fixtures])
@@ -33,7 +33,7 @@ export default function PickupBar({ session }: { session: DocumentSession }) {
   }, [open])
   const select = (id: string) => { store.selectFixture(id); ui?.select() }
   const index = store.quantityIndex()
-  const format = (n: number) => current ? `${quantityKind(current) === 'count' ? String(n) : n.toFixed(2)} ${QUANTITY_UNITS[quantityKind(current)]}` : ''
+  const format = (n: number) => current ? `${quantityDecimals(current) === 0 ? String(n) : n.toFixed(2)} ${quantityUnit(current)}` : ''
   return <div ref={root} className={`pickup-bar-anchor pickup-bar-${position}`} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()}
     onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
     <div className="pickup-bar" role="toolbar" aria-label="拾いバー">
@@ -92,7 +92,7 @@ function PickupRoute({ store, annotation: a }: { store: AnnotationStore; annotat
     return () => observer.disconnect()
   }, [a, entries.length])
   const chip = (e: typeof entries[number], measuring = false) => {
-    const f = store.getCountFixture(e.itemId), code = f ? fixtureCode(f) : e.itemId
+    const f = store.getCountFixture(e.itemId), code = f ? fixtureLabelCode(f) : e.itemId
     const added = routeHighlighted(feedback, a.id, e.itemId)
     return <span key={e.itemId} className={`pickup-route-chip${added ? ' route-item-added' : ''}`} title={code + conditionSuffix(e.cond)}>
       {f && <QuantitySwatch fixture={f} />}<strong>{code}</strong><span>×{e.count}{conditionSuffix(e.cond)}</span>
@@ -102,7 +102,7 @@ function PickupRoute({ store, annotation: a }: { store: AnnotationStore; annotat
   }
   return <div className="pickup-route" ref={root}>
     <div className="pickup-route-row"><span ref={summary}>{entries.length}種類・{entries.reduce((n, e) => n + e.count, 0)}条</span>
-      {entries.slice(0, visible).map(e => chip(e))}{visible < entries.length && <span className="pickup-route-more" title={entries.slice(visible).map(e => { const f = store.getCountFixture(e.itemId); return (f ? fixtureCode(f) : e.itemId) + '×' + e.count + conditionSuffix(e.cond) }).join('、')}>ほか {entries.length - visible}</span>}
+      {entries.slice(0, visible).map(e => chip(e))}{visible < entries.length && <span className="pickup-route-more" title={entries.slice(visible).map(e => { const f = store.getCountFixture(e.itemId); return (f ? fixtureLabelCode(f) : e.itemId) + '×' + e.count + conditionSuffix(e.cond) }).join('、')}>ほか {entries.length - visible}</span>}
       <button type="button" aria-label="拾いバーで線要素を追加" aria-expanded={open} onClick={() => setOpen(v => !v)}>＋</button>
     </div>
     <div ref={measure} className="pickup-route-measure" aria-hidden="true">{entries.map(e => chip(e, true))}</div>

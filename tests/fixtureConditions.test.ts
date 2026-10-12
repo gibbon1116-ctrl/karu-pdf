@@ -8,7 +8,7 @@ import type { QuantityMark } from '../src/core/quantity'
 
 const fixture = (id = 'line', kind: CountFixture['kind'] = 'length'): CountFixture => ({ id, kind, method: kind === 'length' ? 'polyline' : kind === 'area' ? 'polygon' : 'click', name: id, code: id, category: '試験', order: 0, style: nextCountStyle([]) })
 const read = (f: object) => parseCountFixtures(JSON.stringify({ version: 1, fixtures: [f] }))
-const line = { ...fixture(), conditions: ['管内', 'ラック'], routeDefaults: { plan: 'ラック', rise: '管内', slack: null } }
+const line = { ...fixture(), method: 'polyline' as const, conditions: ['管内', 'ラック'], routeDefaults: { plan: 'ラック', rise: '管内', slack: null } }
 
 it('round-trips ordered candidates, all three defaults and non-line defaults independently', () => {
   for (const f of [line, { ...line, routeDefaults: { plan: null, rise: ['管内', undefined, null], slack: 'ラック' } }, { ...fixture(), conditions: [], routeDefaults: {} }, { ...fixture(), routeDefaults: { plan: null, slack: null } }, { ...fixture('area', 'area'), conditions: ['屋内'], defaultCondition: '屋内' }, { ...fixture('count', 'count'), conditions: ['壁付'], defaultCondition: '壁付' }]) {

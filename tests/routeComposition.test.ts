@@ -104,3 +104,104 @@ it('renders the composite badge at the start even with quantity values hidden; s
   expect(composite).toContain('height="12"'); expect(composite).toContain('<title>CV×2、PF28（立上り）、IV</title>')
   expect(composite).not.toContain('measurement-label'); expect(composite).toContain('>3</text>')
 })
+
+it('preserves extra perM through route edits, undo/redo and templates', async () => {
+  const { store, id } = await setup()
+  store.setRouteItems(id, [
+    { itemId: 'line0', count: 1 },
+    { itemId: 'line1', count: 2, perM: 18.85, cond: { slack: null } },
+  ])
+  expect(store.get(id)?.quantity?.extra).toEqual([
+    { itemId: 'line1', count: 2, perM: 18.85, cond: { slack: null } },
+  ])
+  expect(store.quantityIndex().total('line1')).toBeCloseTo(75 * 2 * 18.85, 10)
+  store.undo()
+  expect(store.get(id)?.quantity?.extra).toBeUndefined()
+  store.redo()
+  expect(store.get(id)?.quantity?.extra?.[0].perM).toBe(18.85)
+
+  store.selectFixture('line0')
+  store.setRouteTemplate({
+    itemId: 'line0',
+    count: 1,
+    extra: [{ itemId: 'line1', count: 2, perM: 18.85, cond: { slack: null } }],
+    name: 'スパイラル',
+  })
+  expect(store.routeTemplateItems('line0').extra?.[0].perM).toBe(18.85)
+
+  const current = store.get(id)!
+  store.setRouteMembers(id, [
+    { itemId: current.quantity!.itemId, count: 3, cond: current.quantity!.cond ?? {} },
+    ...current.quantity!.extra!,
+  ])
+  expect(store.get(id)?.quantity?.extra?.[0].perM).toBe(18.85)
+})
+
+it('accepts trench extras but rejects trench or a scaled item as the main item', async () => {
+  const { store, id } = await setup()
+  const trench: CountFixture = {
+    ...fixtures[0],
+    id: 'trench',
+    order: 12,
+    code: '溝',
+    name: 'ケーブル・配管の溝掘削',
+    kind: 'volume',
+    method: 'lengthWidthDepth',
+    defaults: { widthM: 0.6, depthM: 0.8 },
+  }
+  store.addFixturesAndSetRouteItems([trench], id, [
+    { itemId: 'line0', count: 1 },
+    { itemId: 'trench', count: 1, cond: { rise: null, slack: null } },
+  ])
+  expect(store.getCountFixture('trench')).toBeDefined()
+  expect(store.get(id)?.quantity?.extra?.[0].itemId).toBe('trench')
+  expect(store.quantityIndex().total('trench')).toBeCloseTo(72 * 0.6 * 0.8, 12)
+
+  const before = store.get(id)?.quantity
+  store.setRouteItems(id, [
+    { itemId: 'trench', count: 1 },
+    { itemId: 'line0', count: 1 },
+  ])
+  expect(store.get(id)?.quantity).toEqual(before)
+  store.setRouteItems(id, [
+    { itemId: 'line1', count: 1, perM: 18.85 },
+    { itemId: 'line0', count: 1 },
+  ])
+  expect(store.get(id)?.quantity).toEqual(before)
+})
+
+it('round trips scaled and trench route sets including dimensions and conversion', () => {
+  storage()
+  const enriched: RouteSet = {
+    id: 'b27',
+    name: '埋設管とスパイラル',
+    items: [
+      { code: 'L0', spec: '5.5sq', name: '線0', category: '電線', count: 1 },
+      {
+        code: 'SP', spec: 'D10', name: 'スパイラル筋', category: '鉄筋',
+        count: 1, perM: 18.85,
+        convert: { factor: 0.00056, unit: 't', basis: 'D10 0.56kg/m ÷ 1000' },
+      },
+      {
+        code: '溝', name: 'ケーブル・配管の溝掘削', category: '土工',
+        count: 1, method: 'lengthWidthDepth',
+        defaults: { widthM: 0.6, depthM: 0.8 },
+        cond: { rise: null, slack: null },
+      },
+    ],
+  }
+  saveRouteSets([enriched])
+  const restored = loadRouteSets()[0]
+  expect(restored.items[1]).toMatchObject(enriched.items[1])
+  expect(restored.items[2]).toMatchObject(enriched.items[2])
+
+  const resolved = resolveRouteSet(restored, fixtures)
+  expect(resolved.items[1]).toMatchObject({ count: 1, perM: 18.85 })
+  expect(resolved.newFixtures.find(f => f.code === 'SP')?.convert)
+    .toEqual(enriched.items[1].convert)
+  expect(resolved.newFixtures.find(f => f.code === '溝')).toMatchObject({
+    kind: 'volume', method: 'lengthWidthDepth',
+    defaults: { widthM: 0.6, depthM: 0.8 },
+  })
+  expect(resolved.items[2].cond).toEqual({ rise: null, slack: null })
+})

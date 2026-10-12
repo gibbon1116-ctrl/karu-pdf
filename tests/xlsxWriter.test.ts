@@ -170,7 +170,7 @@ it('writes merges, frozen panes, widths, heights and all predefined formats', ()
   expect(sheet).toContain('<row r="1" ht="30" customHeight="1">')
   expect(sheet).toContain('<c r="A4" s="8"><v>2.12345</v></c>')
   const styles = decoder.decode(files.get('xl/styles.xml')!)
-  expect(styles).toContain('<cellXfs count="9">')
+  expect(styles).toContain('<cellXfs count="10">')
   expect(styles).toContain('numFmtId="1"')
   expect(styles).toContain('numFmtId="2"')
   expect(styles).toContain('wrapText="1"')
@@ -230,6 +230,64 @@ it('normalizes invalid, empty, overlong and duplicate sheet names', () => {
   expect(names[2]).toBe('名称')
   expect(names[3]).toBe('A'.repeat(31))
   expectWellFormed(workbook)
+})
+
+it('writes formula cells with optional numeric caches and requests recalculation on opening', () => {
+  const files = readStoredZip(writeXlsx([{
+    name: '数式',
+    cells: [[
+      { value: null, formula: 'IF(E1="","",C1*E1)', style: 'borderedMoney' },
+      { value: 12, formula: '3*4', style: 'borderedMoney' },
+    ]],
+  }]))
+  const sheet = decoder.decode(files.get('xl/worksheets/sheet1.xml')!)
+  expect(sheet).toContain('<c r="A1" s="9"><f>IF(E1=&quot;&quot;,&quot;&quot;,C1*E1)</f></c>')
+  expect(sheet).toContain('<c r="B1" s="9"><f>3*4</f><v>12</v></c>')
+  expect(sheet).not.toContain('t="s"')
+  const workbook = decoder.decode(files.get('xl/workbook.xml')!)
+  expect(workbook).toContain('</sheets><calcPr fullCalcOnLoad="1"/></workbook>')
+  expectWellFormed(sheet)
+  expectWellFormed(workbook)
+})
+
+it('escapes formula XML including sheet references and comparison operators', () => {
+  const input = `IF(A1<2,"A&B",IF(A1>3,'別紙明細'!F5,0))`
+  const files = readStoredZip(writeXlsx([{
+    name: '数式', cells: [[{ value: null, formula: input }]],
+  }]))
+  const sheet = decoder.decode(files.get('xl/worksheets/sheet1.xml')!)
+  expect(sheet).toContain(
+    '<f>IF(A1&lt;2,&quot;A&amp;B&quot;,IF(A1&gt;3,&apos;別紙明細&apos;!F5,0))</f>',
+  )
+  expect(unescapeXml(sheet.match(/<f>([\s\S]*?)<\/f>/)![1])).toBe(input)
+  expectWellFormed(sheet)
+})
+
+it('rejects string values on formula cells', () => {
+  expect(() => writeXlsx([{
+    name: '数式', cells: [[{ value: '', formula: 'C1*E1' }]],
+  }])).toThrow(Error)
+  expect(() => writeXlsx([{
+    name: '数式', cells: [[{ value: '文字列', formula: 'C1*E1' }]],
+  }])).toThrow('文字列のキャッシュ値')
+})
+
+it('appends the bordered money format without renumbering existing styles', () => {
+  const files = readStoredZip(writeXlsx([{
+    name: '金額', cells: [[{ value: 123456, style: 'borderedMoney' }]],
+  }]))
+  const styles = decoder.decode(files.get('xl/styles.xml')!)
+  const formats = styles.match(/<cellXfs count="10">([\s\S]*?)<\/cellXfs>/)![1]
+  const entries = [...formats.matchAll(/<xf\b([^>]*?)(?:\/>|>[\s\S]*?<\/xf>)/g)]
+  expect(entries).toHaveLength(10)
+  expect(entries.map(entry => Number(entry[1].match(/\bnumFmtId="(\d+)"/)![1])))
+    .toEqual([0, 0, 0, 0, 1, 2, 0, 1, 2, 3])
+  expect(entries[9][1]).toContain('borderId="1"')
+  expect(entries[9][1]).toContain('applyNumberFormat="1"')
+  expect(entries[9][1]).toContain('applyBorder="1"')
+  expect(decoder.decode(files.get('xl/worksheets/sheet1.xml')!))
+    .toContain('<c r="A1" s="9"><v>123456</v></c>')
+  expectWellFormed(styles)
 })
 
 it('rejects workbook sizes and cell coordinates that Excel cannot represent', () => {

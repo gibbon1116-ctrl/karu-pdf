@@ -1,11 +1,18 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { fixtureCode, quantityAggregation, quantityKind, QUANTITY_UNITS, type CountFixture } from '../core/countFixtures'
+import { fixtureCode, quantityAggregation, quantityDecimals, quantityKind, quantityUnit, type CountFixture } from '../core/countFixtures'
 import type { DrawingInfo } from '../core/drawingInfo'
 import type { Rect } from '../core/annotations'
+import { countFixtureId } from '../core/counts'
 import { compareFloors, quantityPartSummary, type QuantityEntry, type QuantityIndex } from '../core/quantityIndex'
 import type { DocumentSession } from './documentModel'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { nextReview, refreshReview, reviewOrder, type ReviewCursor } from './reviewCursor'
+import { fixtureLinkRoundsUp, fixtureLinkSourceUnit, fixtureLinkSourceShowsFactor, fixtureLinkBasisNumber } from '../core/fixtureLink'
+import { backfillDetail, backfillSummary } from '../core/backfill'
+
+function basisNumber(value: number): string {
+  return Number.isFinite(value) ? String(Number(value.toFixed(6))) : '—'
+}
 
 export const QuantityNavigationContext = createContext<{
   navigate(pageIndex: number, rect?: Rect): void
@@ -28,7 +35,10 @@ export async function revealPickup(session: DocumentSession, pool: PdfWorkerPool
   if (!current() || revision !== session.pageRevision) return false
   const mark = store.get(annotationId)
   if (!mark || mark.pageIndex !== pageIndex) return false
-  store.selectFixture(itemId); store.setFixtureVisible([itemId], true)
+  const pickupItemId = store.getCountFixture(itemId)?.link
+    ? mark.quantity?.itemId ?? (mark.count ? countFixtureId(mark.count) : undefined) : itemId
+  if (!pickupItemId || store.getCountFixture(pickupItemId)?.link) return false
+  store.selectFixture(pickupItemId); store.setFixtureVisible([pickupItemId], true)
   store.selectOnly(mark.id)
   navigate(pageIndex, mark.rect)
   store.flashPickup(mark.id)
@@ -71,7 +81,8 @@ export default function QuantityBreakdown({ fixture, index, session, pool, onClo
   }, [pages, session])
   const floors = useMemo(() => [...index.byFloorRoom(fixture.id)].sort((a, b) => compareFloors(a[0], b[0])), [index, fixture.id])
   const conditions = useMemo(() => [...index.byCondition(fixture.id)], [index, fixture.id])
-  const format = (n: number) => `${quantityKind(fixture) === 'count' ? n : n.toFixed(2)} ${QUANTITY_UNITS[quantityKind(fixture)]}`
+  const format = (n: number) => `${quantityDecimals(fixture) === 0 ? n : n.toFixed(2)} ${quantityUnit(fixture)}`
+  const linkResult = fixture.link ? index.linkResult(fixture.id) : undefined
   const go = async (pageIndex: number, list: readonly QuantityEntry[]) => {
     setBusy(true); setError('')
     try {
@@ -92,6 +103,63 @@ export default function QuantityBreakdown({ fixture, index, session, pool, onClo
   return <section className="quantity-breakdown" aria-label={`${fixtureCode(fixture)} ${fixture.name}の内訳`} data-testid="quantity-breakdown">
     <div className="quantity-breakdown-heading"><strong>{fixtureCode(fixture)} {fixture.name}</strong><button ref={close} onClick={onClose}>閉じる</button></div>
     <p>全図面 {format(index.total(fixture.id))}</p>
+    {filtered.some(entry => entry.backfill !== undefined) &&
+      <section className="quantity-link-basis" aria-label="埋戻しの計算の根拠">
+        <h3>埋戻しの計算の根拠</h3>
+        <ul>{filtered.filter(entry => entry.backfill !== undefined).map(entry =>
+          <li key={`${entry.annotationId}:${entry.part ?? ''}`}>
+            p.{entry.pageIndex + 1}: {backfillDetail(entry.backfill!)}
+            <small>（{backfillSummary(entry.backfill!)}）</small>
+            {fixture.convert &&
+              <small>（換算後 {format(entry.value)}）</small>}
+            {entry.backfill!.warnings.map((warning, i) =>
+              <p role="status" key={i}>{warning}</p>)}
+          </li>)}</ul>
+      </section>}
+    {fixture.link && linkResult && <section className="quantity-link-basis" aria-label="計算の根拠">
+      <h3>計算の根拠</h3>
+      <ul>{linkResult.sources.map((source, i) => {
+        const original = session.annotationStore.getCountFixture(source.itemId)
+        return <li key={`${source.itemId}-${i}`}>
+          {original ? `${fixtureCode(original)} ${original.name}` : source.itemId}
+          {source.auto && '（自動）'}{'　'}
+          {fixtureLinkBasisNumber(fixture, source.quantity)}{fixtureLinkSourceUnit(fixture, original)}
+          {fixture.link!.kind === 'carry' ? <>
+            {' × 質量 '}{source.unitMassKg === undefined ? '未設定' : basisNumber(source.unitMassKg)}kg
+            {' × 補正率 '}{source.factor === undefined ? '適用なし' : basisNumber(source.factor)}
+            {' ÷ 1000'}
+            {source.factor !== undefined && `（${fixture.link!.carry?.class === 'bulky' ? '容積品' : '重量品'}）`}
+          </> : fixture.link!.kind === 'mass' ? <>
+            {source.perM !== undefined
+              ? ` ÷ ${basisNumber(source.perM)} m`
+              : source.factor !== undefined && source.factor !== 1 ? ` × ${basisNumber(source.factor)}` : ''}
+            {' × '}{source.unitMassKg === undefined ? '未設定' : basisNumber(source.unitMassKg)} kg ÷ 1000
+            {linkResult.densityTPerM3 !== undefined && ` ÷ ${basisNumber(linkResult.densityTPerM3)} t/㎥`}
+          </> : source.perM !== undefined
+            ? ` ÷ ${basisNumber(source.perM)} m`
+            : fixtureLinkSourceShowsFactor(fixture, source)
+              ? ` × ${basisNumber(source.factor ?? 1)}` : ''}
+          {' ＝ '}{fixtureLinkBasisNumber(fixture, source.subtotal)} {quantityUnit(fixture)}
+          {source.note && `（${source.note}）`}
+        </li>
+      })}</ul>
+      <p className="quantity-link-basis-total">合計 {format(linkResult.computed)}
+        {fixture.link.kind === 'mass' && linkResult.densityTPerM3 !== undefined
+          && `、質量の合計 ÷ ${basisNumber(linkResult.densityTPerM3)} t/㎥${
+            fixture.link.densityTPerM3 === undefined && fixture.attributes?.wasteType
+              ? `（${fixture.attributes.wasteType}）` : ''
+          }`}
+        {fixtureLinkRoundsUp(fixture) && `（${{
+          total: '合計で切り上げ', each: '拾いごとに切り上げ', none: '切り上げない',
+        }[fixture.link.rounding ?? 'total']}）`}
+      </p>
+      {linkResult.overridden && <>
+        <p>上書き {format(linkResult.total)}（計算値 {basisNumber(linkResult.computed)}、差 {linkResult.total - linkResult.computed >= 0 ? '+' : ''}{basisNumber(linkResult.total - linkResult.computed)}）</p>
+        {fixture.link.override?.note && <p>理由: {fixture.link.override.note}</p>}
+      </>}
+      {linkResult.error && <p role="alert">{linkResult.error}</p>}
+      {linkResult.warnings.map((warning, i) => <p role="status" key={i}>{warning}</p>)}
+    </section>}
     <div className="quantity-breakdown-tabs">
       <button aria-pressed={mode === 'page'} onClick={() => changeMode('page')}>ページ別</button>
       <button aria-pressed={mode === 'location'} onClick={() => changeMode('location')}>階・部屋別</button>
@@ -112,7 +180,7 @@ export default function QuantityBreakdown({ fixture, index, session, pool, onClo
       className="quantity-breakdown-condition quantity-breakdown-floor" data-condition={key} style={{ color: key === '' && fixture.conditions?.length ? '#a34b00' : undefined }}
       onClick={() => { setCondition(key); setLocation(null); setMode('page'); setCursor(null) }}>
       <span>{key || '未設定'} {format(total.total)}</span>
-      {quantityKind(fixture) === 'length' && <small style={{ display: 'block', fontWeight: 'normal' }}>{quantityPartSummary(total)}</small>}
+      {quantityKind(fixture) === 'length' && <small style={{ display: 'block', fontWeight: 'normal' }}>{quantityPartSummary(total, true, fixture.convert ? quantityDecimals(fixture) : 1)}</small>}
     </button>)}</div> : <div className="quantity-breakdown-list">{floors.map(([floor, rooms]) => <div key={floor}>
       <button className="quantity-breakdown-floor" onClick={() => filterLocation(floor)}>{floor || '（階なし）'} {format([...rooms.values()].reduce((a, b) => a + b, 0))}</button>
       {[...rooms].sort((a, b) => a[0].localeCompare(b[0], 'ja')).map(([room, value]) => <button className="quantity-breakdown-room" key={room} onClick={() => filterLocation(floor, room)}>{room || '（部屋なし）'} {format(value)}</button>)}

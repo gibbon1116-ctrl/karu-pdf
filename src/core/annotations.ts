@@ -1,4 +1,5 @@
 import { fixtureCode, fixtureDrawingCode } from './countFixtures'
+import { writeQuantityChecks, type QuantityCheckBasics } from './quantityCheckBasics'
 import { writeDrawingInfo, type DrawingInfo } from './drawingInfo'
 import { writePageRoomSet, writeRoomRegions, writeRoomSets, type RoomRegion, type RoomSet } from './rooms'
 import { parseQuantityMark, serializeQuantityMark, quantityPoints, quantityDashes, type QuantityMark } from './quantity'
@@ -122,6 +123,7 @@ export type AnnotationEdit =
   | { kind: 'setScaleRegions'; pageIndex: number; regions: ScaleRegion[] }
   | { kind: 'setRoomRegions'; pageIndex: number; regions: RoomRegion[] }
   | { kind: 'setRoomSets'; pageIndex: 0; sets: RoomSet[] }
+  | { kind: 'setQuantityChecks'; pageIndex: 0; basics: QuantityCheckBasics }
   | { kind: 'setPageRoomSet'; pageIndex: number; setId: string | null; dx?: number; dy?: number }
   | { kind: 'setPageScale'; pageIndex: number; scale: PageScale | null }
   | { kind: 'createMeasure'; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number; quantity?: QuantityMark | null; quantityDash?: QuantityLineStyle['dash'] }
@@ -1493,6 +1495,7 @@ export function applyEdits(
     let keepForAppearance = false
     try {
       if (edit.kind === 'setCountFixtures') { writeCountFixtures(doc, edit.fixtures); continue }
+      if (edit.kind === 'setQuantityChecks') { writeQuantityChecks(doc, edit.basics); continue }
       page = pages.get(edit.pageIndex)
       if (!page) {
         page = doc.loadPage(edit.pageIndex)

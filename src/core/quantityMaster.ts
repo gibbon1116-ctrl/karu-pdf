@@ -204,5 +204,12 @@ export function standardConditionsForFixture(f: Pick<FixturePreset, 'category' |
 export function fixtureFromPreset(p: FixturePreset, fixtures: readonly CountFixture[]): CountFixture {
   const { category, code, spec, name, kind, method, defaults, aggregation } = p
   const line = kind && kind !== 'count' ? nextQuantityLineStyle(fixtures) : undefined
-  return { category, code, spec, name, kind, method, defaults: defaults ? { ...defaults } : undefined, aggregation, conditions: [...(p.conditions ?? standardConditionsForFixture(p))], id: crypto.randomUUID(), order: fixtures.reduce((n, f) => Math.max(n, f.order + 1), 0), style: line ? { ...nextCountStyle([]), color: line.color } : nextCountStyle(fixtures), ...(line ? { line: line.line } : {}) }
+  return { category, code, spec, name, kind, method, defaults: defaults ? { ...defaults } : undefined, aggregation,
+    ...(p.unit !== undefined ? { unit: p.unit } : {}),
+    ...(p.convert !== undefined ? { convert: { ...p.convert } } : {}),
+    ...(p.breakdown !== undefined ? { breakdown: { ...p.breakdown } } : {}),
+    ...(p.summary !== undefined ? { summary: p.summary.map(field => ({ ...field })) } : {}),
+    ...(p.remark !== undefined ? { remark: p.remark } : {}),
+    ...(p.attributes !== undefined ? { attributes: { ...p.attributes } } : {}),
+    conditions: [...(p.conditions ?? standardConditionsForFixture(p))], id: crypto.randomUUID(), order: fixtures.reduce((n, f) => Math.max(n, f.order + 1), 0), style: line ? { ...nextCountStyle([]), color: line.color } : nextCountStyle(fixtures), ...(line ? { line: line.line } : {}) }
 }

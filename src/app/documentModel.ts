@@ -13,6 +13,9 @@ export async function ensureSessionFixtures(session: DocumentSession, pool: PdfW
     for (let i = 0; i < session.pageSizes.length; i++) await session.annotationStore.ensurePageLoaded(i, () => pool.listAnnotations(session.docId, i))
   })
 }
+export async function ensureSessionQuantityChecks(session: DocumentSession, pool: PdfWorkerPool): Promise<void> {
+  await session.annotationStore.ensureQuantityChecks(() => pool.getQuantityChecks(session.docId))
+}
 import { AnnotationStore } from '../editor/AnnotationStore'
 import type { PdfFileHandle } from '../editor/fileAccess'
 import { ViewHistory } from '../viewer/ViewHistory'
@@ -161,6 +164,7 @@ export class DocumentSession {
     if (summary.drawings.length) parts.push(`図面番号・図面名称（${pages(summary.drawings)}）`)
     if (summary.rooms.length) parts.push(`部屋の範囲（${pages(summary.rooms)}）`)
     if (summary.roomSets) parts.push('部屋の組')
+    if (summary.quantityChecks) parts.push('チェックシートの基本の値')
     if (this.fileOutdated) parts.push('ページの編集・まだ保存していない文書')
     return parts.join('、')
   }
@@ -188,7 +192,7 @@ export class DocumentSession {
 
   recordSavedRendering(edits: readonly AnnotationEdit[], errors: readonly { editIndex: number }[]): void {
     const failed = new Set(errors.map(error => error.editIndex))
-    const pages = new Set(edits.flatMap((edit, index) => !failed.has(index) && edit.kind !== 'setDrawingInfo' && edit.kind !== 'setPageScale' && edit.kind !== 'setScaleRegions' && edit.kind !== 'setRoomRegions' && edit.kind !== 'setRoomSets' && edit.kind !== 'setPageRoomSet' && edit.kind !== 'setCountFixtures' ? [edit.pageIndex] : []))
+    const pages = new Set(edits.flatMap((edit, index) => !failed.has(index) && edit.kind !== 'setDrawingInfo' && edit.kind !== 'setPageScale' && edit.kind !== 'setScaleRegions' && edit.kind !== 'setRoomRegions' && edit.kind !== 'setRoomSets' && edit.kind !== 'setQuantityChecks' && edit.kind !== 'setPageRoomSet' && edit.kind !== 'setCountFixtures' ? [edit.pageIndex] : []))
     if (pages.size) this.vectorCache.clear()
     this.savedRevision += 1
     for (const page of pages) this.savedPageRevisions.set(page, this.savedRevision)

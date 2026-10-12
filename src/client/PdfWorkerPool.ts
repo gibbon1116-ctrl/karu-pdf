@@ -552,6 +552,10 @@ export class PdfWorkerPool {
     const response = await this.request<import('../worker/protocol').CountFixturesResponse>(this.slots[0], requestId => ({ type: 'getCountFixtures', requestId, docId }))
     return response.fixtures
   }
+  async getQuantityChecks(docId: string): Promise<import('../core/quantityCheckBasics').QuantityCheckBasics> {
+    const response = await this.request<import('../worker/protocol').QuantityChecksResponse>(this.slots[0], requestId => ({ type: 'getQuantityChecks', requestId, docId }))
+    return response.basics
+  }
 
   async pageHasText(docId: string, pageIndex: number): Promise<boolean> {
     const response = await this.request<PageHasTextResponse>(this.slots[0], (requestId) => ({

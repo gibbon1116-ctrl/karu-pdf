@@ -291,9 +291,7 @@ test('指摘の詳細をその行で開閉し、フォーカスを保って入�
 test('項目を選んでクリックし、取消・保存再読込で個数を維持する', async ({ page }) => {
   await open(page)
   await page.getByRole('tab', { name: '数量', exact: true }).click()
-  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
-  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
-  await page.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
+  await page.evaluate(field => window.__karu!.addFixturePresets(field), '電気設備')
   await page.getByRole('button', { name: 'DL ダウンライト', exact: true }).click()
   await page.getByRole('button', { name: '数量拾い', exact: true }).click()
   await click(page, 100, 200); await click(page, 150, 200); await click(page, 200, 200)

@@ -14,6 +14,12 @@ import type { HeaderFooterSettings } from '../app/headerFooterText'
 import type { CountFixture } from '../core/countFixtures'
 export interface GetCountFixturesRequest { type: 'getCountFixtures'; requestId: number; docId: string }
 export interface CountFixturesResponse { type: 'countFixtures'; requestId: number; fixtures: CountFixture[] }
+export interface GetQuantityChecksRequest { type: 'getQuantityChecks'; requestId: number; docId: string }
+export interface QuantityChecksResponse {
+  type: 'quantityChecks'
+  requestId: number
+  basics: import('../core/quantityCheckBasics').QuantityCheckBasics
+}
 
 export type DeviceRect = [number, number, number, number]
 export type Priority = 0 | 1 | 2 | 3
@@ -302,6 +308,7 @@ export interface RenderRasterBandRequest {
 
 export type WorkerRequest =
   | GetCountFixturesRequest
+  | GetQuantityChecksRequest
   | RenderCompareRequest
   | ClearCompareRequest
   | MaxIssueNumberRequest
@@ -556,6 +563,7 @@ export interface ErrorResponse {
 
 export type WorkerResponse =
   | CountFixturesResponse
+  | QuantityChecksResponse
   | MaxIssueNumberResponse
   | ReadyResponse
   | OpenResponse

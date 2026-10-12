@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { AnnotationStore } from '../src/editor/AnnotationStore'
-import { countFixtureId, parseCount } from '../src/core/counts'
+import { countFixtureId, countMembers, parseCount, validCountComponents, type CountComponent, type CountMark } from '../src/core/counts'
 import { nextCountStyle, type CountFixture } from '../src/core/countFixtures'
 import { createCountCsv } from '../src/app/annotationCsv'
 
@@ -49,4 +49,62 @@ it('parses optional count locations, rejects invalid fields and omits empty loca
  for (const key of ['floor', 'room']) for (const value of ['x'.repeat(41), 1, null]) expect(parseCount(JSON.stringify({ ...mark, [key]: value }))).toBeNull()
  expect(parseCount(JSON.stringify({ ...mark, floor: '', room: ' ' }))).toEqual({ version: 2, id: 'a', fixtureId: 'f' })
  expect(parseCount(JSON.stringify({ version: 1, id: 'a', group: '器具' }))).toEqual({ version: 1, id: 'a', group: '器具' })
+})
+
+it('round-trips count components with optional conditions and strips unrelated fields', () => {
+  const mark: CountMark = {
+    version: 2, id: 'switch', fixtureId: 'SW', floor: '1階', room: '事務室', condition: '露出',
+    extra: [{ itemId: 'SB', count: 1, condition: '隠ぺい（埋込）' }, { itemId: 'PL', count: 2 }],
+  }
+  expect(parseCount(JSON.stringify(mark))).toEqual(mark)
+  expect(parseCount(JSON.stringify({
+    ...mark,
+    extra: mark.extra!.map(e => ({ ...e, ignored: 'discard', nested: { value: 1 } })),
+  }))).toEqual(mark)
+  expect(parseCount(JSON.stringify({ version: 2, id: 'a', fixtureId: 'SW', extra: [] })))
+    .toEqual({ version: 2, id: 'a', fixtureId: 'SW' })
+  expect(validCountComponents('SW', [])).toBe(true)
+})
+
+it('discards invalid components without losing the main count', () => {
+  const main = { version: 2 as const, id: 'a', fixtureId: 'SW' }
+  const invalid: unknown[] = [
+    Array.from({ length: 11 }, (_, i) => ({ itemId: 'f' + i, count: 1 })),
+    [{ itemId: 'SB', count: 0 }],
+    [{ itemId: 'SB', count: 100 }],
+    [{ itemId: 'SB', count: 1.5 }],
+    [{ itemId: 'SW', count: 1 }],
+    [{ itemId: 'SB', count: 1 }, { itemId: 'SB', count: 2 }],
+    [{ itemId: 'SB', count: 1, condition: ' padded ' }],
+    [{ itemId: 'SB', count: 1, condition: '' }],
+    [{ itemId: 'SB', count: 1, condition: 'a\nb' }],
+    [{ itemId: 'SB', count: 1, condition: null }],
+    [{ itemId: '', count: 1 }],
+    [{ itemId: 'x'.repeat(81), count: 1 }],
+    [null], null, {},
+  ]
+  for (const extra of invalid) expect(parseCount(JSON.stringify({ ...main, extra }))).toEqual(main)
+  expect(validCountComponents('SW', [{ itemId: 'x'.repeat(80), count: 99 }])).toBe(true)
+  expect(validCountComponents('SW', new Array<CountComponent>(1))).toBe(false)
+})
+
+it('accepts up to 2400 characters and returns main-first independent member copies', () => {
+  const main = { version: 2 as const, id: 'a', fixtureId: 'SW' }
+  const raw = JSON.stringify(main).padEnd(2400, ' ')
+  expect(parseCount(raw)).toEqual(main)
+  expect(parseCount(raw + ' ')).toBeNull()
+  const mark: CountMark = {
+    ...main, condition: '露出',
+    extra: [{ itemId: 'SB', count: 1, condition: '隠ぺい（埋込）' }, { itemId: 'PL', count: 2 }],
+  }
+  const members = countMembers(mark)
+  expect(members).toEqual([
+    { itemId: 'SW', count: 1, condition: '露出' },
+    { itemId: 'SB', count: 1, condition: '隠ぺい（埋込）' },
+    { itemId: 'PL', count: 2 },
+  ])
+  members[1].count = 9
+  expect(mark.extra![0].count).toBe(1)
+  const legacy: CountMark = { version: 1, id: 'old', group: 'スイッチ' }
+  expect(countMembers(legacy)).toEqual([{ itemId: countFixtureId(legacy), count: 1 }])
 })

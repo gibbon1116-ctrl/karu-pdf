@@ -2,7 +2,7 @@ import { groupFixtures } from './fixtureOrder'
 import { QuantityIndex, compareFloors, quantityPartLabel } from '../core/quantityIndex'
 import type { DrawingInfo } from '../core/drawingInfo'
 import { quantityValue } from '../core/quantity'
-import { quantityAggregation, quantityKind, QUANTITY_UNITS } from '../core/countFixtures'
+import { quantityAggregation, quantityDecimals, quantityKind, quantityUnit } from '../core/countFixtures'
 import { scaleLabel, PT_MM } from '../core/measure'
 import { issueStatusLabel, issueColor } from '../core/issues'
 import { countFixtureId } from '../core/counts'
@@ -133,7 +133,7 @@ export function quantityCsvFileName(pdfName: string, type: QuantityCsvType): str
 
 export type QuantityDetailRow = [
   string, string, string, string, string, string, string, string, string,
-  string, string, number, string, string, number, number,
+  string, string, number | '', string, string, number, number,
 ]
 
 /** Same detail groups/order as CSV, with unrounded numeric quantities. */
@@ -145,9 +145,17 @@ export function quantityDetailRows(index: QuantityIndex, fixtures: readonly Coun
     const kind = quantityKind(f)
     const base: [string, string, string, string] = [f.category, f.code, f.name, f.spec ?? '']
     const metadata: [string, string, string] = [
-      { count: '個数', length: '長さ', area: '面積', volume: '体積' }[kind],
-      QUANTITY_UNITS[kind], quantityAggregation(f) === 'location' ? '場所別' : '全図面',
+      f.link !== undefined ? '連動' : { count: '個数', length: '長さ', area: '面積', volume: '体積' }[kind],
+      quantityUnit(f), quantityAggregation(f) === 'location' ? '場所別' : '全図面',
     ]
+    const linkResult = f.link !== undefined ? index.linkResult(f.id) : undefined
+    if (linkResult?.overridden) {
+      rows.push([
+        ...base, f.link?.condition?.value ?? '', '', ...metadata,
+        '', '', '', '', '', index.total(f.id), 0,
+      ])
+      continue
+    }
     const groups = new Map<string, { condition: string; part: string; page: number; floor: string; room: string; value: number; ids: Set<string> }>()
     for (const e of index.entries(f.id)) {
       const condition = e.condition ?? '', part = kind === 'length' && e.part ? quantityPartLabel(e.part) : ''
@@ -165,8 +173,13 @@ export function quantityDetailRows(index: QuantityIndex, fixtures: readonly Coun
 
 export function createQuantityCsv(index: QuantityIndex, fixtures: readonly CountFixture[], currentPageIndex: number, type: QuantityCsvType, drawingInfo: (page: number) => DrawingInfo | null = () => null): string {
   if (type === 'detail') {
+    const decimals = new Map(fixtures.map(f => [
+      JSON.stringify([f.category, f.code, f.name, f.spec ?? '', quantityUnit(f)]),
+      quantityDecimals(f),
+    ]))
     const rows = quantityDetailRows(index, fixtures, drawingInfo).map(row => row.map((value, column) =>
-      column === 14 && row[6] !== '個数' ? (value as number).toFixed(2) : value))
+      column === 14 && decimals.get(JSON.stringify([row[0], row[1], row[2], row[3], row[7]])) === 2
+        ? (value as number).toFixed(2) : value))
     return '\uFEFF' + [QUANTITY_DETAIL_HEADER, ...rows].map(row => row.map(quote).join(',')).join('\r\n') + '\r\n'
   }
   const ordered = groupFixtures(fixtures).flatMap(g => g.items)
@@ -174,9 +187,9 @@ export function createQuantityCsv(index: QuantityIndex, fixtures: readonly Count
   const header = [...QUANTITY_SUMMARY_HEADER, `表示中の図面（p.${currentPageIndex + 1}）`, ...pages.map(p => `p.${p + 1}${drawingInfo(p)?.number ? ' ' + drawingInfo(p)!.number : ''}`)]
   const rows: (string | number)[][] = []
   for (const f of ordered) {
-    const kind = quantityKind(f), format = (n: number) => kind === 'count' ? n : n.toFixed(2)
+    const kind = quantityKind(f), format = (n: number) => quantityDecimals(f) === 0 ? n : n.toFixed(2)
     const base = [f.category, f.code, f.name, f.spec ?? '']
-    const metadata = [{ count: '個数', length: '長さ', area: '面積', volume: '体積' }[kind], QUANTITY_UNITS[kind], quantityAggregation(f) === 'location' ? '場所別' : '全図面']
+    const metadata = [{ count: '個数', length: '長さ', area: '面積', volume: '体積' }[kind], quantityUnit(f), quantityAggregation(f) === 'location' ? '場所別' : '全図面']
     const conditions = index.byCondition(f.id), conditionPages = new Map<string, Map<number, number>>()
     for (const e of index.entries(f.id)) {
       const key = e.condition ?? '', byPage = conditionPages.get(key) ?? new Map<number, number>()
@@ -188,7 +201,7 @@ export function createQuantityCsv(index: QuantityIndex, fixtures: readonly Count
       rows.push([...base, condition, section, ...metadata, ...parts(total), format(total.total), format(byPage.get(currentPageIndex) ?? 0), ...pages.map(p => format(byPage.get(p) ?? 0))])
     }
     if (!conditions.size) addRow('', '施工条件別', { total: index.total(f.id), plan: 0, rise: 0, slack: 0 }, index.byPage(f.id))
-    for (const [condition, total] of conditions) addRow(condition, '施工条件別', total, conditionPages.get(condition)!)
+    for (const [condition, total] of conditions) addRow(condition, '施工条件別', total, conditionPages.get(condition) ?? new Map())  // an overridden linked item has a total but no entries
     if (conditions.size >= 2) {
       const total = { total: index.total(f.id), plan: 0, rise: 0, slack: 0 }
       for (const value of conditions.values()) { total.plan += value.plan; total.rise += value.rise; total.slack += value.slack }

@@ -16,6 +16,7 @@ import { readDocumentScaleMetadata } from '../core/measure'
 import { readDocumentRoomMetadata } from '../core/rooms'
 import { applyEdits, listAnnotations } from '../core/annotations'
 import { readCountFixtures } from '../core/countFixtures'
+import { readQuantityChecks } from '../core/quantityCheckBasics'
 import { applyEditsAtomically, applyAndSaveAtomically, pdfOperation } from '../core/editTransaction'
 import { assertEditablePdf } from '../core/pdfRestrictions'
 import { maxIssueNumber } from '../core/issues'
@@ -98,6 +99,7 @@ type CoreRequest =
   | import('./protocol').ExtractLabelsRequest
   | import('./protocol').DrawingPageRequest
   | import('./protocol').GetCountFixturesRequest
+  | import('./protocol').GetQuantityChecksRequest
   | MaxIssueNumberRequest
   | OpenRequest
   | ListAnnotationsRequest
@@ -454,6 +456,10 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       post({ type: 'countFixtures', requestId: request.requestId, fixtures: readCountFixtures(document) })
       return
     }
+    if (request.type === 'getQuantityChecks') {
+      post({ type: 'quantityChecks', requestId: request.requestId, basics: readQuantityChecks(document) })
+      return
+    }
     if (request.type === 'listAnnotations') {
       post({
         type: 'annotationsListed',
@@ -784,7 +790,9 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
     await loadFontsForEdits(request.edits)
     if (request.type === 'applyEdits') {
       const applied = applyEditsAtomically(document, request.edits, fontResources)
-      entry.displayLists.clear()
+      if (request.edits.some(edit => edit.kind !== 'setQuantityChecks')) {
+        entry.displayLists.clear()
+      }
       post({
         type: 'editsApplied', requestId: request.requestId,
         created: applied.created,
@@ -895,6 +903,7 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     || message.type === 'removeHeaderFooter'
     || message.type === 'getHeaderFooterSettings'
     || message.type === 'getCountFixtures'
+    || message.type === 'getQuantityChecks'
     || message.type === 'undoPageLayout'
     || message.type === 'extractPages'
     || message.type === 'splitPages'

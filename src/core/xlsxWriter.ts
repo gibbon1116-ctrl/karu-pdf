@@ -2,10 +2,13 @@ export type XlsxStyle =
   | 'text' | 'title' | 'header' | 'category'
   | 'integer' | 'decimal'
   | 'borderedText' | 'borderedInteger' | 'borderedDecimal'
+  | 'borderedMoney'
 
 export interface XlsxCell {
   value: string | number | null
   style?: XlsxStyle
+  /** Excel formula without a leading "=". Only numeric cached values are allowed. */
+  formula?: string
 }
 
 export interface XlsxMerge {
@@ -51,6 +54,7 @@ const STYLE_IDS: Record<XlsxStyle, number> = {
   text: 0, title: 1, header: 2, category: 3,
   integer: 4, decimal: 5,
   borderedText: 6, borderedInteger: 7, borderedDecimal: 8,
+  borderedMoney: 9,
 }
 
 export function columnName(column: number): string {
@@ -143,7 +147,7 @@ const STYLES_XML = `${XML_HEADER}<styleSheet xmlns="${MAIN_NS}">
   <border><left style="thin"><color auto="1"/></left><right style="thin"><color auto="1"/></right><top style="thin"><color auto="1"/></top><bottom style="thin"><color auto="1"/></bottom><diagonal/></border>
 </borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="9">
+<cellXfs count="10">
   <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
   <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>
   <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
@@ -153,6 +157,7 @@ const STYLES_XML = `${XML_HEADER}<styleSheet xmlns="${MAIN_NS}">
   <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
   <xf numFmtId="1" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
   <xf numFmtId="2" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+  <xf numFmtId="3" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`
@@ -317,6 +322,14 @@ function sheetXml(sheet: XlsxSheet, sharedString: (value: string) => number): st
       const style = STYLE_IDS[cell.style ?? 'text']
       if (style === undefined) throw new Error('Excelのセル書式が不正です')
       const attributes = `r="${address(row, column)}" s="${style}"`
+      if (cell.formula !== undefined) {
+        if (typeof cell.value === 'string') {
+          throw new Error('Excelの数式セルに文字列のキャッシュ値は指定できません')
+        }
+        const cached = typeof cell.value === 'number' && Number.isFinite(cell.value)
+          ? `<v>${cell.value}</v>` : ''
+        return `<c ${attributes}><f>${xml(cell.formula)}</f>${cached}</c>`
+      }
       if (typeof cell.value === 'string') {
         return `<c ${attributes} t="s"><v>${sharedString(cell.value)}</v></c>`
       }
@@ -378,7 +391,7 @@ export function writeXlsx(sheets: readonly XlsxSheet[]): Uint8Array {
   })
   addXml('xl/sharedStrings.xml', `${XML_HEADER}<sst xmlns="${MAIN_NS}" count="${stringCount}" uniqueCount="${strings.length}">${strings.map(value => `<si><t xml:space="preserve">${xml(value)}</t></si>`).join('')}</sst>`)
   addXml('xl/styles.xml', STYLES_XML)
-  addXml('xl/workbook.xml', `${XML_HEADER}<workbook xmlns="${MAIN_NS}" xmlns:r="${REL_NS}"><bookViews><workbookView/></bookViews><sheets>${names.map((name, i) => `<sheet name="${xml(name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>`)
+  addXml('xl/workbook.xml', `${XML_HEADER}<workbook xmlns="${MAIN_NS}" xmlns:r="${REL_NS}"><bookViews><workbookView/></bookViews><sheets>${names.map((name, i) => `<sheet name="${xml(name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets><calcPr fullCalcOnLoad="1"/></workbook>`)
   addXml('xl/_rels/workbook.xml.rels', relationships(
     sheets.map((_, i) => relationship(`rId${i + 1}`, 'worksheet', `worksheets/sheet${i + 1}.xml`)).join('')
     + relationship(`rId${sheets.length + 1}`, 'styles', 'styles.xml')

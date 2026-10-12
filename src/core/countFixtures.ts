@@ -1,5 +1,8 @@
 import type { PDFDocument } from 'mupdf'
 import type { RGB, Rect } from './annotations'
+import { rcMemberError, readRcMember, type RcMember } from './rcMember'
+import { steelMemberError, readSteelMember, type SteelMember } from './steelMember'
+import { fixtureLinkDensity, fixtureLinkError, readFixtureLink, type FixtureLink } from './fixtureLink'
 import { validRouteScope, conditionsFromScope, normalizeRouteConditions, validRouteConditions, parseQuantityMark, serializeQuantityMark, validCondition, validOpeningDimension, type OpeningSize, type RouteConditions } from './quantity'
 
 export const COUNT_SHAPES = ['circle', 'doubleCircle', 'square', 'roundedSquare', 'triangle', 'invertedTriangle', 'diamond', 'pentagon', 'hexagon', 'octagon', 'star', 'plus', 'cross', 'hourglass'] as const
@@ -13,7 +16,30 @@ export interface CountFixtureSample {
   png: string; width: number; height: number; pageIndex: number; rect?: Rect
   lines?: { segments: number[]; widths: number[] }
 }
-export interface CountFixture { conditions?: string[]; routeDefaults?: RouteConditions; defaultCondition?: string; spec?: string; aggregation?: 'location' | 'document'; kind?: QuantityKind; method?: QuantityMethod; defaults?: QuantityDefaults; line?: QuantityLineStyle; id: string; name: string; code: string; category: string; style: CountStyle; memo?: string; order: number; sample?: CountFixtureSample; opening?: { widthM: number; heightM: number } }
+export const COUNT_UNITS = ['個', '台', '面', '基', '組', '本', '枚', '灯', 'か所', '対', '式', '株'] as const
+export type CountUnit = typeof COUNT_UNITS[number]
+export const CONVERT_UNITS = ['m', '㎡', '㎥', 'kg', 't'] as const
+export type ConvertUnit = typeof CONVERT_UNITS[number]
+/** 拾った数量（長さ m・面積・体積・個数）× factor を unit の数量として集計する */
+export interface FixtureConvert { factor: number; unit: ConvertUnit; basis: string }
+export const BREAKDOWN_BOOKS = ['建築', '電気設備', '機械設備', '昇降機設備'] as const
+export type BreakdownBook = typeof BREAKDOWN_BOOKS[number]
+/** 内訳書の位置。section=種目、subject=科目、middle=中科目（省略可）、item=細目 */
+export interface BreakdownPosition { book: BreakdownBook; section: string; subject: string; middle?: string; item: string }
+/** 摘要の1区分。label=区分名（例: 形式、呼び径）、value=値 */
+export interface SummaryField { label: string; value: string }
+/** 連動の計算（B05〜B07）に使う値。どれも任意 */
+export interface FixtureAttributes {
+  massKg?: number          // 機器の単体質量 kg
+  widthMm?: number         // 外形 幅 mm
+  depthMm?: number         // 外形 奥行 mm
+  heightMm?: number        // 外形 高さ mm
+  outerDiameterMm?: number // 管・ポール等の外径 mm
+  unitMassKg?: number      // 数量1単位（1m、1個など）あたりの質量 kg
+  wasteType?: string       // 発生材の種類（例: 金属くず）
+}
+export interface FixtureBackfill { deductPipes: true; conditionIncludes: string[] }
+export interface CountFixture { backfill?: FixtureBackfill; conditions?: string[]; routeDefaults?: RouteConditions; defaultCondition?: string; spec?: string; aggregation?: 'location' | 'document'; kind?: QuantityKind; method?: QuantityMethod; defaults?: QuantityDefaults; line?: QuantityLineStyle; unit?: CountUnit; convert?: FixtureConvert; link?: FixtureLink; rc?: RcMember; steel?: SteelMember; breakdown?: BreakdownPosition; summary?: SummaryField[]; remark?: string; attributes?: FixtureAttributes; id: string; name: string; code: string; category: string; style: CountStyle; memo?: string; order: number; sample?: CountFixtureSample; opening?: { widthM: number; heightM: number } }
 export type QuantityKind = 'count' | 'length' | 'area' | 'volume'
 export type QuantityMethod = 'click' | 'polyline' | 'polygon' | 'lengthHeight' | 'polygonDepth' | 'lengthWidthDepth'
 export const QUANTITY_METHODS: Record<QuantityKind, readonly QuantityMethod[]> = { count: ['click'], length: ['polyline'], area: ['polygon', 'lengthHeight'], volume: ['polygonDepth', 'lengthWidthDepth'] }
@@ -27,7 +53,191 @@ export function quantityAggregation(f: CountFixture): 'location' | 'document' { 
 export function fixtureCode(f: Pick<CountFixture, 'code' | 'spec'>): string { return [f.code, f.spec].filter(Boolean).join(' ') }
 // Drawings show the specification only on line pickups, where it is the size (CV 38sq-3C); marks and area labels show the code alone.
 export function fixtureDrawingCode(f: Pick<CountFixture, 'code' | 'spec' | 'kind'>): string { return f.kind === 'length' ? fixtureCode(f) : f.code }
+/** 長さ・面積・体積の札や経路構成用。個数の印の横の文字には使わない。 */
+export function fixtureLabelCode(f: Pick<CountFixture, 'code' | 'spec' | 'kind' | 'name'>): string { return fixtureDrawingCode(f) || f.name }
 export function quantityKind(f: CountFixture): QuantityKind { return f.kind ?? 'count' }
+/** 数量の単位。換算があれば換算後の単位を使う。 */
+export function quantityUnit(f: Pick<CountFixture, 'kind' | 'unit' | 'convert' | 'link' | 'attributes'>): string {
+  if (f.link?.kind === 'rc') {
+    switch (f.link.rc!.output) {
+      case 'concrete': return '㎥'
+      case 'formwork': return '㎡'
+      case 'rebar': return 't'
+      case 'gasJoint':
+      case 'lapJoint': return 'か所'
+    }
+  }
+  if (f.link?.kind === 'crossing') return 'か所'
+  if (f.link?.kind === 'steel') return f.link.steel!.output === 'mass' ? 't' : '㎡'
+  if (f.link?.kind === 'carry') return 't'
+  if (f.link?.kind === 'mass') return fixtureLinkDensity(f) !== undefined ? '㎥' : 't'
+  if (f.convert) return f.convert.unit
+  return f.kind === undefined || f.kind === 'count' ? f.unit ?? '個' : QUANTITY_UNITS[f.kind]
+}
+export function quantityDecimals(f: CountFixture): 0 | 2 {
+  if (f.link?.kind === 'rc') {
+    return f.link.rc!.output === 'gasJoint' || f.link.rc!.output === 'lapJoint' ? 0 : 2
+  }
+  if (f.link?.kind === 'crossing') return 0
+  if (f.link?.kind === 'steel') return 2
+  if (f.link?.kind === 'mass' || f.link?.kind === 'carry') return 2
+  return !f.convert && quantityKind(f) === 'count' ? 0 : 2
+}
+export function quantityOutputKind(f: CountFixture): QuantityKind | 'mass' {
+  if (f.link?.kind === 'rc') {
+    switch (f.link.rc!.output) {
+      case 'concrete': return 'volume'
+      case 'formwork': return 'area'
+      case 'rebar': return 'mass'
+      case 'gasJoint':
+      case 'lapJoint': return 'count'
+    }
+  }
+  if (f.link?.kind === 'crossing') return 'count'
+  if (f.link?.kind === 'steel') return f.link.steel!.output === 'mass' ? 'mass' : 'area'
+  if (f.link?.kind === 'carry') return 'mass'
+  if (f.link?.kind === 'mass') return fixtureLinkDensity(f) !== undefined ? 'volume' : 'mass'
+  if (!f.convert) return quantityKind(f)
+  switch (f.convert.unit) {
+    case 'm': return 'length'
+    case '㎡': return 'area'
+    case '㎥': return 'volume'
+    case 'kg':
+    case 't': return 'mass'
+  }
+}
+/** 摘要の値を「、」でつないだ文（区分名は含めない）。無ければ '' */
+export function summaryText(f: Pick<CountFixture, 'summary'>): string {
+  return f.summary?.map(field => field.value).join('、') ?? ''
+}
+/** 内訳書の位置の同一判定用の文字列。無ければ '' */
+export function breakdownKey(f: Pick<CountFixture, 'breakdown'>): string {
+  const p = f.breakdown
+  return p === undefined ? '' : JSON.stringify([p.book, p.section, p.subject, p.middle ?? '', p.item])
+}
+/** 同じ項目かの判定。内訳書の位置・摘要の値が違えば別の項目 */
+export function fixtureIdentity(f: Pick<CountFixture, 'code' | 'spec' | 'name' | 'breakdown' | 'summary'>): string {
+  return JSON.stringify([f.code, f.spec ?? '', f.name, breakdownKey(f), summaryText(f)])
+}
+function validFixtureText(value: unknown, maxLength: number, trimmed = true): value is string {
+  return typeof value === 'string' && value.length >= 1 && value.length <= maxLength
+    && (!trimmed || value === value.trim()) && !/[\r\n\t\u2028\u2029]/.test(value)
+}
+function validFixtureBackfill(value: unknown): value is FixtureBackfill {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const backfill = value as Partial<Record<keyof FixtureBackfill, unknown>>
+  return Object.keys(value).every(key => key === 'deductPipes' || key === 'conditionIncludes')
+    && backfill.deductPipes === true
+    && Array.isArray(backfill.conditionIncludes)
+    && backfill.conditionIncludes.length >= 1
+    && backfill.conditionIncludes.length <= 5
+    && Array.from(backfill.conditionIncludes).every(word => validFixtureText(word, 20))
+}
+
+export function fixtureBackfillError(
+  f: Pick<CountFixture, 'kind' | 'method' | 'backfill'>,
+): string | undefined {
+  if (f.backfill === undefined) return undefined
+  const method = f.method ?? QUANTITY_METHODS[f.kind ?? 'count'][0]
+  if (method !== 'lengthWidthDepth' || !validFixtureBackfill(f.backfill)) {
+    return '埋戻しの控除は長さ×幅×深さの項目だけに設定できます。施工条件に含む語は1〜5語、各20字以内で入れてください。'
+  }
+}
+
+function validFixtureBreakdown(value: unknown): value is BreakdownPosition {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const p = value as Partial<Record<keyof BreakdownPosition, unknown>>
+  return BREAKDOWN_BOOKS.some(book => book === p.book)
+    && validFixtureText(p.section, 20) && validFixtureText(p.subject, 30)
+    && (p.middle === undefined || validFixtureText(p.middle, 30)) && validFixtureText(p.item, 40)
+}
+function validFixtureSummary(value: unknown): value is SummaryField[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8
+    || !Array.from(value).every(field => field && typeof field === 'object' && !Array.isArray(field)
+      && validFixtureText(field.label, 20) && validFixtureText(field.value, 60))) return false
+  return new Set(value.map(field => field.label)).size === value.length && summaryText({ summary: value }).length <= 120
+}
+const fixtureAttributeLimits = {
+  massKg: 100000, widthMm: 100000, depthMm: 100000, heightMm: 100000,
+  outerDiameterMm: 10000, unitMassKg: 100000,
+} as const
+function validFixtureAttributes(value: unknown): value is FixtureAttributes {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  return Object.entries(value).every(([key, entry]) => key === 'wasteType'
+    ? validFixtureText(entry, 20, false)
+    : Object.hasOwn(fixtureAttributeLimits, key) && typeof entry === 'number' && Number.isFinite(entry)
+      && entry > 0 && entry <= fixtureAttributeLimits[key as keyof typeof fixtureAttributeLimits])
+}
+function validFixtureConvert(value: unknown): value is FixtureConvert {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const convert = value as Partial<Record<keyof FixtureConvert, unknown>>
+  return typeof convert.factor === 'number' && Number.isFinite(convert.factor)
+    && convert.factor > 0 && convert.factor <= 1000000
+    && CONVERT_UNITS.some(unit => unit === convert.unit)
+    && typeof convert.basis === 'string' && convert.basis.length <= 60
+    && !/[\r\n\t\u2028\u2029]/.test(convert.basis)
+}
+export function fixtureConvertError(f: Pick<CountFixture, 'convert'>): string | undefined {
+  if (f.convert !== undefined && !validFixtureConvert(f.convert)) {
+    return '数量の換算は、係数を0より大きい数で、単位を候補から入れてください。'
+  }
+}
+function fixtureSteelError(
+  f: Pick<CountFixture, 'kind' | 'steel'>,
+): string | undefined {
+  if (f.steel === undefined) return undefined
+  const error = steelMemberError(f.steel)
+  if (error) return error
+  if (f.kind !== undefined && f.kind !== 'count' && f.kind !== 'length') {
+    return '鉄骨部材は線または個数で拾ってください。'
+  }
+  if ((f.kind ?? 'count') === 'count' && f.steel.lengthMm === undefined) {
+    return '個数で拾う鉄骨部材には1本の長さを設定してください。'
+  }
+}
+
+export function fixtureBreakdownError(f: Pick<CountFixture, 'kind' | 'steel' | 'unit' | 'convert' | 'breakdown' | 'summary' | 'remark' | 'attributes'>): string | undefined {
+  const convertError = fixtureConvertError(f)
+  if (convertError) return convertError
+  if (f.unit !== undefined && ((f.kind !== undefined && f.kind !== 'count') || !COUNT_UNITS.some(unit => unit === f.unit))) {
+    return '単位は個数の項目だけに、候補の中から設定できます。'
+  }
+  if (f.breakdown !== undefined && !validFixtureBreakdown(f.breakdown)) {
+    return '内訳書の位置は、編・種目・科目・細目を入れてください（中科目は省略できます）。種目は20字、科目・中科目は30字、細目は40字までです。'
+  }
+  // An empty list means no summary; serializeCountFixtures omits it.
+  if (f.summary !== undefined && !(Array.isArray(f.summary) && f.summary.length === 0) && !validFixtureSummary(f.summary)) {
+    return '摘要は8区分まで、区分名は20字、値は60字、合わせて120字までです。同じ区分名は使えません。'
+  }
+  if (f.remark !== undefined && !validFixtureText(f.remark, 40, false)) return '備考は40字までです。'
+  if (f.attributes !== undefined && !validFixtureAttributes(f.attributes)) {
+    return '連動に使う値（質量・寸法・外径・単位質量・発生材の種類）が正しくありません。'
+  }
+  return fixtureSteelError(f)
+}
+function readFixtureBreakdownFields(f: Pick<CountFixture, 'id' | 'link' | 'rc' | 'steel' | 'kind' | 'method' | 'backfill' | 'unit' | 'convert' | 'breakdown' | 'summary' | 'remark' | 'attributes'>): Pick<CountFixture, 'link' | 'rc' | 'steel' | 'backfill' | 'unit' | 'convert' | 'breakdown' | 'summary' | 'remark' | 'attributes'> {
+  const link = readFixtureLink(f)
+  const rc = f.rc === undefined ? undefined : readRcMember(f.rc)
+  const steel = f.steel === undefined || fixtureSteelError(f)
+    ? undefined : readSteelMember(f.steel)
+  return {
+    ...(link ? { link } : {}),
+    ...(rc ? { rc } : {}),
+    ...(steel ? { steel } : {}),
+    ...(f.backfill !== undefined && !fixtureBackfillError(f) ? {
+      backfill: {
+        deductPipes: true as const,
+        conditionIncludes: [...f.backfill.conditionIncludes],
+      },
+    } : {}),
+    ...(f.unit !== undefined && !fixtureBreakdownError({ kind: f.kind, unit: f.unit }) ? { unit: f.unit } : {}),
+    ...(validFixtureConvert(f.convert) ? { convert: { factor: f.convert.factor, unit: f.convert.unit, basis: f.convert.basis } } : {}),
+    ...(validFixtureBreakdown(f.breakdown) ? { breakdown: { ...f.breakdown } } : {}),
+    ...(validFixtureSummary(f.summary) ? { summary: f.summary.map(field => ({ label: field.label, value: field.value })) } : {}),
+    ...(validFixtureText(f.remark, 40, false) ? { remark: f.remark } : {}),
+    ...(validFixtureAttributes(f.attributes) && Object.keys(f.attributes).length ? { attributes: { ...f.attributes } } : {}),
+  }
+}
 export function parseFixtureOpening(value: unknown): CountFixture['opening'] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const opening = value as { widthM?: unknown; heightM?: unknown }
@@ -153,6 +363,15 @@ export function nextQuantityLineStyle(fixtures: readonly CountFixture[], exclude
 const conditionEdits = new WeakMap<CountFixture, ReadonlyMap<string, string>>()
 export function setFixtureConditionRenames(f: CountFixture, renames: ReadonlyMap<string, string>): void { conditionEdits.set(f, new Map(renames)) }
 export function fixtureConditionRenames(f: CountFixture): ReadonlyMap<string, string> { return conditionEdits.get(f) ?? new Map() }
+// 寸法の反映指定も編集時だけの情報。PDF・複製・Undoの項目データには残さない。
+const dimensionEdits = new WeakSet<CountFixture>()
+export function setFixtureDimensionUpdate(f: CountFixture, enabled: boolean): void {
+  if (enabled) dimensionEdits.add(f)
+  else dimensionEdits.delete(f)
+}
+export function fixtureDimensionUpdateEnabled(f: CountFixture): boolean {
+  return dimensionEdits.has(f)
+}
 export function fixtureConditionsError(f: Pick<CountFixture, 'conditions' | 'routeDefaults' | 'defaultCondition' | 'kind'>): string | undefined {
   const candidates = f.conditions === undefined ? [] : f.conditions
   if (!Array.isArray(candidates) || candidates.length > 30) return '施工条件の候補は30件までです。'
@@ -199,14 +418,29 @@ export function parseCountFixtures(raw: string | null): CountFixture[] {
       ids.add(f.id)
       const sample = parseCountFixtureSample(f.sample)
       const opening = kind === 'count' ? parseFixtureOpening(f.opening) : undefined
-      result.push({ ...(f.conditions !== undefined ? { conditions: [...f.conditions] } : {}), ...(routeDefaults !== undefined ? { routeDefaults } : {}), ...(f.defaultCondition !== undefined ? { defaultCondition: f.defaultCondition } : {}), ...(f.spec?.trim() ? { spec: f.spec.trim() } : {}), ...(f.aggregation !== undefined ? { aggregation: f.aggregation } : {}), ...(f.kind !== undefined ? { kind: f.kind } : {}), ...(f.method !== undefined ? { method: f.method } : {}), ...(f.defaults !== undefined ? { defaults: { ...f.defaults } } : {}), ...(f.line !== undefined ? { line: { ...f.line } } : {}), id: f.id, name: f.name.trim(), code: f.code, category: f.category.trim(), memo: f.memo, order: f.order, ...(sample ? { sample } : {}), ...(opening ? { opening } : {}), style: { shape: s.shape, fill: s.fill, color: [...s.color] as RGB, size: s.size, opacity: s.opacity, showCode: s.showCode } })
+      result.push({ ...(f.conditions !== undefined ? { conditions: [...f.conditions] } : {}), ...(routeDefaults !== undefined ? { routeDefaults } : {}), ...(f.defaultCondition !== undefined ? { defaultCondition: f.defaultCondition } : {}), ...(f.spec?.trim() ? { spec: f.spec.trim() } : {}), ...(f.aggregation !== undefined ? { aggregation: f.aggregation } : {}), ...(f.kind !== undefined ? { kind: f.kind } : {}), ...(f.method !== undefined ? { method: f.method } : {}), ...(f.defaults !== undefined ? { defaults: { ...f.defaults } } : {}), ...(f.line !== undefined ? { line: { ...f.line } } : {}), id: f.id, name: f.name.trim(), code: f.code, category: f.category.trim(), memo: f.memo, order: f.order, ...(sample ? { sample } : {}), ...(opening ? { opening } : {}), ...readFixtureBreakdownFields(f), style: { shape: s.shape, fill: s.fill, color: [...s.color] as RGB, size: s.size, opacity: s.opacity, showCode: s.showCode } })
     }
     return result.sort((a, b) => a.order - b.order)
   } catch { return [] }
 }
 export function serializeCountFixtures(fixtures: readonly CountFixture[]): string {
-  for (const f of fixtures) { const error = fixtureConditionsError(f); if (error) throw new Error(error) }
-  const raw = JSON.stringify({ version: 1, fixtures: fixtures.map(f => ({ ...f, opening: quantityKind(f) === 'count' ? parseFixtureOpening(f.opening) : undefined, routeDefaults: f.routeDefaults === undefined ? undefined : wireFixtureRouteDefaults(f.routeDefaults), routeScope: f.routeDefaults?.plan === null && f.routeDefaults?.slack === null ? 'rise' : f.routeDefaults?.slack === null ? 'noSlack' : undefined, defaults: f.defaults ? { ...f.defaults, slackM: f.defaults.slackM === 0 ? undefined : f.defaults.slackM } : undefined, spec: f.spec?.trim() || undefined })).map(f => f.kind === 'count' && f.method === undefined && f.defaults === undefined && f.line === undefined ? { ...f, kind: undefined } : f) })
+  const normalized: CountFixture[] = []
+  for (const f of fixtures) {
+    const error = fixtureConditionsError(f) ?? fixtureBreakdownError(f) ?? fixtureBackfillError(f) ?? fixtureLinkError(f)
+      ?? (f.rc === undefined ? undefined : rcMemberError(f.rc, {
+        fromShape: quantityMethod(f) === 'polygonDepth',
+        fromLine: quantityMethod(f) === 'polyline',
+      }))
+    if (error) throw new Error(error)
+    normalized.push(f.link === undefined && f.rc === undefined && f.steel === undefined ? f : {
+      ...f,
+      ...(f.link !== undefined ? { link: readFixtureLink(f) } : {}),
+      ...(f.rc !== undefined ? { rc: readRcMember(f.rc) } : {}),
+      ...(f.steel !== undefined ? { steel: readSteelMember(f.steel) } : {}),
+    })
+  }
+  fixtures = normalized
+  const raw = JSON.stringify({ version: 1, fixtures: fixtures.map(f => ({ ...f, unit: f.unit, breakdown: f.breakdown, summary: f.summary?.length ? f.summary : undefined, remark: f.remark, attributes: f.attributes && Object.keys(f.attributes).length ? f.attributes : undefined, opening: quantityKind(f) === 'count' ? parseFixtureOpening(f.opening) : undefined, routeDefaults: f.routeDefaults === undefined ? undefined : wireFixtureRouteDefaults(f.routeDefaults), routeScope: f.routeDefaults?.plan === null && f.routeDefaults?.slack === null ? 'rise' : f.routeDefaults?.slack === null ? 'noSlack' : undefined, defaults: f.defaults ? { ...f.defaults, slackM: f.defaults.slackM === 0 ? undefined : f.defaults.slackM } : undefined, spec: f.spec?.trim() || undefined })).map(f => f.kind === 'count' && f.method === undefined && f.defaults === undefined && f.line === undefined ? { ...f, kind: undefined } : f) })
   if (fixtures.some(f => f.spec !== undefined && (typeof f.spec !== 'string' || f.spec.length > 40)) || fixtures.length > MAX_COUNT_FIXTURES || fixtures.some(f => f.sample !== undefined && !parseCountFixtureSample(f.sample)) || new TextEncoder().encode(raw).length > MAX_COUNT_FIXTURE_BYTES || parseCountFixtures(raw).length !== fixtures.length) throw new Error('数量拾いの値・件数・容量が上限を超えています。')
   return raw
 }
@@ -218,7 +452,7 @@ export function writeCountFixtures(doc: PDFDocument, fixtures: readonly CountFix
   const raw = serializeCountFixtures(fixtures), root = doc.getTrailer().get('Root'), value = doc.newString(raw)
   try { root.put('KaruCountFixtures', value) } finally { value.destroy(); root.destroy() }
 }
-export interface FixturePreset { conditions?: string[]; spec?: string; aggregation?: 'location' | 'document'; category: string; code: string; name: string; kind?: QuantityKind; method?: QuantityMethod; defaults?: QuantityDefaults }
+export interface FixturePreset { conditions?: string[]; spec?: string; aggregation?: 'location' | 'document'; category: string; code: string; name: string; kind?: QuantityKind; method?: QuantityMethod; defaults?: QuantityDefaults; unit?: CountUnit; convert?: FixtureConvert; breakdown?: BreakdownPosition; summary?: SummaryField[]; remark?: string; attributes?: FixtureAttributes }
 export const FIXTURE_PRESETS: Record<string, FixturePreset[]> = {}
 const presets: Record<string, Record<string, string[]>> = {
   電気設備: {

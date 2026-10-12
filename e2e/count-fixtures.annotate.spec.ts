@@ -327,9 +327,7 @@ test('crops original drawing without annotations, keeps drafts on Esc, and prese
 
 test('changes suggestions repeatedly while retaining size, opacity, code display and duplication fields', async ({ page }) => {
   await open(page)
-  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
-  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
-  await page.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
+  await page.evaluate(field => window.__karu!.addFixturePresets(field), '電気設備')
   await expect(page.getByTestId('fixture-panel').locator('li[data-fixture-id]')).toHaveCount(41)
   await page.getByRole('button', { name: '項目を追加', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '項目を追加', exact: true })
@@ -387,10 +385,7 @@ test('fixture layout keeps counts and add actions in view at 1440x900 and restor
   expect(await page.evaluate(() => localStorage.getItem('karu-pdf:side-panel-width'))).toBe('260')
   await page.getByRole('tab', { name: '数量', exact: true }).click();
 
-  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
-  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
-  await page.getByLabel('見本の分野', { exact: true }).selectOption('電気設備')
-  await page.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
+  await page.evaluate(field => window.__karu!.addFixturePresets(field), '電気設備')
   await select(page, 'DL ダウンライト')
   await clickPoint(page, 0, 80, 90)
   const fixturePanel = page.getByTestId('fixture-panel')
@@ -417,9 +412,7 @@ test('fixture layout keeps counts and add actions in view at 1440x900 and restor
 
 test('presets count across pages, visibility excludes hit testing, and quantity CSV includes zero fixtures', async ({ page }) => {
   await open(page)
-  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
-  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
-  await page.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
+  await page.evaluate(field => window.__karu!.addFixturePresets(field), '電気設備')
   await select(page, 'DL ダウンライト'); await clickPoint(page, 0, 80, 90); await clickPoint(page, 0, 130, 90)
   await expect(page.getByTestId('fixture-panel')).toContainText('表示中の図面（p.1）: 2個 ／ 全図面: 2個')
   const firstId = await page.evaluate(() => { const a = window.__karu!.getEditableAnnotations(0).find(a => a.count)!; return a.count!.version === 2 ? a.count!.fixtureId : '' })
@@ -496,10 +489,7 @@ test('custom style, duplication, bulk editing, multiple reassignment, undo, and 
 
 test('imports another open PDF without duplicate names/codes and keeps fixture deletion undoable', async ({ page }) => {
   await open(page)
-  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
-  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
-  await page.getByLabel('見本の分野', { exact: true }).selectOption('建築')
-  await page.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
+  await page.evaluate(field => window.__karu!.addFixturePresets(field), '建築')
   await select(page, 'DS 片開き戸'); await clickPoint(page, 0, 90, 90)
   await page.getByRole('button', { name: '削除', exact: true }).click({ trial: true })
   page.once('dialog', async d => { expect(d.message()).toContain('この項目の拾い 1 件を削除します。'); await d.accept() })
@@ -524,10 +514,58 @@ test('requires a fixture and warns for same-fixture clicks within 3mm without dr
   await clickPoint(page, 0, 100, 100)
   expect(await page.evaluate(() => window.__karu!.getEditableAnnotations(0).filter(a => a.count).length)).toBe(0)
   await expect(page.getByRole('status')).toContainText('数量拾いの一覧で項目を選んでください')
-  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
-  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
-  await page.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
+  await page.evaluate(field => window.__karu!.addFixturePresets(field), '電気設備')
   await select(page, 'DL ダウンライト'); await clickPoint(page, 0, 100, 100); await clickPoint(page, 0, 103, 100)
   await expect(page.locator('.status-bar [role="status"]')).toContainText('近くに同じ数量拾いの印があります')
   await expect(page.getByTestId('fixture-panel')).toContainText('全図面: 2個')
+})
+
+test('同名項目の行にカーソルを合わせると規格・摘要カードが表示される', async ({ page }) => {
+  await open(page)
+  await page.evaluate(field => window.__karu!.addFixturePresets(field), '電気設備')
+  // 名前が同じで摘要だけが違う 2 項目を、数量タブのセッションの店で作る（e2e/breakdown-move と同じ取り方）。
+  await page.evaluate(() => {
+    type Store = { getCountFixtures(): CountFixture[]; setCountFixtures(f: CountFixture[]): void }
+    type Fiber = { memoizedProps?: { session?: { annotationStore?: Store } }; return?: Fiber | null }
+    const element = document.querySelector('[data-testid="fixture-panel"]')!
+    const key = Object.keys(element).find(name => name.startsWith('__reactFiber$'))!
+    let fiber = (element as unknown as Record<string, Fiber>)[key] as Fiber | null | undefined
+    while (fiber && !fiber.memoizedProps?.session?.annotationStore) fiber = fiber.return
+    const store = fiber!.memoizedProps!.session!.annotationStore!
+    const current = store.getCountFixtures()
+    const base = current.find(f => f.name === '熱感知器')!
+    const order = Math.max(...current.map(f => f.order)) + 1
+    store.setCountFixtures([
+      ...current.filter(f => f.id !== base.id),
+      { ...base, id: 'heat-differential', code: 'HD1', order, summary: [{ label: '種別', value: '差動式' }] },
+      { ...base, id: 'heat-fixed', code: 'HD2', order: order + 1, summary: [{ label: '種別', value: '定温式' }] },
+    ])
+  })
+  const fixtures = (await savedFixtures(page)).filter(f => f.name === '熱感知器')
+  const differential = fixtures.find(f => f.id === 'heat-differential')!
+  const fixed = fixtures.find(f => f.id === 'heat-fixed')!
+  expect(differential).toBeDefined()
+  expect(fixed).toBeDefined()
+
+  const panel = page.getByTestId('fixture-panel')
+  const differentialRow = panel.locator(`li[data-fixture-id="${differential.id}"]`)
+  const fixedRow = panel.locator(`li[data-fixture-id="${fixed.id}"]`)
+  await expect(differentialRow.locator('.fixture-sample-thumbnail')).toHaveCount(0)
+
+  // 一覧のスクロールでカードを消すので、先に行を見える位置へ動かしてから合わせる。
+  await fixedRow.scrollIntoViewIfNeeded()
+  await differentialRow.scrollIntoViewIfNeeded()
+  await page.waitForTimeout(200)
+  await differentialRow.hover()
+  const card = page.getByRole('tooltip')
+  await expect(card).toBeVisible()
+  await expect(card).toContainText('摘要: 種別 差動式')
+  await expect(card.locator('.fixture-hover-emphasis')).toContainText('摘要: 種別 差動式')
+
+  await fixedRow.hover()
+  await expect(card).toContainText('摘要: 種別 定温式')
+  await expect(card).not.toContainText('摘要: 種別 差動式')
+
+  await page.mouse.move(0, 0)
+  await expect(card).toHaveCount(0)
 })

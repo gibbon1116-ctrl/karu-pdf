@@ -1,4 +1,5 @@
 import { QuantityNavigationContext } from './app/QuantityBreakdown'
+import { createFixturePreviews } from './app/fixturePreviews'
 import { DrawingInfoDialog } from './app/DrawingInfoDialog'
 import { DrawingUiContext } from './app/documentModel'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
@@ -74,12 +75,14 @@ const FixtureDialog = lazy(() => import('./app/FixtureDialog'))
 const SymbolSearchPanel = lazy(() => import('./app/SymbolSearchPanel'))
 
 import { fixtureSampleRectFitsPage, fixtureSamplesMatch } from './app/fixtureSampleMatch'
+import { appendFixtures } from './app/fixtureAppend'
 
 declare global {
   interface Window {
     __karu?: {
       getExternalSendRecords: typeof getExternalSendRecords
       getCountFixtures(): import('./core/countFixtures').CountFixture[]
+      addFixturePresets(field: string): Promise<number>
       snapVertexProbe(pageIndex: number, count?: number): unknown
       vectorProbe(pageIndex: number): Promise<{
         kind: import('./core/vectorPaths').PageKind; segmentCount: number; truncated: boolean
@@ -682,7 +685,8 @@ export default function App() {
   useEffect(() => {
     const onError = (event: ErrorEvent) => {
       console.error('アプリで予期しないエラーが発生しました。', event.error ?? event.message)
-      setRuntimeError('画面の処理で問題が起きました。書き込みは保持されています。')
+      const detail = String(event.error?.message ?? event.message ?? '').trim().slice(0, 120)
+      setRuntimeError('画面の処理で問題が起きました。書き込みは保持されています。' + (detail ? `（詳細: ${detail}）` : ''))
       if (openingRef.current) {
         finishOpening(openingRef.current.id)
         setError('PDFの表示中に問題が起きました。開き直してください。')
@@ -690,7 +694,8 @@ export default function App() {
     }
     const onUnhandledRejection = (event: PromiseRejectionEvent) => {
       console.error('未処理の Promise エラーが発生しました。', event.reason)
-      setRuntimeError('画面の処理で問題が起きました。書き込みは保持されています。')
+      const detail = String(event.reason?.message ?? String(event.reason)).trim().slice(0, 120)
+      setRuntimeError('画面の処理で問題が起きました。書き込みは保持されています。' + (detail ? `（詳細: ${detail}）` : ''))
       if (openingRef.current) {
         finishOpening(openingRef.current.id)
         setError('PDFの表示中に問題が起きました。開き直してください。')
@@ -1183,7 +1188,12 @@ export default function App() {
     if (tab === 'search' && focusSearch) setFocusSearchVersion((value) => value + 1)
     refreshTabs()
   }, [panels, refreshTabs, updatePanels])
-  const [fixtureEdit, setFixtureEdit] = useState<{ session: DocumentSession; id: string } | null>(null)
+  const [fixtureEdit, setFixtureEdit] = useState<{
+    session: DocumentSession; id: string; initialSection?: 'rc'
+  } | null>(null)
+  const fixtureEditStore = fixtureEdit?.session.annotationStore
+  const fixtureEditPreviews = useMemo(() => fixtureEditStore
+    ? createFixturePreviews(fixtureEditStore) : undefined, [fixtureEditStore])
   useEffect(() => {
     const open = () => openSidePanel('fixtures', false)
     window.addEventListener('karu-pdf:open-fixtures', open)
@@ -1706,6 +1716,25 @@ export default function App() {
     pool.extractVectors = options => { vectorExtractionRequests.current++; return extractVectors.call(pool, options) }
     window.__karu = {
       getCountFixtures: () => (activeRef.current?.annotationStore.getCountFixtures() ?? []).map(f => structuredClone(f)),
+      addFixturePresets: async field => {
+        const session = activeRef.current
+        if (!session) throw new Error('PDFを開いてください。')
+        const { FIXTURE_PRESETS } = await import('./core/countFixtures')
+        if (!Object.hasOwn(FIXTURE_PRESETS, field)) {
+          throw new Error(`見本の分野がありません: ${field}`)
+        }
+        const { ensureSessionFixtures } = await import('./app/documentModel')
+        await ensureSessionFixtures(session, pool)
+        const store = session.annotationStore
+        const existing = store.getCountFixtures()
+        // Same as the former 分野の一式 tab: each preset goes through fixtureFromPreset (standard condition candidates, styles).
+        const { fixtureFromPreset } = await import('./core/quantityMaster')
+        const available = [...existing], additions = FIXTURE_PRESETS[field].map(item => { const f = fixtureFromPreset(item, available); available.push(f); return f })
+        const next = appendFixtures(existing, additions)
+        const added = next.length - existing.length
+        if (added) store.setCountFixtures(next)
+        return added
+      },
       vectorProbe: async pageIndex => {
         const session = tabs.active, size = session?.pageSizes[pageIndex]
         if (!session || !size) throw Error('No page')
@@ -2196,6 +2225,16 @@ export default function App() {
         key={`${fixtureEdit.session.docId}:${fixtureEdit.id}`}
         initial={structuredClone(fixtureEdit.session.annotationStore.getCountFixture(fixtureEdit.id)!)}
         fixtures={fixtureEdit.session.annotationStore.getCountFixtures()} editing hasMarks={fixtureEdit.session.annotationStore.fixtureMarkCount(fixtureEdit.id) > 0}
+        initialSection={fixtureEdit.initialSection}
+        dimensionMarkCounts={draft => fixtureEdit.session.annotationStore.fixtureDimensionMarks(draft)}
+        {...(fixtureEditPreviews ?? {})}
+        onOpenFixture={(id, section) => {
+          const session = fixtureEdit.session
+          if (session.editRestriction || !session.annotationStore.fixturesReady) return
+          const fixture = session.annotationStore.getCountFixture(id)
+          if (!fixture || fixture.link) return
+          setFixtureEdit({ session, id, initialSection: section })
+        }}
         onClose={() => setFixtureEdit(null)} onSave={fixture => {
           const store = fixtureEdit.session.annotationStore
           store.setCountFixtures(store.getCountFixtures().map(f => f.id === fixture.id ? fixture : f)); setFixtureEdit(null)

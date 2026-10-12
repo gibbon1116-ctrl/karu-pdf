@@ -150,7 +150,7 @@ it('caches condition subtotals and includes area/count conditions with unset key
   expect(index.entries('cv')).toHaveLength(4)
   expect(index.total('pf')).toBe(9)
   const totals = index.byCondition('cv')
-  expect(totals.get('ラック')).toEqual({ plan: 44, rise: 4, slack: 0, other: 0, total: 48, annotationIds: new Set(['a']) })
+  expect(totals.get('ラック')).toEqual({ plan: 44, rise: 4, slack: 0, other: 0, total: 48, raw: 48, annotationIds: new Set(['a']) })
   expect(totals.get('管内')?.rise).toBe(6)
   expect(totals.get('')?.slack).toBe(2)
   expect(index.byCondition('area').get('屋外')?.other).toBe(20)

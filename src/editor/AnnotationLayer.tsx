@@ -1,5 +1,5 @@
 import { routeMembers, conditionSuffix } from '../core/quantity'
-import { fixtureCode, fixtureDrawingCode } from '../core/countFixtures'
+import { fixtureCode, fixtureDrawingCode, fixtureLabelCode } from '../core/countFixtures'
 import { quantityMethod } from '../core/countFixtures'
 import { constrainLinePoint, arrowHeadSize } from '../core/lineGeometry'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
@@ -273,7 +273,8 @@ export function AnnotationLayer(props: Props) {
     regionDrag.current = null; regionDraft.current?.setAttribute('display', 'none')
   }
   useEffect(() => { clearRegionDrag(); if (drawingRegion) measurement.cancel(); return clearRegionDrag }, [drawingRegion])
-  const measurement = useMeasurementInteraction({ svg: svgRef, store: props.store, pageIndex: props.pageIndex, tool: props.tool, quantityItem: props.store.getCountFixture(props.store.selectedFixtureId), defaults: props.formatDefaults, select: props.onSelect, zoom: props.zoom, version, onStatus: props.onStatus })
+  const selectedQuantityItem = props.store.getCountFixture(props.store.selectedFixtureId)
+  const measurement = useMeasurementInteraction({ svg: svgRef, store: props.store, pageIndex: props.pageIndex, tool: props.tool, quantityItem: selectedQuantityItem?.link ? undefined : selectedQuantityItem, defaults: props.formatDefaults, select: props.onSelect, zoom: props.zoom, version, onStatus: props.onStatus })
   const draftCloudRef = useRef<SVGPathElement>(null)
   const draftRectRef = useRef<SVGRectElement>(null)
   const draftLineRef = useRef<SVGLineElement>(null)
@@ -756,6 +757,7 @@ export function AnnotationLayer(props: Props) {
     }
     if (operation.mode === 'symbol') {
       const fixture = props.tool === 'count' ? props.store.getCountFixture(props.store.selectedFixtureId) : undefined
+      if (fixture?.link) { props.onStatus('連動の項目は図面に拾いません（ほかの項目の拾いから計算します）'); return }
       if (fixture && quantityMethod(fixture) !== 'click') { props.onStatus('この種別の拾いは、まだ使えません'); return }
       if (props.tool === 'count' && !fixture) { props.onStatus('数量拾いの一覧で項目を選んでください'); window.dispatchEvent(new CustomEvent('karu-pdf:open-fixtures')); return }
       const format = props.formatDefaults[props.tool === 'count' ? 'count' : 'symbol']
@@ -881,7 +883,7 @@ export function AnnotationLayer(props: Props) {
           <circle cx={(x0+x1)/2} cy={(y0+y1)/2} r={(x1-x0)*.45} fill="white" stroke={color(issueColor(annotation.issue, annotation.color))} strokeWidth={(x1-x0)*.06} />
           <text x={(x0+x1)/2} y={(y0+y1)/2 + issueFontSize(annotation.issue.number, x1-x0)*.3} textAnchor="middle" fontFamily="KaruBIZUDGothic" fontSize={issueFontSize(annotation.issue.number, x1-x0)}>{annotation.issue.number}</text>
         </g>}
-        {visible && annotation.measure && annotation.vertices && <MeasurementShape points={annotation.vertices} kind={annotation.measure.kind} text={annotation.quantity ? props.store.quantityText(annotation) : annotation.text} fontSize={annotation.fontSize} color={color(annotation.color)} width={annotation.borderWidth} opacity={annotation.opacity} dash={annotation.quantityDash} holes={annotation.quantity ? annotation.quantity.holes : annotation.measure.holes} holesId={`measurement-holes-${props.docId}-${annotation.id}`} showText={!annotation.quantity || props.store.showQuantityValues} showFill={!selectedOverlay} routeComposition={annotation.quantity?.extra?.length ? { count: annotation.quantity.extra.length + 1, title: routeMembers(annotation.quantity).map(e => { const f = props.store.getCountFixture(e.itemId); return (f ? fixtureCode(f) : e.itemId) + (e.count === 1 ? '' : '×' + e.count) + conditionSuffix(e.cond) }).join('、') } : undefined} haloWidth={selected && annotation.opacity >= .99 ? annotation.borderWidth + 4 / Math.max(.01, props.zoom * CSS_PX_PER_PT) : undefined} />}
+        {visible && annotation.measure && annotation.vertices && <MeasurementShape points={annotation.vertices} kind={annotation.measure.kind} text={annotation.quantity ? props.store.quantityText(annotation) : annotation.text} fontSize={annotation.fontSize} color={color(annotation.color)} width={annotation.borderWidth} opacity={annotation.opacity} dash={annotation.quantityDash} holes={annotation.quantity ? annotation.quantity.holes : annotation.measure.holes} holesId={`measurement-holes-${props.docId}-${annotation.id}`} showText={!annotation.quantity || props.store.showQuantityValues} showFill={!selectedOverlay} routeComposition={annotation.quantity?.extra?.length ? { count: annotation.quantity.extra.length + 1, title: routeMembers(annotation.quantity).map(e => { const f = props.store.getCountFixture(e.itemId); return (f ? fixtureLabelCode(f) : e.itemId) + (e.count === 1 ? '' : '×' + e.count) + conditionSuffix(e.cond) }).join('、') } : undefined} haloWidth={selected && annotation.opacity >= .99 ? annotation.borderWidth + 4 / Math.max(.01, props.zoom * CSS_PX_PER_PT) : undefined} />}
         {visible && annotation.kind === 'square' && <rect className="annotation-square" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && annotation.kind === 'circle' && <ellipse className="annotation-shape" cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} rx={(x1 - x0) / 2} ry={(y1 - y0) / 2} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && line && <>

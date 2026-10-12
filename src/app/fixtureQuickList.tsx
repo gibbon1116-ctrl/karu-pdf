@@ -4,6 +4,8 @@ import { countFixtureId } from '../core/counts'
 import type { AnnotationStore } from '../editor/AnnotationStore'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 import { groupFixtures } from './fixtureOrder'
+import FixtureHoverCard, { useFixtureHover } from './FixtureHoverCard'
+import { linkRelations, type FixtureLinkRelations } from './linkRelations'
 
 export function FixtureSwatch({ fixture }: { fixture: CountFixture }) {
   return quantityKind(fixture) === 'count'
@@ -28,14 +30,23 @@ export function adjacentPickupFixture(store: AnnotationStore, direction: -1 | 1)
   return index < 0 ? undefined : items[index + direction]
 }
 
-export function RecentFixtures({ fixtures, ids, limit = 6, onSelect }: {
+export function RecentFixtures({ fixtures, ids, limit = 6, onSelect, relations: suppliedRelations }: {
   fixtures: readonly CountFixture[]; ids: readonly string[]; limit?: number; onSelect(id: string): void
+  relations?: FixtureLinkRelations
 }) {
+  const relations = useMemo(() => suppliedRelations ?? linkRelations(fixtures), [fixtures, suppliedRelations])
+  const { hover, show, hide } = useFixtureHover()
   const recent = ids.flatMap(id => { const fixture = fixtures.find(f => f.id === id); return fixture ? [fixture] : [] }).slice(0, limit)
   if (!recent.length) return null
   return <div className="fixture-recent" role="group" aria-label="最近使った項目"><span>最近</span>{recent.map(f =>
-    <button key={f.id} type="button" title={f.name} aria-label={`最近の${fixtureCode(f)} ${f.name}`} onClick={() => onSelect(f.id)}><FixtureSwatch fixture={f} /><span>{fixtureCode(f)}</span></button>
-  )}</div>
+    <button key={f.id} type="button" title={f.name} aria-label={`最近の${fixtureCode(f)} ${f.name}`}
+      onPointerEnter={event => show(f, event.currentTarget.getBoundingClientRect())}
+      onPointerLeave={hide}
+      onClick={() => { hide(); onSelect(f.id) }}><FixtureSwatch fixture={f} /><span>{fixtureCode(f)}</span></button>
+  )}
+    {hover && <FixtureHoverCard fixture={hover.fixture} fixtures={fixtures}
+      anchorRect={hover.anchorRect} relations={relations} />}
+  </div>
 }
 
 export default function FixtureQuickList({ fixtures, recentIds, onSelect, onClose, onDismiss }: {
@@ -43,6 +54,8 @@ export default function FixtureQuickList({ fixtures, recentIds, onSelect, onClos
 }) {
   const [search, setSearch] = useState(''), [active, setActive] = useState(0)
   const input = useRef<HTMLInputElement>(null), root = useRef<HTMLDivElement>(null)
+  const relations = useMemo(() => linkRelations(fixtures), [fixtures])
+  const { hover, show, hide } = useFixtureHover()
   const rows = useMemo(() => {
     const matches = (f: CountFixture) => `${fixtureCode(f)} ${f.name}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())
     const recent = recentIds.flatMap(id => { const f = fixtures.find(item => item.id === id); return f && matches(f) ? [{ fixture: f, heading: '最近', key: `recent-${id}` }] : [] })
@@ -53,6 +66,7 @@ export default function FixtureQuickList({ fixtures, recentIds, onSelect, onClos
   useEffect(() => { input.current?.focus() }, [])
   useEffect(() => { root.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' }) }, [active])
   return <div ref={root} className="fixture-quick-list" role="dialog" aria-label="項目を選ぶ" onKeyDown={event => {
+    hide()
     event.stopPropagation()
     if (event.key === 'Escape') { event.preventDefault(); onDismiss() }
     else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -61,16 +75,23 @@ export default function FixtureQuickList({ fixtures, recentIds, onSelect, onClos
       event.preventDefault(); const row = visible[active]; if (row) { onSelect(row.fixture.id); onClose() }
     }
   }}>
-    <input ref={input} type="search" aria-label="項目を検索" value={search} onChange={event => { setSearch(event.currentTarget.value); setActive(0) }}
+    <input ref={input} type="search" aria-label="項目を検索" value={search} onChange={event => { hide(); setSearch(event.currentTarget.value); setActive(0) }}
       aria-controls="pickup-quick-options" aria-activedescendant={visible[active] ? `pickup-option-${active}` : undefined} />
     <div className="fixture-quick-options" id="pickup-quick-options" role="listbox" aria-label="数量の項目">
       {visible.map((row, index) => <div key={row.key}>
         {(index === 0 || visible[index - 1].heading !== row.heading) && <div className="fixture-quick-heading">{row.heading}</div>}
-        <button id={`pickup-option-${index}`} type="button" role="option" aria-selected={index === active} data-active={index === active} title={`${fixtureCode(row.fixture)} ${row.fixture.name}`} onMouseEnter={() => setActive(index)}
-          onClick={() => { onSelect(row.fixture.id); onClose() }}><FixtureSwatch fixture={row.fixture} /><span>{fixtureCode(row.fixture)} {row.fixture.name}</span></button>
+        <button id={`pickup-option-${index}`} type="button" role="option" aria-selected={index === active} data-active={index === active} title={`${fixtureCode(row.fixture)} ${row.fixture.name}`}
+          onPointerEnter={event => {
+            setActive(index)
+            show(row.fixture, event.currentTarget.getBoundingClientRect())
+          }}
+          onPointerLeave={hide}
+          onClick={() => { hide(); onSelect(row.fixture.id); onClose() }}><FixtureSwatch fixture={row.fixture} /><span>{fixtureCode(row.fixture)} {row.fixture.name}</span></button>
       </div>)}
     </div>
     {!visible.length && <p>該当する項目がありません</p>}
     {rows.length > 200 && <p>検索で絞り込んでください</p>}
+    {hover && <FixtureHoverCard fixture={hover.fixture} fixtures={fixtures}
+      anchorRect={hover.anchorRect} relations={relations} />}
   </div>
 }

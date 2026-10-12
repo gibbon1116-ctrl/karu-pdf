@@ -18,9 +18,26 @@ export interface RouteConditions {
 export interface Rise { m: number; at?: number }
 export interface QuantityOpening { itemId?: string; widthM?: number; heightM?: number; count: number }
 export type OpeningSize = (itemId: string) => { widthM: number; heightM: number } | undefined
+export interface RouteExtra {
+  itemId: string
+  count: number
+  cond?: RouteConditions
+  perM?: number
+}
+export function validRoutePerM(value: unknown): value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value)
+    || value <= 0 || value > 10000) return false
+  const scaled = Math.round(value * 1000)
+  return scaled >= 1
+    && Math.abs(value - scaled / 1000)
+      <= Number.EPSILON * Math.max(1, Math.abs(value)) * 4
+}
+export function routePerMSuffix(perM?: number): string {
+  return perM === undefined || perM === 1 ? '' : ` ×${perM.toFixed(3)}/m`
+}
 export interface QuantityMark {
   version: 1; id: string; itemId: string; method: Exclude<QuantityMethod, 'click'>
-  floor?: string; room?: string; count?: number; cond?: RouteConditions; extra?: Array<{ itemId: string; count: number; cond?: RouteConditions }>
+  floor?: string; room?: string; count?: number; cond?: RouteConditions; extra?: RouteExtra[]
   rises?: Rise[]; condition?: string
   addM?: number; slackM?: number; heightM?: number; widthM?: number; depthM?: number
   holes?: Point[][]
@@ -45,6 +62,7 @@ export function validQuantityOpenings(value: unknown): value is QuantityOpening[
 }
 function quantityJson(value: unknown): string {
   const raw = JSON.stringify(value)
+  // 経路の 8,000 字の上限は呼び出し側（読込・店の検査）で扱う。ここは全体の上限だけ。
   if (raw.length > MAX_QUANTITY_MARK_LENGTH) throw new Error('数量拾いの保存データが文字数の上限を超えています。')
   return raw
 }
@@ -104,7 +122,7 @@ export function riseTotal(rises: readonly Rise[]): number {
   // The old addM parser accepted arbitrary precision; preserve its singleton exactly.
   return rises.length === 1 ? rises[0].m : Number(rises.reduce((n, r) => n + r.m, 0).toFixed(10))
 }
-export function routeMembers(mark: QuantityMark): Array<{ itemId: string; count: number; cond: RouteConditions }> {
+export function routeMembers(mark: QuantityMark): Array<RouteExtra & { cond: RouteConditions }> {
   return [{ itemId: mark.itemId, count: mark.count ?? 1, cond: mark.cond ?? {} }, ...(mark.extra ?? []).map(e => ({ ...e, cond: e.cond ?? {} }))]
 }
 export function riseCondition(cond: RouteConditions, i: number): PartCondition { return Array.isArray(cond.rise) ? cond.rise[i] : cond.rise }
@@ -174,7 +192,14 @@ export function parseQuantityMark(raw: string | null): QuantityMark | null {
           if (!e || typeof e.itemId !== 'string' || !e.itemId || e.itemId.length > 80 || ids.has(e.itemId) || !validRouteCount(e.count) || !readConditions(e)) return null
           ids.add(e.itemId)
         }
-        if (v.extra.length) result.extra = v.extra.map((e: { itemId: string; count: number; cond?: unknown; scope?: unknown }) => ({ itemId: e.itemId, count: e.count, cond: readConditions(e)! }))
+        if (v.extra.length) result.extra = v.extra.map((e: {
+          itemId: string; count: number; cond?: unknown; scope?: unknown; perM?: unknown
+        }) => ({
+          itemId: e.itemId,
+          count: e.count,
+          cond: readConditions(e)!,
+          ...(validRoutePerM(e.perM) ? { perM: e.perM } : {}),
+        }))
       }
     }
     if (v.method !== 'polyline' && v.condition !== undefined) {
@@ -212,7 +237,22 @@ export function serializeQuantityMark(mark: QuantityMark): string {
   if (mark.method !== 'polyline') return quantityJson(base)
   const cond = supplied === undefined ? conditionsFromScope(legacyScope) : supplied
   if (supplied !== undefined && !validRouteConditions(supplied) || supplied === undefined && legacyScope !== undefined && !validRouteScope(legacyScope)) throw new Error('経路の施工条件が不正です。')
+  if (mark.count !== undefined && !validRouteCount(mark.count)) {
+    throw new Error('経路の条数が不正です。')
+  }
+  if (extra !== undefined && (!Array.isArray(extra) || extra.length > 10)) {
+    throw new Error('経路の追加項目は10件までです。')
+  }
+  const ids = new Set([mark.itemId])
   for (const e of extra ?? []) {
+    if (!e || typeof e.itemId !== 'string' || !e.itemId
+      || e.itemId.length > 80 || ids.has(e.itemId) || !validRouteCount(e.count)) {
+      throw new Error('経路の追加項目・条数が不正です。')
+    }
+    ids.add(e.itemId)
+    if (e.perM !== undefined && !validRoutePerM(e.perM)) {
+      throw new Error('1m あたりは0より大きく10000以下、小数3桁までで入れてください。')
+    }
     const legacy = e as { scope?: RouteScope }
     if (e.cond !== undefined && !validRouteConditions(e.cond) || e.cond === undefined && legacy.scope !== undefined && !validRouteScope(legacy.scope)) throw new Error('経路の施工条件が不正です。')
   }
@@ -223,7 +263,13 @@ export function serializeQuantityMark(mark: QuantityMark): string {
   return quantityJson({ ...base, ...(rises !== undefined || mark.addM !== undefined ? { addM: total } : {}),
     // A zero singleton needs its array: addM=0 alone cannot preserve an explicit rise.
     ...(rises && (rises.length !== 1 || rises[0].at !== undefined || rises[0].m === 0) ? { rises } : {}),
-    cond: wireConditions(cond), scope: scope(cond), extra: extra?.map(e => ({ itemId: e.itemId, count: e.count, cond: wireConditions(e.cond ?? conditionsFromScope((e as { scope?: RouteScope }).scope)), scope: scope(e.cond ?? conditionsFromScope((e as { scope?: RouteScope }).scope)) })) })
+    cond: wireConditions(cond), scope: scope(cond), extra: extra?.map(e => ({
+      itemId: e.itemId,
+      count: e.count,
+      ...(e.perM !== undefined ? { perM: e.perM } : {}),
+      cond: wireConditions(e.cond ?? conditionsFromScope((e as { scope?: RouteScope }).scope)),
+      scope: scope(e.cond ?? conditionsFromScope((e as { scope?: RouteScope }).scope)),
+    })) })
 }
 export function validRouteCount(n: unknown): n is number { return typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 99 }
 export function quantityPoints(method: QuantityMark['method']): 'polyline' | 'polygon' {
@@ -245,7 +291,7 @@ export function quantityValue(points: readonly Point[], mmPerPoint: number, mark
   }
 }
 const number = (n: number) => n.toLocaleString('ja-JP', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-export function quantityLabel(points: readonly Point[], mmPerPoint: number, mark: QuantityMark & { scope?: RouteScope }, code: string, showCode: boolean, extraCode: (id: string) => string = id => id, openingSize?: OpeningSize): string {
+export function quantityLabel(points: readonly Point[], mmPerPoint: number, mark: QuantityMark & { scope?: RouteScope }, code: string, showCode: boolean, extraCode: (id: string) => string = id => id, openingSize?: OpeningSize, routeNote: (id: string) => string = () => ''): string {
   if (mark.cond === undefined && mark.scope !== undefined) mark = { ...mark, cond: conditionsFromScope(mark.scope) }
   const length = number(polylineLength(points) * mmPerPoint / 1000)
   const area = number(polygonArea(points) * mmPerPoint ** 2 / 1e6)
@@ -264,8 +310,14 @@ export function quantityLabel(points: readonly Point[], mmPerPoint: number, mark
     case 'lengthWidthDepth': label = `${length}×W${dimension('widthM')}×D${dimension('depthM')}=${value} m³`; break
   }
   if (mark.method === 'polyline' && ((mark.count ?? 1) !== 1 || mark.extra?.length)) {
-    const codes = routeMembers(mark).map((e, i) => (i === 0 ? code : extraCode(e.itemId)) + conditionSuffix(e.cond, true) + (e.count === 1 ? '' : '×' + e.count)).join(', ')
-    return showCode && codes ? codes + '  ' + label : label
+    const codes = routeMembers(mark).map((e, i) =>
+      (i === 0 ? code : extraCode(e.itemId))
+      + conditionSuffix(e.cond, true)
+      + (e.count === 1 ? '' : '×' + e.count)
+      + routePerMSuffix(e.perM)).join(', ')
+    const notes = routeMembers(mark).map(e => routeNote(e.itemId)).filter(Boolean).join(' ／ ')
+    return (showCode && codes ? codes + '  ' + label : label)
+      + (notes ? '；' + notes : '')
   }
   return showCode && code ? `${code}${mark.method === 'polyline' ? conditionSuffix(mark.cond, true) : ''} ${label}` : label
 }

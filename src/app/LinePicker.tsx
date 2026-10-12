@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { fixtureCode, nextCountStyle, nextQuantityLineStyle, quantityMethod, type CountFixture } from '../core/countFixtures'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { fixtureCode, fixtureIdentity, nextCountStyle, nextQuantityLineStyle, quantityMethod, type CountFixture, type FixturePreset } from '../core/countFixtures'
 import { routeMembers, conditionScope, conditionSuffix } from '../core/quantity'
-import type { MasterEntry } from '../core/quantityMaster'
+
+type CatalogLineCandidate = { key: string; label: string; preset: FixturePreset }
 import type { AnnotationStore, EditableAnnotation } from '../editor/AnnotationStore'
 import { QuantitySwatch } from '../editor/countMarkers'
 import { groupFixtures } from './fixtureOrder'
+import FixtureHoverCard, { useFixtureHover } from './FixtureHoverCard'
+import { linkRelations } from './linkRelations'
 
 // Scope is a derived display projection for PickupBar (which remains unchanged in 07a).
 export const routeEntries = (a: EditableAnnotation) => routeMembers(a.quantity!).map(e => ({ ...e, scope: conditionScope(e.cond) }))
@@ -36,10 +39,14 @@ export function changeRouteCount(store: AnnotationStore, a: EditableAnnotation, 
 
 export default function LinePicker({ store, annotation, onClose }: { store: AnnotationStore; annotation: EditableAnnotation; onClose(): void }) {
   const root = useRef<HTMLDivElement>(null), search = useRef<HTMLInputElement>(null)
-  const [query, setQuery] = useState(''), [master, setMaster] = useState<MasterEntry[]>([]), [active, setActive] = useState(-1), [error, setError] = useState('')
+  const [query, setQuery] = useState(''), [master, setMaster] = useState<CatalogLineCandidate[]>([]), [active, setActive] = useState(-1), [error, setError] = useState('')
+  const version = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const fixtures = store.getCountFixtures(), entries = routeEntries(annotation), full = entries.length >= 11
+  const relations = useMemo(() => linkRelations(fixtures), [fixtures])
+  const { hover, show, hide } = useFixtureHover()
   const matches = (f: CountFixture) => `${fixtureCode(f)} ${f.name} ${f.category}`.normalize('NFKC').toLocaleLowerCase().includes(query.trim().normalize('NFKC').toLocaleLowerCase())
-  const lines = fixtures.filter(f => quantityMethod(f) === 'polyline')
+  const lines = fixtures.filter(f => !f.link
+    && (quantityMethod(f) === 'polyline' || quantityMethod(f) === 'lengthWidthDepth'))
   const recent = store.recentFixtureIds.map(id => lines.find(f => f.id === id)).filter((f): f is CountFixture => !!f && matches(f))
   const groups = groupFixtures(lines.filter(matches))
   useEffect(() => {
@@ -50,26 +57,59 @@ export default function LinePicker({ store, annotation, onClose }: { store: Anno
     return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape, true) }
   }, [onClose])
   useEffect(() => {
-    let alive = true; setMaster([]); setActive(-1)
-    if (query.trim()) void import('../core/quantityMaster').then(m => {
-      const result = m.searchQuantityMaster(query, Number.MAX_SAFE_INTEGER).entries.filter(e => e.kind === 'length' && !fixtures.some(f => quantityMethod(f) === 'polyline' && f.code === e.code && (f.spec ?? '') === (e.spec ?? '') && f.name === e.name)).slice(0, 30)
+    let alive = true; setMaster([]); setActive(-1); setError('')
+    if (query.trim()) void import('../core/catalog').then(catalog => {
+      const existing = new Set(fixtures.map(fixtureIdentity))
+      const seen = new Set<string>()
+      const result: CatalogLineCandidate[] = []
+      for (const { item, options } of catalog.searchCatalog(query, Number.MAX_SAFE_INTEGER).results) {
+        for (const option of options) {
+          if (option.method !== 'polyline' && option.method !== 'lengthWidthDepth') continue
+          const preset = catalog.catalogPresets(item, { options: [option.key] })[0]
+          if (!preset) continue
+          const identity = fixtureIdentity(preset)
+          if (existing.has(identity) || seen.has(identity)) continue
+          seen.add(identity)
+          result.push({
+            key: JSON.stringify([item.key, option.key]),
+            label: option.label,
+            preset,
+          })
+          if (result.length === 30) break
+        }
+        if (result.length === 30) break
+      }
       if (alive) setMaster(result)
     }).catch(() => { if (alive) setError('標準マスタを読み込めませんでした') })
     return () => { alive = false }
-  }, [query, store, annotation])
-  const add = (candidate: CountFixture | MasterEntry) => {
+  }, [query, store, annotation, version])
+  const add = (candidate: CountFixture | CatalogLineCandidate) => {
+    hide()
     if (full) return
     try {
       let f: CountFixture, newFixtures: CountFixture[] = []
       if ('id' in candidate) f = candidate
       else {
         const appearance = nextQuantityLineStyle(fixtures)
-        const { code, spec, name, category, kind, method, defaults, aggregation, conditions } = candidate
-        f = { id: crypto.randomUUID(), code, spec, name, category, kind, method, defaults, aggregation, conditions: [...(conditions ?? [])], order: fixtures.reduce((n, f) => Math.max(n, f.order + 1), 0), style: { ...nextCountStyle([]), color: appearance.color }, line: appearance.line }
+        const preset = structuredClone(candidate.preset)
+        f = {
+          ...preset,
+          conditions: [...(preset.conditions ?? [])],
+          id: crypto.randomUUID(),
+          order: fixtures.reduce((n, fixture) => Math.max(n, fixture.order + 1), 0),
+          style: { ...nextCountStyle([]), color: appearance.color },
+          line: appearance.line,
+        }
         newFixtures = [f]
       }
       if (entries.some(e => e.itemId === f.id)) return
-      const next = [...entries, { itemId: f.id, count: 1, cond: structuredClone(store.lastRouteConditions.get(f.id) ?? f.routeDefaults ?? {}) }]
+      const remembered = structuredClone(
+        store.lastRouteConditions.get(f.id) ?? f.routeDefaults ?? {},
+      )
+      const cond = quantityMethod(f) === 'lengthWidthDepth'
+        ? { ...remembered, rise: null, slack: null }
+        : remembered
+      const next = [...entries, { itemId: f.id, count: 1, cond }]
       if (newFixtures.length) store.addFixturesAndSetRouteItems(newFixtures, annotation.id, next)
       else store.setRouteItems(annotation.id, next)
       if (!store.get(annotation.id)?.quantity?.extra?.some(e => e.itemId === f.id)) return
@@ -78,13 +118,26 @@ export default function LinePicker({ store, annotation, onClose }: { store: Anno
       announceRoute(store, annotation.id, f.id, `${fixtureCode(f)} を足しました（1条・${conditionSuffix(next[next.length - 1].cond).slice(1, -1) || '未設定'}）`); onClose()
     } catch (reason) { setError(String(reason)) }
   }
-  const candidates: Array<CountFixture | MasterEntry> = [...recent, ...groups.flatMap(g => g.items), ...master].filter(f => !('id' in f) || !entries.some(e => e.itemId === f.id))
+  const candidates: Array<CountFixture | CatalogLineCandidate> = [...recent, ...groups.flatMap(g => g.items), ...master].filter(f => !('id' in f) || !entries.some(e => e.itemId === f.id))
   useEffect(() => { root.current?.querySelector('.active')?.scrollIntoView({ block: 'nearest' }) }, [active])
   let index = 0
-  const button = (f: CountFixture | MasterEntry, prefix: string) => {
-    const added = 'id' in f && entries.some(e => e.itemId === f.id), i = added ? -1 : index++, code = fixtureCode(f)
-    return <button key={prefix + ('id' in f ? f.id : f.key)} type="button" aria-label={code + (added ? ' 追加済み' : '')} disabled={full || added} className={active === i ? 'active' : ''} onClick={() => add(f)}>
-      {'style' in f && <QuantitySwatch fixture={f} />}<strong>{code}</strong><small title={f.name}>{f.name}</small>{added && <span>追加済み</span>}
+  const button = (f: CountFixture | CatalogLineCandidate, prefix: string) => {
+    const added = 'id' in f && entries.some(e => e.itemId === f.id)
+    const i = added ? -1 : index++
+    const code = 'id' in f ? fixtureCode(f) : f.label
+    const name = 'id' in f ? f.name : f.preset.name
+    return <button key={prefix + ('id' in f ? f.id : f.key)} type="button" aria-label={code + (added ? ' 追加済み' : '')} disabled={full || added} className={active === i ? 'active' : ''}
+      onPointerEnter={event => {
+        const fixture: CountFixture = 'id' in f ? f : {
+          ...f.preset,
+          id: `catalog:${f.key}`,
+          order: -1,
+          style: nextCountStyle([]),
+        }
+        show(fixture, event.currentTarget.getBoundingClientRect())
+      }}
+      onPointerLeave={hide} onClick={() => add(f)}>
+      {'style' in f && <QuantitySwatch fixture={f} />}<strong>{code}</strong><small title={name}>{name}</small>{added && <span>追加済み</span>}
     </button>
   }
   return <div ref={root} role="dialog" aria-label="線要素を追加" className="line-picker" onKeyDown={e => {
@@ -92,7 +145,7 @@ export default function LinePicker({ store, annotation, onClose }: { store: Anno
     // Enter right after typing adds the first match, so the common case is type → Enter.
     if (e.key === 'Enter' && candidates[Math.max(0, active)]) { e.preventDefault(); add(candidates[Math.max(0, active)]) }
   }}>
-    <input ref={search} aria-label="線要素を検索" value={query} onChange={e => setQuery(e.currentTarget.value)} />
+    <input ref={search} aria-label="線要素を検索" value={query} onChange={e => { hide(); setQuery(e.currentTarget.value) }} />
     {full && <p role="status">これ以上足せません（最大 11 項目）</p>}
     {error && <p role="alert">{error}</p>}
     <div className="line-picker-results">
@@ -100,5 +153,7 @@ export default function LinePicker({ store, annotation, onClose }: { store: Anno
       <section><h4>この PDF の項目</h4>{groups.map(g => <div key={g.category}><h5>{g.category}</h5>{g.items.map(f => button(f, 'pdf'))}</div>)}</section>
       {query.trim() && <section><h4>標準マスタ</h4>{master.map(f => button(f, 'master'))}</section>}
     </div>
+    {hover && <FixtureHoverCard fixture={hover.fixture} fixtures={fixtures}
+      anchorRect={hover.anchorRect} relations={relations} />}
   </div>
 }

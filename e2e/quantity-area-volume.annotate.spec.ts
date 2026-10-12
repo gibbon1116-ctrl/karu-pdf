@@ -30,13 +30,7 @@ const names = {
 }
 async function addPresets(page: Page) {
  await page.getByRole('button', { name: '数量拾い', exact: true }).click();
- await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
- await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
- const dialog = page.getByRole('dialog', { name: '標準マスタから追加' })
- await dialog.getByLabel('見本の分野').selectOption('仮設・土工')
- await expect(dialog.getByText('仮設／内部足場 内部足場（囲む）（面積・m²）', { exact: true })).toBeVisible()
- await expect(dialog.getByText('土工／根切り 根切り（囲む×深さ）（体積・m³）', { exact: true })).toBeVisible()
- await dialog.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
+ await page.evaluate(field => window.__karu!.addFixturePresets(field), '仮設・土工')
  await page.getByRole('button', { name: names.internal, exact: true }).click()
  await click(page,100,120)
  const scale = page.getByRole('dialog', { name: '縮尺の設定（1 ページ）' })

@@ -60,6 +60,11 @@ test('two CV routes split into two conditions whose sum equals the material tota
   await expect(material(page).locator('.quantity-table-fixed-5 button')).toHaveText('40.00')
   await expect(conditionRow(page, 'ケーブルラック配線').locator('.quantity-table-fixed-5 button')).toHaveText('15.00')
   await expect(conditionRow(page, '管内配線').locator('.quantity-table-fixed-5 button')).toHaveText('25.00')
+  for (const condition of ['ケーブルラック配線', '管内配線']) {
+    await expect(conditionRow(page, condition).locator('.quantity-table-summary')).toBeEmpty()
+    await expect(conditionRow(page, condition).locator('.quantity-table-summary')).toHaveAttribute('title', '')
+    await expect(conditionRow(page, condition).locator('.quantity-table-breakdown')).toHaveCount(0)
+  }
   await expect(conditionRow(page, 'ケーブルラック配線').locator('.quantity-table-parts')).toHaveText('平面 10.0 ／ 立上り・立下り 5.0')
   const heights = await rows.evaluateAll(elements => elements.map(e => e.getBoundingClientRect().height))
   expect(heights).toEqual([32, 32])

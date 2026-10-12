@@ -35,13 +35,15 @@ const warning = (dialog: Locator) => dialog.getByRole('status').filter({ hasText
 
 test('six length presets and three successive suggestions have distinct appearances, with collision warnings retained', async ({ page }) => {
   await open(page)
-  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
-  await page.getByRole('tab', { name: '分野の一式', exact: true }).click()
-  const presets = page.getByRole('dialog', { name: '標準マスタから追加', exact: true })
-  await presets.getByLabel('見本の分野', { exact: true }).selectOption('機械設備')
-  const labels = presets.locator('.fixture-presets > label')
-  for (const label of await labels.all()) if (!(await label.innerText()).includes('（長さ・m）')) await label.getByRole('checkbox').uncheck()
-  await presets.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
+  await page.evaluate(field => window.__karu!.addFixturePresets(field), '機械設備')
+  for (const fixture of await savedFixtures(page)) {
+    if (quantityKind(fixture) === 'length') continue
+    const row = page.getByTestId('fixture-panel').locator(`li[data-fixture-id="${fixture.id}"]`)
+    await row.locator('.fixture-row').click()
+    page.once('dialog', async dialog => { await dialog.accept() })
+    await page.getByTestId('fixture-panel').getByRole('button', { name: '削除', exact: true }).click()
+    await expect(row).toHaveCount(0)
+  }
   const fixtures = await savedFixtures(page)
   expect(fixtures).toHaveLength(6)
   expect(fixtures.every(f => quantityKind(f) === 'length')).toBe(true)

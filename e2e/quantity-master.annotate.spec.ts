@@ -124,7 +124,8 @@ test('selects only requested specs, undoes one batch, draws PF22 and persists fo
   await dialog.getByRole('button', { name: '選んだ項目を追加（2件）', exact: true }).click()
   const panel = page.getByTestId('fixture-panel'), rows = panel.locator('li[data-fixture-id]')
   await expect(rows).toHaveCount(2)
-  const cableCategory = panel.locator('.fixture-groups > section').filter({ has: page.getByRole('button', { name: 'ケーブル（低圧）（2）', exact: true }) })
+  // SPEC-B28: 規格から選んだケーブルには代表の内訳書の位置（電灯幹線のケーブルの別紙明細）が付き、一覧は内訳書の構成でまとまる。
+  const cableCategory = panel.locator('.fixture-groups > section').filter({ has: page.getByRole('button', { name: 'ケーブル（別紙明細）（2）', exact: true }) })
   await expect(cableCategory.getByRole('button', { name: emName, exact: true })).toBeVisible()
   await expect(panel.getByRole('button', { name: emName, exact: true })).toBeVisible()
   await expect(panel.getByRole('button', { name: cvName, exact: true })).toHaveAttribute('aria-pressed', 'true')
@@ -141,7 +142,8 @@ test('selects only requested specs, undoes one batch, draws PF22 and persists fo
   await expect(panel.getByRole('button', { name: pfName('PF22'), exact: true })).toBeVisible()
 
   await masterDialog(page); dialog = await pfType(page)
-  const added = dialog.getByRole('checkbox', { name: /^PF16 .*追加済み/ })
+  const added = dialog.getByRole('checkbox', { name: /^PF16 / })
+  await expect(added.locator('..').getByText('追加済み', { exact: true })).toBeVisible()
   await expect(added).toBeChecked(); await expect(added).toBeDisabled()
   await expect(dialog.getByRole('button', { name: '選んだ項目を追加（0件）', exact: true })).toBeDisabled()
   await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
@@ -198,7 +200,7 @@ test('retains checked specs across searches, hierarchy and tabs, rendering at mo
   await expect(dialog.getByRole('checkbox')).toBeChecked()
   await search.fill('存在しない規格'); await expect(dialog.getByRole('checkbox')).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: '選んだ項目を追加（2件）', exact: true })).toBeEnabled()
-  await dialog.getByRole('tab', { name: '分野の一式', exact: true }).click()
+  await dialog.getByRole('tab', { name: '内訳書から選ぶ', exact: true }).click()
   await dialog.getByRole('tab', { name: '規格から選ぶ', exact: true }).click()
   await expect(search).toBeFocused()
   await search.fill('iv 1.6mm'); await expect(dialog.getByRole('checkbox', { name: /^IV / })).toBeChecked()
@@ -206,15 +208,9 @@ test('retains checked specs across searches, hierarchy and tabs, rendering at mo
   await expect(page.getByTestId('fixture-panel').locator('li[data-fixture-id]')).toHaveCount(2)
 })
 
-test('keeps the existing all-selected field bundles and imports exactly the legacy items', async ({ page }) => {
+test('imports exactly the legacy items through the test hook', async ({ page }) => {
   await open(page)
-  const dialog = await masterDialog(page)
-  await dialog.getByRole('tab', { name: '分野の一式', exact: true }).click()
-  await expect(dialog.getByRole('checkbox')).toHaveCount(FIXTURE_PRESETS['電気設備'].length)
-  expect(await dialog.getByRole('checkbox').evaluateAll(inputs => inputs.every(input => (input as HTMLInputElement).checked))).toBe(true)
-  await dialog.getByLabel('見本の分野', { exact: true }).selectOption('仮設・土工')
-  await expect(dialog.getByRole('checkbox')).toHaveCount(8)
-  await dialog.getByRole('button', { name: '選んだ項目を追加', exact: true }).click()
+  await page.evaluate(field => window.__karu!.addFixturePresets(field), '仮設・土工')
   const panel = page.getByTestId('fixture-panel')
   await expect(panel.locator('li[data-fixture-id]')).toHaveCount(8)
   const saved = await page.evaluate(async () => [...(await window.__karu!.saveToBytes())!])
@@ -247,7 +243,8 @@ test('stacks field, category, type and specs on a narrow screen', async ({ page 
   await page.setViewportSize({ width: 390, height: 844 })
   await open(page)
   const dialog = await masterDialog(page)
-  const boxes = await dialog.locator('.quantity-master-navigation, .quantity-master-specs').evaluateAll(elements => elements.map(el => {
+  // Both tab panels stay mounted (hidden) so selections survive tab switches; measure the visible one.
+  const boxes = await dialog.getByRole('tabpanel', { name: '規格から選ぶ', exact: true }).locator('.quantity-master-navigation, .quantity-master-specs').evaluateAll(elements => elements.map(el => {
     const rect = el.getBoundingClientRect()
     return { top: rect.top, bottom: rect.bottom, left: rect.left }
   }))
