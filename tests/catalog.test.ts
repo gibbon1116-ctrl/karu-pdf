@@ -30,6 +30,7 @@ import {
 } from '../src/core/breakdown/buildingDetails'
 import { BUILDING_ROW_VARIANTS } from '../src/core/breakdown/buildingVariants'
 import { CONDITION_RULES } from '../src/core/breakdown/conditionCandidates'
+import { REPRESENTATIVE_POSITION_ROWS } from '../src/core/breakdown/representativePositions'
 import { LINK_RULES, linkRuleForDetail } from '../src/core/breakdown/linkRules'
 import { validCondition } from '../src/core/quantity'
 import {
@@ -436,6 +437,87 @@ describe('SPEC-B28 representativeBreakdownPosition', () => {
     first!.item = '呼出側で変更'
     expect(representativeBreakdownPosition(panel)).toEqual(expected)
     expect(catalogItems()).toBe(items)
+  })
+})
+
+describe('SPEC-B30', () => {
+  it('assigns a representative breakdown position to every catalog item', () => {
+    const missing = catalogItems()
+      .filter(item => representativeBreakdownPosition(item) === undefined)
+      .map(item => item.key)
+    expect(missing).toEqual([])
+  })
+
+  it('requires every representative row to reference an existing exact breakdown position', () => {
+    const unmatched = REPRESENTATIVE_POSITION_ROWS.filter(row =>
+      !entries.some(entry =>
+        entry.book === row.book
+        && entry.section === row.section
+        && entry.subject === row.subject
+        && entry.middle === row.middle
+        && entry.row.name === row.item,
+      ),
+    )
+    expect(unmatched).toEqual([])
+  })
+
+  it('requires every representative master key to exist in the catalog', () => {
+    const keys = new Set(catalogItems().map(item => item.key))
+    const unmatched = REPRESENTATIVE_POSITION_ROWS
+      .map(row => `master:${JSON.stringify(row.master)}`)
+      .filter(key => !keys.has(key))
+    expect(unmatched).toEqual([])
+  })
+
+  it('maps paving without a middle and C2 to the outlet branch', () => {
+    const paving = requiredItem(item =>
+      item.key === `master:${JSON.stringify(['建築', '外部（面積）', '舗装'])}`,
+    )
+    const pavingPosition = representativeBreakdownPosition(paving)
+    expect(pavingPosition).toEqual({
+      book: '建築',
+      section: '構内舗装',
+      subject: '構内舗装',
+      item: 'アスファルト舗装',
+    })
+    expect(pavingPosition).not.toHaveProperty('middle')
+
+    const c2 = requiredItem(item =>
+      item.key === `master:${JSON.stringify(['電気設備', 'コンセント', 'C2'])}`,
+    )
+    expect(representativeBreakdownPosition(c2)).toEqual({
+      book: '電気設備',
+      section: '庁舎',
+      subject: '電灯設備',
+      middle: 'コンセント分岐',
+      item: '配線器具',
+    })
+  })
+
+  it('resolves supplemented master overlays and returns independent position copies', () => {
+    const paving = requiredItem(item =>
+      item.key === `master:${JSON.stringify(['建築', '外部（面積）', '舗装'])}`,
+    )
+    const expected = {
+      book: '建築',
+      section: '構内舗装',
+      subject: '構内舗装',
+      item: 'アスファルト舗装',
+    }
+    const overlay: CatalogItem = {
+      ...paving,
+      key: `${paving.key}#SPEC-B30-overlay`,
+    }
+    const first = representativeBreakdownPosition(paving)
+    const second = representativeBreakdownPosition(overlay)
+    expect(first).toEqual(expected)
+    expect(second).toEqual(expected)
+    expect(second).not.toBe(first)
+
+    first!.item = '呼出側で変更'
+    expect(second).toEqual(expected)
+    expect(representativeBreakdownPosition(paving)).toEqual(expected)
+    expect(representativeBreakdownPosition(overlay)).toEqual(expected)
   })
 })
 

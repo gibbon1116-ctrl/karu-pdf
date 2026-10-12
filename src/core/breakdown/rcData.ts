@@ -4,6 +4,8 @@
 export const REBAR_MASS_KG_PER_M: Readonly<Record<string, number>> = {
   D10: 0.560, D13: 0.995, D16: 1.56, D19: 2.25, D22: 3.04, D25: 3.98, D29: 5.04, D32: 6.23, D35: 7.51, D38: 8.95, D41: 10.5,
 }
+/** 鉄筋の規格（種類の記号）。JIS G 3112。内訳書の「異形鉄筋|規格」の候補と同じ。 */
+export const REBAR_GRADES = ['SD295', 'SD345', 'SD390', 'SD490'] as const
 /** 呼び名の公称直径 d（mm）。定着・重ね継手の長さ（d の倍数）に使う。呼び名の数字を d とする（D13 → 13mm）。 */
 export function rebarDiameterMm(name: string): number | undefined {
   const m = /^D(\d+)$/.exec(name)

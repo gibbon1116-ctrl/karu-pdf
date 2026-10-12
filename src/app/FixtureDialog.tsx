@@ -5,9 +5,9 @@ import { computeLinks, fixtureLinkError, fixtureLinkRoundsUp, fixtureLinkSourceU
 import { WASTE_DENSITIES } from '../core/breakdown/linkData'
 import { steelMemberError, type SteelMember } from '../core/steelMember'
 import { H_SECTIONS, STEEL_REQUIRED_FACTOR } from '../core/breakdown/steelData'
-import { fixtureLinkSources } from '../core/fixtureLink'
+import { fixtureLinkSources, rcRebarItemFilter } from '../core/fixtureLink'
 import { rcMemberError, type RcMember, type RcMemberKind, type RcBar, type RcResult } from '../core/rcMember'
-import { REBAR_MASS_KG_PER_M, REBAR_REQUIRED_FACTOR, DEFAULT_ANCHORAGE_D, DEFAULT_LAP_D, ANCHORAGE_LAP_VERIFIED } from '../core/breakdown/rcData'
+import { REBAR_MASS_KG_PER_M, REBAR_GRADES, REBAR_REQUIRED_FACTOR, DEFAULT_ANCHORAGE_D, DEFAULT_LAP_D, ANCHORAGE_LAP_VERIFIED } from '../core/breakdown/rcData'
 import { LINK_RULES, linkRuleAuto, linkRuleForDetail, type LinkAutoSources, type LinkRule } from '../core/breakdown/linkRules'
 import { normalizeRouteConditions, type PartCondition, quantityDimensions, quantityLabel, QUANTITY_DIMENSIONS, type QuantityMark } from '../core/quantity'
 import { FixtureSampleContext } from '../editor/AnnotationLayer'
@@ -212,7 +212,7 @@ function RcMemberFields({
       <div className="fixture-rc-table-scroll">
         <table className="fixture-rc-bars">
           <thead><tr>
-            <th scope="col">役割</th><th scope="col">径</th>
+            <th scope="col">役割</th><th scope="col">径</th><th scope="col">規格</th>
             <th scope="col">間隔・本数</th><th scope="col">段</th><th scope="col">削除</th>
           </tr></thead>
           <tbody>{member.bars.map((bar, i) => {
@@ -224,7 +224,10 @@ function RcMemberFields({
                   const role = RC_ROLES[member.kind].find(entry => entry === event.currentTarget.value)
                   if (!role) return
                   updateBar(i, previous => {
-                    const next: RcBar = { role, size: previous.size }
+                    const next: RcBar = {
+                      role, size: previous.size,
+                      ...(previous.grade !== undefined ? { grade: previous.grade } : {}),
+                    }
                     if (rcBarCounted(role)) next.count = previous.count ?? 1
                     else next.spacingMm = previous.spacingMm ?? 200
                     if (previous.layers !== undefined) {
@@ -242,6 +245,20 @@ function RcMemberFields({
                   updateBar(i, previous => ({ ...previous, size }))
                 }}>
                 {REBAR_SIZES.map(size => <option key={size} value={size}>{size}</option>)}
+              </select></td>
+              <td><select aria-label={`${prefix}の規格`} value={bar.grade ?? ''}
+                onChange={event => {
+                  const grade = event.currentTarget.value
+                  updateBar(i, previous => {
+                    const next = { ...previous }
+                    if (grade === '') delete next.grade
+                    else next.grade = grade
+                    return next
+                  })
+                }}>
+                <option value="">—</option>
+                {REBAR_GRADES.map(grade =>
+                  <option key={grade} value={grade}>{grade}</option>)}
               </select></td>
               <td><input type="number" min={counted ? 1 : undefined}
                 step={counted ? 1 : 'any'}
@@ -279,8 +296,10 @@ function RcMemberFields({
         if (member.bars.length >= 20) return
         const candidates = RC_ROLES[member.kind]
         const role = candidates[member.bars.length % candidates.length]
+        const grade = member.bars[member.bars.length - 1]?.grade
         const bar: RcBar = {
           role, size: 'D13',
+          ...(grade !== undefined ? { grade } : {}),
           ...(rcBarCounted(role) ? { count: 1 } : { spacingMm: 200 }),
           layers: 1,
         }
@@ -311,12 +330,13 @@ function RcMemberFields({
 }
 
 function RcMemberPreview({ result, error }: { result?: RcResult; error?: string }) {
-  const bars = new Map<string, { lengthM: number; massKg: number }>()
+  const bars = new Map<string, { size: string; lengthM: number; massKg: number }>()
   for (const bar of result?.bars ?? []) {
-    const total = bars.get(bar.size) ?? { lengthM: 0, massKg: 0 }
+    const key = `${bar.grade !== undefined ? `${bar.grade} ` : ''}${bar.size}`
+    const total = bars.get(key) ?? { size: bar.size, lengthM: 0, massKg: 0 }
     total.lengthM += bar.lengthM
     total.massKg += bar.massKg
-    bars.set(bar.size, total)
+    bars.set(key, total)
   }
   return <section className="fixture-rc-preview" aria-label="RC 部材の見本">
     <h3>今の拾いで計算した見本</h3>
@@ -325,10 +345,11 @@ function RcMemberPreview({ result, error }: { result?: RcResult; error?: string 
       <p>型枠 {result.formworkM2.toFixed(2)} ㎡</p>
       {result.shapeDimensionText && <p>{result.shapeDimensionText}</p>}
       {bars.size > 0 && <table>
-        <thead><tr><th scope="col">径</th><th scope="col">長さ（m）</th><th scope="col">質量（t）</th></tr></thead>
-        <tbody>{REBAR_SIZES.filter(size => bars.has(size)).map(size => {
-          const bar = bars.get(size)!
-          return <tr key={size}><th scope="row">{size}</th>
+        <thead><tr><th scope="col">規格・径</th><th scope="col">長さ（m）</th><th scope="col">質量（t）</th></tr></thead>
+        <tbody>{[...bars].sort(([, a], [, b]) =>
+          REBAR_SIZES.indexOf(a.size) - REBAR_SIZES.indexOf(b.size),
+        ).map(([key, bar]) => {
+          return <tr key={key}><th scope="row">{key}</th>
             <td>{bar.lengthM.toFixed(2)}</td><td>{(bar.massKg / 1000).toFixed(3)}</td>
           </tr>
         })}</tbody>
@@ -679,6 +700,9 @@ export default function FixtureDialog({
     if (wasteType) attributes.wasteType = wasteType
     return {
       ...value,
+      summary: summaryDrafts.map(field => ({
+        label: field.label.trim(), value: field.value.trim(),
+      })).filter(field => field.label !== '' || field.value !== ''),
       attributes: Object.keys(attributes).length ? attributes : undefined,
       backfill: quantityMethod(value) === 'lengthWidthDepth' && backfillEnabled ? {
         deductPipes: true,
@@ -686,7 +710,8 @@ export default function FixtureDialog({
           .map(word => word.trim()).filter(Boolean),
       } : undefined,
     }
-  }, [value, attributeDraft, backfillEnabled, backfillConditions])
+  }, [value, summaryDrafts, attributeDraft, backfillEnabled, backfillConditions])
+  const rcItemFilter = rcRebarItemFilter(draftFixture)
   const dimensionCounts = editing
     ? dimensionMarkCounts?.(draftFixture) ?? { matched: 0, customized: 0 }
     : { matched: 0, customized: 0 }
@@ -1296,8 +1321,8 @@ export default function FixtureDialog({
               <option value="gasJoint">ガス圧接</option>
               <option value="lapJoint">重ね継手</option>
             </select></label>
-            {value.link.rc?.output === 'rebar' && <>
-              <fieldset><legend>鉄筋の数量</legend>
+            {value.link.rc && ['rebar', 'gasJoint', 'lapJoint'].includes(value.link.rc.output) && <>
+              {value.link.rc.output === 'rebar' && <fieldset><legend>鉄筋の数量</legend>
                 {(['design', 'required'] as const).map(basis => <label key={basis}>
                   <input type="radio" name="fixture-link-rebar-basis"
                     checked={(value.link?.rc?.basis ?? 'design') === basis}
@@ -1306,9 +1331,14 @@ export default function FixtureDialog({
                     }))} />
                   {basis === 'design' ? '設計数量' : `所要数量（×${REBAR_REQUIRED_FACTOR}）`}
                 </label>)}
-              </fieldset>
+              </fieldset>}
               <fieldset className="fixture-link-choice-grid">
-                <legend>径で絞る（どれも付けなければ全部）</legend>
+                <legend>{rcItemFilter.sizes.length
+                  ? `径で絞る（どれも付けなければ摘要の径 ${rcItemFilter.sizes.join('・')}。摘要にも無ければ全部）`
+                  : '径で絞る（どれも付けなければ全部）'}</legend>
+                {rcItemFilter.grades.length > 0 && <p>
+                  {`規格: 摘要の ${rcItemFilter.grades.join('・')} の鉄筋と、規格の指定が無い鉄筋を数えます`}
+                </p>}
                 {REBAR_SIZES.map(size => <label key={size}>
                   <input type="checkbox" aria-label={`RC の径 ${size}`}
                     checked={value.link?.rc?.sizes?.includes(size) ?? false}
@@ -1319,7 +1349,7 @@ export default function FixtureDialog({
                           ? [...new Set([...(link.rc?.sizes ?? []), size])]
                           : (link.rc?.sizes ?? []).filter(entry => entry !== size)
                         const rc: NonNullable<FixtureLink['rc']> = {
-                          ...link.rc, output: 'rebar',
+                          ...link.rc, output: link.rc?.output ?? 'rebar',
                         }
                         if (sizes.length) rc.sizes = sizes
                         else delete rc.sizes

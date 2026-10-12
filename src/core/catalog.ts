@@ -29,6 +29,7 @@ import {
 } from './breakdown/buildingDetails'
 import { BUILDING_ROW_VARIANTS } from './breakdown/buildingVariants'
 import { CONDITION_RULES } from './breakdown/conditionCandidates'
+import { REPRESENTATIVE_POSITION_ROWS } from './breakdown/representativePositions'
 import {
   CATEGORY_ALIASES,
   DETAIL_CATEGORY,
@@ -518,7 +519,7 @@ function sourceCatalogKey(key: string): string {
   return key.startsWith('master:') && overlay !== -1 ? key.slice(0, overlay) : key
 }
 
-/** 編の順、庁舎優先、マスタの行順で最初に対応する細目を返す。 */
+/** 編の順、庁舎優先、マスタの行順で選び、未対応の品目は想定の細目で補う。 */
 export function representativeBreakdownPosition(item: CatalogItem): BreakdownPosition | undefined {
   if (cachedRepresentativePositions === undefined) {
     const positions = new Map<string, BreakdownPosition>()
@@ -542,6 +543,28 @@ export function representativeBreakdownPosition(item: CatalogItem): BreakdownPos
           }
         }
       }
+    }
+
+    // 自動対応を優先し、位置がまだ決まっていない標準マスタだけ補う。
+    for (const row of REPRESENTATIVE_POSITION_ROWS) {
+      const key = masterKey(...row.master)
+      if (positions.has(key)) continue
+
+      const entry = breakdownEntries(row.book).find(entry =>
+        entry.section === row.section
+        && entry.subject === row.subject
+        && entry.middle === row.middle
+        && entry.row.name === row.item,
+      )
+      if (entry === undefined) continue
+
+      positions.set(key, {
+        book: entry.book,
+        section: entry.section,
+        subject: entry.subject,
+        ...(entry.middle !== undefined ? { middle: entry.middle } : {}),
+        item: entry.row.name,
+      })
     }
 
     cachedRepresentativePositions = positions

@@ -1,6 +1,6 @@
 import { clipParallelBars, type ShapeMetrics } from './shapeMetrics'
 import {
-  REBAR_MASS_KG_PER_M, rebarDiameterMm,
+  REBAR_MASS_KG_PER_M, REBAR_GRADES, rebarDiameterMm,
   DEFAULT_ANCHORAGE_D, DEFAULT_LAP_D, MIN_DIAMETER_GAS_PRESSURE,
   rebarJoints, barCount,
 } from './breakdown/rcData'
@@ -13,6 +13,7 @@ export interface RcBar {
   role: 'x' | 'y' | 'vertical' | 'horizontal'
     | 'top' | 'bottom' | 'stirrup' | 'hoop' | 'main' | 'base'
   size: string
+  grade?: string
   spacingMm?: number
   count?: number
   layers?: 1 | 2
@@ -37,6 +38,7 @@ export interface RcResult {
   formworkM2: number
   bars: Array<{
     size: string
+    grade?: string
     role: RcBar['role']
     count: number
     lengthM: number
@@ -138,6 +140,10 @@ export function rcMemberError(
       || typeof bar.size !== 'string' || !Object.hasOwn(REBAR_MASS_KG_PER_M, bar.size)) {
       return 'RC部材の鉄筋の役割・径が正しくありません。'
     }
+    if (bar.grade !== undefined
+      && !REBAR_GRADES.some(grade => grade === bar.grade)) {
+      return '鉄筋の規格は SD295・SD345・SD390・SD490 から選んでください。'
+    }
     if (bar.layers !== undefined && bar.layers !== 1 && bar.layers !== 2) {
       return '鉄筋の層数は1または2で入れてください。'
     }
@@ -173,6 +179,7 @@ export function readRcMember(value: unknown): RcMember | undefined {
     bars: member.bars.map(bar => ({
       role: bar.role,
       size: bar.size,
+      ...(bar.grade !== undefined ? { grade: bar.grade } : {}),
       ...(bar.spacingMm !== undefined ? { spacingMm: bar.spacingMm } : {}),
       ...(bar.count !== undefined ? { count: bar.count } : {}),
       ...(bar.layers !== undefined ? { layers: bar.layers } : {}),
@@ -393,6 +400,7 @@ export function computeRcMember(member: RcMember, metrics: ShapeMetrics): RcResu
     const spacing = (bar.spacingMm ?? 0) / 1000
     const computed: RcResult['bars'][number] = {
       size: bar.size, role: bar.role, count: 0, lengthM: 0, massKg: 0,
+      ...(bar.grade !== undefined ? { grade: bar.grade } : {}),
       layers, pickupCount: multiplicity,
       ...(result.shapeDimensionText
         ? { shapeDimensionText: result.shapeDimensionText } : {}),

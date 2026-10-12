@@ -1,10 +1,10 @@
 import { parseFixtureOpening, quantityOutputKind, quantityUnit, quantityDecimals, type CountFixture } from './countFixtures'
-import { computeRcMember, rcBarCountText, type RcMember, type RcResult } from './rcMember'
+import { computeRcMember, rcMemberError, rcBarCountText, type RcMember, type RcResult } from './rcMember'
 import { steelMemberError, steelSection } from './steelMember'
 import { STEEL_REQUIRED_FACTOR } from './breakdown/steelData'
 import { createPageCrossingCounter, type PageCrossingBarrier } from './crossings'
 import type { ShapeMetrics } from './shapeMetrics'
-import { REBAR_MASS_KG_PER_M, REBAR_REQUIRED_FACTOR } from './breakdown/rcData'
+import { REBAR_MASS_KG_PER_M, REBAR_GRADES, REBAR_REQUIRED_FACTOR } from './breakdown/rcData'
 import type { LinkAutoSources } from './breakdown/linkRules'
 import {
   CARRY_MIN_MASS_KG, CARRY_HEAVY_DENSITY_KG_PER_M3, CARRY_ALONE_INCREASE,
@@ -529,18 +529,35 @@ function openingFactorFor(
   }
 }
 
+/** 摘要と規格欄からの抽出を、連動の計算と編集画面で共有する。 */
+export function rcRebarItemFilter(
+  fixture: Pick<CountFixture, 'summary' | 'spec'>,
+): { sizes: string[]; grades: string[] } {
+  const textFor = (label: string) => [
+    ...(fixture.summary ?? [])
+      .filter(field => field.label.trim() === label)
+      .map(field => field.value),
+    fixture.spec ?? '',
+  ].join(' ')
+  const sizes = [...new Set(
+    (textFor('径').match(/D\d+/g) ?? [])
+      .filter(size => Object.hasOwn(REBAR_MASS_KG_PER_M, size)),
+  )]
+  const gradeText = textFor('規格')
+  const grades = REBAR_GRADES.filter(grade =>
+    new RegExp(`(^|[^A-Za-z0-9_])${grade}(?![A-Za-z0-9_])`).test(gradeText))
+  return { sizes, grades }
+}
+
 function rcOutputValue(rc: RcResult, settings: NonNullable<FixtureLink['rc']>): number {
-  const sizes = settings.sizes === undefined ? undefined : new Set(settings.sizes)
   switch (settings.output) {
     case 'concrete': return rc.concreteM3
     case 'formwork': return rc.formworkM2
     case 'rebar':
-      return rc.bars.reduce((sum, bar) =>
-        sum + (!sizes || sizes.has(bar.size) ? bar.massKg : 0), 0) / 1000
+      return rc.bars.reduce((sum, bar) => sum + bar.massKg, 0) / 1000
         * (settings.basis === 'required' ? REBAR_REQUIRED_FACTOR : 1)
     case 'gasJoint':
-      return rc.gasJoints.reduce((sum, joint) =>
-        sum + (!sizes || sizes.has(joint.size) ? joint.count : 0), 0)
+      return rc.gasJoints.reduce((sum, joint) => sum + joint.count, 0)
     case 'lapJoint': return rc.lapJoints
   }
 }
@@ -560,6 +577,7 @@ function rcOutputNote(
   metric: ShapeMetrics,
   rc: RcResult,
   settings: NonNullable<FixtureLink['rc']>,
+  filter?: { grades: readonly string[]; missing?: string },
 ): string {
   const n = (value: number) => value.toFixed(2)
   const mass = (value: number) => value.toFixed(3)
@@ -612,12 +630,19 @@ function rcOutputNote(
     return `${metric.annotationId}: ${label} ${expression}${repeat} = ${n(rc.formworkM2)}㎡`
   }
 
-  const sizes = settings.sizes === undefined ? undefined : new Set(settings.sizes)
-  const bars = rc.bars.filter(bar => !sizes || sizes.has(bar.size))
+  const bars = rc.bars
+  const barLabel = (bar: RcResult['bars'][number]) =>
+    `${bar.grade !== undefined ? `${bar.grade} ` : ''}${bar.size}`
+      + (bar.grade === undefined && filter?.grades.length
+        ? '（規格の指定なし）' : '')
+  if (filter?.missing) {
+    const zero = settings.output === 'rebar' ? '質量 0.000t' : '合計 0.00か所'
+    return `${metric.annotationId}: ${dimensions}: ${filter.missing}｜${zero}`
+  }
   if (settings.output === 'gasJoint' || settings.output === 'lapJoint') {
     const joint = settings.output === 'gasJoint' ? 'gas' : 'lap'
     const parts = bars.filter(bar => bar.joint === joint).map(bar =>
-      `${bar.size} ${rcRoleLabels[bar.role]} ${rcBarCountText(bar)}: ${
+      `${barLabel(bar)} ${rcRoleLabels[bar.role]} ${rcBarCountText(bar)}: ${
         joint === 'gas' ? 'ガス圧接' : '重ね継手'
       } ${n(bar.jointCount ?? 0)}か所`)
     return `${metric.annotationId}: ${dimensions}: ${
@@ -626,19 +651,20 @@ function rcOutputNote(
   }
 
   const barTexts = bars.map(bar =>
-    `${bar.size} ${rcRoleLabels[bar.role]} ${rcBarCountText(bar)} 計${n(bar.lengthM)}m`
+    `${barLabel(bar)} ${rcRoleLabels[bar.role]} ${rcBarCountText(bar)} 計${n(bar.lengthM)}m`
       + `（1本 平均${n(bar.count > 0 ? bar.lengthM / bar.count : 0)}m、`
       + `定着・継手を含む：定着 ${n(bar.anchorageM ?? 0)}m、`
       + `重ね継手 ${n(bar.lapM ?? 0)}m）`)
   const bySize = new Map<string, { lengthM: number; massKg: number; massKgPerM: number }>()
   for (const bar of bars) {
-    const total = bySize.get(bar.size) ?? {
+    const key = barLabel(bar)
+    const total = bySize.get(key) ?? {
       lengthM: 0, massKg: 0,
       massKgPerM: bar.massKgPerM ?? REBAR_MASS_KG_PER_M[bar.size],
     }
     total.lengthM += bar.lengthM
     total.massKg += bar.massKg
-    bySize.set(bar.size, total)
+    bySize.set(key, total)
   }
   const massTexts = [...bySize].map(([size, total]) =>
     `${size} 計${n(total.lengthM)}m × ${mass(total.massKgPerM)}kg/m`
@@ -704,17 +730,46 @@ function appendMetricSource(
     try {
       if (link.kind === 'rc') {
         const settings = link.rc!
-        // RcResult exposes a total lap count. Filtering bars before calculating
-        // this output preserves size-specific lap counts without changing RcResult.
-        const member = settings.output === 'lapJoint' && settings.sizes !== undefined
-          ? {
-            ...original.rc!,
-            bars: original.rc!.bars.filter(bar => settings.sizes!.includes(bar.size)),
-          }
-          : original.rc!
+        const rebarOutput = settings.output === 'rebar'
+          || settings.output === 'gasJoint' || settings.output === 'lapJoint'
+        const inferred = rebarOutput
+          ? rcRebarItemFilter(fixture) : { sizes: [], grades: [] }
+        const sizes = rebarOutput
+          ? settings.sizes ?? (inferred.sizes.length ? inferred.sizes : undefined)
+          : undefined
+        const grades = inferred.grades
+        const filtered = sizes !== undefined || grades.length > 0
+
+        // Validate every original bar before filtering so invalid imported or
+        // edited settings cannot be hidden by a diameter/grade exclusion.
+        if (filtered) {
+          const error = rcMemberError(original.rc!, {
+            fromShape: metric.method === 'polygonDepth',
+            fromLine: metric.method === 'polyline',
+          })
+          if (error) throw new Error(error)
+        }
+        const sizeMatches = sizes === undefined
+          ? original.rc!.bars
+          : original.rc!.bars.filter(bar => sizes.includes(bar.size))
+        const member = filtered ? {
+          ...original.rc!,
+          bars: sizeMatches.filter(bar =>
+            !grades.length || bar.grade === undefined || grades.includes(bar.grade)),
+        } : original.rc!
+
         const rc = computeRcMember(member, metric)
         quantity = rcOutputValue(rc, settings)
-        note = rcOutputNote(member, metric, rc, settings)
+        let missing: string | undefined
+        if (filtered && member.bars.length === 0) {
+          const missingSize = sizes !== undefined && sizeMatches.length === 0
+          const target = missingSize
+            ? sizes.join('・') || '指定した径'
+            : [grades.join('・'), sizes?.join('・')].filter(Boolean).join(' ')
+          missing = `この部材に ${target} の鉄筋はありません`
+            + (missingSize && grades.length ? `（規格: ${grades.join('・')}）` : '')
+        }
+        note = rcOutputNote(member, metric, rc, settings, { grades, missing })
       } else if (link.kind === 'steel') {
         const member = original.steel!
         const section = steelSection(member)!

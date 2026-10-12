@@ -11,6 +11,8 @@ import {
 import { computeRcMember, rcMemberError, readRcMember, rcBarCountText, type RcMember } from '../src/core/rcMember'
 import type { ShapeMetrics, ShapeAnnotation } from '../src/core/shapeMetrics'
 import { QuantityIndex } from '../src/core/quantityIndex'
+import { rcRebarItemFilter } from '../src/core/fixtureLink'
+import { REBAR_GRADES } from '../src/core/breakdown/rcData'
 
 const style: CountFixture['style'] = {
   shape: 'circle', fill: 'none', color: [1, 0, 0],
@@ -92,6 +94,294 @@ function depthRectangle(
     ...options,
   })
 }
+
+function b31RebarItem(
+  id: string,
+  size?: string,
+  grade?: string,
+  settings: Partial<NonNullable<FixtureLink['rc']>> = {},
+): CountFixture {
+  return fixture(id, {
+    name: '異形鉄筋',
+    summary: [
+      ...(grade !== undefined ? [{ label: '規格', value: grade }] : []),
+      ...(size !== undefined ? [{ label: '径', value: size }] : []),
+    ],
+    link: {
+      kind: 'rc', sources: [], auto: { rcKinds: [] },
+      rc: { output: 'rebar', basis: 'required', ...settings },
+    },
+  })
+}
+
+function b31Foundation(): RcMember {
+  const member = slab({ kind: 'foundationSlab' })
+  return {
+    ...member,
+    bars: member.bars.map(bar => ({ ...bar, grade: 'SD295' })),
+  }
+}
+
+it('B31 counts only the summary diameter from one SD295 foundation slab pickup', () => {
+  const member = b31Foundation()
+  const source = fixture('A', { kind: 'area', method: 'polygon', rc: member })
+  const targets = ['D10', 'D13', 'D19'].map(size =>
+    b31RebarItem(size, size, 'SD295'))
+  const results = computeLinks(
+    [source, ...targets], () => [], id => id === 'A' ? [metric()] : [],
+  )
+  const expected = computeRcMember(member, metric()).bars
+    .reduce((sum, bar) => sum + bar.massKg, 0) / 1000 * 1.04
+
+  expect(expected).toBeGreaterThan(0)
+  expect(results.get('D13')!.total).toBeCloseTo(expected, 12)
+  expect(results.get('D13')!.sources[0].note).toContain('SD295 D13 x方向')
+  expect(results.get('D13')!.sources[0].note).toContain('SD295 D13 y方向')
+  expect(results.get('D13')!.sources[0].note).not.toContain('規格の指定なし')
+  for (const size of ['D10', 'D19']) {
+    const result = results.get(size)!
+    expect(result.total).toBe(0)
+    expect(result.sources[0]).toMatchObject({ quantity: 0, subtotal: 0 })
+    expect(result.entries[0].value).toBe(0)
+    expect(result.sources[0].note)
+      .toContain(`この部材に ${size} の鉄筋はありません`)
+    expect(result.error).toBeUndefined()
+    expect(result.warnings).toEqual([])
+  }
+})
+
+it('B31 excludes a different grade but includes and explains unspecified grades', () => {
+  const target = b31RebarItem('R345', 'D13', 'SD345')
+  const member = b31Foundation()
+  const calculate = (rc: RcMember) => computeLinks([
+    fixture('A', { kind: 'area', method: 'polygon', rc }), target,
+  ], () => [], () => [metric()]).get(target.id)!
+
+  const mismatch = calculate(member)
+  expect(mismatch.total).toBe(0)
+  expect(mismatch.sources[0].note)
+    .toContain('この部材に SD345 D13 の鉄筋はありません')
+  expect(mismatch.warnings).toEqual([])
+
+  const unspecified = slab({ kind: 'foundationSlab' })
+  const compatible = calculate(unspecified)
+  const expected = computeRcMember(unspecified, metric()).bars
+    .reduce((sum, bar) => sum + bar.massKg, 0) / 1000 * 1.04
+  expect(compatible.total).toBeCloseTo(expected, 12)
+  expect(compatible.sources[0].note).toContain('（規格の指定なし）')
+
+  const mixed = calculate({
+    ...member,
+    bars: [member.bars[0], unspecified.bars[1]],
+  })
+  const yOnly = computeRcMember({
+    ...unspecified, bars: [unspecified.bars[1]],
+  }, metric()).bars[0].massKg / 1000 * 1.04
+  expect(mixed.total).toBeCloseTo(yOnly, 12)
+  expect(mixed.sources[0].note).toContain('（規格の指定なし）')
+  expect(mixed.sources[0].note).not.toContain('x方向')
+})
+
+it('B31 gives explicit sizes priority and preserves all-diameter assembly links', () => {
+  const member = slab({
+    kind: 'foundationSlab',
+    bars: [
+      { role: 'x', size: 'D10', grade: 'SD295', spacingMm: 200 },
+      { role: 'y', size: 'D13', grade: 'SD295', spacingMm: 200 },
+      { role: 'x', size: 'D19', grade: 'SD345', spacingMm: 200 },
+    ],
+  })
+  const source = fixture('A', { kind: 'area', method: 'polygon', rc: member })
+  const explicit = b31RebarItem('Explicit', 'D10', 'SD295', { sizes: ['D13'] })
+  const empty = b31RebarItem('Empty', 'D13', 'SD295', { sizes: [] })
+  const assembly = {
+    ...b31RebarItem('Assembly', undefined, undefined, { basis: 'design' }),
+    name: '鉄筋加工組立',
+  }
+  const specOnly = {
+    ...b31RebarItem('SpecOnly'),
+    spec: 'SD295 D10 D13 D999',
+  }
+  const results = computeLinks(
+    [source, explicit, empty, assembly, specOnly], () => [], () => [metric()],
+  )
+  const rc = computeRcMember(member, metric())
+  const d13 = rc.bars.find(bar => bar.size === 'D13')!.massKg / 1000 * 1.04
+  const sd295 = rc.bars.filter(bar => bar.grade === 'SD295')
+    .reduce((sum, bar) => sum + bar.massKg, 0) / 1000 * 1.04
+  const all = rc.bars.reduce((sum, bar) => sum + bar.massKg, 0) / 1000
+  expect(results.get('Explicit')!.total).toBeCloseTo(d13, 12)
+  expect(results.get('Explicit')!.sources[0].note).not.toContain('D10')
+  expect(results.get('Empty')!.total).toBe(0)
+  expect(results.get('Empty')!.warnings).toEqual([])
+  expect(results.get('Assembly')!.total).toBeCloseTo(all, 12)
+  expect(results.get('SpecOnly')!.total).toBeCloseTo(sd295, 12)
+
+  const saved = readFixtureLink(specOnly)!
+  expect(saved.rc).not.toHaveProperty('sizes')
+  expect(readFixtureLink(explicit)!.rc!.sizes).toEqual(['D13'])
+  expect(readFixtureLink(empty)!.rc!.sizes).toEqual([])
+})
+
+it('B31 combines summary/spec tokens, ignores unrelated labels and rejects grade prefixes', () => {
+  expect(rcRebarItemFilter({
+    summary: [
+      { label: ' 径 ', value: 'D10・D13・D999・D13' },
+      { label: ' 規格 ', value: 'SD295・SD345' },
+      { label: '備考', value: 'D19 SD490' },
+    ],
+    spec: 'SD390 D16',
+  })).toEqual({
+    sizes: ['D10', 'D13', 'D16'],
+    grades: ['SD295', 'SD345', 'SD390'],
+  })
+  expect(rcRebarItemFilter({
+    summary: [{ label: '規格', value: 'SD2950 SD345A XSD390 SD490_' }],
+    spec: 'D999',
+  })).toEqual({ sizes: [], grades: [] })
+})
+
+it('B31 filters both joint outputs before aggregating identical diameters', () => {
+  const original = beam({
+    bars: [
+      { role: 'top', size: 'D22', grade: 'SD295', count: 4 },
+      { role: 'bottom', size: 'D22', grade: 'SD345', count: 8 },
+      { role: 'stirrup', size: 'D10', grade: 'SD295', spacingMm: 200 },
+    ],
+  })
+  for (const [output, joint] of [
+    ['gasJoint', 'gas'], ['lapJoint', 'lap'],
+  ] as const) {
+    const member = { ...original, joint }
+    const before = JSON.stringify(member)
+    const target = b31RebarItem('Joint', 'D22', 'SD295', { output })
+    const wrongSize = b31RebarItem('WrongSize', 'D19', 'SD295', { output })
+    const result = computeLinks([
+      fixture('A', { kind: 'length', method: 'polyline', rc: member }),
+      target, wrongSize,
+    ], () => [], () => [lineMetric()])
+    expect(result.get('Joint')!.total).toBe(4)
+    expect(result.get('Joint')!.sources[0].note).toContain('SD295 D22 上端筋')
+    expect(result.get('Joint')!.sources[0].note).not.toContain('SD345')
+    expect(result.get('Joint')!.sources[0].note).not.toContain('D10')
+    expect(result.get('WrongSize')!.total).toBe(0)
+    expect(result.get('WrongSize')!.sources[0].note)
+      .toContain('この部材に D19 の鉄筋はありません')
+    expect(result.get('WrongSize')!.warnings).toEqual([])
+    expect(JSON.stringify(member)).toBe(before)
+
+    const legacy = {
+      ...member,
+      bars: member.bars.map(bar => {
+        const next = { ...bar }
+        delete next.grade
+        return next
+      }),
+    }
+    const compatible = computeLinks([
+      fixture('A', { kind: 'length', method: 'polyline', rc: legacy }), target,
+    ], () => [], () => [lineMetric()]).get('Joint')!
+    expect(compatible.total).toBe(12)
+    expect(compatible.sources[0].note).toContain('（規格の指定なし）')
+  }
+})
+
+it('B31 preserves concrete/formwork and unfiltered rebar quantities', () => {
+  const member = b31Foundation()
+  const reference = computeRcMember(slab({ kind: 'foundationSlab' }), metric())
+  const source = fixture('A', { kind: 'area', method: 'polygon', rc: member })
+  const targets = [
+    b31RebarItem('Concrete', 'D10', 'SD345', {
+      output: 'concrete', sizes: ['D19'],
+    }),
+    b31RebarItem('Formwork', 'D10', 'SD345', {
+      output: 'formwork', sizes: ['D19'],
+    }),
+    b31RebarItem('All'),
+  ]
+  const results = computeLinks([source, ...targets], () => [], () => [metric()])
+  expect(results.get('Concrete')!.total).toBeCloseTo(reference.concreteM3, 12)
+  expect(results.get('Formwork')!.total).toBeCloseTo(reference.formworkM2, 12)
+  expect(results.get('All')!.total).toBeCloseTo(
+    reference.bars.reduce((sum, bar) => sum + bar.massKg, 0) / 1000 * 1.04, 12,
+  )
+  expect(results.get('All')!.sources[0].note).not.toContain('規格の指定なし')
+})
+
+it('B31 validates, imports, computes and round-trips optional grades', () => {
+  for (const grade of REBAR_GRADES) {
+    const member = slab({
+      bars: [{ role: 'x', size: 'D13', grade, spacingMm: 200 }],
+    })
+    expect(rcMemberError(member)).toBeUndefined()
+    expect(readRcMember({
+      ...member,
+      bars: member.bars.map(bar => ({ ...bar, unwanted: true })),
+    })).toEqual(member)
+    expect(computeRcMember(member, metric()).bars[0].grade).toBe(grade)
+    const source = fixture('A', { kind: 'area', method: 'polygon', rc: member })
+    expect(parseCountFixtures(serializeCountFixtures([source]))[0].rc).toEqual(member)
+  }
+  const legacy = slab()
+  expect(readRcMember(legacy)!.bars[0]).not.toHaveProperty('grade')
+  expect(computeRcMember(legacy, metric()).bars[0]).not.toHaveProperty('grade')
+
+  const message = '鉄筋の規格は SD295・SD345・SD390・SD490 から選んでください。'
+  for (const grade of ['', 'SD500', ' SD295', null, 295]) {
+    const invalid = {
+      ...legacy, bars: [{ ...legacy.bars[0], grade }],
+    }
+    expect(rcMemberError(invalid)).toBe(message)
+    expect(readRcMember(invalid)).toBeUndefined()
+    const source = fixture('A', { kind: 'area', method: 'polygon', memo: '保持' })
+    const parsed = parseCountFixtures(JSON.stringify({
+      version: 1, fixtures: [{ ...source, rc: invalid }],
+    }))
+    expect(parsed).toHaveLength(1)
+    expect(parsed[0].rc).toBeUndefined()
+    expect(parsed[0].memo).toBe('保持')
+  }
+
+  const invalidMember = slab({
+    bars: [
+      { role: 'x', size: 'D13', grade: 'SD295', spacingMm: 200 },
+      { role: 'y', size: 'D19', grade: 'SD500', spacingMm: 200 },
+    ],
+  })
+  const rejected = computeLinks([
+    fixture('A', { kind: 'area', method: 'polygon', rc: invalidMember }),
+    b31RebarItem('R', 'D13', 'SD295'),
+  ], () => [], () => [metric()]).get('R')!
+  expect(rejected.total).toBe(0)
+  expect(rejected.warnings[0]).toContain(message)
+})
+
+it('B31 quantity index retains zero links and diameter-specific required totals', () => {
+  const source = fixture('A', {
+    kind: 'area', method: 'polygon', rc: b31Foundation(),
+  })
+  const targets = ['D10', 'D13', 'D19'].map(size =>
+    b31RebarItem(size, size, 'SD295'))
+  const fixtures = parseCountFixtures(serializeCountFixtures([source, ...targets]))
+  const annotation: ShapeAnnotation = {
+    id: 'b31', pageIndex: 2,
+    vertices: [[0, 0], [4, 0], [4, 3], [0, 3]],
+    measure: { mmPerPoint: 1000 },
+    quantity: {
+      version: 1, id: 'b31', itemId: 'A', method: 'polygon',
+      floor: '2階', room: '居室',
+    },
+  }
+  const index = QuantityIndex.build([annotation], fixtures)
+  expect(index.total('A')).toBe(12)
+  expect(index.total('D10').toFixed(2)).toBe('0.00')
+  expect(index.total('D13').toFixed(2)).toBe('0.35')
+  expect(index.total('D19').toFixed(2)).toBe('0.00')
+  expect(index.byPage('D13').get(2)).toBeCloseTo(index.total('D13'), 12)
+  expect(index.linkResult('D10')!.sources[0].note)
+    .toContain('この部材に D10 の鉄筋はありません')
+  expect(index.linkResult('D10')!.warnings).toEqual([])
+})
 
 it('derives volume beam dimensions and prefers explicit width and depth', () => {
   const member = beam({

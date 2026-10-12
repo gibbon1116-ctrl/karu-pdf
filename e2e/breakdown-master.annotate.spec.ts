@@ -650,6 +650,76 @@ test('SPEC-B28: 規格のチェックで代表位置を表示し、品目ごと�
   expect(ivItem!.options.some(option => option.spec === iv!.spec)).toBe(true)
 })
 
+test('SPEC-B30: 保存された機械設備の位置にかかわらず舗装の代表位置で追加する', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  const storageKey = 'karu-pdf:master-breakdown-position'
+  const storedPosition = {
+    book: '機械設備',
+    section: '庁舎',
+    subject: '空気調和設備',
+    middle: 'ダクト設備',
+  }
+  await page.addInitScript(({ key, position }) => {
+    localStorage.setItem(key, JSON.stringify(position))
+  }, { key: storageKey, position: storedPosition })
+
+  await open(page)
+  await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '標準マスタから追加', exact: true })
+  await expect(dialog.getByRole('tab', { name: '規格から選ぶ', exact: true }))
+    .toHaveAttribute('aria-selected', 'true')
+
+  const expectPosition = async (position: {
+    book: string; section: string; subject: string; middle?: string;
+  }) => {
+    await expect(dialog.getByLabel('位置の編', { exact: true })).toHaveValue(position.book)
+    await expect(dialog.getByLabel('位置の種目', { exact: true })).toHaveValue(position.section)
+    await expect(dialog.getByLabel('位置の科目', { exact: true })).toHaveValue(position.subject)
+    await expect(dialog.getByLabel('位置の中科目', { exact: true }))
+      .toHaveValue(position.middle ?? '')
+  }
+  await expectPosition(storedPosition)
+
+  await dialog.getByRole('group', { name: '標準マスタの分野', exact: true })
+    .getByRole('button', { name: '建築', exact: true }).click()
+  await dialog.getByRole('group', { name: '標準マスタの分類', exact: true })
+    .getByRole('button', { name: '外部（面積）', exact: true }).click()
+  await dialog.getByRole('group', { name: '標準マスタの種類', exact: true })
+    .getByRole('button', { name: /^舗装（\d+件）$/ }).click()
+
+  const specPanel = dialog.getByRole('tabpanel', { name: '規格から選ぶ', exact: true })
+  const pavingOption = specPanel.locator('.catalog-options').getByRole('checkbox').first()
+  await expect(pavingOption).toBeVisible()
+  await pavingOption.check()
+
+  const pavingPosition = {
+    book: '建築',
+    section: '構内舗装',
+    subject: '構内舗装',
+    item: 'アスファルト舗装',
+  }
+  await expectPosition(pavingPosition)
+  const positionButton = dialog.getByRole('button', {
+    name: '内訳書: 建築 › 構内舗装 › 構内舗装 › アスファルト舗装',
+    exact: true,
+  })
+  await expect(positionButton).toBeVisible()
+  await expect(positionButton).toHaveAttribute('aria-pressed', 'true')
+  // 代表位置の自動選択は、保存されている手動の位置を上書きしない。
+  expect(await page.evaluate(key => localStorage.getItem(key), storageKey))
+    .toBe(JSON.stringify(storedPosition))
+
+  await dialog.getByRole('button', { name: '選んだ項目を追加（1件）', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => window.__karu!.getCountFixtures().length))
+    .toBe(1)
+
+  const fixtures = await savedFixtures(page)
+  expect(fixtures).toHaveLength(1)
+  expect(fixtures[0].breakdown).toEqual(pavingPosition)
+  expect(fixtures[0].breakdown).not.toHaveProperty('middle')
+})
+
 test('adds a searched distribution board under the board category', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: '標準マスタから追加', exact: true }).click()
