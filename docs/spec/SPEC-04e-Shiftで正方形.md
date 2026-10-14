@@ -25,7 +25,7 @@
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - `src/editor/AnnotationLayer.tsx` — 460行と616行の条件だけ
   - `src/app/HelpDialog.tsx` — 四角と丸の説明に1文を足すだけ

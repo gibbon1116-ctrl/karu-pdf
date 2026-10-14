@@ -27,7 +27,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - 新規 `src/core/quantityMaster.ts` — 標準マスタのデータ・展開・検索（このファイルは**動的 import だけ**で読む）
   - `src/app/FixturePresetDialog.tsx` — 標準マスタの画面を足す（「他のPDFから読み込む」の動作は変えない）

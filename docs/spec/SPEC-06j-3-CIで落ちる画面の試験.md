@@ -29,7 +29,7 @@ GitHub Pages への公開（`.github/workflows/deploy.yml` の `npm run e2e`）�
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `e2e/quantity-order.annotate.spec.ts`、`e2e/menu.annotate.spec.ts`
 - 変更しないファイル: 上以外すべて（`src/` は変えない）
 

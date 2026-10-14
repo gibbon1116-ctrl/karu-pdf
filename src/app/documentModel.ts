@@ -7,7 +7,22 @@ import { createContext } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 export const DrawingUiContext = createContext<{ edit(pageIndex: number): void } | null>(null)
 export const SnapUiContext = createContext<{ enabled: boolean; toggle(): void; drawingEndpoints: boolean; toggleDrawingEndpoints(): void } | null>(null)
-export const FixtureUiContext = createContext<{ documents: readonly DocumentSession[]; select(): void; edit(id: string): void; open(): void } | null>(null)
+export interface RelatedAddContext {
+  originFixtureId: string
+  routeId?: string
+}
+
+export const FixtureUiContext = createContext<{
+  documents: readonly DocumentSession[]
+  select(): void
+  edit(id: string): void
+  open(): void
+  addFromMaster(query: string, context?: RelatedAddContext): void
+  createFixture(initial: import('../core/countFixtures').CountFixture, context?: RelatedAddContext): void
+  canEdit?: boolean
+  setBusy?(busy: boolean): void
+  retryRelatedReviews?(): void
+} | null>(null)
 export async function ensureSessionFixtures(session: DocumentSession, pool: PdfWorkerPool): Promise<void> {
   await session.annotationStore.ensureCountFixtures(() => pool.getCountFixtures(session.docId), async () => {
     for (let i = 0; i < session.pageSizes.length; i++) await session.annotationStore.ensurePageLoaded(i, () => pool.listAnnotations(session.docId, i))
@@ -15,6 +30,9 @@ export async function ensureSessionFixtures(session: DocumentSession, pool: PdfW
 }
 export async function ensureSessionQuantityChecks(session: DocumentSession, pool: PdfWorkerPool): Promise<void> {
   await session.annotationStore.ensureQuantityChecks(() => pool.getQuantityChecks(session.docId))
+}
+export async function ensureSessionRelatedReviews(session: DocumentSession, pool: PdfWorkerPool): Promise<void> {
+  await session.annotationStore.ensureRelatedReviews(() => pool.getRelatedReviews(session.docId))
 }
 import { AnnotationStore } from '../editor/AnnotationStore'
 import type { PdfFileHandle } from '../editor/fileAccess'
@@ -165,6 +183,7 @@ export class DocumentSession {
     if (summary.rooms.length) parts.push(`部屋の範囲（${pages(summary.rooms)}）`)
     if (summary.roomSets) parts.push('部屋の組')
     if (summary.quantityChecks) parts.push('チェックシートの基本の値')
+    if (summary.relatedReviews) parts.push('関連候補の判断')
     if (this.fileOutdated) parts.push('ページの編集・まだ保存していない文書')
     return parts.join('、')
   }
@@ -192,7 +211,7 @@ export class DocumentSession {
 
   recordSavedRendering(edits: readonly AnnotationEdit[], errors: readonly { editIndex: number }[]): void {
     const failed = new Set(errors.map(error => error.editIndex))
-    const pages = new Set(edits.flatMap((edit, index) => !failed.has(index) && edit.kind !== 'setDrawingInfo' && edit.kind !== 'setPageScale' && edit.kind !== 'setScaleRegions' && edit.kind !== 'setRoomRegions' && edit.kind !== 'setRoomSets' && edit.kind !== 'setQuantityChecks' && edit.kind !== 'setPageRoomSet' && edit.kind !== 'setCountFixtures' ? [edit.pageIndex] : []))
+    const pages = new Set(edits.flatMap((edit, index) => !failed.has(index) && edit.kind !== 'setDrawingInfo' && edit.kind !== 'setPageScale' && edit.kind !== 'setScaleRegions' && edit.kind !== 'setRoomRegions' && edit.kind !== 'setRoomSets' && edit.kind !== 'setQuantityChecks' && edit.kind !== 'setRelatedReviews' && edit.kind !== 'setPageRoomSet' && edit.kind !== 'setCountFixtures' ? [edit.pageIndex] : []))
     if (pages.size) this.vectorCache.clear()
     this.savedRevision += 1
     for (const page of pages) this.savedPageRevisions.set(page, this.savedRevision)

@@ -28,7 +28,7 @@ SPEC-06h-1 の試作を実図面（七ヶ浜町 1ページ目、A3 1190×842pt�
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/worker/pdf.worker.ts`・`src/worker/protocol.ts`・`src/client/PdfWorkerPool.ts`（照合用のページの描画の要求を1つ足すだけ。既存の描画は変えない）、`src/core/symbolSearch.ts`、`src/worker/symbolSearch.worker.ts`、`src/client/SymbolSearchClient.ts`、`tests/symbolSearch.test.ts`、`e2e/symbol-search.perf.spec.ts`
 - 変更しないファイル: 上以外
 

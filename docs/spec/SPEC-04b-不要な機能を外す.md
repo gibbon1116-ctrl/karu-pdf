@@ -57,7 +57,7 @@
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: 上の「だけが使っているもの」に挙げたファイル、`src/app/TextCorrectionDialog.tsx`（`prepareOutput` の呼出しの引数を合わせるだけ）、`src/core/textExtract.ts`（抽出出力にしか使わない関数・定数があれば削除）、`tests/textExtractFixtures.ts`（使われなくなる場合だけ）
 - 削除してよいファイル: `src/app/TextExportDialog.tsx`、`src/app/textExport.ts`、`src/app/SafeOutputDialog.tsx`、`src/core/safeOutput.ts`、`tests/textExport.test.ts`、`e2e/text-extract.annotate.spec.ts`、`scripts/eizen-text-validation.mjs`
 - 変更しないファイル: 上記以外。特に `package.json`、`package-lock.json`、`vite.config.ts`、`playwright.config.ts`、`scripts/audit-allowlist.json`、`docs/`、`test-data/`、`bench-results/`、`dist*/`、`release/`、`work/`

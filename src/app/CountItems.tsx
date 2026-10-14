@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { countHex, fixtureLabelCode, quantityUnit } from '../core/countFixtures'
 import type { CountComponent } from '../core/counts'
+import { isPerEquipmentComponent } from '../core/perEquipment'
 import type { AnnotationStore, EditableAnnotation } from '../editor/AnnotationStore'
 import { QuantitySwatch } from '../editor/countMarkers'
 import ComponentPicker from './ComponentPicker'
@@ -94,6 +95,13 @@ export function CountItems({ annotation, store }: {
             onClick={() => remove(component.itemId, code)}>×</button>
         </div>
         {f && <>
+          {isPerEquipmentComponent(f) && <button type="button"
+            aria-label={`${f.name}を${main.name}の項目に分ける`}
+            onClick={() => {
+              if (commit(() => store.splitPerEquipmentComponent(main.id, f.id))) {
+                setStatus(`${f.name}を${main.name}の項目に分けました（Ctrl+Z で戻せます）`)
+              }
+            }}>機器ごとに分ける</button>}
           <div className="route-item-values">
             <ComponentCount value={component.count} code={code} commit={count => {
               change(component.itemId, current => ({ ...current, count }))

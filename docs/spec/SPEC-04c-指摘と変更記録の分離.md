@@ -38,7 +38,7 @@
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/core/issues.ts`、`src/core/annotations.ts`（指摘の保存・読込・外観の部分だけ）、`src/editor/AnnotationStore.ts`、`src/editor/AnnotationLayer.tsx`、`src/editor/IssueEditor.tsx`、`src/editor/formatDefaults.ts`、`src/app/FormatPanel.tsx`、`src/app/IssueDetails.tsx`、`src/app/AnnotationListPanel.tsx`、`src/app/annotationCsv.ts`、`src/app/issueTransfer.ts`、`src/app/IssueTransferDialog.tsx`、`src/App.tsx`（番号の初期化と `window.__karu` のCSV関数だけ）、`src/worker/pdf.worker.ts`・`src/worker/protocol.ts`・`src/client/PdfWorkerPool.ts`（番号の走査の要求だけ）、`src/app/HelpDialog.tsx`、`src/styles.css`、`tests/`、`e2e/`
 - 新しく作ってよいファイル: `src/app/CsvExportDialog.tsx`（下の6.）、試験ファイル
 - 変更しないファイル: 上記以外。特に個数カウントの処理（`src/core/counts.ts` と、その描画・書式）は変えない（別の SPEC-04d で作り直す）。`package.json`、`package-lock.json`、`scripts/`、`docs/`、`test-data/`、`dist*/`、`release/`、`work/`

@@ -25,7 +25,7 @@
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/core/countFixtures.ts`、`src/app/FixturePanel.tsx`、`src/app/FixtureDialog.tsx`、`src/app/FixturePresetDialog.tsx`（見本から追加の提案だけ）、`src/editor/AnnotationLayer.tsx`（切り取りの範囲を囲む操作だけ）、`src/App.tsx`（切り取りの操作の接続だけ）、`src/client/PdfWorkerPool.ts`・`src/worker/pdf.worker.ts`・`src/worker/protocol.ts`（範囲の画像を作る要求が既存の描画で足りない場合だけ）、`src/app/HelpDialog.tsx`、`src/styles.css`、`tests/`、`e2e/`
 - 変更しないファイル: 上記以外。`package.json`、`package-lock.json`、`scripts/`、`docs/`、`test-data/`、`dist*/`、`release/`、`work/`
 

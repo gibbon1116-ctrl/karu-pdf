@@ -7,6 +7,7 @@ import type { SymbolSearchClient } from '../client/SymbolSearchClient'
 import type { DocumentSession } from './documentModel'
 import { symbolLabelDisplay, UNKNOWN_SYMBOL_LABEL } from '../core/symbolLabels'
 import { defaultVectorTolerance } from '../core/vectorSymbolSearch'
+import SymbolCandidateReview from './SymbolCandidateReview'
 
 import type { SymbolSearchSelection } from './symbolSearchContext'
 export { SymbolSearchContext, type SymbolSearchSelection } from './symbolSearchContext'
@@ -27,10 +28,10 @@ export function parseSymbolSearchPages(text: string, pageCount: number): number[
   return [...pages].sort((a, b) => a - b)
 }
 
-export default function SymbolSearchPanel({ selection, pool, onClose, onRecapture, onRequestArea, onPage, onStatus, registerDispose }: {
+export default function SymbolSearchPanel({ selection, pool, onClose, onRecapture, onRequestArea, onPage, onLocate, onStatus, registerDispose }: {
   selection: SymbolSearchSelection; pool: PdfWorkerPool; onClose(): void; onRecapture(): void
   onRequestArea(): Promise<{ pageIndex: number; rect: Rect } | null>
-  onPage(pageIndex: number): void; onStatus(message: string): void
+  onPage(pageIndex: number): void; onLocate(pageIndex: number, rect: Rect): void; onStatus(message: string): void
   registerDispose(dispose: (() => void) | null): void
 }) {
   const { session, fixtureId, sample, rect } = selection, store = session.annotationStore
@@ -94,6 +95,27 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
   const otherFixtureSummary = [...otherFixtureCounts].map(([id, count]) => `${store.symbolOtherFixtureLabel(id)} ${count}`).join('・')
   const chosen = candidates?.filter(c => c.state === 'chosen') ?? []
   const counted = candidates?.filter(c => c.state === 'counted').length ?? 0
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [reviewGeneration, setReviewGeneration] = useState(0)
+  // 窓が開いている間だけ、図面のクリックで候補を強調する（閉じているときは今までの選択の色のまま）。
+  useLayoutEffect(() => {
+    store.setSymbolReviewOpen(reviewOpen)
+    return () => store.setSymbolReviewOpen(false)
+  }, [store, reviewOpen])
+  const chooseAllCandidates = () => {
+    store.chooseSymbolCandidates(true)
+    if (candidates?.some(candidate => candidate.state !== 'counted')) setReviewOpen(true)
+  }
+  const chooseHighConfidenceCandidates = () => {
+    const hasPendingHighConfidence = !!candidates?.some(candidate =>
+      candidate.confidence === 'high' && candidate.state === 'pending')
+    store.chooseHighConfidenceCandidates()
+    if (hasPendingHighConfidence) setReviewOpen(true)
+  }
+  const closeReview = () => {
+    setReviewOpen(false)
+    store.setFocusedSymbolCandidate(null)
+  }
   const confidenceSummary = (items: typeof store.symbolCandidates) => {
     const high = items?.filter(c => c.confidence === 'high').length ?? 0
     const check = items?.filter(c => c.confidence === 'check').length ?? 0
@@ -117,6 +139,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
     registerDispose(dispose)
     return () => { registerDispose(null); dispose() }
   }, [store, registerDispose])
+
   useLayoutEffect(() => {
     // clearSymbolCandidates also clears the overlay; restore it while this panel remains active.
     if (alive.current) store.setSymbolSearchArea(scope === 'area' ? area : null)
@@ -241,6 +264,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
     stop()
     const run = generation.current
     const current = () => alive.current && generation.current === run && store.selectedFixtureId === fixtureId
+    setReviewOpen(false); setReviewGeneration(value => value + 1)
     store.beginSymbolCandidates(fixtureId, rect); setBusy(true); setMessage(''); setError(''); setCompletedPages([]); setSearchPageCount(pages.length); setTemplateSummary(null)
     store.setSymbolCandidateFilters([''], 'all')
     let initializedLabels = false
@@ -287,7 +311,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
     } catch (reason) { setError((reason as Error).message) }
   }
   if (!host || !fixture) return null
-  return createPortal(<section className="symbol-search-panel" role="dialog" aria-label="同じ記号を探す"
+  return createPortal(<><section className="symbol-search-panel" role="dialog" aria-label="同じ記号を探す"
     onPointerDown={e => e.stopPropagation()} onPointerUp={e => e.stopPropagation()} onClick={e => e.stopPropagation()} onWheel={e => e.stopPropagation()}>
     <h2>同じ記号を探す</h2>
     <div className="symbol-search-sample"><img src={`data:image/png;base64,${sample.png}`} alt="探す記号の見本" /><span>{fixtureCode(fixture)} {fixture.name}</span></div>
@@ -356,13 +380,18 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
       </select></label>
       {searchPageCount === 1 && completedPages.length > 0 && <p>{methods[completedPages[0]] === 'vector' ? '線の情報で探しました' : '画像で探しました（線の情報が無いページ）'}</p>}
       {searchPageCount > 1 && <div className="symbol-search-pages">{pageCounts.map(([page, count]) => <button key={page} type="button" onClick={() => onPage(page)}>p.{page + 1} {methods[page] === 'vector' ? '線で探しました' : '画像で探しました（線の情報が無いページ）'} {count} 件{confidenceSummary(candidates.filter(c => c.pageIndex === page))}</button>)}</div>}
-      <div className="symbol-search-actions"><button type="button" onClick={() => store.chooseSymbolCandidates(true)}>すべて選ぶ</button><button type="button" onClick={() => store.chooseSymbolCandidates(false)}>すべて外す</button></div>
+      <div className="symbol-search-actions"><button type="button" onClick={chooseAllCandidates}>すべて選ぶ</button><button type="button" onClick={() => store.chooseSymbolCandidates(false)}>すべて外す</button></div>
       <button type="button" disabled={busy || !candidates.some(c => c.confidence === 'high' && c.state === 'pending')}
-        onClick={() => store.chooseHighConfidenceCandidates()}>確度の高い候補を選ぶ</button>
+        onClick={chooseHighConfidenceCandidates}>確度の高い候補を選ぶ</button>
+      <button type="button" onClick={() => setReviewOpen(true)}>選んだ候補を画像で確認</button>
       <button type="button" disabled={busy || chosen.length === 0} onClick={add}>選んだ {chosen.length} 件を数量へ追加</button>
     </>}
     <p>候補は自動で数量に入りません。図面で確認して選んでください。</p>
     {message && <p role="status">{message}</p>}{error && <p role="alert">{error}</p>}
     <button type="button" onClick={onClose}>閉じる</button>
-  </section>, host)
+  </section>
+    {store.symbolCandidates !== null && <SymbolCandidateReview
+      key={reviewGeneration} session={session} pool={pool} open={reviewOpen}
+      onClose={closeReview} onLocate={onLocate} />}
+  </>, host)
 }

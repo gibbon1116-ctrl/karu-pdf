@@ -29,7 +29,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\quantity-pickup-expansion-ea43cf`
+- 対象フォルダ: `<作業フォルダ>`
 - 新しく作るファイル:
   - `src/core/drawingInfo.ts` — 図面情報の型、ページの辞書への読み書き、候補の判定（純粋な関数。MuPDF に依らない判定の部分は、行の配列を受け取る形にして単体試験できるようにする）
   - `tests/drawingInfo.test.ts`、`tests/drawingInfo.integration.test.ts`、`e2e/drawing-info.annotate.spec.ts`

@@ -3,6 +3,9 @@
 // 発生材の3行は単位を ㎥（t を併記）にした。鋼板製ダクトの「1.6mm」は区分「板厚」に、マルチパッケージの屋外機・屋内機は名称に、集合装置の摘要は2区分に手で直した。separate は「1式・別紙明細」、renovation は書式の ※（改修工事の項目の例）。
 import type { BreakdownGroupData } from './types'
 
+/** 書式に独立の行が無く、既存の標準マスタの品目を残すために Claude が追加した行（U1、2026-10-14）。 */
+export const SUPPLEMENT_ROW_NOTE = '書式に独立の行なし（既存の標準マスタの品目を残すため Claude が追加）'
+
 export const MECHANICAL_GROUPS: readonly BreakdownGroupData[] = [
   { section: "庁舎", subject: "空気調和設備", middle: "機器設備", rows: [
     { name: "鋼製ボイラー", summary: ["記号", "仕様等"], unit: "基" },
@@ -53,6 +56,7 @@ export const MECHANICAL_GROUPS: readonly BreakdownGroupData[] = [
   { section: "庁舎", subject: "空気調和設備", middle: "ダクト設備", rows: [
     { name: "長方形ダクト", summary: ["板厚等"], unit: "㎡" },
     { name: "スパイラルダクト", summary: ["口径"], unit: "m" },
+    { name: "フレキシブルダクト", summary: ["口径"], unit: "m", note: SUPPLEMENT_ROW_NOTE },
     { name: "鋼板製ダクト", summary: ["板厚"], unit: "㎡", note: "書式の例は 1.6mm" },
     { name: "シーリングディフューザー", summary: ["記号", "寸法"], unit: "個" },
     { name: "線状吹出口", summary: ["記号", "寸法"], unit: "個" },
@@ -121,6 +125,8 @@ export const MECHANICAL_GROUPS: readonly BreakdownGroupData[] = [
     { name: "全熱交換ユニット", summary: ["記号", "仕様等"], unit: "台" },
     { name: "全熱交換ユニット", summary: ["予備品"], unit: "式" },
     { name: "圧力扇", summary: ["記号", "仕様等"], unit: "台" },
+    { name: "天井換気扇", summary: ["記号", "仕様等"], unit: "台", note: SUPPLEMENT_ROW_NOTE },
+    { name: "壁付換気扇", summary: ["記号", "仕様等"], unit: "台", note: SUPPLEMENT_ROW_NOTE },
     { name: "パネル形エアフィルター", summary: ["記号", "仕様等"], unit: "台" },
     { name: "自動巻取形エアフィルター", summary: ["記号", "仕様等"], unit: "台" },
     { name: "電気集じん器", summary: ["記号", "仕様等"], unit: "台" },
@@ -130,9 +136,11 @@ export const MECHANICAL_GROUPS: readonly BreakdownGroupData[] = [
   { section: "庁舎", subject: "換気設備", middle: "ダクト設備", rows: [
     { name: "長方形ダクト", summary: ["板厚等"], unit: "㎡" },
     { name: "スパイラルダクト", summary: ["口径"], unit: "m" },
+    { name: "フレキシブルダクト", summary: ["口径"], unit: "m", note: SUPPLEMENT_ROW_NOTE },
     { name: "鋼板製ダクト", summary: ["板厚"], unit: "㎡", note: "書式の例は 1.6mm" },
     { name: "吹出口", summary: ["記号", "寸法"], unit: "個" },
     { name: "吸込口", summary: ["記号", "寸法"], unit: "個" },
+    { name: "排気ガラリ", summary: ["記号", "寸法"], unit: "個", note: SUPPLEMENT_ROW_NOTE },
     { name: "風量調節ダンパー", summary: ["記号", "寸法"], unit: "個" },
     { name: "防火ダンパー", summary: ["記号", "寸法"], unit: "個" },
     { name: "防火防煙ダンパー", summary: ["記号", "寸法"], unit: "個" },
@@ -192,6 +200,7 @@ export const MECHANICAL_GROUPS: readonly BreakdownGroupData[] = [
     { name: "洗面器", summary: ["記号等"], unit: "組" },
     { name: "手洗器", summary: ["記号等"], unit: "組" },
     { name: "掃除流し", summary: ["記号等"], unit: "組" },
+    { name: "流し", summary: ["記号等"], unit: "組", note: SUPPLEMENT_ROW_NOTE },
     { name: "鏡", summary: ["寸法"], unit: "枚" },
     { name: "化粧棚", summary: ["寸法"], unit: "個" },
     { name: "水石けん入れ", summary: ["形式"], unit: "個" },
@@ -268,6 +277,7 @@ export const MECHANICAL_GROUPS: readonly BreakdownGroupData[] = [
     { name: "貯湯タンク", summary: ["記号", "仕様等"], unit: "基" },
     { name: "給湯用膨張・補給水タンク", summary: ["記号", "仕様等"], unit: "基" },
     { name: "貯湯式電気温水器", summary: ["記号", "仕様等"], unit: "台" },
+    { name: "給湯器", summary: ["記号", "仕様等"], unit: "台", note: SUPPLEMENT_ROW_NOTE },
     { name: "煙道", unit: "式" },
     { name: "給湯管", summary: ["管種", "接合方法", "呼び径", "区分"], unit: "m" },
     { name: "仕切弁", summary: ["材質", "接合方法", "耐圧", "呼び径"], unit: "個" },
@@ -291,6 +301,7 @@ export const MECHANICAL_GROUPS: readonly BreakdownGroupData[] = [
     { name: "消火ポンプユニット", summary: ["記号", "仕様等"], unit: "台" },
     { name: "消火用充水タンク", summary: ["記号", "仕様等"], unit: "基" },
     { name: "屋内消火栓箱", summary: ["記号", "仕様等"], unit: "組" },
+    { name: "消火器", summary: ["仕様"], unit: "本", note: SUPPLEMENT_ROW_NOTE },
     { name: "消火管", summary: ["管種", "接合方法", "呼び径", "区分"], unit: "m" },
     { name: "仕切弁", summary: ["材質", "接合方法", "耐圧", "呼び径"], unit: "個" },
     { name: "逆止弁", summary: ["材質", "接合方法", "耐圧", "呼び径"], unit: "個" },
@@ -341,6 +352,7 @@ export const MECHANICAL_GROUPS: readonly BreakdownGroupData[] = [
     { name: "あと施工アンカー", unit: "式", separate: true, renovation: true },
   ] },
   { section: "庁舎", subject: "消火設備", middle: "スプリンクラー設備", rows: [
+    { name: "スプリンクラーヘッド", summary: ["形式"], unit: "個", note: SUPPLEMENT_ROW_NOTE },
     { name: "消火機器", unit: "式" },
     { name: "材料費", unit: "式" },
     { name: "労務費", unit: "式" },

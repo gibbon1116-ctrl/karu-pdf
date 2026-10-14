@@ -19,7 +19,7 @@ SPEC-S01/S01b の試作（`src/core/symbolFeatureProfile.ts`）を、アプリ�
   - 内部の塗り（`interior`）
 - 結果を候補に付ける。
 
-正解の5組の診断では、違う形の候補を「確定」にした数が 0 になり、要確認も減った（`docs/調査/標準図記号検索_実装記録_20261010.md`）。
+正解の5組の診断では、違う形の候補を「確定」にした数が 0 になり、要確認も減った（非公開の調査資料）。
 
 この SPEC では、検索の依頼に `shapeCheck: true` を渡したときだけ動く。既定は `false` で、今の検索の結果・速度は変わらない。画面の設定と表示は、次の SPEC-S02b で行う。
 
@@ -183,7 +183,7 @@ export function decideSymbolShape(sample: LocalShapeLike | undefined, target: Lo
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\.codex\worktrees\dfd5\PDF編集アプリ`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - `src/worker/symbolSearchMessages.ts`、`src/worker/symbolSearch.worker.ts`
   - `src/client/SymbolSearchClient.ts`

@@ -95,7 +95,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/core/symbolLabels.ts`、`src/worker/labelExtract.ts`、`src/core/vectorSymbolSearch.ts`、`tests/`
 - 変更しないファイル: 上以外。
 
@@ -109,5 +109,5 @@
 
 ## 報告してほしいこと
 
-- 変更点、実データの回帰の出力（`KARU_ANTE_PDF` を `C:\Users\gibbo\Desktop\鞍手町庁舎新築工事_電気設計図面参考図.pdf` にして実行した結果）
+- 変更点、実データの回帰の出力（`KARU_ANTE_PDF` を `<作業フォルダ>` にして実行した結果）
 - SPEC から逸脱した箇所と理由

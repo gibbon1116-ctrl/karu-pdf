@@ -20,6 +20,12 @@ export interface QuantityChecksResponse {
   requestId: number
   basics: import('../core/quantityCheckBasics').QuantityCheckBasics
 }
+export interface GetRelatedReviewsRequest { type: 'getRelatedReviews'; requestId: number; docId: string }
+export interface RelatedReviewsResponse {
+  type: 'relatedReviews'
+  requestId: number
+  reviews: import('../core/related/reviews').RelatedReviews
+}
 
 export type DeviceRect = [number, number, number, number]
 export type Priority = 0 | 1 | 2 | 3
@@ -309,6 +315,7 @@ export interface RenderRasterBandRequest {
 export type WorkerRequest =
   | GetCountFixturesRequest
   | GetQuantityChecksRequest
+  | GetRelatedReviewsRequest
   | RenderCompareRequest
   | ClearCompareRequest
   | MaxIssueNumberRequest
@@ -564,6 +571,7 @@ export interface ErrorResponse {
 export type WorkerResponse =
   | CountFixturesResponse
   | QuantityChecksResponse
+  | RelatedReviewsResponse
   | MaxIssueNumberResponse
   | ReadyResponse
   | OpenResponse

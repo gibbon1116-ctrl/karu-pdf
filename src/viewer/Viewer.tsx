@@ -16,6 +16,7 @@ import { getDetailRecoveryCount, subscribeDetailRecovery } from './detailRequest
 import { computePageLayout, CSS_PX_PER_PT, pagesInRange, type PageLayout } from './pageLayout'
 import { PageView } from './PageView'
 import { mapViewPosition, readViewPosition, type ViewPosition } from './viewSync'
+import { perfCount } from '../perf/counters'
 
 export const ZOOM_STEPS = [0.25, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8]
 
@@ -107,6 +108,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   const initialPageIndex = Math.max(0, Math.min(props.pageSizes.length - 1, (props.initialView?.page ?? 1) - 1))
   const initialTop = props.initialView?.scrollTop ?? initialLayout.pages[initialPageIndex]?.top ?? 0
   const annotationVersion = useSyncExternalStore(props.annotationStore.subscribe, props.annotationStore.getSnapshot)
+  perfCount('Viewer.render')
   const scrollerRef = useRef<HTMLDivElement>(null)
   const prefetchRef = useRef(new Map<number, PrefetchEntry>())
   const warmReleasesRef = useRef<Array<() => void>>([])

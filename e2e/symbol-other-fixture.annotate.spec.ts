@@ -86,6 +86,8 @@ test('他の項目で拾い済みの候補は初めは隠し、表示すると�
   await expect(panel(page).getByRole('button',{name:'選んだ 4 件を数量へ追加',exact:true})).toBeEnabled()
   await panel(page).getByRole('button',{name:'すべて外す',exact:true}).click()
   await expect(page.locator('[data-testid="symbol-search-candidate"][data-state="chosen"]')).toHaveCount(0)
+  // SPEC-R6f: 「すべて選ぶ」で開いた「選んだ候補の確認」の窓は、図面の候補を直接クリックする前に閉じる。
+  await page.getByRole('button',{name:'選んだ候補の確認を閉じる',exact:true}).click()
 
   await showOther.check()
   await expect(candidates).toHaveCount(8)

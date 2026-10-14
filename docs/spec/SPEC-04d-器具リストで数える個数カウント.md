@@ -39,7 +39,7 @@
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/core/counts.ts`、`src/core/annotations.ts`（個数カウントの保存・読込・外観と、器具リストの保存だけ）、`src/editor/AnnotationStore.ts`、`src/editor/AnnotationLayer.tsx`、`src/editor/formatDefaults.ts`、`src/app/FormatPanel.tsx`（個数カウントの部分だけ）、`src/app/AnnotationListPanel.tsx`（個数の集計の部分だけ）、`src/app/annotationCsv.ts`、`src/app/CsvExportDialog.tsx`（個数カウントの列だけ）、`src/app/SidePanel.tsx`、`src/app/documentModel.ts`、`src/App.tsx`（器具リストのタブ・道具・保存の接続だけ）、`src/viewer/PageView.tsx`・`src/viewer/Viewer.tsx`（印の表示の絞り込みの接続だけ）、`src/worker/pdf.worker.ts`・`src/worker/protocol.ts`・`src/client/PdfWorkerPool.ts`（器具リストの読み書きの要求だけ）、`src/app/HelpDialog.tsx`、`src/styles.css`、`tests/`、`e2e/`
 - 新しく作ってよいファイル: `src/core/countFixtures.ts`（器具リストのデータ・検証・既定の形と色・見本）、`src/app/FixturePanel.tsx`（器具リストのタブ）、`src/app/FixtureDialog.tsx`（追加・編集の画面）、`src/app/FixturePresetDialog.tsx`（見本から追加）、`src/editor/countMarkers.ts`（印の図形の描き方。画面とPDFの外観で共用）、試験ファイル
 - 変更しないファイル: 上記以外。指摘の処理（SPEC-04c で整理済み）は変えない。`package.json`、`package-lock.json`、`scripts/`、`docs/`、`test-data/`、`dist*/`、`release/`、`work/`

@@ -90,7 +90,7 @@ test('adds multiple rows with summaries and excludes already added identities', 
   await lightingGroup(dialog, '電灯分岐')
   let row = distributionBoardRow(dialog)
   await row.getByRole('checkbox', { name: '分電盤（面）', exact: true }).check()
-  await row.getByLabel('分電盤の盤名称', { exact: true }).fill(' L-1 、 L-2 ')
+  await row.getByLabel('分電盤の盤名称のほかの値', { exact: true }).fill(' L-1 、 L-2 ')
   await dialog.getByRole('button', { name: '選んだ項目を追加（2件）', exact: true }).click()
 
   const panel = page.getByTestId('fixture-panel')
@@ -119,13 +119,13 @@ test('adds multiple rows with summaries and excludes already added identities', 
   row = distributionBoardRow(dialog)
   const checkbox = row.getByRole('checkbox', { name: '分電盤（面）', exact: true })
   await checkbox.check()
-  await row.getByLabel('分電盤の盤名称', { exact: true }).fill('L-1')
+  await row.getByLabel('分電盤の盤名称のほかの値', { exact: true }).fill('L-1')
   await expect(row.getByText('追加済み', { exact: true })).toBeVisible()
   await expect(checkbox).toBeChecked()
   await expect(checkbox).toBeEnabled()
   await expect(dialog.getByRole('button', { name: '選んだ項目を追加（0件）', exact: true })).toBeDisabled()
 
-  await row.getByLabel('分電盤の盤名称', { exact: true }).fill('L-1、L-3,L-3，L-3')
+  await row.getByLabel('分電盤の盤名称のほかの値', { exact: true }).fill('L-1、L-3,L-3，L-3')
   await expect(dialog.getByRole('button', { name: '選んだ項目を追加（1件）', exact: true })).toBeEnabled()
   await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
 })
@@ -241,7 +241,7 @@ test('exports a counted distribution board from the breakdown master to the item
   await lightingGroup(dialog, '電灯分岐')
   const boardRow = distributionBoardRow(dialog)
   await boardRow.getByRole('checkbox', { name: '分電盤（面）', exact: true }).check()
-  await boardRow.getByLabel('分電盤の盤名称', { exact: true }).fill('L-1')
+  await boardRow.getByLabel('分電盤の盤名称のほかの値', { exact: true }).fill('L-1')
   await dialog.getByRole('button', { name: '選んだ項目を追加（1件）', exact: true }).click()
   await expect(dialog).toHaveCount(0)
 
@@ -424,7 +424,7 @@ test('stacks both catalog tabs without horizontal scrolling at 390px', async ({ 
   await lightingGroup(dialog, '電灯分岐')
   const row = distributionBoardRow(dialog)
   await row.getByRole('checkbox', { name: '分電盤（面）', exact: true }).check()
-  await row.getByLabel('分電盤の盤名称', { exact: true }).fill('L-1、L-2')
+  await row.getByLabel('分電盤の盤名称のほかの値', { exact: true }).fill('L-1、L-2')
 
   const breakdownPanel = dialog.getByRole('tabpanel', { name: '内訳書から選ぶ', exact: true })
   const boxes = await breakdownPanel.locator('.quantity-master-navigation, .quantity-master-specs').evaluateAll(elements => elements.map(element => {
@@ -456,7 +456,7 @@ test('stacks both catalog tabs without horizontal scrolling at 390px', async ({ 
   expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
   await dialog.getByLabel('標準マスタを検索', { exact: true }).fill('分電盤')
   await dialog.getByRole('checkbox', { name: '分電盤（面）', exact: true }).check()
-  await dialog.getByLabel('分電盤の盤名称', { exact: true }).fill('L-1、L-2')
+  await dialog.getByLabel('分電盤の盤名称のほかの値', { exact: true }).fill('L-1、L-2')
   expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
 })
 
@@ -528,11 +528,10 @@ test('SPEC-B28: 規格のチェックで代表位置を表示し、品目ごと�
   await fields.getByRole('button', { name: '電気設備', exact: true }).click()
   await dialog.getByRole('group', { name: '標準マスタの分類', exact: true })
     .getByRole('button', { name: '照明器具', exact: true }).click()
-  await dialog.getByRole('group', { name: '標準マスタの種類', exact: true })
-    .getByRole('button', { name: /^DL（\d+件）$/ }).click()
+  await dialog.getByRole('searchbox').fill('ダウンライト')
 
   const dlOption = dialog.getByRole('checkbox', {
-    name: /^DL φ150 ダウンライト（(?:個数・)?個）$/,
+    name: 'DL φ150 ＬＥＤ照明器具（個）', exact: true,
   })
   await dlOption.check()
   const dlPosition = {
@@ -560,6 +559,7 @@ test('SPEC-B28: 規格のチェックで代表位置を表示し、品目ごと�
   await expectPosition(dlPosition)
   expect(await page.evaluate(key => localStorage.getItem(key), storageKey)).toBe(storedBefore)
 
+  await dialog.getByRole('searchbox').fill('')
   await dialog.getByRole('group', { name: '標準マスタの分類', exact: true })
     .getByRole('button', { name: '電線', exact: true }).click()
   await dialog.getByRole('group', { name: '標準マスタの種類', exact: true })
@@ -613,8 +613,7 @@ test('SPEC-B28: 規格のチェックで代表位置を表示し、品目ごと�
   // 表示を戻して位置の行を押すと、その品目だけが欄の編集対象になる。
   await dialog.getByRole('group', { name: '標準マスタの分類', exact: true })
     .getByRole('button', { name: '照明器具', exact: true }).click()
-  await dialog.getByRole('group', { name: '標準マスタの種類', exact: true })
-    .getByRole('button', { name: /^DL（\d+件）$/ }).click()
+  await dialog.getByRole('searchbox').fill('ダウンライト')
   await expect(dialog.getByRole('button', { name: dlLine, exact: true })).toBeVisible()
   await expectPosition(changedIvPosition)
   await dialog.getByRole('button', { name: dlLine, exact: true }).click()
@@ -645,7 +644,7 @@ test('SPEC-B28: 規格のチェックで代表位置を表示し、品目ごと�
   expect(iv).toBeDefined()
   expect(dl!.breakdown).toEqual(dlPosition)
   expect(dl!.spec).toBe('φ150')
-  expect(dl!.summary).toBeUndefined()
+  expect(dl!.summary).toEqual([{ label: '記号', value: 'DL' }])
   expect(iv!.breakdown).toEqual(changedIvPosition)
   expect(ivItem!.options.some(option => option.spec === iv!.spec)).toBe(true)
 })
@@ -726,7 +725,7 @@ test('adds a searched distribution board under the board category', async ({ pag
   const dialog = page.getByRole('dialog', { name: '標準マスタから追加', exact: true })
   await dialog.getByLabel('標準マスタを検索', { exact: true }).fill('分電盤')
   await dialog.getByRole('checkbox', { name: '分電盤（面）', exact: true }).check()
-  await dialog.getByLabel('分電盤の盤名称', { exact: true }).fill('L-1')
+  await dialog.getByLabel('分電盤の盤名称のほかの値', { exact: true }).fill('L-1')
   await dialog.getByRole('button', { name: '選んだ項目を追加（1件）', exact: true }).click()
 
   const panel = page.getByTestId('fixture-panel')
@@ -864,7 +863,7 @@ test('fills legacy fixture conditions together and restores them with one undo',
   await lightingGroup(dialog, '電灯分岐')
   const boardRow = distributionBoardRow(dialog)
   await boardRow.getByRole('checkbox', { name: '分電盤（面）', exact: true }).check()
-  await boardRow.getByLabel('分電盤の盤名称', { exact: true }).fill('L-1')
+  await boardRow.getByLabel('分電盤の盤名称のほかの値', { exact: true }).fill('L-1')
   await dialog.getByRole('button', { name: '選んだ項目を追加（1件）', exact: true }).click()
   await expect(dialog).toHaveCount(0)
 
@@ -973,7 +972,7 @@ test('shows the fixture list in breakdown order with subtree controls and a pers
   await lightingGroup(dialog, '電灯分岐')
   const boardRow = distributionBoardRow(dialog)
   await boardRow.getByRole('checkbox', { name: '分電盤（面）', exact: true }).check()
-  await boardRow.getByLabel('分電盤の盤名称', { exact: true }).fill('L-1、L-2')
+  await boardRow.getByLabel('分電盤の盤名称のほかの値', { exact: true }).fill('L-1、L-2')
 
   const cableRow = dialog.locator('.breakdown-row').filter({
     has: page.getByText('ケーブル', { exact: true }),
@@ -1020,7 +1019,8 @@ test('shows the fixture list in breakdown order with subtree controls and a pers
   })).toHaveAttribute('data-level', '4')
   for (const heading of await headings.all()) {
     const level = await heading.locator('..').getAttribute('data-level')
-    if (level === '2' || level === '3' || level === '4') {
+    const breakdownKey = await heading.locator('..').getAttribute('data-breakdown-heading')
+    if ((level === '1' && breakdownKey !== null) || level === '2' || level === '3' || level === '4') {
       await expect(heading).toHaveAttribute('draggable', 'true')
     } else {
       await expect(heading).not.toHaveAttribute('draggable', 'true')
@@ -1090,11 +1090,17 @@ test('shows the fixture list in breakdown order with subtree controls and a pers
 
   await panel.locator(`li[data-fixture-id="${firstBoard.id}"]`)
     .dragTo(panel.locator(`li[data-fixture-id="${cables[0].id}"]`))
+  // SPEC-R6e: 細目の項目も別紙明細の項目の位置へ移せる。
+  await expect.poll(() => page.evaluate(id =>
+    window.__karu!.getCountFixtures().find(fixture => fixture.id === id)?.breakdown, firstBoard.id,
+  )).toEqual(cables[0].breakdown)
   await expect(panel.getByRole('status').filter({
-    // SPEC-B20: 別紙明細の項目と細目そのものの項目の間では移せない。
-    hasText: '同じ編の別紙明細同士、または同じ名前の細目がある中科目へ移せます',
-  })).toBeVisible()
-  expect(await page.evaluate(() => window.__karu!.getCountFixtures())).toEqual(reordered)
+    hasText: `${firstBoard.name}を「`,
+  }).filter({ hasText: ' › ケーブル」へ移しました（Ctrl+Z で戻せます）' })).toBeVisible()
+  expect((await savedFixtures(page)).find(fixture => fixture.id === firstBoard.id)!.breakdown)
+    .toEqual(cables[0].breakdown)
+  await page.keyboard.press('Control+z')
+  await expect.poll(() => page.evaluate(() => window.__karu!.getCountFixtures())).toEqual(reordered)
 
   await toggle.uncheck()
   await expect(panel.locator('.fixture-groups')).toHaveAttribute('data-grouping', 'category')
@@ -1145,7 +1151,7 @@ test('moves separate details and middle headings with one undo and restores mast
   await chooseSeparateDetails(dialog, '設備プレート', 1)
   const boardRow = distributionBoardRow(dialog)
   await boardRow.getByRole('checkbox', { name: '分電盤（面）', exact: true }).check()
-  await boardRow.getByLabel('分電盤の盤名称', { exact: true }).fill('L-1')
+  await boardRow.getByLabel('分電盤の盤名称のほかの値', { exact: true }).fill('L-1')
   await dialog.getByRole('button', { name: '選んだ項目を追加（4件）', exact: true }).click()
   await expect(dialog).toHaveCount(0)
 
@@ -1205,14 +1211,20 @@ test('moves separate details and middle headings with one undo and restores mast
   await page.keyboard.press('Control+z')
   await expect.poll(() => page.evaluate(() => window.__karu!.getCountFixtures())).toEqual(before)
 
-  // SPEC-B20: 別紙明細の項目と細目そのものの項目の間では移せない。
+  // SPEC-R6e: 別紙明細から細目へも、落とした項目の位置をそのままコピーする。
   await sourceRow().dragTo(panel.locator(`li[data-fixture-id="${board.id}"]`), {
     targetPosition: { x: 20, y: 2 },
   })
+  await expect.poll(() => page.evaluate(id =>
+    window.__karu!.getCountFixtures().find(fixture => fixture.id === id)?.breakdown, switches[0].id,
+  )).toEqual(board.breakdown)
   await expect(panel.getByRole('status').filter({
-    hasText: '同じ編の別紙明細同士、または同じ名前の細目がある中科目へ移せます',
-  })).toBeVisible()
-  expect(await page.evaluate(() => window.__karu!.getCountFixtures())).toEqual(before)
+    hasText: `${switches[0].name}を「`,
+  }).filter({ hasText: ' › 分電盤」へ移しました（Ctrl+Z で戻せます）' })).toBeVisible()
+  const movedToOrdinary = await savedFixtures(page)
+  expect(movedToOrdinary.find(fixture => fixture.id === switches[0].id)!.breakdown).toEqual(board.breakdown)
+  await page.keyboard.press('Control+z')
+  await expect.poll(() => page.evaluate(() => window.__karu!.getCountFixtures())).toEqual(before)
   // SPEC-B20: 別の中科目の別紙明細へも移せる（Ctrl+Z 1 回で戻る）。
   await sourceRow().dragTo(panel.locator(`li[data-fixture-id="${trunk.id}"]`), {
     targetPosition: { x: 20, y: 2 },
@@ -1232,7 +1244,7 @@ test('moves separate details and middle headings with one undo and restores mast
     await expect(panel.locator('.fixture-category[data-level="3"] > button:first-child'))
       .toHaveText(['電灯分岐（4）', '電灯幹線（1）'])
     await expect(panel.getByRole('status').filter({
-      hasText: '電灯分岐を移しました（Ctrl+Z で戻せます）',
+      hasText: '電灯分岐を「庁舎 › 電灯設備 › 電灯分岐」へ移しました（Ctrl+Z で戻せます）',
     })).toBeVisible()
   }
   await moveBranchBeforeTrunk()
@@ -1284,6 +1296,98 @@ test('moves separate details and middle headings with one undo and restores mast
   await expect(reset).toHaveCount(0)
 })
 
+async function internalScaffoldRow(dialog: Locator): Promise<Locator> {
+  await dialog.getByLabel('内訳書を検索', { exact: true }).fill('')
+  await dialog.getByRole('group', { name: '内訳書の編', exact: true })
+    .getByRole('button', { name: '建築', exact: true }).click()
+  const row = dialog.locator('.breakdown-row').filter({
+    has: dialog.page().getByText('内部足場', { exact: true }),
+  }).first()
+  const sectionGroup = dialog.getByRole('group', { name: '内訳書の種目', exact: true })
+  const subjectGroup = dialog.getByRole('group', { name: '内訳書の科目', exact: true })
+  const middleGroup = dialog.getByRole('group', { name: '内訳書の中科目', exact: true })
+  const sections = await sectionGroup.getByRole('button').allTextContents()
+  for (const section of sections) {
+    await sectionGroup.getByRole('button', { name: section, exact: true }).click()
+    const subjects = await subjectGroup.getByRole('button').allTextContents()
+    for (const subject of subjects) {
+      await subjectGroup.getByRole('button', { name: subject, exact: true }).click()
+      if (await row.count()) return row
+      const middles = await middleGroup.getByRole('button').allTextContents()
+      for (const middle of middles) {
+        await middleGroup.getByRole('button', { name: middle, exact: true }).click()
+        if (await row.count()) return row
+      }
+    }
+  }
+  throw new Error('建築の内訳書マスタに内部足場の行が見つかりません')
+}
+
+test('moves an unlocated fixture into the internal scaffold separate heading with one undo', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1400 })
+  await open(page)
+  await page.evaluate(field => window.__karu!.addFixturePresets(field), '電気設備')
+  const dialog = await breakdownDialog(page)
+  const row = await internalScaffoldRow(dialog)
+  const detailButton = row.getByRole('button', { name: /^明細を選ぶ（\d+）$/ })
+  if (await detailButton.count()) {
+    await detailButton.click()
+    for (const type of await row.getByRole('button', { name: /の種類 / }).all()) {
+      if (await type.getAttribute('aria-expanded') !== 'true') await type.click()
+    }
+  }
+  await expect(row.getByRole('checkbox').first()).toBeVisible()
+  await row.getByRole('checkbox').first().check()
+  await dialog.getByRole('button', { name: '選んだ項目を追加（1件）', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+
+  const panel = page.getByTestId('fixture-panel')
+  await expect(panel.locator('.fixture-groups')).toHaveAttribute('data-grouping', 'breakdown')
+  const before = await page.evaluate(() => window.__karu!.getCountFixtures())
+  const destination = before.find(fixture => fixture.breakdown?.item === '内部足場')!
+  const source = [...before].filter(fixture => fixture.breakdown === undefined)
+    .sort((a, b) => a.order - b.order)[0]!
+  expect(destination).toBeDefined()
+  expect(source).toBeDefined()
+  const heading = panel.locator('.fixture-category[data-level="4"]').filter({
+    has: page.getByRole('button', { name: '内部足場（別紙明細）（1）', exact: true }),
+  })
+  await expect(heading).toBeVisible()
+  await panel.locator(`li[data-fixture-id="${source.id}"]`).dragTo(heading)
+
+  await expect.poll(() => page.evaluate(id =>
+    window.__karu!.getCountFixtures().find(fixture => fixture.id === id)?.breakdown, source.id,
+  )).toEqual(destination.breakdown)
+  const movedSection = panel.locator('.fixture-groups > section').filter({
+    has: page.getByRole('button', { name: '内部足場（別紙明細）（2）', exact: true }),
+  })
+  await expect(movedSection.locator(`li[data-fixture-id="${source.id}"]`)).toBeVisible()
+  await expect(movedSection.locator('li[data-fixture-id]')).toHaveAttribute('draggable', 'true')
+    .catch(async () => {
+      for (const item of await movedSection.locator('li[data-fixture-id]').all()) {
+        await expect(item).toHaveAttribute('draggable', 'true')
+      }
+    })
+  const moved = await savedFixtures(page)
+  const peers = moved.filter(fixture =>
+    fixture.breakdown?.book === destination.breakdown!.book
+      && fixture.breakdown?.section === destination.breakdown!.section
+      && fixture.breakdown?.subject === destination.breakdown!.subject
+      && (fixture.breakdown?.middle ?? '') === (destination.breakdown!.middle ?? '')
+      && fixture.breakdown?.item === '内部足場',
+  ).sort((a, b) => a.order - b.order)
+  expect(peers.map(fixture => fixture.id)).toEqual([destination.id, source.id])
+  await expect(panel.getByRole('status').filter({
+    hasText: `${source.name}を「`,
+  }).filter({ hasText: ' › 内部足場」へ移しました（Ctrl+Z で戻せます）' })).toBeVisible()
+
+  await page.keyboard.press('Control+z')
+  await expect.poll(() => page.evaluate(() => window.__karu!.getCountFixtures())).toEqual(before)
+  await expect(panel.getByRole('button', { name: '内部足場（別紙明細）（1）', exact: true })).toBeVisible()
+  const restored = await savedFixtures(page)
+  expect(restored.find(fixture => fixture.id === source.id)!.breakdown).toBeUndefined()
+})
+
 test('falls back to no position for invalid stored hierarchy', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('karu-pdf:master-breakdown-position', JSON.stringify({
@@ -1332,19 +1436,25 @@ test('機械の給水管を追加し、配管の分類と施工条件の候補�
   }
 
   await expect(waterRow).toHaveCount(1)
-  await waterRow.getByRole('checkbox', { name: /^給水管（(?:長さ・)?m）$/ }).check()
-  await waterRow.getByRole('checkbox', { name: /SGP-VB/ }).check()
-  await waterRow.getByRole('checkbox', { name: /(?:^|\s)25A(?:$|\s)/ }).check()
+  await waterRow.getByRole('checkbox', {
+    name: 'SGP-VB 20A 給水管（m）', exact: true,
+  }).check()
   await dialog.getByRole('button', { name: /追加/ }).click()
   await expect(dialog).toBeHidden()
 
   const fixtures = page.getByTestId('fixture-panel')
   // The list opens in the breakdown view, so check the saved category rather than a category heading.
   await expect.poll(async () => (await page.evaluate(() => window.__karu!.getCountFixtures())).find(f => f.name === '給水管')?.category).toBe('配管（給水・給湯）')
-  await expect(fixtures.getByText('給水管', { exact: true })).toBeVisible()
+  // 登録直後は関連の候補カードにも起点の「給水管」ボタンが出るため、先頭（項目の見出し）を見る。
+  await expect(fixtures.getByRole('button', { name: 'SGP-VB 20A 給水管', exact: true })).toBeVisible()
   // The pipe's location (区分) is a construction condition, not a separate item.
   const water = (await page.evaluate(() => window.__karu!.getCountFixtures())).find(f => f.name === '給水管')!
-  expect(water.conditions).toEqual(['屋内一般配管', '機械室・便所配管', '屋外配管（架空・暗渠内・共同溝内）', '地中配管'])
+  expect(water).toMatchObject({ name: '給水管', code: 'SGP-VB', spec: '20A' })
+  expect(water.summary).toEqual([
+    { label: '管種', value: '水道用硬質塩化ビニルライニング鋼管（SGP-VB）' },
+    { label: '呼び径', value: '20A' },
+  ])
+  expect(water.conditions).toEqual(['屋内一般配管', '機械室・便所配管', '屋外配管（架空・暗渠内・共同溝内）', '屋外露出配管', '地中配管'])
   expect(water.breakdown?.book).toBe('機械設備')
 })
 
@@ -1480,39 +1590,19 @@ test('電灯分岐のＬＥＤ照明器具からDLのφ150を選び、位置・�
   })
   await expect(row).toHaveCount(1)
 
-  const fallback = row.getByRole('checkbox', {
-    name: 'ＬＥＤ照明器具（個）', exact: true,
+  const specificationGroup = row.getByRole('group', {
+    name: 'ダウンライトの規格', exact: true,
   })
-  const devices = row.getByRole('button', { name: '器具を選ぶ（7）', exact: true })
-  await expect(devices).toHaveAttribute('aria-expanded', 'false')
-  await expect(fallback).toBeVisible()
-  await expect(fallback).not.toBeChecked()
-  await expect(row.getByRole('button', { name: /の種類 DL$/ })).toHaveCount(0)
-
-  await devices.click()
-  await expect(devices).toHaveAttribute('aria-expanded', 'true')
-  const type = row.getByRole('button', { name: 'ＬＥＤ照明器具の種類 DL', exact: true })
-  await expect(type).toHaveText('DL ダウンライト')
-  await type.click()
-  await expect(type).toHaveAttribute('aria-expanded', 'true')
-
-  const specification = row.getByRole('checkbox', {
-    name: /^DL φ150 ダウンライト（(?:個数・)?個）$/,
+  const specification = specificationGroup.getByRole('checkbox', {
+    name: 'DL φ150 ＬＥＤ照明器具（個）', exact: true,
   })
   await specification.check()
-  await expect(row.getByLabel('ダウンライトの記号', { exact: true })).toHaveValue('DL')
+  // 記号は規格から入る（欄は出ない）。保存した摘要で確かめる。
+  await expect(row.getByText('記号は規格から入ります', { exact: true })).toBeVisible()
   await expect(dialog.getByRole('button', {
     name: '選んだ項目を追加（1件）', exact: true,
   })).toBeEnabled()
 
-  // 器具を閉じても選択を保持し、従来の記号だけの品目は表示し続ける。
-  await devices.click()
-  await expect(devices).toHaveAttribute('aria-expanded', 'false')
-  await expect(fallback).toBeVisible()
-  await expect(dialog.getByRole('button', {
-    name: '選んだ項目を追加（1件）', exact: true,
-  })).toBeEnabled()
-  await devices.click()
   await expect(specification).toBeChecked()
 
   await dialog.getByRole('button', {
@@ -1523,7 +1613,7 @@ test('電灯分岐のＬＥＤ照明器具からDLのφ150を選び、位置・�
   const panel = page.getByTestId('fixture-panel')
   await expect(panel.locator('li[data-fixture-id]')).toHaveCount(1)
   await expect(panel.getByRole('button', {
-    name: 'DL φ150 ダウンライト', exact: true,
+    name: 'DL φ150 ＬＥＤ照明器具', exact: true,
   })).toBeVisible()
 
   const fixtures = await savedFixtures(page)
@@ -1531,7 +1621,7 @@ test('電灯分岐のＬＥＤ照明器具からDLのφ150を選び、位置・�
   expect(fixtures[0]).toMatchObject({
     category: '照明器具',
     code: 'DL',
-    name: 'ダウンライト',
+    name: 'ＬＥＤ照明器具',
     spec: 'φ150',
     kind: 'count',
     method: 'click',

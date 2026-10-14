@@ -21,7 +21,7 @@ Claude Code の調査（Edge・使い捨ての e2e）では、単一の PDF の�
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - `src/App.tsx` — 保存・タブを閉じる・`beforeunload`・`applyPendingEdits` の流れ
   - `src/app/documentModel.ts` — `DocumentSession` の未保存の内容

@@ -7,6 +7,7 @@ import { polylineLength } from './measure'
 import { computeLinks, fixtureLinkSources, fixtureCrossingBarriers, fixtureLinkError, fixtureLinkRoundsUp, ceilLinkQuantity, type LinkResult } from './fixtureLink'
 import { collectShapeMetrics } from './shapeMetrics'
 import { calculateBackfillVolume, type BackfillVolume } from './backfill'
+import { isRouteSurfaceFixture } from './routeSurface'
 /** Recognized floors precede free-form names; basement numbers run down to up. */
 export function compareFloors(a: string, b: string): number {
   const rank = (s: string): [number, number] => {
@@ -52,9 +53,11 @@ export class QuantityIndex {
   private readonly links = new Map<string, LinkResult>()
   static build(annotations: Iterable<IndexedAnnotation>, fixtures: readonly CountFixture[]): QuantityIndex {
     const index = new QuantityIndex(), linkedFixtures: CountFixture[] = [], linkIds = new Set<string>()
-    // Collect links during the existing fixture pass, without another pass for ordinary documents.
+    const surfaces = new Set<string>()
+    // Collect links and surface items during the existing fixture pass.
     const lengths = new Set(fixtures.filter(f => {
       if (f.link !== undefined) { linkedFixtures.push(f); linkIds.add(f.id) }
+      if (isRouteSurfaceFixture(f)) surfaces.add(f.id)
       return f.link === undefined && quantityMethod(f) === 'polyline'
     }).map(f => f.id))
     const trenches = new Map(fixtures.filter(f =>
@@ -97,13 +100,16 @@ export class QuantityIndex {
         const common = { annotationId: a.id, pageIndex: a.pageIndex, ...(q.floor ? { floor: q.floor } : {}), ...(q.room ? { room: q.room } : {}) }
         if (q.method === 'polyline') {
           for (const [i, member] of routeMembers(q).entries()) if (!linkIds.has(member.itemId)
-            && (i === 0 || lengths.has(member.itemId) || trenches.has(member.itemId))) {
+            && (i === 0
+              ? !surfaces.has(member.itemId)
+              : lengths.has(member.itemId) || trenches.has(member.itemId) || surfaces.has(member.itemId))) {
+            const surface = i > 0 && surfaces.has(member.itemId)
             const trench = i > 0 ? trenches.get(member.itemId) : undefined
             const dimension = (value: number | undefined) =>
               value !== undefined && Number.isFinite(value) && value > 0 ? value : 0
             const widthM = trench ? dimension(trench.defaults?.widthM) : undefined
             const depthM = trench ? dimension(trench.defaults?.depthM) : undefined
-            const perM = member.perM ?? 1
+            const perM = member.perM ?? (surface ? 0 : 1)
             const portions = routePortions(planM, trench ? {} : q, member.cond)
             const backfill = trench?.backfill?.deductPipes && backfillFixtures
               ? calculateBackfillVolume(
@@ -129,6 +135,12 @@ export class QuantityIndex {
               routeCount: member.count,
               ...(member.perM !== undefined ? { routePerM: member.perM } : {}),
               ...(trench ? { routeWidthM: widthM, routeDepthM: depthM } : {}),
+            })
+          }
+          for (const point of q.points ?? []) if (clicks.has(point.itemId)) {
+            add({
+              ...common, itemId: point.itemId, value: point.count,
+              ...(point.condition !== undefined ? { condition: point.condition } : {}),
             })
           }
         } else add({ ...common, itemId: q.itemId, value: quantityValue(a.vertices, a.measure.mmPerPoint, q, openingSize), condition: q.condition })

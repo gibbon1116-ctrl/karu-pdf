@@ -25,7 +25,7 @@ export interface SymbolCandidate { pageIndex: number; rect: Rect; center: Point;
 // Image similarity only grades line matches; it never removes them. On real drawings the
 // correct line matches scored 0.17-1.00 (median 0.70; text and lines crossing the symbol pull
 // it down) while the wrong ones scored 0.16-0.30, so the bar sits well below whole-page image
-// matching's: 0.35 at the default 0.85 (七ヶ浜町 p.1 desks, docs/調査/数量拾いUI改修_計画.md).
+// matching's: 0.35 at the default 0.85 (七ヶ浜町 p.1 desks, 非公開の調査資料).
 export const imageConfidenceThreshold = (threshold: number) => Math.max(.20, Math.min(.60, threshold - .50))
 export function imageConfidence(score: number, threshold: number): 'high' | 'check' {
   return score >= imageConfidenceThreshold(threshold) ? 'high' : 'check'

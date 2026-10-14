@@ -14,7 +14,7 @@
   - `decision` は `same`・`different`・`unknown`。
   - `differences` と `unknown` に、`topArc`・`annexFrame`・`interiorLines`・`interior` が入る。
   - `same` 以外の候補の確度は `check`（要確認）になる。
-- 正解の5組で、違う形の候補を「確定」にした数が 0 になった（`docs/調査/標準図記号検索_実装記録_20261010.md`）。
+- 正解の5組で、違う形の候補を「確定」にした数が 0 になった（非公開の調査資料）。
 
 ## 目的
 
@@ -117,7 +117,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\.codex\worktrees\dfd5\PDF編集アプリ`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - `src/app/SymbolSearchPanel.tsx`、`src/app/HelpDialog.tsx`
   - `src/editor/AnnotationStore.ts`（記号の候補の部分だけ）

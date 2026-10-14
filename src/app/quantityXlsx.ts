@@ -1,5 +1,5 @@
 import { quantityDecimals, quantityUnit, type CountFixture } from '../core/countFixtures'
-import { fixtureLinkRoundsUp, readFixtureLink, fixtureLinkSourceUnit, fixtureLinkSourceShowsFactor, fixtureLinkSourceUsesOutputUnit, type FixtureLink, type LinkBasisSource } from '../core/fixtureLink'
+import { fixtureLinkRoundsUp, readFixtureLink, fixtureLinkSourceUnit, fixtureLinkSourceShowsFactor, fixtureLinkSourceUsesOutputUnit, fixtureLinkSectionText, type FixtureLink, type LinkBasisSource } from '../core/fixtureLink'
 import type { DrawingInfo } from '../core/drawingInfo'
 import type { QuantityIndex } from '../core/quantityIndex'
 import { writeXlsx, type XlsxCell, type XlsxImage, type XlsxMerge, type XlsxSheet, type XlsxStyle } from '../core/xlsxWriter'
@@ -14,6 +14,7 @@ import {
 } from './QuantityTable'
 import { QUANTITY_DETAIL_HEADER, quantityDetailRows } from './annotationCsv'
 import { breakdownSheets } from './breakdownXlsx'
+import { relatedReviewSheet, type RelatedReviewRow } from './relatedXlsx'
 import { CHECK_BASICS } from '../core/breakdown/checkSheets'
 import {
   computeQuantityChecks,
@@ -32,6 +33,7 @@ export interface QuantityWorkbookOptions {
   index: QuantityIndex
   fixtures: readonly CountFixture[]
   quantityChecks?: QuantityCheckBasics
+  relatedReviews?: RelatedReviewRow[]
 }
 
 const KIND_LABELS = { count: '個数', length: '長さ', area: '面積', volume: '体積' } as const
@@ -61,7 +63,10 @@ function linkCalculation(
   const operation = source.perM !== undefined
     ? `÷ ${source.perM} m`
     : `× ${source.factor ?? 1}`
-  if (link?.kind !== 'mass') return source.perM !== undefined || showFactor ? operation : ''
+  if (link?.kind !== 'mass') {
+    return (source.perM !== undefined || showFactor ? operation : '')
+      + fixtureLinkSectionText(source)
+  }
   const prefix = source.perM !== undefined || (source.factor ?? 1) !== 1
     ? `${operation} ` : ''
   return `${prefix}× ${source.unitMassKg ?? 0} kg ÷ 1000`
@@ -339,6 +344,8 @@ export function quantityWorkbookSheets(options: QuantityWorkbookOptions): XlsxSh
     ...breakdownSheets({ fixtures, index, pdfName }),
     ...linkBasisSheets(fixtures, index, pdfName),
     ...quantityCheckSheets(options),
+    ...(options.relatedReviews !== undefined
+      ? [relatedReviewSheet(options.relatedReviews)] : []),
   ]
 }
 

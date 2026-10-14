@@ -10,7 +10,7 @@
 
 ## 背景
 
-計画: `docs/調査/連動B06_計画.md`。データは Claude が作成済み（変えないこと）: `src/core/breakdown/linkData.ts`（`WASTE_DENSITIES`・`CARRY_*`・`CONDUIT_MASS_KG_PER_M`）、`src/core/breakdown/linkRules.ts`（`LinkAutoSources`・`LINK_RULES`）。
+計画: 非公開の調査資料。データは Claude が作成済み（変えないこと）: `src/core/breakdown/linkData.ts`（`WASTE_DENSITIES`・`CARRY_*`・`CONDUIT_MASS_KG_PER_M`）、`src/core/breakdown/linkRules.ts`（`LinkAutoSources`・`LINK_RULES`）。
 
 ## 対象
 

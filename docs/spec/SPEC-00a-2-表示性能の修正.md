@@ -20,7 +20,7 @@ SPEC-00a の計測では、基準2（スクロールで白く抜けない）と�
 
 ### エンジン単体の測定
 
-Node で MuPDF 単体の処理時間を測った。PC は Ryzen 5 5625U、測定スクリプトは `C:\Users\gibbo\AppData\Local\Temp\claude\C--Users-gibbo-Desktop-PDF-----\8d8ef725-e18f-407b-a35e-079c6645ce02\scratchpad\engine-bench.mjs`。
+Node で MuPDF 単体の処理時間を測った。PC は Ryzen 5 5625U、測定スクリプトは `<作業フォルダ>`。
 
 | 処理 | A4（スキャン風） | A1（線分 15 万本） |
 |---|---|---|
@@ -60,7 +60,7 @@ A1 のページでは、描く範囲の広さにほとんど関係なく、1回�
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - `src/` 配下
   - `scripts/make-test-pdf.mjs`、`scripts/engine-bench.mjs`（新規）

@@ -18,7 +18,7 @@ Claude Code が実際の画面（`work/screens-04f/`）で確認した: 見本�
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/editor/countMarkers.ts`、`tests/countFixtures.test.ts`
 - 変更しないファイル: 上記以外
 

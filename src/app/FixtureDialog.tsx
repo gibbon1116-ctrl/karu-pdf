@@ -1,11 +1,12 @@
-import { useContext, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { useContext, useEffect, useId, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { documentSummaryValues } from '../core/summaryValues'
 import { fixtureCode, quantityAggregation, COUNT_COLORS, COUNT_FILLS, COUNT_SHAPES, COUNT_SIZES, COUNT_OPACITIES, COUNT_UNITS, BREAKDOWN_BOOKS, summaryText, countHex, countRgb, nextCountStyle, nextQuantityLineStyle, sameFixtureAppearance, quantityKind, quantityMethod, QUANTITY_METHODS, quantityLine, QUANTITY_LINE_WIDTHS, QUANTITY_DASHES, type BreakdownBook, type CountUnit, type QuantityKind, type QuantityLineAppearance, type QuantityLineStyle, serializeCountFixtures, fixtureConditionsError, setFixtureConditionRenames, type CountFixture, type CountStyle } from '../core/countFixtures'
 import { CONVERT_UNITS, fixtureConvertError, fixtureBreakdownError, fixtureLabelCode, quantityUnit, quantityDecimals, QUANTITY_UNITS, type ConvertUnit, type FixtureAttributes } from '../core/countFixtures'
 import { computeLinks, fixtureLinkError, fixtureLinkRoundsUp, fixtureLinkSourceUnit, fixtureLinkSourceShowsFactor, fixtureLinkBasisNumber, type FixtureLink, type FixtureLinkSource, type LinkBasisSource, type LinkResult } from '../core/fixtureLink'
 import { WASTE_DENSITIES } from '../core/breakdown/linkData'
 import { steelMemberError, type SteelMember } from '../core/steelMember'
 import { H_SECTIONS, STEEL_REQUIRED_FACTOR } from '../core/breakdown/steelData'
-import { fixtureLinkSources, rcRebarItemFilter } from '../core/fixtureLink'
+import { fixtureLinkSectionText, fixtureLinkSources, rcRebarItemFilter } from '../core/fixtureLink'
 import { rcMemberError, type RcMember, type RcMemberKind, type RcBar, type RcResult } from '../core/rcMember'
 import { REBAR_MASS_KG_PER_M, REBAR_GRADES, REBAR_REQUIRED_FACTOR, DEFAULT_ANCHORAGE_D, DEFAULT_LAP_D, ANCHORAGE_LAP_VERIFIED } from '../core/breakdown/rcData'
 import { LINK_RULES, linkRuleAuto, linkRuleForDetail, type LinkAutoSources, type LinkRule } from '../core/breakdown/linkRules'
@@ -653,7 +654,67 @@ export default function FixtureDialog({
     book: initial.breakdown?.book ?? '', section: initial.breakdown?.section ?? '',
     subject: initial.breakdown?.subject ?? '', middle: initial.breakdown?.middle ?? '', item: initial.breakdown?.item ?? '',
   }))
+  const [breakdownMaster, setBreakdownMaster] = useState<typeof import('../core/breakdownMaster') | null>(null)
+  const [breakdownMasterLoading, setBreakdownMasterLoading] = useState(false)
+  useEffect(() => {
+    if (!breakdownOpen) return
+    let cancelled = false
+    setBreakdownMasterLoading(true)
+    void import('../core/breakdownMaster').then(module => {
+      if (!cancelled) setBreakdownMaster(module)
+    }).catch(() => {}).finally(() => {
+      if (!cancelled) setBreakdownMasterLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [breakdownOpen])
+  const breakdownEntries = useMemo(() =>
+    breakdownMaster && breakdownDraft.book ? breakdownMaster.breakdownEntries(breakdownDraft.book) : [],
+  [breakdownMaster, breakdownDraft.book])
+  const breakdownSectionOptions = useMemo(() =>
+    [...new Set(breakdownEntries.map(entry => entry.section))],
+  [breakdownEntries])
+  const breakdownSubjectOptions = useMemo(() =>
+    [...new Set(breakdownEntries
+      .filter(entry => !breakdownDraft.section || entry.section === breakdownDraft.section)
+      .map(entry => entry.subject))],
+  [breakdownEntries, breakdownDraft.section])
+  const breakdownMiddleOptions = useMemo(() =>
+    [...new Set(breakdownEntries
+      .filter(entry =>
+        (!breakdownDraft.section || entry.section === breakdownDraft.section) &&
+        (!breakdownDraft.subject || entry.subject === breakdownDraft.subject))
+      .map(entry => entry.middle)
+      .filter((middle): middle is string => middle !== undefined))],
+  [breakdownEntries, breakdownDraft.section, breakdownDraft.subject])
+  const breakdownItemOptions = useMemo(() =>
+    [...new Set(breakdownEntries
+      .filter(entry =>
+        (!breakdownDraft.section || entry.section === breakdownDraft.section) &&
+        (!breakdownDraft.subject || entry.subject === breakdownDraft.subject) &&
+        (!breakdownDraft.middle || entry.middle === breakdownDraft.middle))
+      .map(entry => entry.row.name))],
+  [breakdownEntries, breakdownDraft.section, breakdownDraft.subject, breakdownDraft.middle])
   const [summaryDrafts, setSummaryDrafts] = useState(() => (initial.summary ?? []).map(field => ({ ...field })))
+  const summaryListId = useId()
+  const summaryPosition = useMemo(() => breakdownDraft.book
+    ? { ...breakdownDraft, book: breakdownDraft.book }
+    : undefined,
+  [breakdownDraft])
+  const summaryLabelOptions = useMemo(() => breakdownMaster
+    ? [...new Set([
+      ...breakdownMaster.summaryLabelsForFixture(summaryPosition, value.name),
+      ...fixtures.flatMap(fixture =>
+        (fixture.summary ?? []).map(field => field.label.trim()).filter(Boolean)),
+    ])]
+    : [],
+  [breakdownMaster, summaryPosition, value.name, fixtures])
+  const summaryValueOptions = useMemo(() => breakdownMaster
+    ? summaryDrafts.map(field => [...new Set([
+      ...breakdownMaster.summaryChoicesForFixture(summaryPosition, value.name, field.label),
+      ...documentSummaryValues(fixtures, field.label, value.name),
+    ])])
+    : [],
+  [breakdownMaster, summaryPosition, value.name, summaryDrafts, fixtures])
   const [convertOpen, setConvertOpen] = useState(() => !!initial.convert)
   const [convertDraft, setConvertDraft] = useState(() => ({
     enabled: !!initial.convert,
@@ -1105,35 +1166,77 @@ export default function FixtureDialog({
             <option value="">なし</option>
             {BREAKDOWN_BOOKS.map(book => <option key={book} value={book}>{book}</option>)}
           </select></label>
-          <label>種目<input aria-label="種目" maxLength={20} disabled={breakdownDraft.book === ''} value={breakdownDraft.section} onChange={e => {
-            const section = e.currentTarget.value
-            setBreakdownDraft(previous => ({ ...previous, section }))
-          }} /></label>
-          <label>科目<input aria-label="科目" maxLength={30} disabled={breakdownDraft.book === ''} value={breakdownDraft.subject} onChange={e => {
-            const subject = e.currentTarget.value
-            setBreakdownDraft(previous => ({ ...previous, subject }))
-          }} /></label>
-          <label>中科目<input aria-label="中科目" maxLength={30} disabled={breakdownDraft.book === ''} value={breakdownDraft.middle} onChange={e => {
-            const middle = e.currentTarget.value
-            setBreakdownDraft(previous => ({ ...previous, middle }))
-          }} /></label>
-          <label>細目<input aria-label="細目" maxLength={40} disabled={breakdownDraft.book === ''} value={breakdownDraft.item} onChange={e => {
-            const item = e.currentTarget.value
-            setBreakdownDraft(previous => ({ ...previous, item }))
-          }} /></label>
+          <div className="fixture-breakdown-position-field">
+            <label>種目<input aria-label="種目" maxLength={20} disabled={breakdownDraft.book === ''} value={breakdownDraft.section} onChange={e => {
+              const section = e.currentTarget.value
+              setBreakdownDraft(previous => ({ ...previous, section }))
+            }} /></label>
+            <select aria-label="種目の候補" title={breakdownMasterLoading ? '候補を読み込み中' : breakdownSectionOptions.length === 0 ? '候補がありません' : undefined} disabled={breakdownDraft.book === '' || breakdownMasterLoading || breakdownSectionOptions.length === 0} value="" onChange={e => {
+              const section = e.currentTarget.value
+              setBreakdownDraft(previous => ({ ...previous, section }))
+            }}>
+              <option value="">候補から選ぶ…</option>
+              {breakdownSectionOptions.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </div>
+          <div className="fixture-breakdown-position-field">
+            <label>科目<input aria-label="科目" maxLength={30} disabled={breakdownDraft.book === ''} value={breakdownDraft.subject} onChange={e => {
+              const subject = e.currentTarget.value
+              setBreakdownDraft(previous => ({ ...previous, subject }))
+            }} /></label>
+            <select aria-label="科目の候補" title={breakdownMasterLoading ? '候補を読み込み中' : breakdownSubjectOptions.length === 0 ? '候補がありません' : undefined} disabled={breakdownDraft.book === '' || breakdownMasterLoading || breakdownSubjectOptions.length === 0} value="" onChange={e => {
+              const subject = e.currentTarget.value
+              setBreakdownDraft(previous => ({ ...previous, subject }))
+            }}>
+              <option value="">候補から選ぶ…</option>
+              {breakdownSubjectOptions.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </div>
+          <div className="fixture-breakdown-position-field">
+            <label>中科目<input aria-label="中科目" maxLength={30} disabled={breakdownDraft.book === ''} value={breakdownDraft.middle} onChange={e => {
+              const middle = e.currentTarget.value
+              setBreakdownDraft(previous => ({ ...previous, middle }))
+            }} /></label>
+            <select aria-label="中科目の候補" title={breakdownMasterLoading ? '候補を読み込み中' : breakdownMiddleOptions.length === 0 ? '候補がありません' : undefined} disabled={breakdownDraft.book === '' || breakdownMasterLoading || breakdownMiddleOptions.length === 0} value="" onChange={e => {
+              const middle = e.currentTarget.value
+              setBreakdownDraft(previous => ({ ...previous, middle }))
+            }}>
+              <option value="">候補から選ぶ…</option>
+              {breakdownMiddleOptions.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </div>
+          <div className="fixture-breakdown-position-field">
+            <label>細目<input aria-label="細目" maxLength={40} disabled={breakdownDraft.book === ''} value={breakdownDraft.item} onChange={e => {
+              const item = e.currentTarget.value
+              setBreakdownDraft(previous => ({ ...previous, item }))
+            }} /></label>
+            <select aria-label="細目の候補" title={breakdownMasterLoading ? '候補を読み込み中' : breakdownItemOptions.length === 0 ? '候補がありません' : undefined} disabled={breakdownDraft.book === '' || breakdownMasterLoading || breakdownItemOptions.length === 0} value="" onChange={e => {
+              const item = e.currentTarget.value
+              setBreakdownDraft(previous => ({ ...previous, item }))
+            }}>
+              <option value="">候補から選ぶ…</option>
+              {breakdownItemOptions.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </div>
         </fieldset>
         <fieldset><legend>摘要</legend>
           <ol>{summaryDrafts.map((field, i) => <li key={i}>
-            <label>区分名<input aria-label={'摘要の区分名' + (i + 1)} maxLength={20} value={field.label} onChange={e => {
+            <label>区分名<input aria-label={'摘要の区分名' + (i + 1)} list={breakdownMaster ? `${summaryListId}-labels` : undefined} maxLength={20} value={field.label} onChange={e => {
               const label = e.currentTarget.value
               setSummaryDrafts(previous => previous.map((v, j) => j === i ? { ...v, label } : v))
             }} /></label>
-            <label>値<input aria-label={'摘要の値' + (i + 1)} maxLength={60} value={field.value} onChange={e => {
+            <label>値<input aria-label={'摘要の値' + (i + 1)} list={breakdownMaster ? `${summaryListId}-values-${i}` : undefined} maxLength={60} value={field.value} onChange={e => {
               const text = e.currentTarget.value
               setSummaryDrafts(previous => previous.map((v, j) => j === i ? { ...v, value: text } : v))
             }} /></label>
+            {breakdownMaster && <datalist id={`${summaryListId}-values-${i}`}>
+              {(summaryValueOptions[i] ?? []).map(option => <option key={option} value={option} />)}
+            </datalist>}
             <button type="button" onClick={() => setSummaryDrafts(previous => previous.filter((_, j) => j !== i))}>削除</button>
           </li>)}</ol>
+          {breakdownMaster && <datalist id={`${summaryListId}-labels`}>
+            {summaryLabelOptions.map(option => <option key={option} value={option} />)}
+          </datalist>}
           <button type="button" disabled={summaryDrafts.length >= 8} onClick={() => setSummaryDrafts(previous => [...previous, { label: '', value: '' }])}>摘要の区分を追加</button>
           <p>{summaryText({ summary: summaryDrafts }) || '（なし）'}</p>
         </fieldset>
@@ -1823,6 +1926,7 @@ export default function FixtureDialog({
                     {source.perM !== undefined ? ` ÷ ${linkNumber(source.perM)} m`
                       : fixtureLinkSourceShowsFactor(draftFixture, source)
                         ? ` × ${linkNumber(source.factor ?? 1)}` : ''}
+                    {fixtureLinkSectionText(source)}
                     {value.link!.kind === 'mass' && ` × ${source.unitMassKg === undefined ? '未設定' : linkNumber(source.unitMassKg)} kg ÷ 1000`}
                     {value.link!.kind === 'mass' && linkPreview.densityTPerM3 !== undefined && ` ÷ ${linkNumber(linkPreview.densityTPerM3)} t/㎥`}
                   </>}
@@ -1879,7 +1983,13 @@ export default function FixtureDialog({
         </>}
         </fieldset>
       </details>
-      {length ? <div className="quantity-preview"><QuantitySwatch fixture={value} preview /><span>{quantityLabel(quantityMethod(value) === 'polygon' || quantityMethod(value) === 'polygonDepth' ? [[0, 0], [8, 0], [8, 6], [0, 6]] : [[0, 0], [quantityMethod(value) === 'polyline' ? 9.35 : 24, 0]], 1000, { version: 1, id: 'preview', itemId: value.id, method: quantityMethod(value) as QuantityMark['method'], ...value.defaults, cond: value.routeDefaults, condition: value.defaultCondition }, fixtureLabelCode(value), value.style.showCode)}</span></div> : <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + value.style.size * (1 + .7 * fixtureCode(value).length))} 50`} aria-label="印の見本"><CountMarker style={value.style} code={fixtureCode(value)} /></svg>}
+      {length ? <div className="quantity-preview">
+        <QuantitySwatch fixture={value} preview />
+        {!value.link && <>
+          <small>表示の見本（例）</small>
+          <span>{quantityLabel(quantityMethod(value) === 'polygon' || quantityMethod(value) === 'polygonDepth' ? [[0, 0], [8, 0], [8, 6], [0, 6]] : [[0, 0], [quantityMethod(value) === 'polyline' ? 9.35 : 24, 0]], 1000, { version: 1, id: 'preview', itemId: value.id, method: quantityMethod(value) as QuantityMark['method'], ...value.defaults, cond: value.routeDefaults, condition: value.defaultCondition }, fixtureLabelCode(value), value.style.showCode)}</span>
+        </>}
+      </div> : <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + value.style.size * (1 + .7 * fixtureCode(value).length))} 50`} aria-label="印の見本"><CountMarker style={value.style} code={fixtureCode(value)} /></svg>}
       {!length && <div className="fixture-sample-editor">
         {value.sample && <img className="fixture-sample-preview" src={`data:image/png;base64,${value.sample.png}`} width={value.sample.width} height={value.sample.height} alt="図面から切り取った見本" />}
         <div className="fixture-fields"><button type="button" disabled={!sampleInteraction} onClick={() => void capture()}>図面から見本を切り取る</button>
@@ -2009,7 +2119,11 @@ export default function FixtureDialog({
         {conditionError && <p role="alert">{conditionError}</p>}
       </fieldset>
       {quantityDimensions(quantityMethod(value)).map(key => <label key={key}>{QUANTITY_DIMENSIONS[key]}（新しく拾うときの初期値）<span className="quantity-input-unit"><input aria-label={QUANTITY_DIMENSIONS[key] + '（新しく拾うときの初期値）'} type="number" min="0" max="1000" step="0.01" value={value.defaults?.[key] ?? ''} onChange={e => { const text = e.currentTarget.value; setValue(v => ({ ...v, defaults: { ...v.defaults, [key]: text === '' ? undefined : Number(text) } })) }} />m</span></label>)}
-      {quantityDimensions(quantityMethod(value)).length > 0 && <p>空欄または0なら、拾うときに寸法を入力します。</p>}
+      {quantityDimensions(quantityMethod(value)).length > 0 && <p>
+        {quantityMethod(value) === 'lengthWidthDepth' && value.link
+          ? '連動のときは、元の長さ（平面）× 幅 × 深さで数量を計算します。'
+          : '空欄または0なら、拾うときに寸法を入力します。'}
+      </p>}
       {quantityMethod(value) === 'lengthWidthDepth' && <fieldset>
         <legend>埋戻し</legend>
         <label><input type="checkbox"
@@ -2027,7 +2141,7 @@ export default function FixtureDialog({
               setBackfillConditions(event.currentTarget.value)
               setError('')
             }} /></label>
-          <p>読点で区切って1〜5語、各20字以内で入れてください。経路の線要素として使うとき、平面の条件が合う管だけを引きます。</p>
+          <p>読点で区切って1〜5語、各20字以内で入れてください。経路の線要素として使うとき、平面の条件が合う管だけを引きます。連動のときは、連動の元の管（施工条件で絞った拾い）の体積を引きます。</p>
         </>}
       </fieldset>}
       {!!collisions.length && <p role="status">同じ見た目の項目があります: {collisions.map(f => `${fixtureCode(f)} ${f.name}`.trim()).join('、')}</p>}

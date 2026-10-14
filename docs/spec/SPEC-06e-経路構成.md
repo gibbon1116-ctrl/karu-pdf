@@ -30,7 +30,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - `src/app/RouteItems.tsx`（作り直してよい。ファイル名は変えない）
   - 新規 `src/app/LinePicker.tsx` — 線要素を足す小さな画面

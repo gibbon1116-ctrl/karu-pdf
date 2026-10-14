@@ -26,7 +26,7 @@
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/core/issues.ts`、`src/app/AnnotationListPanel.tsx`、`src/app/IssueDetails.tsx`、`src/app/FormatPanel.tsx`（指摘の状態の選択欄と、指摘の色の選択欄だけ）、`src/app/CsvExportDialog.tsx`（状態の選択肢の文言だけ）、`src/app/annotationCsv.ts`（必要な場合だけ）、`src/editor/AnnotationLayer.tsx`（指摘のチェックの描画だけ）、`src/core/annotations.ts`（`drawIssue` のチェックだけ）、`src/editor/AnnotationStore.ts`（状態の型の調整が要る場合だけ）、`src/app/FixtureDialog.tsx`、`src/app/HelpDialog.tsx`、`src/styles.css`、`tests/`、`e2e/`
 - 変更しないファイル: 上記以外
 

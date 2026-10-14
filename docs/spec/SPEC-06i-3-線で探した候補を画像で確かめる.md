@@ -28,7 +28,7 @@ Claude Code の判断（利用者の了承済み）:
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/core/symbolSearch.ts`（候補の位置だけで類似度を求める関数を足す）、`src/worker/symbolSearch.worker.ts`・`src/worker/symbolSearchMessages.ts`、`src/client/SymbolSearchClient.ts`、`src/app/SymbolSearchPanel.tsx`、`src/editor/AnnotationStore.ts`（候補に確度を持たせるだけ）、`src/editor/AnnotationLayer.tsx`（候補の描き分けだけ）、`src/app/HelpDialog.tsx`、`src/styles.css`、`tests/`、`e2e/`（`e2e/vector-search-snap.annotate.spec.ts` に足す）、`e2e/vector-paths.perf.spec.ts`（測定を足す）
 - 変更しないファイル: 上以外。**線の無いページの画像検索の流れ（`search` メッセージ・`searchSymbol`）は変えない。**
 

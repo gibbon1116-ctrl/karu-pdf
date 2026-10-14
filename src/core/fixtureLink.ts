@@ -1,4 +1,5 @@
-import { parseFixtureOpening, quantityOutputKind, quantityUnit, quantityDecimals, type CountFixture } from './countFixtures'
+import { parseFixtureOpening, quantityKind, quantityMethod, quantityOutputKind, quantityUnit, quantityDecimals, type CountFixture } from './countFixtures'
+import { pipeOuterDiameterMm } from './backfill'
 import { computeRcMember, rcMemberError, rcBarCountText, type RcMember, type RcResult } from './rcMember'
 import { steelMemberError, steelSection } from './steelMember'
 import { STEEL_REQUIRED_FACTOR } from './breakdown/steelData'
@@ -74,6 +75,12 @@ export interface LinkBasisSource {
   factor?: number
   perM?: number
   unitMassKg?: number
+  /** 断面の連動（溝掘削・埋戻し）のとき */
+  section?: { widthM: number; depthM: number }
+  /** 管の体積の控除の合計（m³）。控除したときだけ */
+  pipeDeductionM3?: number
+  /** 控除に使った管の外径（mm） */
+  pipeOuterDiameterMm?: number
   auto?: boolean
   note?: string
   subtotal: number
@@ -117,6 +124,18 @@ export function fixtureLinkBasisNumber(fixture: CountFixture, value: number): st
   if (!Number.isFinite(value)) return '—'
   if (!fixtureLinkSourceUsesOutputUnit(fixture)) return String(Number(value.toFixed(6)))
   return value.toFixed(quantityUnit(fixture) === 't' ? 3 : quantityDecimals(fixture))
+}
+
+/** 断面の連動の根拠の文字。断面でなければ '' */
+export function fixtureLinkSectionText(source: LinkBasisSource): string {
+  if (source.section === undefined) return ''
+  const dimension = (value: number): string => String(Number(value.toFixed(3)))
+  const { widthM, depthM } = source.section
+  return ` × 幅 ${dimension(widthM)} × 深さ ${dimension(depthM)}`
+    + (source.pipeDeductionM3 !== undefined
+      ? ` − 管${source.pipeOuterDiameterMm !== undefined
+        ? ` φ${source.pipeOuterDiameterMm}mm` : ''} ${source.pipeDeductionM3.toFixed(4)}`
+      : '')
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -1150,8 +1169,23 @@ export function computeLinks(
           }
         }
       }
+      const isSectionLink = link.kind === 'factor'
+        && quantityMethod(fixture) === 'lengthWidthDepth'
+        && quantityKind(original) === 'length'
+      const widthM = isSectionLink ? fixture.defaults?.widthM : undefined
+      const depthM = isSectionLink ? fixture.defaults?.depthM : undefined
+      const section = typeof widthM === 'number' && Number.isFinite(widthM) && widthM > 0
+        && typeof depthM === 'number' && Number.isFinite(depthM) && depthM > 0
+        ? { widthM, depthM } : undefined
+      if (isSectionLink && section === undefined) {
+        const warning = `${fixture.name}の幅・深さが未設定のため、元の長さ × 係数のままです。`
+        if (!result.warnings.includes(warning)) result.warnings.push(warning)
+      }
+      const deductPipes = section !== undefined && fixture.backfill?.deductPipes === true
+      const outerDiameterMm = deductPipes ? pipeOuterDiameterMm(original) : undefined
       const basis: LinkBasisSource = {
         itemId: original.id, quantity: 0, subtotal: 0,
+        ...(section !== undefined ? { section } : {}),
         ...(link.kind === 'carry'
           ? carryFactor !== undefined ? { factor: carryFactor } : {}
           : source.factor !== undefined ? { factor: source.factor } : {}),
@@ -1171,12 +1205,37 @@ export function computeLinks(
       }
       for (const row of rows) {
         if (conditions && !conditions.has(row.condition ?? '')) continue
-        basis.quantity += row.value
+        const excludedPart = section !== undefined
+          && (row.part === 'rise' || row.part === 'slack')
+        if (!excludedPart) basis.quantity += row.value
         if (skipSource) continue
-        let value = link.kind === 'carry'
+        let value = excludedPart ? 0 : link.kind === 'carry'
           ? row.value * (unitMassKg ?? 0) / 1000 * (carryFactor ?? 0)
           : source.perM !== undefined
             ? row.value / source.perM : row.value * (source.factor ?? 1)
+        if (section !== undefined && !excludedPart) {
+          value *= section.widthM * section.depthM
+          if (deductPipes) {
+            if (outerDiameterMm === undefined) {
+              const pipeLabel = [original.code.trim(), original.spec?.trim()]
+                .filter(Boolean).join('') || original.name
+              const warning = `${pipeLabel} の外径が分からないため引いていません（項目の質量・寸法に外径を入れてください）`
+              if (!result.warnings.includes(warning)) result.warnings.push(warning)
+            } else {
+              const deductionM3 = Math.PI / 4 * (outerDiameterMm / 1000) ** 2 * row.value
+              value -= deductionM3
+              if (deductionM3 !== 0) {
+                basis.pipeDeductionM3 = (basis.pipeDeductionM3 ?? 0) + deductionM3
+                basis.pipeOuterDiameterMm = outerDiameterMm
+              }
+              if (value < 0) {
+                value = 0
+                const warning = '管の体積が埋戻しの総体積を超えた行があるため、0 にしています。'
+                if (!result.warnings.includes(warning)) result.warnings.push(warning)
+              }
+            }
+          }
+        }
         if (link.kind === 'mass') {
           value *= (unitMassKg ?? 0) / 1000
           if (densityTPerM3 !== undefined) value /= densityTPerM3

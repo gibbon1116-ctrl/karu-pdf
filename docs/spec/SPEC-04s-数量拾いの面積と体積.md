@@ -32,7 +32,7 @@ SPEC-04r（第1段）で、器具リストを「数量拾い」に改め、項�
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\quantity-pickup-expansion-ea43cf`
+- 対象フォルダ: `<作業フォルダ>`
 - 新しく作るファイル: `e2e/quantity-area-volume.annotate.spec.ts`
 - 変更してよいファイル: SPEC-04r と同じ範囲（`src/core/`、`src/editor/`、`src/app/`、`src/ui/ToolIcon.tsx`、`src/App.tsx`、`src/styles.css`、`tests/`、`e2e/`）
 - 変更しないファイル: `docs/`、`public/`、`LICENSE`、設定ファイル、`src/organize/`、`scripts/`、`src/viewer/`、`src/worker/`（第1段で足した受け渡しで足りないときだけ最小限）

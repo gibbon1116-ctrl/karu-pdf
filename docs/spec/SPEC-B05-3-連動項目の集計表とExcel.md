@@ -10,7 +10,7 @@
 
 ## 背景
 
-計画: `docs/調査/連動B05_計画.md` §4.3。B05-1・B05-2 で連動項目（`CountFixture.link`）、数量の索引の計算（`QuantityIndex.linkResult(id)` が `LinkResult`: `total`・`computed`・`sources`（元ごとの `itemId`・`quantity`・`factor`・`perM`・`unitMassKg`・`subtotal`）・`error`・`warnings`・`overridden`）、画面ができた。連動項目の数量は索引にふつうの項目と同じ形で入っている（図面・階・部屋・施工条件ごと）。この SPEC で集計表・Excel・CSV を仕上げる。
+計画: 非公開の調査資料 §4.3。B05-1・B05-2 で連動項目（`CountFixture.link`）、数量の索引の計算（`QuantityIndex.linkResult(id)` が `LinkResult`: `total`・`computed`・`sources`（元ごとの `itemId`・`quantity`・`factor`・`perM`・`unitMassKg`・`subtotal`）・`error`・`warnings`・`overridden`）、画面ができた。連動項目の数量は索引にふつうの項目と同じ形で入っている（図面・階・部屋・施工条件ごと）。この SPEC で集計表・Excel・CSV を仕上げる。
 
 ## 対象
 

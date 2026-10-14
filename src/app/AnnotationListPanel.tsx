@@ -9,6 +9,7 @@ import { IssueDetails } from './IssueDetails'
 import { annotationBody, annotationColorHex, annotationKindLabel, CSV_KINDS, type CsvKind } from './annotationCsv'
 import { ensureSessionFixtures } from './documentModel'
 import { ANNOTATION_FILTER_LABELS, matchesAnnotationFilter, type AnnotationFilterKind } from '../editor/annotationFilter'
+import { perfCount } from '../perf/counters'
 
 const CsvExportDialog = lazy(() => import('./CsvExportDialog'))
 
@@ -42,6 +43,7 @@ export function allSessionAnnotations(session: DocumentSession): EditableAnnotat
 
 export function AnnotationListPanel({ session, pool, onSelect, onEdit }: Props) {
   const annotationVersion = useSyncExternalStore(session.annotationStore.subscribe, session.annotationStore.getSnapshot)
+  perfCount('AnnotationListPanel.render')
   const store = session.annotationStore
   const { kind: filter, discipline, status: issueStatus } = store.annotationFilter
   const [firstPage, setFirstPage] = useState(1)

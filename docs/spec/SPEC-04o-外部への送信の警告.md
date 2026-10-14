@@ -28,7 +28,7 @@
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: 新規 `src/security/externalSend.ts`（見張りと判定）、新規 `src/app/ExternalSendAlert.tsx`（警告・確認の画面）、`src/main.tsx`（起動の最初に見張りを入れる）、`src/App.tsx`（警告の画面を置くだけ）、`src/worker/pdf.worker.ts`・`src/worker/image.worker.ts`（Worker 内の見張りと、止めたことの主画面への知らせ）、`src/client/PdfWorkerPool.ts`（Worker からの知らせを受け取るだけ）、`src/styles.css`、`src/app/HelpDialog.tsx`（説明の追加）、`scripts/audit-allowlist.json`（見張りのコードの承認）、`tests/`、`e2e/`
 - 変更しないファイル: 上記以外
 

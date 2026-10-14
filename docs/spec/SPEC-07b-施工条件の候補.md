@@ -10,7 +10,7 @@
 
 ## 目的
 
-計画: `docs/調査/施工条件別数量拾い_計画.md`（1章が基準の調査結果。必ず読むこと）。前提: SPEC-07a の実装（`RouteConditions`・`PartCondition`・`setRouteCondition`・`setQuantityCondition`・`QuantityMark.condition`・`CountMark.condition`）。
+計画: 非公開の調査資料（1章が基準の調査結果。必ず読むこと）。前提: SPEC-07a の実装（`RouteConditions`・`PartCondition`・`setRouteCondition`・`setQuantityCondition`・`QuantityMark.condition`・`CountMark.condition`）。
 
 利用者の指示:
 - 標準マスタに、積算基準に対応する施工条件を登録する。
@@ -109,7 +109,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - `src/core/countFixtures.ts`、`src/core/quantityMaster.ts`
   - `src/app/FixtureDialog.tsx`、`src/app/FixturePresetDialog.tsx`、`src/app/LinePicker.tsx`、`src/app/routeSets.ts`

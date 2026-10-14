@@ -10,7 +10,7 @@
 
 ## 背景
 
-計画: `docs/調査/連動B06_計画.md`。B06-1 で `FixtureLink` に `auto`（`LinkAutoSources`）・`kind: 'carry'`・`carry: { class, alone? }` が入り、計算（自動の元、機器搬入の区分と補正率、電線管の質量の既定、発生材の種類からの見かけ比重）ができた。根拠（`LinkBasisSource`）に `auto?`・`note?`、`LinkResult` に `densityTPerM3?` がある。データ: `src/core/breakdown/linkData.ts`、`src/core/breakdown/linkRules.ts`（`LINK_RULES`、`linkRuleForDetail(name)`）。
+計画: 非公開の調査資料。B06-1 で `FixtureLink` に `auto`（`LinkAutoSources`）・`kind: 'carry'`・`carry: { class, alone? }` が入り、計算（自動の元、機器搬入の区分と補正率、電線管の質量の既定、発生材の種類からの見かけ比重）ができた。根拠（`LinkBasisSource`）に `auto?`・`note?`、`LinkResult` に `densityTPerM3?` がある。データ: `src/core/breakdown/linkData.ts`、`src/core/breakdown/linkRules.ts`（`LINK_RULES`、`linkRuleForDetail(name)`）。
 
 ## 対象
 

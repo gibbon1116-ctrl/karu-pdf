@@ -16,6 +16,8 @@ export interface RouteConditions {
   slack?: string | null
 }
 export interface Rise { m: number; at?: number }
+/** 経路の頂点に足す個数の項目。at は頂点の番号（0 = 始点）。 */
+export interface RoutePoint { itemId: string; at: number; count: number; condition?: string }
 export interface QuantityOpening { itemId?: string; widthM?: number; heightM?: number; count: number }
 export type OpeningSize = (itemId: string) => { widthM: number; heightM: number } | undefined
 export interface RouteExtra {
@@ -39,6 +41,7 @@ export interface QuantityMark {
   version: 1; id: string; itemId: string; method: Exclude<QuantityMethod, 'click'>
   floor?: string; room?: string; count?: number; cond?: RouteConditions; extra?: RouteExtra[]
   rises?: Rise[]; condition?: string
+  points?: RoutePoint[]
   addM?: number; slackM?: number; heightM?: number; widthM?: number; depthM?: number
   holes?: Point[][]
   openings?: QuantityOpening[]
@@ -87,6 +90,22 @@ function quantityDeductions(mark: QuantityMark, mmPerPoint: number, openingSize?
 }
 export function validCondition(v: unknown): v is string {
   return typeof v === 'string' && v.length >= 1 && v.length <= 30 && v.trim() === v && !/[\r\n\u2028\u2029]/.test(v)
+}
+export function validRoutePoints(value: unknown): value is RoutePoint[] {
+  if (!Array.isArray(value) || value.length > 50) return false
+  const used = new Map<string, Set<number>>()
+  return Array.from(value).every(point => {
+    if (!point || typeof point !== 'object' || Array.isArray(point)
+      || typeof point.itemId !== 'string' || point.itemId.length < 1 || point.itemId.length > 80
+      || typeof point.at !== 'number' || !Number.isInteger(point.at) || point.at < 0
+      || !validRouteCount(point.count)
+      || point.condition !== undefined && !validCondition(point.condition)) return false
+    const vertices = used.get(point.itemId) ?? new Set<number>()
+    if (vertices.has(point.at)) return false
+    vertices.add(point.at)
+    used.set(point.itemId, vertices)
+    return true
+  })
 }
 const validPartCondition = (v: unknown) => v === undefined || v === null || validCondition(v)
 export function validRouteConditions(v: unknown): v is RouteConditions {
@@ -172,6 +191,12 @@ export function parseQuantityMark(raw: string | null): QuantityMark | null {
     if (!location) return null
     Object.assign(result, location)
     if (v.method === 'polyline') {
+      if (validRoutePoints(v.points)) {
+        result.points = v.points.map((point: RoutePoint) => ({
+          itemId: point.itemId, at: point.at, count: point.count,
+          ...(point.condition !== undefined ? { condition: point.condition } : {}),
+        }))
+      }
       if (v.slackM !== undefined) {
         if (typeof v.slackM !== 'number' || !Number.isFinite(v.slackM) || v.slackM < 0 || v.slackM > 1000) return null
         if (v.slackM) result.slackM = v.slackM
@@ -231,7 +256,7 @@ function wireConditions(c: RouteConditions = {}): object | undefined {
 }
 export function routeConditionsKey(c: RouteConditions = {}): string { return JSON.stringify(wireConditions(c) ?? {}) }
 export function serializeQuantityMark(mark: QuantityMark): string {
-  const { cond: supplied, rises, extra, scope: legacyScope, ...base } = mark as QuantityMark & { scope?: RouteScope }
+  const { cond: supplied, rises, extra, points, scope: legacyScope, ...base } = mark as QuantityMark & { scope?: RouteScope }
   if (!(mark.method === 'polygon' || mark.method === 'polygonDepth') || !validAreaHoles(base.holes)) delete base.holes
   if (!(mark.method === 'polygon' || mark.method === 'lengthHeight') || !validQuantityOpenings(base.openings)) delete base.openings
   if (mark.method !== 'polyline') return quantityJson(base)
@@ -256,11 +281,18 @@ export function serializeQuantityMark(mark: QuantityMark): string {
     const legacy = e as { scope?: RouteScope }
     if (e.cond !== undefined && !validRouteConditions(e.cond) || e.cond === undefined && legacy.scope !== undefined && !validRouteScope(legacy.scope)) throw new Error('経路の施工条件が不正です。')
   }
+  if (points !== undefined && !validRoutePoints(points)) {
+    throw new Error('頂点の個数は50件まで、数は1〜99の整数で、同じ項目と頂点を重複させずに設定してください。')
+  }
   const rs = routeRises(mark), total = riseTotal(rs)
   // Legacy scope approximates unsupported masks: old apps can count excluded rises/plan.
   // Old apps also reject addM > 1000 or JSON > 2000; the new reader supports all 20 rises and JSON up to 64,000 characters.
   const scope = (c: RouteConditions = {}): Exclude<RouteScope, 'all'> | undefined => c.plan === null && c.slack === null ? 'rise' : c.slack === null ? 'noSlack' : undefined
   return quantityJson({ ...base, ...(rises !== undefined || mark.addM !== undefined ? { addM: total } : {}),
+    ...(points?.length ? { points: points.map(point => ({
+      itemId: point.itemId, at: point.at, count: point.count,
+      ...(point.condition !== undefined ? { condition: point.condition } : {}),
+    })) } : {}),
     // A zero singleton needs its array: addM=0 alone cannot preserve an explicit rise.
     ...(rises && (rises.length !== 1 || rises[0].at !== undefined || rises[0].m === 0) ? { rises } : {}),
     cond: wireConditions(cond), scope: scope(cond), extra: extra?.map(e => ({

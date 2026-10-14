@@ -7,6 +7,8 @@
 // 選択肢は「よく使うもの」に絞った。無い値は画面で手入力する。
 import type { DetailTemplate, DetailVariant, SummarySlot } from './types'
 import { CONDUIT_OUTER_DIAMETERS } from './pipeDiameters'
+import { WASTE_CHOICES, mergeChoices, withDetailChoices } from './commonChoices'
+import { ELECTRICAL_STANDARD_CHOICES, ELECTRICAL_STANDARD_DETAIL_CHOICES } from './electricalStandardChoices'
 
 const slot = (label: string, choices?: readonly string[]): SummarySlot => (choices ? { label, choices } : { label })
 const list = (text: string) => text.split('、')
@@ -33,7 +35,7 @@ const processing: SummarySlot = { label: '処理', choices: list('撤去（廃�
 const symbol = slot('記号')
 
 /** 別紙明細の細目名 → 標準の明細。書式の細目名と完全に一致させる。 */
-export const ELECTRICAL_DETAILS: Readonly<Record<string, readonly DetailTemplate[]>> = {
+const electricalDetailBase: Readonly<Record<string, readonly DetailTemplate[]>> = {
   電線: [{ name: '電線', unit: 'm', master: { categories: ['電線'] } }],
   ケーブル: [{ name: 'ケーブル', unit: 'm', master: { categories: ['ケーブル（低圧）', 'ケーブル（高圧）', '制御ケーブル', '通信・弱電ケーブル', '耐火・耐熱ケーブル'] } }],
   電線管: [{ name: '電線管', unit: 'm', master: { categories: ['電線管'] } }],
@@ -133,7 +135,7 @@ export const ELECTRICAL_DETAILS: Readonly<Record<string, readonly DetailTemplate
   装柱材: [{ name: '装柱材', unit: '組', summary: [slot('種類', list('腕金、アームタイ、がいし、引留クランプ'))] }],
   支線: [{ name: '支線', unit: '本', summary: [slot('種類', list('普通支線、水平支線、支柱'))] }],
   メッセンジャワイヤ: [{ name: 'メッセンジャワイヤ', unit: 'm', summary: [slot('サイズ', list('22sq、38sq、55sq'))] }],
-  蓄電池: [{ name: '蓄電池', unit: '個', summary: [slot('形式', list('制御弁式据置鉛蓄電池（MSE）、長寿命形制御弁式据置鉛蓄電池、アルカリ蓄電池、リチウムイオン蓄電池')), slot('容量')] }],
+  蓄電池: [{ name: '蓄電池', unit: '個', summary: [slot('形式', list('制御弁式据置鉛蓄電池（MSE）、長寿命形制御弁式据置鉛蓄電池、アルカリ蓄電池、リチウムイオン蓄電池')), slot('容量', list('50Ah、100Ah、150Ah、200Ah、300Ah、500Ah'))] }],
   発信機: [{ name: '発信機', unit: '個', summary: [slot('形式', list('P型1級、P型2級')), placement] }],
   警報ベル: [{ name: '地区音響装置（ベル）', unit: '個', summary: [slot('寸法', list('φ100、φ150'))] }],
   表示灯: [{ name: '表示灯', unit: '個', summary: [placement] }],
@@ -148,7 +150,7 @@ export const ELECTRICAL_DETAILS: Readonly<Record<string, readonly DetailTemplate
   '受雷部（導線）': [{ name: '受雷部（導線）', unit: 'm', summary: [slot('材料', list('銅より線 38sq、銅より線 60sq、アルミ線、ステンレス棒'))] }],
   引下げ導線: [{ name: '引下げ導線', unit: 'm', summary: [slot('材料', list('銅より線 38sq、銅より線 60sq、構造体利用'))] }],
   接続金物: [{ name: '接続金物', unit: '個' }],
-  太陽電池: [{ name: '太陽電池モジュール', unit: '枚', summary: [slot('出力')] }],
+  太陽電池: [{ name: '太陽電池モジュール', unit: '枚', summary: [slot('出力', list('200W、250W、300W、350W、400W、450W'))] }],
   架台: [{ name: '太陽電池架台', unit: '基' }],
   接続箱: [{ name: '接続箱', unit: '個', summary: [slot('回路数', list('4回路、6回路、8回路、10回路'))] }],
   変換器箱: [{ name: '変換器箱', unit: '個' }],
@@ -157,7 +159,7 @@ export const ELECTRICAL_DETAILS: Readonly<Record<string, readonly DetailTemplate
 }
 
 /** 数量で計上する細目の摘要の標準の選択肢。鍵は「細目名|区分名」。記号・盤名称・名称は図面の文字を入れるので持たない。 */
-export const ELECTRICAL_CHOICES: Readonly<Record<string, readonly string[]>> = {
+const electricalChoiceBase: Readonly<Record<string, readonly string[]>> = {
   '引込み計器箱|形式': list('屋外壁掛形、屋外自立形、屋内壁掛形'),
   '引込み計器箱|仕様': list('電灯用、動力用、電灯動力共用'),
   '変圧器|方式': list('油入式（単相）、油入式（三相）、モールド式（単相）、モールド式（三相）'),
@@ -291,20 +293,28 @@ export const ELECTRICAL_CHOICES: Readonly<Record<string, readonly string[]>> = {
   '温度センサ|仕様': list('路面埋込形、外気温用'),
   '降雪センサ|仕様': list('屋外ポール取付形'),
   '水分センサ|仕様': list('路面埋込形'),
+  // ── U3（2026-10-14）: 選択肢の無かった区分に、よく使う値を足した。無い値は「ほかの値」で入れる ──
+  ...WASTE_CHOICES,
+  '制御装置|形式': list('壁掛形、自立形、ラック収容形、卓上形'),
+  '電源装置|形式': list('壁掛形、自立形、ラック収容形'),
+  '電源装置|仕様': list('AC100V 出力、DC24V 出力、DC48V 出力'),
+  '電源装置|容量': list('500VA、1kVA、1.5kVA、2kVA、3kVA、5kVA'),
+  '料金課金装置|形式': list('自立形、壁掛形'),
+  '操作制御装置|形式': list('卓上形、壁掛形、自立形'),
+  '配線接続盤|形式': list('壁掛形、自立形'),
+  '検出装置|形式': list('ループコイル式、超音波式、光電式、画像式'),
+  '記録装置|形式': list('ラック収容形、卓上形、壁掛形'),
+  '屋外時計|形式': list('片面形、両面形'),
+  '屋外スピーカ|形式': list('ホーン形、コラム形、ボックス形'),
+  '支持構造物|仕様': list('鋼製（溶融亜鉛めっき）、鋼製（錆止め塗装）、ステンレス製'),
+  'ＡＶ操作卓|仕様': list('卓上形、据置形'),
+  'カットリレー盤|仕様': list('壁掛形、自立形'),
+  'ブレーカボックス|仕様': list('屋内用、屋外用'),
+  '電源供給器|仕様': list('AC100V 入力 DC15V 出力、AC100V 入力 AC24V 出力'),
+  '電源挿入器|仕様': list('屋内用、屋外用'),
 }
 
-/**
- * 細目の行（別紙明細でない行）から選べる既存の標準マスタ（quantityMaster）の種類（SPEC-B17）。
- * 内訳書の「ＬＥＤ照明器具」などは記号だけの行なので、器具の種類（ダウンライト・ベースライトなど）と規格を選べるようにする。
- * 拾う単位は行の単位（個・灯）にする。
- */
-export const ELECTRICAL_ROW_MASTERS: Readonly<Record<string, { types: readonly string[] }>> = {
-  ＬＥＤ照明器具: { types: ['DL', 'BL', 'BE', 'BR', 'PD', 'SP', 'OL'] },
-  非常用照明器具: { types: ['非常用照明'] },
-  誘導灯: { types: ['誘導灯（避難口）', '誘導灯（通路）'] },
-  煙感知器: { types: ['SD'] },
-  熱感知器: { types: ['HD'] },
-  スピーカ: { types: ['SPK'] },
-  天井形スピーカ: { types: ['SPK'] },
-  カメラ: { types: ['CAM'] },
-}
+// 標準単価積算基準の細目・摘要の区分（U6、electricalStandardChoices.ts）を、行の区分と別紙明細の明細の区分に重ねる。
+export const ELECTRICAL_DETAILS: Readonly<Record<string, readonly DetailTemplate[]>> = withDetailChoices(electricalDetailBase, ELECTRICAL_STANDARD_DETAIL_CHOICES)
+/** 数量で計上する細目の摘要の標準の選択肢。鍵は「細目名|区分名」。 */
+export const ELECTRICAL_CHOICES: Readonly<Record<string, readonly string[]>> = mergeChoices(electricalChoiceBase, ELECTRICAL_STANDARD_CHOICES)

@@ -27,7 +27,7 @@ Claude Code が調べた原因: `src/core/annotations.ts` の `applyEdits` は�
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/core/annotations.ts`（`applyEdits` と `findAnnotation`、それに伴う後始末だけ）、`tests/`（下の試験の追加）
 - 変更しないファイル: 上記以外。特に `e2e/`、`src/app/`、`src/editor/`、`src/worker/`、`src/client/`
 

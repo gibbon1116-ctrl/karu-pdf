@@ -32,7 +32,7 @@ SPEC-04d で作った器具リストを、Claude Code が 1440×900 の画面で
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/app/FixturePanel.tsx`、`src/app/FixtureDialog.tsx`、`src/app/SidePanel.tsx`（タブの並びと、器具タブのときの幅だけ）、`src/styles.css`、`e2e/count-fixtures.annotate.spec.ts`（下の検証の追加だけ）
 - 変更しないファイル: 上記以外。特に器具リストのデータ・保存・個数の計算・印の描画（`src/core/countFixtures.ts`、`src/editor/countMarkers.ts`、`src/editor/AnnotationStore.ts`、`src/editor/AnnotationLayer.tsx`）
 

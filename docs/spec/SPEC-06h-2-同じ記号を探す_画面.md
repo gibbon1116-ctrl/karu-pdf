@@ -23,7 +23,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: 新規 `src/app/SymbolSearchPanel.tsx`、`src/App.tsx`（範囲の指定の操作を、見本の取り方と同じ仕組みで「同じ記号を探す」にも使えるようにする。パネルの置き場所）、`src/editor/AnnotationLayer.tsx`（候補の描画とクリックでの採否だけ）、`src/editor/AnnotationStore.ts`（候補の状態（メモリだけ）と、個数の拾いの一括作成）、`src/app/PickupBar.tsx`・`src/app/FixturePanel.tsx`（ボタンを1つずつ）、`src/client/SymbolSearchClient.ts`（必要な最小限）、`src/app/HelpDialog.tsx`、`src/styles.css`、`tests/`、新規 `e2e/symbol-search.annotate.spec.ts`
 - 変更しないファイル: 上以外。保存の形は変えない（候補は保存しない）。
 

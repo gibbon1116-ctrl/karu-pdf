@@ -21,7 +21,9 @@ import {
   summaryIsCondition,
   type BreakdownEntry,
 } from './breakdownMaster'
-import { ELECTRICAL_DETAILS, ELECTRICAL_ROW_MASTERS } from './breakdown/electricalDetails'
+import { ELECTRICAL_DETAILS } from './breakdown/electricalDetails'
+import { MASTER_ABSORPTIONS } from './breakdown/masterAbsorption'
+import { STANDARD_GROUPS } from './breakdown/standardMasterGroups'
 import { MECHANICAL_DETAILS, MECHANICAL_ROW_VARIANTS } from './breakdown/mechanicalDetails'
 import {
   BUILDING_DETAILS,
@@ -30,6 +32,7 @@ import {
 import { BUILDING_ROW_VARIANTS } from './breakdown/buildingVariants'
 import { CONDITION_RULES } from './breakdown/conditionCandidates'
 import { REPRESENTATIVE_POSITION_ROWS } from './breakdown/representativePositions'
+import { MERGED_ROW_CATEGORY } from './breakdown/mergedRows'
 import {
   CATEGORY_ALIASES,
   DETAIL_CATEGORY,
@@ -56,6 +59,8 @@ export interface CatalogOption {
   code: string
   spec?: string
   name: string
+  /** 吸収前の品目名 */
+  formerName?: string
   kind?: QuantityKind
   method?: QuantityMethod
   defaults?: QuantityDefaults
@@ -75,8 +80,8 @@ export interface CatalogItem {
   breakdownItem?: string
   options: readonly CatalogOption[]
   slots: readonly SummarySlot[]
-  /** 細目に重ね合わせた器具だけ、未入力の記号に選んだ規格の略号を使う。 */
-  defaultSymbolFromCode?: boolean
+  /** この品目に吸収した標準マスタの品目名 */
+  formerNames?: readonly string[]
   search: string
 }
 
@@ -97,10 +102,13 @@ interface CatalogIndex {
   masters: readonly CatalogItem[]
   byKey: ReadonlyMap<string, CatalogItem>
   unitQualifiedRows: ReadonlySet<string>
+  rowKeys: ReadonlyMap<string, string>
+  rowAliases: ReadonlyMap<string, string>
 }
 
 let cachedCatalog: CatalogIndex | undefined
 let cachedRepresentativePositions: ReadonlyMap<string, BreakdownPosition> | undefined
+let cachedItemPositions: ReadonlyMap<string, readonly BreakdownPosition[]> | undefined
 
 const detailSources: readonly {
   book: BreakdownBook
@@ -137,13 +145,18 @@ function rowNameKey(entry: BreakdownEntry): string {
   return JSON.stringify([entry.book, entry.row.name])
 }
 
-function rowKey(entry: BreakdownEntry, unitQualifiedRows: ReadonlySet<string>): string {
+function rowKey(
+  entry: BreakdownEntry,
+  unitQualifiedRows: ReadonlySet<string>,
+  summary?: readonly string[],
+): string {
   const parts = [rowCategory(entry), entry.row.name]
   // 建築は従来どおり単位を含める。他編は同名の行に単位差がある場合だけ追加する。
   if (entry.book === '建築' || unitQualifiedRows.has(rowNameKey(entry))) {
     parts.push(entry.row.unit)
   }
-  return `row:${JSON.stringify(entry.book === '電気設備' ? parts : [entry.book, ...parts])}`
+  const scopedParts = entry.book === '電気設備' ? parts : [entry.book, ...parts]
+  return `row:${JSON.stringify(summary === undefined ? scopedParts : [...scopedParts, summary])}`
 }
 
 function detailKey(
@@ -166,6 +179,7 @@ function sharedSearch(item: CatalogSource): string {
     item.category,
     item.type,
     item.name,
+    ...(item.formerNames ?? []),
     ...item.slots.flatMap(slot => [slot.label, ...(slot.choices ?? [])]),
   ].join(' '))
 }
@@ -178,6 +192,7 @@ function withSearch(item: CatalogSource): CatalogItem {
       item.category,
       item.type,
       item.name,
+      ...(item.formerNames ?? []),
       ...item.options.flatMap(option => [option.label, option.spec ?? '']),
       ...item.slots.flatMap(slot => [slot.label, ...(slot.choices ?? [])]),
     ].join(' ')),
@@ -275,9 +290,20 @@ function catalogIndex(): CatalogIndex {
   const byKey = new Map(items.map(item => [item.key, item]))
 
   const entries = breakdownEntries()
+  // 別紙明細から品目ができない設備の行だけ、行自体を1式の品目にする。
+  // catalogIndex の構築中なので、公開の逆引き関数を呼んで再入しない。
+  const detailHasItems = (template: DetailTemplate): boolean =>
+    template.master === undefined
+      ? detailOptions(template).length > 0
+      : detailMasterEntries(template).some(choice =>
+        byKey.has(masterKey(choice.field, choice.category, choice.type)))
+  const rowEntries = entries.filter(entry =>
+    !entry.row.separate
+    || ((entry.book === '電気設備' || entry.book === '機械設備')
+      && !entry.details.some(detailHasItems)),
+  )
   const unitsByName = new Map<string, Set<string>>()
-  for (const entry of entries) {
-    if (entry.row.separate) continue
+  for (const entry of rowEntries) {
     const nameKey = rowNameKey(entry)
     let units = unitsByName.get(nameKey)
     if (units === undefined) {
@@ -290,17 +316,35 @@ function catalogIndex(): CatalogIndex {
     [...unitsByName].filter(([, units]) => units.size > 1).map(([key]) => key),
   )
 
-  for (const entry of entries) {
-    if (entry.row.separate) continue
-    const hasLinkRule = linkRuleForDetail(entry.row.name) !== undefined
-    const key = rowKey(entry, unitQualifiedRows)
+  const rowKeys = new Map<string, string>()
+  const rowAliases = new Map<string, string>()
+  const rowKeysBySummary = new Map<string, Map<string, string>>()
+
+  for (const entry of rowEntries) {
+    const hasLinkRule = !entry.row.separate && linkRuleForDetail(entry.row.name) !== undefined
+    const baseKey = rowKey(entry, unitQualifiedRows)
+    let key = baseKey
+    if (entry.book === '電気設備' || entry.book === '機械設備') {
+      const summary = entry.row.summary ?? []
+      const signature = JSON.stringify(summary)
+      const keys = rowKeysBySummary.get(baseKey) ?? new Map<string, string>()
+      key = keys.get(signature)
+        ?? (keys.size === 0 ? baseKey : rowKey(entry, unitQualifiedRows, summary))
+      keys.set(signature, key)
+      rowKeysBySummary.set(baseKey, keys)
+    }
+    rowKeys.set(entry.key, key)
     if (byKey.has(key)) continue
 
-    const quantity = kindForUnit(entry.row.unit)
-      ?? (hasLinkRule ? { kind: 'count' as const, method: 'click' as const } : undefined)
+    const quantity = entry.row.separate
+      ? { kind: 'count' as const, method: 'click' as const }
+      : kindForUnit(entry.row.unit)
+        ?? (hasLinkRule ? { kind: 'count' as const, method: 'click' as const } : undefined)
     // 建築は連動の選択肢と規格を併設する。他編の連動の選び方は維持する。
-    const rowVariants = entry.book === '建築'
-      ? BUILDING_ROW_VARIANTS[entry.row.name]
+    const rowVariants = entry.row.separate
+      ? undefined
+      : entry.book === '建築'
+        ? BUILDING_ROW_VARIANTS[entry.row.name]
       : !hasLinkRule && entry.book === '機械設備'
         ? MECHANICAL_ROW_VARIANTS[entry.row.name]
         : undefined
@@ -375,7 +419,220 @@ function catalogIndex(): CatalogIndex {
     }
   }
 
-  return cachedCatalog = { items, masters, byKey, unitQualifiedRows }
+  for (const absorption of MASTER_ABSORPTIONS) {
+    const key = masterKey(...absorption.master)
+    const master = byKey.get(key)
+    if (master === undefined) {
+      throw new Error(`吸収元の標準マスタがありません: ${key}`)
+    }
+
+    const targets = items.filter(item =>
+      item.field === absorption.master[0]
+      && absorption.targets.some(target =>
+        'row' in target
+          ? item.key.startsWith('row:')
+            && item.name === target.row
+            && (target.unit === undefined || item.unit === target.unit)
+          : item.key.startsWith('detail:')
+            && item.breakdownItem === target.detailRow
+            && item.name === target.detail),
+    )
+    if (!targets.length) {
+      throw new Error(`標準マスタの吸収先がありません: ${key}`)
+    }
+
+    for (const target of targets) {
+      const options = [...target.options]
+      const optionKeys = new Set(options.map(option => option.key))
+      if (absorption.mode !== 'drop') {
+        for (const option of master.options) {
+          if (optionKeys.has(option.key)) continue
+          const summary: Record<string, string> = {}
+          for (const [label, value] of Object.entries(absorption.summary ?? {})) {
+            if (value.trim()) summary[label] = value
+          }
+          if (absorption.codeLabel && option.code.trim()) {
+            summary[absorption.codeLabel] = option.code
+          }
+          if (absorption.specLabel && option.spec !== undefined) {
+            const value = absorption.specValue === 'stripPhi'
+              ? option.spec.replace(/^φ/, '')
+              : option.spec
+            if (value.trim()) summary[absorption.specLabel] = value
+          }
+          options.push({
+            ...option,
+            name: target.name,
+            formerName: master.name,
+            summary,
+          })
+          optionKeys.add(option.key)
+        }
+      }
+
+      const absorbed = withSearch({
+        ...target,
+        options,
+        formerNames: [...new Set([...(target.formerNames ?? []), master.name])],
+      })
+      items[items.findIndex(item => item.key === target.key)] = absorbed
+      byKey.set(absorbed.key, absorbed)
+    }
+
+    items.splice(items.findIndex(item => item.key === key), 1)
+    byKey.delete(key)
+  }
+
+  // U8: 標準単価積算基準の規格を、U1 の吸収後・U2 の行統合前に追加する。
+  const standardCountUnits = new Set<string>(COUNT_UNITS)
+  standardCountUnits.delete('式')
+
+  for (const [i, group] of STANDARD_GROUPS.entries()) {
+    const standardOptions: CatalogOption[] = group.specs.map(([spec, code], j) => {
+      const summary: Record<string, string> = {}
+      for (const [label, value] of Object.entries(group.summary ?? {})) {
+        if (value.trim()) summary[label] = value
+      }
+      if (group.specLabel && spec !== '') {
+        summary[group.specLabel] = spec
+          + (group.specSuffix && /^\d+$/.test(spec) ? group.specSuffix : '')
+      }
+
+      return {
+        key: `std:${i}:${j}`,
+        label: [code, spec].filter(Boolean).join(' '),
+        code,
+        ...(spec !== '' ? { spec } : {}),
+        name: group.name,
+        kind: group.kind,
+        method: group.method,
+        ...(group.conditions.length ? { conditions: [...group.conditions] } : {}),
+        ...(Object.keys(summary).length ? { summary } : {}),
+      }
+    })
+
+    const appendOptions = (target: CatalogSource, absorbed: boolean): CatalogItem => {
+      const options = [...target.options]
+      const optionKeys = new Set(options.map(option => option.key))
+      for (const option of standardOptions) {
+        if (optionKeys.has(option.key)) continue
+        // 吸収先には品目そのものの規格があるので、記号・規格・摘要の無い規格は足さない（同じ名前のチェックが2つ並ぶため）。
+        if (absorbed && option.label === '' && option.summary === undefined) continue
+        options.push({
+          ...option,
+          name: target.name,
+          ...(absorbed ? { formerName: group.name } : {}),
+        })
+        optionKeys.add(option.key)
+      }
+
+      return withSearch({
+        ...target,
+        options,
+        ...(absorbed ? {
+          formerNames: [...new Set([...(target.formerNames ?? []), group.name])],
+        } : {}),
+      })
+    }
+
+    const targetDefinitions = group.targets ?? []
+    const targets = targetDefinitions.length
+      ? items.filter(item =>
+        item.field === group.field
+        && (item.unit === group.unit
+          || (standardCountUnits.has(item.unit) && standardCountUnits.has(group.unit)))
+        && targetDefinitions.some(target =>
+          'row' in target
+            ? item.key.startsWith('row:')
+              && item.name === target.row
+              && (target.unit === undefined || item.unit === target.unit)
+            : item.key.startsWith('detail:')
+              && item.breakdownItem === target.detailRow
+              && item.name === target.detail),
+      )
+      : []
+
+    if (targets.length) {
+      for (const target of targets) {
+        const absorbed = appendOptions(target, true)
+        items[items.findIndex(item => item.key === target.key)] = absorbed
+        byKey.set(absorbed.key, absorbed)
+      }
+      continue
+    }
+
+    const key = `std:${JSON.stringify([
+      group.field, group.category, group.name, group.unit,
+    ])}`
+    const existing = byKey.get(key)
+    const independent = appendOptions(existing ?? {
+      key,
+      field: group.field,
+      category: group.category,
+      type: group.name,
+      name: group.name,
+      unit: group.unit,
+      options: [],
+      slots: [],
+    }, false)
+
+    if (existing === undefined) {
+      items.push(independent)
+    } else {
+      items[items.findIndex(item => item.key === key)] = independent
+    }
+    byKey.set(key, independent)
+  }
+
+  // 吸収後の規格も含めてまとめる。行の生成順なので最初の行の鍵が残る。
+  const mergedRows = new Map<string, CatalogItem>()
+  for (const item of [...items]) {
+    if (!item.key.startsWith('row:')
+      || (item.field !== '電気設備' && item.field !== '機械設備')) continue
+
+    const signature = JSON.stringify([
+      item.field,
+      item.name,
+      item.unit,
+      item.slots.map(slot => slot.label),
+    ])
+    const first = mergedRows.get(signature)
+    if (first === undefined) {
+      const retained = withSearch({
+        ...item,
+        category: MERGED_ROW_CATEGORY[item.field][item.name] ?? item.category,
+      })
+      items[items.findIndex(candidate => candidate.key === item.key)] = retained
+      byKey.set(retained.key, retained)
+      mergedRows.set(signature, retained)
+      continue
+    }
+
+    const options = [...first.options]
+    const optionKeys = new Set(options.map(option => option.key))
+    for (const option of item.options) {
+      if (optionKeys.has(option.key)) continue
+      options.push(option)
+      optionKeys.add(option.key)
+    }
+    const formerNames = [...new Set([
+      ...(first.formerNames ?? []),
+      ...(item.formerNames ?? []),
+    ])]
+    const retained = withSearch({
+      ...first,
+      options,
+      ...(formerNames.length ? { formerNames } : {}),
+    })
+    items[items.findIndex(candidate => candidate.key === first.key)] = retained
+    items.splice(items.findIndex(candidate => candidate.key === item.key), 1)
+    byKey.set(retained.key, retained)
+    byKey.delete(item.key)
+    rowAliases.set(item.key, retained.key)
+    mergedRows.set(signature, retained)
+  }
+
+  return cachedCatalog = { items, masters, byKey, unitQualifiedRows, rowKeys, rowAliases }
 }
 
 /** 初回に一覧を構築し、以後は同じ一覧を返す。画面側から遅延 import する。 */
@@ -400,24 +657,51 @@ function catalogOptionConditions(item: CatalogItem, option: CatalogOption): stri
 
 /** 既存の項目を品目へ照合し、新規追加と同じ順序で候補を返す。 */
 export function catalogConditionsForFixture(
-  f: Pick<CountFixture, 'code' | 'spec' | 'name' | 'category'>,
+  f: Pick<CountFixture, 'code' | 'spec' | 'name' | 'category'> & {
+    summary?: CountFixture['summary']
+  },
 ): string[] {
   const items = catalogItems()
   const sameSpecification = (option: CatalogOption) =>
     option.code === f.code && (option.spec ?? '') === (f.spec ?? '')
   const sameOption = (option: CatalogOption) =>
-    sameSpecification(option) && option.name === f.name
+    sameSpecification(option) && (option.name === f.name || option.formerName === f.name)
+  const fixtureSummary = f.summary
+  const sameOptionWithSummary = (option: CatalogOption) => {
+    const optionSummary = Object.entries(option.summary ?? {})
+    return sameOption(option)
+      && fixtureSummary !== undefined
+      && optionSummary.length > 0
+      && optionSummary.every(([label, value]) =>
+        fixtureSummary.some(summary => summary.label === label && summary.value === value),
+      )
+  }
   const item = items.find(candidate =>
-    candidate.category === f.category && candidate.options.some(sameOption),
+    candidate.category === f.category && candidate.options.some(sameOptionWithSummary),
   )
+    ?? items.find(candidate =>
+      candidate.category === f.category && candidate.options.some(sameOption),
+    )
+    ?? items.find(candidate => candidate.options.some(sameOptionWithSummary))
     ?? items.find(candidate => candidate.options.some(sameOption))
     ?? items.find(candidate => candidate.name === f.name && candidate.category === f.category)
     ?? items.find(candidate => candidate.name === f.name)
     ?? (f.code !== '' ? items.find(candidate => candidate.type === f.code) : undefined)
+    // 吸収した既存の品目（U1）の項目: 規格の無い「ダウンライト」（記号 DL）等も、吸収先の品目の条件にする。
+    ?? items.find(candidate => candidate.formerNames?.includes(f.name) && candidate.category === f.category)
+    ?? items.find(candidate => candidate.formerNames?.includes(f.name))
+    ?? (f.code !== '' ? items.find(candidate => candidate.options.some(option =>
+      option.formerName !== undefined && option.code === f.code)) : undefined)
   if (item === undefined) return []
 
-  const option = item.options.find(sameOption)
+  // 摘要の一致する区分が最も多い規格を選ぶ（管種の違う配管が同じ呼び径の規格を持つため）。
+  const summaryScore = (candidate: CatalogOption) => Object.keys(candidate.summary ?? {}).length
+  const option = item.options.filter(sameOptionWithSummary)
+    .sort((left, right) => summaryScore(right) - summaryScore(left))[0]
+    ?? item.options.find(sameOption)
     ?? item.options.find(sameSpecification)
+    ?? item.options.find(option => option.formerName === f.name)
+    ?? (f.code !== '' ? item.options.find(option => option.formerName !== undefined && option.code === f.code) : undefined)
     ?? item.options[0]
   return option === undefined ? [] : catalogOptionConditions(item, option)
 }
@@ -456,36 +740,16 @@ export function searchCatalog(
 /** 内訳書の細目に対応する品目。位置は catalogPresets の呼出時に渡す。 */
 export function catalogItemsForBreakdownRow(entry: BreakdownEntry): readonly CatalogItem[] {
   const index = catalogIndex()
-  if (!entry.row.separate) {
-    // variants・連動の規則で拾う行も返す。同名でも単位が違う品目は返さない。
-    const item = index.byKey.get(rowKey(entry, index.unitQualifiedRows))
+  const rowItems = (): readonly CatalogItem[] => {
+    const key = index.rowKeys.get(entry.key)
+    if (key === undefined) return []
+    const item = index.byKey.get(index.rowAliases.get(key) ?? key)
     if (item === undefined || item.unit !== entry.row.unit || !item.options.length) return []
-
-    const rowMaster = entry.book === '電気設備'
-      && Object.hasOwn(ELECTRICAL_ROW_MASTERS, entry.row.name)
-      ? ELECTRICAL_ROW_MASTERS[entry.row.name]
-      : undefined
-    if (rowMaster === undefined) return [item]
-
-    const slots = (entry.row.summary ?? []).map(label => {
-      const choices = summaryChoices(entry.row.name, label, entry.book)
-      return {
-        label,
-        ...(choices.length ? { choices } : {}),
-        ...(summaryIsCondition(entry.row.name, label, entry.book) ? { condition: true as const } : {}),
-      }
-    })
-    const masters = index.masters
-      .filter(master => master.field === '電気設備' && rowMaster.types.includes(master.type))
-      .map(master => withSearch({
-        ...master,
-        key: `${master.key}#row:${item.key}`,
-        unit: entry.row.unit,
-        breakdownItem: entry.row.name,
-        slots,
-        defaultSymbolFromCode: true,
-      }))
-    return [...masters, item]
+    return [item]
+  }
+  if (!entry.row.separate) {
+    // variants・連動の規則で拾う行も返す。同名でも単位・摘要区分が違う品目は返さない。
+    return rowItems()
   }
 
   const result: CatalogItem[] = []
@@ -510,13 +774,59 @@ export function catalogItemsForBreakdownRow(entry: BreakdownEntry): readonly Cat
       }))
     }
   }
-  return result
+  return result.length ? result : rowItems()
 }
 
-/** 重ね合わせた標準マスタの鍵を、元の品目の鍵に戻す。 */
+/** 重ね合わせと統合前の鍵を、一覧に残した品目の鍵に戻す。 */
 function sourceCatalogKey(key: string): string {
+  const index = catalogIndex()
+  if (index.byKey.has(key) || index.rowAliases.has(key)) {
+    return index.rowAliases.get(key) ?? key
+  }
+
+  // JSON 内の名称に # があっても、実在する元の鍵まで確認する。
+  for (let overlay = key.indexOf('#'); overlay !== -1; overlay = key.indexOf('#', overlay + 1)) {
+    const source = key.slice(0, overlay)
+    if (index.byKey.has(source) || index.rowAliases.has(source)) {
+      return index.rowAliases.get(source) ?? source
+    }
+  }
+
   const overlay = key.indexOf('#')
   return key.startsWith('master:') && overlay !== -1 ? key.slice(0, overlay) : key
+}
+
+/** 品目が出る内訳書の行の位置の一覧（breakdownEntries() の順、庁舎を先）。重ね合わせの鍵は元の鍵で比べる。 */
+export function catalogItemPositions(item: CatalogItem): BreakdownPosition[] {
+  if (cachedItemPositions === undefined) {
+    const positions = new Map<string, BreakdownPosition[]>()
+    const entries = breakdownEntries()
+    for (const headquarters of [true, false]) {
+      for (const entry of entries) {
+        if ((entry.section === '庁舎') !== headquarters) continue
+        const seen = new Set<string>()
+        for (const candidate of catalogItemsForBreakdownRow(entry)) {
+          const key = sourceCatalogKey(candidate.key)
+          if (seen.has(key)) continue
+          seen.add(key)
+          const rows = positions.get(key) ?? []
+          rows.push({
+            book: entry.book,
+            section: entry.section,
+            subject: entry.subject,
+            ...(entry.middle !== undefined ? { middle: entry.middle } : {}),
+            item: entry.row.name,
+          })
+          positions.set(key, rows)
+        }
+      }
+    }
+    cachedItemPositions = positions
+  }
+
+  // 呼出側による変更をキャッシュへ戻さない。
+  return (cachedItemPositions.get(sourceCatalogKey(item.key)) ?? [])
+    .map(position => ({ ...position }))
 }
 
 /** 編の順、庁舎優先、マスタの行順で選び、未対応の品目は想定の細目で補う。 */
@@ -548,7 +858,7 @@ export function representativeBreakdownPosition(item: CatalogItem): BreakdownPos
     // 自動対応を優先し、位置がまだ決まっていない標準マスタだけ補う。
     for (const row of REPRESENTATIVE_POSITION_ROWS) {
       const key = masterKey(...row.master)
-      if (positions.has(key)) continue
+      if (!catalogIndex().byKey.has(key) || positions.has(key)) continue
 
       const entry = breakdownEntries(row.book).find(entry =>
         entry.section === row.section
@@ -627,7 +937,7 @@ export function catalogPresets(
   if (!options.length) return []
 
   const splitIndex = item.slots.findIndex(slot =>
-    !slot.condition && !slot.choices?.length && splitLabels.has(slot.label),
+    !slot.condition && splitLabels.has(slot.label),
   )
   const dimensions: SummaryDimension[] = []
 
@@ -636,9 +946,11 @@ export function catalogPresets(
 
     const split = index === splitIndex
     const text = selection.text?.[slot.label] ?? ''
+    // 選択肢のある区分も、入力された文字（「、」で分ける区分は分けて）を値に含める（U6: 記号等に選択肢を足した）。
+    const typed = split ? text.split(/[、,，]/) : [text]
     const values = slot.choices?.length
-      ? trimmedValues(selection.values?.[slot.label] ?? [])
-      : trimmedValues(split ? text.split(/[、,，]/) : [text])
+      ? trimmedValues([...(selection.values?.[slot.label] ?? []), ...typed])
+      : trimmedValues(typed)
     if (values.length) dimensions.push({ label: slot.label, values, split })
   }
 
@@ -674,6 +986,13 @@ export function catalogPresets(
     combinationsByOption.set(option.key, combinations)
   }
 
+  const lumpSumPosition = (
+    (item.field === '電気設備' || item.field === '機械設備')
+    && item.key.startsWith('row:')
+    && item.unit === '式'
+    && position !== undefined
+  ) ? position : undefined
+
   const presets: FixturePreset[] = []
   for (const option of options) {
     const conditions = catalogOptionConditions(item, option)
@@ -693,12 +1012,16 @@ export function catalogPresets(
       for (const [label, value] of Object.entries(option.summary ?? {})) {
         if (value.trim()) summaryValues.set(label, value.trim())
       }
-      if (item.defaultSymbolFromCode && option.code && item.slots.some(slot =>
-        slot.label === '記号' && !slot.condition && !slot.choices?.length,
-      ) && !summaryValues.has('記号')) {
-        summaryValues.set('記号', option.code)
+
+      if (lumpSumPosition !== undefined) {
+        summaryValues.set('対象', [
+          lumpSumPosition.subject,
+          lumpSumPosition.middle,
+        ].filter(Boolean).join(' '))
       }
+
       const summaryLabels = [...new Set([
+        ...(lumpSumPosition !== undefined ? ['対象'] : []),
         ...item.slots.filter(slot => !slot.condition).map(slot => slot.label),
         ...summaryValues.keys(),
       ])]
@@ -709,7 +1032,9 @@ export function catalogPresets(
       const preset: FixturePreset = {
         category: item.category,
         code,
-        name: option.name,
+        name: lumpSumPosition !== undefined
+          ? `${option.name}（${lumpSumPosition.middle || lumpSumPosition.subject}）`
+          : option.name,
         ...(option.spec !== undefined ? { spec: option.spec } : {}),
         ...(option.kind !== undefined ? { kind: option.kind } : {}),
         ...(option.method !== undefined ? { method: option.method } : {}),

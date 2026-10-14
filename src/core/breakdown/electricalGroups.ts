@@ -1,6 +1,6 @@
 // 公共建築工事内訳書標準書式（設備工事編）令和8年3月改定（国営積第15号）の電気設備の細目別内訳。
 // 書式の PDF から列の位置で抽出し、名称と摘要が1つの欄に重なった3行・バスダクトの単位・発生材の3行を手で直した。
-// 抽出の手順は docs/調査/内訳書標準書式対応_計画.md の 8 章。separate は「1式・別紙明細」、renovation は書式の ※（改修工事の項目の例）。
+// 抽出の手順は 非公開の調査資料 の 8 章。separate は「1式・別紙明細」、renovation は書式の ※（改修工事の項目の例）。
 import type { BreakdownGroupData } from './types'
 
 export const ELECTRICAL_GROUPS: readonly BreakdownGroupData[] = [

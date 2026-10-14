@@ -17,6 +17,7 @@ import { readDocumentRoomMetadata } from '../core/rooms'
 import { applyEdits, listAnnotations } from '../core/annotations'
 import { readCountFixtures } from '../core/countFixtures'
 import { readQuantityChecks } from '../core/quantityCheckBasics'
+import { readRelatedReviews } from '../core/related/reviews'
 import { applyEditsAtomically, applyAndSaveAtomically, pdfOperation } from '../core/editTransaction'
 import { assertEditablePdf } from '../core/pdfRestrictions'
 import { maxIssueNumber } from '../core/issues'
@@ -100,6 +101,7 @@ type CoreRequest =
   | import('./protocol').DrawingPageRequest
   | import('./protocol').GetCountFixturesRequest
   | import('./protocol').GetQuantityChecksRequest
+  | import('./protocol').GetRelatedReviewsRequest
   | MaxIssueNumberRequest
   | OpenRequest
   | ListAnnotationsRequest
@@ -460,6 +462,10 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
       post({ type: 'quantityChecks', requestId: request.requestId, basics: readQuantityChecks(document) })
       return
     }
+    if (request.type === 'getRelatedReviews') {
+      post({ type: 'relatedReviews', requestId: request.requestId, reviews: readRelatedReviews(document) })
+      return
+    }
     if (request.type === 'listAnnotations') {
       post({
         type: 'annotationsListed',
@@ -790,7 +796,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
     await loadFontsForEdits(request.edits)
     if (request.type === 'applyEdits') {
       const applied = applyEditsAtomically(document, request.edits, fontResources)
-      if (request.edits.some(edit => edit.kind !== 'setQuantityChecks')) {
+      if (request.edits.some(edit => edit.kind !== 'setQuantityChecks' && edit.kind !== 'setRelatedReviews')) {
         entry.displayLists.clear()
       }
       post({
@@ -904,6 +910,7 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     || message.type === 'getHeaderFooterSettings'
     || message.type === 'getCountFixtures'
     || message.type === 'getQuantityChecks'
+    || message.type === 'getRelatedReviews'
     || message.type === 'undoPageLayout'
     || message.type === 'extractPages'
     || message.type === 'splitPages'

@@ -196,8 +196,9 @@ test('retains checked specs across searches, hierarchy and tabs, rendering at mo
   await search.fill('設備')
   await expect(dialog.getByRole('checkbox')).toHaveCount(200)
   await expect(dialog.getByText(/ほか \d+ 件。言葉を足して絞り込んでください/)).toBeVisible()
-  await search.fill('pf22'); await expect(dialog.getByRole('checkbox')).toHaveCount(1)
-  await expect(dialog.getByRole('checkbox')).toBeChecked()
+  // 配管撤去の種類・呼び径の選択肢にも PF22 があるので、規格のチェックで確かめる。
+  await search.fill('pf22'); await expect(dialog.getByRole('checkbox', { name: /^PF22 / })).toHaveCount(1)
+  await expect(dialog.getByRole('checkbox', { name: /^PF22 / })).toBeChecked()
   await search.fill('存在しない規格'); await expect(dialog.getByRole('checkbox')).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: '選んだ項目を追加（2件）', exact: true })).toBeEnabled()
   await dialog.getByRole('tab', { name: '内訳書から選ぶ', exact: true }).click()

@@ -22,7 +22,7 @@ SPEC-04m（`docs/spec/SPEC-04m-指摘の状態3種類と詳細のその場編集
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/editor/AnnotationStore.ts`、`src/editor/AnnotationLayer.tsx`、`src/viewer/PageView.tsx`、`src/viewer/Viewer.tsx`、`tests/`（新しい試験ファイル、または指摘の試験）、`e2e/cloud-issues.annotate.spec.ts`
 - 変更しないファイル: 上記以外。**別の作業（SPEC-04n）が同時に `src/core/pageOps.ts`、`src/core/countFixtures.ts`、`src/app/`、`src/App.tsx`、`src/worker/`、`e2e/organize.annotate.spec.ts` などを変更している。これらには触れないこと。**
 

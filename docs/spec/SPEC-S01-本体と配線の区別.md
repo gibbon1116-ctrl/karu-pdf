@@ -10,8 +10,8 @@
 
 ## 前提
 
-- 計画: `docs/調査/標準図記号登録と実図面検索_改善計画_20261010.md`（工程②）。
-- 記録: `docs/調査/標準図記号検索_実装記録_20261010.md`。
+- 計画: 非公開の調査資料（工程②）。
+- 記録: 非公開の調査資料。
 - 対象のモジュール `src/core/symbolFeatureProfile.ts` は試作である。アプリ・Worker からは import していない。この SPEC でも import させない。
 
 ## 現状（Claude Code が実データで確かめたこと）
@@ -123,7 +123,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\.codex\worktrees\dfd5\PDF編集アプリ`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/core/symbolFeatureProfile.ts`、`tests/symbolFeatureProfile.test.ts`
 - 変更しないファイル: 上以外（`work/` を含む）。
 

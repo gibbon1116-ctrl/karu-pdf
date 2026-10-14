@@ -167,6 +167,6 @@ describe('SPEC-B27: 線要素の数量索引', () => {
     const index = build(25, {
       extra: [{ itemId: 'trench', count: 5, perM: 2 }],
     }, [line, linked])
-    expect(index.total('trench')).toBe(25)
+    expect(index.total('trench')).toBeCloseTo(12, 12)
   })
 })

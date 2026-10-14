@@ -26,7 +26,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: 新規 `src/app/QuantityTable.tsx`、`src/app/FixturePanel.tsx`（集計表を開くボタンだけ）、`src/app/DocumentWorkspace.tsx`（集計表の置き場所）、`src/app/QuantityBreakdown.tsx`（移動の後の強調）、`src/editor/AnnotationLayer.tsx`（位置を知らせる一時的な輪の描画だけ）、`src/editor/AnnotationStore.ts`（一時的な強調の対象 id を持つだけ。保存しない）、`src/core/quantityIndex.ts`（集計表のための読み出しを足すだけ。作り方は変えない）、`src/App.tsx`（つなぎだけ）、`src/app/HelpDialog.tsx`、`src/styles.css`、`tests/`、新規 `e2e/quantity-table.annotate.spec.ts`
 - 変更しないファイル: 上以外。`docs/`、設定ファイル、`scripts/`
 

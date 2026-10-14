@@ -435,6 +435,46 @@ export class PdfWorkerPool {
     } }
   }
 
+  renderRegionImage(docId: string, pageIndex: number, rect: Rect, maxPx: number): {
+    promise: Promise<HTMLCanvasElement>; cancel(): void
+  } {
+    const widthPt = rect[2] - rect[0], heightPt = rect[3] - rect[1]
+    if (!rect.every(Number.isFinite) || widthPt <= 0 || heightPt <= 0
+      || !Number.isFinite(maxPx) || maxPx < 1) throw new Error('画像の範囲が不正です')
+    const renderScale = Math.min(512, Math.round(maxPx)) / Math.max(widthPt, heightPt)
+    const deviceRect: DeviceRect = [
+      Math.floor(rect[0] * renderScale), Math.floor(rect[1] * renderScale),
+      Math.ceil(rect[2] * renderScale), Math.ceil(rect[3] * renderScale),
+    ]
+    // 見本の描画（renderFixtureSample）と同じ経路で、表示の描画の最も低い優先度（3）で描く。
+    const task = this.render({
+      docId, pageIndex, priority: 3, renderScale, deviceRect, contentsOnly: true,
+    })
+    let cancelled = false
+    const promise = task.promise.then(result => {
+      if (!result.bitmap) throw new Error('候補の描画を中止しました。')
+      try {
+        if (cancelled) throw new Error('候補の描画を中止しました。')
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.max(1, deviceRect[2] - deviceRect[0])
+        canvas.height = Math.max(1, deviceRect[3] - deviceRect[1])
+        const context = canvas.getContext('2d')
+        if (!context) throw new Error('候補の画像を作れません。')
+        context.fillStyle = '#fff'
+        context.fillRect(0, 0, canvas.width, canvas.height)
+        context.drawImage(result.bitmap, 0, 0)
+        return canvas
+      } finally {
+        result.bitmap.close()
+      }
+    })
+    return { promise, cancel: () => {
+      if (cancelled) return
+      cancelled = true
+      this.cancelJobs(docId, [task.jobId])
+    } }
+  }
+
   async renderFixtureSample(docId: string, pageIndex: number, rect: import('../core/annotations').Rect): Promise<import('../core/countFixtures').CountFixtureSample> {
     const widthPt = rect[2] - rect[0], heightPt = rect[3] - rect[1]
     if (!rect.every(Number.isFinite) || Math.min(widthPt, heightPt) < 2 * 72 / 25.4) throw new Error('範囲が小さすぎます')
@@ -555,6 +595,10 @@ export class PdfWorkerPool {
   async getQuantityChecks(docId: string): Promise<import('../core/quantityCheckBasics').QuantityCheckBasics> {
     const response = await this.request<import('../worker/protocol').QuantityChecksResponse>(this.slots[0], requestId => ({ type: 'getQuantityChecks', requestId, docId }))
     return response.basics
+  }
+  async getRelatedReviews(docId: string): Promise<import('../core/related/reviews').RelatedReviews> {
+    const response = await this.request<import('../worker/protocol').RelatedReviewsResponse>(this.slots[0], requestId => ({ type: 'getRelatedReviews', requestId, docId }))
+    return response.reviews
   }
 
   async pageHasText(docId: string, pageIndex: number): Promise<boolean> {

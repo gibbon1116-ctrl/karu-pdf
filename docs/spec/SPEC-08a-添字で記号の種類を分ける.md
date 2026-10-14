@@ -161,7 +161,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - `src/core/vectorSymbolSearch.ts`
   - `src/worker/symbolSearchMessages.ts`、`src/worker/symbolSearch.worker.ts`、`src/worker/pdf.worker.ts`、`src/worker/protocol.ts`

@@ -22,7 +22,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - 新規 `src/core/symbolSearch.ts` — 照合の算法（DOM・Worker に依存しない純粋な関数）
   - 新規 `src/worker/symbolSearch.worker.ts` — 照合の専用 Worker

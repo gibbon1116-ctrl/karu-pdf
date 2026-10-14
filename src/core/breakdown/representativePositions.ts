@@ -84,8 +84,8 @@ export const REPRESENTATIVE_POSITION_ROWS: readonly RepresentativePositionRow[] 
 
   // 建築
   { master: ['建築', '内装（面積）', '床仕上げ'], ...建築, subject: '内外装', middle: '内部', item: 'ビニル床シート張り' },
-  { master: ['建築', '内装（面積）', '天井仕上げ'], ...建築, subject: '内外装', middle: '内部', item: '天井ロックウ-ル化粧吸音板張り' },
-  { master: ['建築', '内装（面積）', '壁仕上げ'], ...建築, subject: '内外装', middle: '内部', item: '壁せっこうボ－ド張り' },
+  { master: ['建築', '内装（面積）', '天井仕上げ'], ...建築, subject: '内外装', middle: '内部', item: '天井ロックウール化粧吸音板張り' },
+  { master: ['建築', '内装（面積）', '壁仕上げ'], ...建築, subject: '内外装', middle: '内部', item: '壁せっこうボード張り' },
   { master: ['建築', '内装（面積）', '塗装'], ...建築, subject: '塗装', middle: '内部', item: 'ＥＰ合成樹脂エマルションペイント塗り' },
   { master: ['建築', '外部（面積）', '舗装'], book: '建築', section: '構内舗装', subject: '構内舗装', item: 'アスファルト舗装' },
   { master: ['建築', '外部（面積）', '屋上防水'], ...建築, subject: '防水', middle: '外部', item: 'アスファルト防水' },

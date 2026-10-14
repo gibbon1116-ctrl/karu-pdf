@@ -12,6 +12,8 @@ import { breakdownHeadingPath, breakdownHeadingRows, createQuantityBreakdownOrde
 import { getGroupByBreakdown, setGroupByBreakdown, subscribeGroupByBreakdown } from './breakdownGroupingPreference'
 import type { QuantityCheckBasics } from '../core/quantityCheckBasics'
 import { linkRelations, linkSourceText, linkSourceTitle, linkDependentTitle } from './linkRelations'
+import { perfCount, perfTime } from '../perf/counters'
+import type { RelatedReviewRow } from './relatedXlsx'
 
 export { breakdownHeadingPath, breakdownHeadingRows, createQuantityBreakdownOrder, orderByBreakdown, quantityBreakdownGroupKey, quantityBreakdownRowKey } from './breakdownOutline'
 export type { QuantityBreakdownOrder } from './breakdownOutline'
@@ -310,14 +312,46 @@ type QuantityWorkbookPicker = (options: QuantityWorkbookPickerOptions) => Promis
 export default function QuantityTable({ session, pool, height, onHeightChange, onClose }: {
   session: DocumentSession; pool: PdfWorkerPool; height: number; onHeightChange(n: number): void; onClose(): void
 }) {
+  perfCount('QuantityTable.render')
   const store = session.annotationStore, navigation = useContext(QuantityNavigationContext)
   const controls = useContext(QuantityTableContext), fixtureUi = useContext(FixtureUiContext)
   // This component is mounted only while open.
   useSyncExternalStore(store.subscribe, store.getSnapshot)
   const index = store.quantityIndex()
-  const fixtures = store.getCountFixtures()
-  const relations = useMemo(() => linkRelations(fixtures), [fixtures])
-  const data = useMemo(() => buildQuantityTableData(index, fixtures), [index, fixtures])
+  const fixtures = store.getCountFixturesSnapshot()
+  const relatedReviews = store.getRelatedReviewsSnapshot()
+  const relatedFixturesRevision = store.getFixturesRevision()
+  const relatedReviewsRevision = store.getRelatedReviewsRevision()
+  const relatedEnabled = useMemo(() =>
+    relatedReviews.projectMode !== undefined
+      || Object.keys(relatedReviews.decisions).length > 0,
+  [relatedReviews])
+  const [relatedAttempt, setRelatedAttempt] = useState(0)
+  const relatedInput = useMemo(() =>
+    relatedEnabled && store.fixturesReady && store.relatedReviewsReady
+      ? {
+        store,
+        fixtures,
+        reviews: relatedReviews,
+        fixturesRevision: relatedFixturesRevision,
+        reviewsRevision: relatedReviewsRevision,
+        pageRevision: session.pageRevision,
+      }
+      : undefined,
+  [
+    relatedEnabled, store, fixtures, relatedReviews,
+    relatedFixturesRevision, relatedReviewsRevision, session.pageRevision,
+    store.fixturesReady, store.relatedReviewsReady, relatedAttempt,
+  ])
+  const [relatedEvaluation, setRelatedEvaluation] = useState<{
+    input: NonNullable<typeof relatedInput>
+    pending?: number
+    error?: string
+  }>()
+  const relatedResult = relatedEvaluation?.input === relatedInput
+    ? relatedEvaluation : undefined
+  const relations = useMemo(() => perfTime('QuantityTable.linkRelations', () => linkRelations(fixtures)), [fixtures])
+  const data = useMemo(() => perfTime('QuantityTable.buildData', () => buildQuantityTableData(index, fixtures)), [index, fixtures])
   const hasArchitecture = data.some(item => item.fixture.breakdown?.book === '建築')
   const hasBreakdown = data.some(item => item.fixture.breakdown !== undefined)
   const [showChecks, setShowChecks] = useState(() => {
@@ -369,8 +403,8 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
   const headings = pages.map(page => { const info = store.getDrawingInfo(page); return [page, info?.number ?? '', info?.name ?? ''] as const })
   const headingKey = JSON.stringify(headings)
   const info = useMemo(() => new Map(headings.map(([page, number, name]) => [page, { number, name } as DrawingInfo])), [headingKey])
-  const outline = useMemo(() => projectQuantityTable(data, mode, filters, page => info.get(page) ?? null,
-    { allConditions, expanded, groupByBreakdown, breakdownOrder }),
+  const outline = useMemo(() => perfTime('QuantityTable.project', () => projectQuantityTable(data, mode, filters, page => info.get(page) ?? null,
+    { allConditions, expanded, groupByBreakdown, breakdownOrder })),
   [data, mode, filters, info, allConditions, expanded, groupByBreakdown, breakdownOrder])
   const table = useMemo(() => ({
     ...outline,
@@ -390,6 +424,38 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
   const xlsxBusyRef = useRef(false)
   const [xlsxBusy, setXlsxBusy] = useState(false)
   const [cursors, setCursors] = useState<Record<string, ReviewCursor>>({})
+  useEffect(() => {
+    if (!relatedInput) return
+    let current = true
+    const isCurrent = () => current
+      && relatedInput.pageRevision === session.pageRevision
+      && relatedInput.fixturesRevision === store.getFixturesRevision()
+      && relatedInput.reviewsRevision === store.getRelatedReviewsRevision()
+      && store.fixturesReady && store.relatedReviewsReady
+    // 未使用文書では import も評価もしない。評価は描画後に行う。
+    const timer = setTimeout(() => {
+      if (!isCurrent()) return
+      void import('./relatedReviewRows')
+        .then(module => module.evaluateRelatedReviewRows(
+          relatedInput.fixtures, relatedInput.reviews, isCurrent,
+        ))
+        .then(rows => {
+          if (rows === undefined || !isCurrent()) return
+          setRelatedEvaluation({
+            input: relatedInput,
+            pending: rows.filter(row => row.status === '未判断').length,
+          })
+        })
+        .catch(reason => {
+          if (!isCurrent()) return
+          setRelatedEvaluation({
+            input: relatedInput,
+            error: reason instanceof Error ? reason.message : String(reason),
+          })
+        })
+    }, 0)
+    return () => { current = false; clearTimeout(timer) }
+  }, [relatedInput, session, store])
   useEffect(() => {
     try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed])) }
     catch { /* Optional UI preference. */ }
@@ -550,6 +616,11 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
       const fileName = `${pdfName.replace(/\.pdf$/i, '')}_数量集計表.xlsx`
       const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
       const fixtures = [...store.getCountFixtures()]
+      const exportReviews = store.getRelatedReviewsSnapshot()
+      const exportFixturesRevision = store.getFixturesRevision()
+      const exportReviewsRevision = store.getRelatedReviewsRevision()
+      const includeRelated = exportReviews.projectMode !== undefined
+        || Object.keys(exportReviews.decisions).length > 0
       const drawingInfo = (page: number) => info.get(page) ?? null
       const options = { data, mode, filters, display: { allConditions, expanded, groupByBreakdown, breakdownOrder }, drawingInfo, pdfName, index, fixtures }
       const picker = (window as unknown as { showSaveFilePicker?: QuantityWorkbookPicker }).showSaveFilePicker
@@ -572,7 +643,29 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
         if (!alive.current || revision !== session.pageRevision || !store.quantityChecksReady) return
         quantityChecks = store.getQuantityChecks()
       }
-      const bytes = createQuantityWorkbook({ ...options, quantityChecks })
+      let relatedReviewRows: RelatedReviewRow[] | undefined
+      if (includeRelated) {
+        if (!store.fixturesReady || !store.relatedReviewsReady) {
+          throw new Error('関連候補の判断の読込が完了していません。')
+        }
+        const isCurrent = () => alive.current
+          && revision === session.pageRevision
+          && exportFixturesRevision === store.getFixturesRevision()
+          && exportReviewsRevision === store.getRelatedReviewsRevision()
+          && store.fixturesReady && store.relatedReviewsReady
+        if (!isCurrent()) return
+        const { evaluateRelatedReviewRows } = await import('./relatedReviewRows')
+        if (!isCurrent()) return
+        relatedReviewRows = await evaluateRelatedReviewRows(
+          fixtures, exportReviews, isCurrent,
+        )
+        if (relatedReviewRows === undefined || !isCurrent()) return
+      }
+      const bytes = createQuantityWorkbook({
+        ...options,
+        quantityChecks,
+        ...(relatedReviewRows !== undefined ? { relatedReviews: relatedReviewRows } : {}),
+      })
       const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: mime })
       if (handle) {
         writable = await handle.createWritable()
@@ -666,6 +759,15 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
       <button disabled={xlsxBusy} onClick={() => void exportXlsx()}>Excelに書き出す</button>
       <button ref={closeRef} onClick={onClose} aria-label="集計表を閉じる">閉じる</button>
     </div>
+    {relatedResult?.pending !== undefined && <p
+      className="quantity-table-notice" role="status"
+      data-testid="quantity-related-pending">
+      関連候補：未判断 {relatedResult.pending}件
+    </p>}
+    {relatedResult?.error && <p role="alert">
+      関連候補の件数を確認できませんでした：{relatedResult.error}
+      {' '}<button onClick={() => setRelatedAttempt(value => value + 1)}>再試行</button>
+    </p>}
     {table.omittedColumns > 0 && <p className="quantity-table-notice" role="status">ほか {table.omittedColumns} 列。分類・種別・検索で絞り込むか、CSV で確かめてください</p>}
     {error && <p role="alert">{error}</p>}
     {hasArchitecture && checksLoadError && <p role="alert">

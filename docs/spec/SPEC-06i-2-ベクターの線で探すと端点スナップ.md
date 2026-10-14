@@ -12,7 +12,7 @@
 
 利用者の要望（2026-10-08）: PDF の線がベクターとして残っていれば、その線で同じ記号を探す。スナップでもベクターの線の始点・終点に合わせる。遅くなるなら実装しない。
 
-SPEC-06i-1 の実測（Edge、`e2e/vector-paths.perf.spec.ts`、`docs/調査/数量拾いUI改修_計画.md` に記録予定）:
+SPEC-06i-1 の実測（Edge、`e2e/vector-paths.perf.spec.ts`、非公開の調査資料 に記録予定）:
 
 | 図面 | 線分 | 取り出し | 端点の索引 | 端点の探索 p95 | 取り出し中のスクロール p95 |
 |---|---|---|---|---|---|
@@ -34,7 +34,7 @@ SPEC-06i-1 の実測（Edge、`e2e/vector-paths.perf.spec.ts`、`docs/調査/数
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/client/SymbolSearchClient.ts`、`src/worker/symbolSearch.worker.ts`、新規 `src/client/VectorCache.ts`（名前は任意）、`src/core/vectorPaths.ts`・`src/core/vectorSymbolSearch.ts`（必要な最小限）、`src/core/snap.ts`（索引を Worker で作って転送できる形にする最小限）、`src/editor/MeasurementOverlay.tsx`、`src/app/SymbolSearchPanel.tsx`、`src/app/ToolRow.tsx`・`src/app/FixturePanel.tsx`（スナップの設定の表示だけ）、`src/App.tsx`（スナップの設定・キャッシュの破棄のつなぎ）、`src/app/documentModel.ts`（キャッシュの持ち主）、`src/app/HelpDialog.tsx`、`src/styles.css`、`tests/`、`e2e/`（新規 `e2e/vector-search-snap.annotate.spec.ts`、既存の `snap`・`symbol-search` の調整）
 - 変更しないファイル: 上以外。保存の形は変えない。
 

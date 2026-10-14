@@ -21,6 +21,7 @@ it('pickupMethod defaults, kind guards and exclusion/opening limits', () => {
       if (dirty !== false) throw new Error('Pickup preferences must not dirty the document')
       notifications++
     }
+    ;(store as unknown as { notifyUi(): void }).notifyUi = () => { notifications++ }
     store.mutate = () => { mutations++ }
 
     const fallback = store.pickupMethod(fixtures.get('area'))

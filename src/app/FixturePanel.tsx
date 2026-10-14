@@ -9,12 +9,12 @@ import { linkRelations, linkSourceText, linkSourceTitle, linkDependentTitle } fr
 import { collectShapeMetrics } from '../core/shapeMetrics'
 import { createFixturePreviews } from './fixturePreviews'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
-import { ensureSessionFixtures, FixtureUiContext, SnapUiContext, type DocumentSession } from './documentModel'
+import { ensureSessionFixtures, ensureSessionRelatedReviews, FixtureUiContext, SnapUiContext, type DocumentSession } from './documentModel'
 import QuantityBreakdown, { QuantityTableContext } from './QuantityBreakdown'
 import { floorFromDrawingName } from '../core/location'
 import { annotationFilterLabel } from '../editor/annotationFilter'
 import { groupFixtures, moveCategory, moveFixture, stepFixture } from './fixtureOrder'
-import { breakdownHeadingPath, breakdownHeadingRows, createQuantityBreakdownOrder, fixtureOutlineDropError, fixtureOutlineMoveError, moveFixtureInOutline, moveFixturesToOutlinePosition, moveHeadingInOutline, orderByBreakdown, quantityBreakdownRowKey, sortByBreakdownMaster, type BreakdownHeading, type BreakdownHeadingLevel, type QuantityBreakdownOrder } from './breakdownOutline'
+import { breakdownHeadingPath, breakdownHeadingRows, createQuantityBreakdownOrder, fixtureOutlineDropError, fixtureOutlineMoveError, headingOutlineDropError, moveFixtureInOutline, moveFixturesToOutlinePosition, moveHeadingInOutline, orderByBreakdown, quantityBreakdownRowKey, sortByBreakdownMaster, type BreakdownHeading, type BreakdownHeadingLevel, type QuantityBreakdownOrder } from './breakdownOutline'
 import { RecentFixtures } from './fixtureQuickList'
 import { useRouteSets } from './RouteItems'
 import { resolveRouteSet, routeSetSummary } from './routeSets'
@@ -22,12 +22,15 @@ import { SymbolSearchContext } from './symbolSearchContext'
 import { RoomRegionDialog, RoomSetDialog, RoomSetPickupDialog } from '../editor/MeasurementOverlay'
 import type { RoomRegion, RoomSet } from '../core/rooms'
 import { getGroupByBreakdown, setGroupByBreakdown, subscribeGroupByBreakdown } from './breakdownGroupingPreference'
+import { perfCount, perfTime } from '../perf/counters'
+import { relatedSessionMemory } from './relatedState'
+
 const QuantityCsvExportDialog = lazy(() => import('./CsvExportDialog').then(m => ({ default: m.QuantityCsvExportDialog })))
 const FixtureDialog = lazy(() => import('./FixtureDialog'))
 const FixturePresetDialog = lazy(() => import('./FixturePresetDialog'))
 const BreakdownMoveDialog = lazy(() => import('./BreakdownMoveDialog'))
 
-const BREAKDOWN_REORDER_STATUS = '同じ編の別紙明細同士、または同じ名前の細目がある中科目へ移せます'
+const BREAKDOWN_REORDER_STATUS = '科目より下の見出しか項目へ落としてください'
 type FixtureDragKind = 'fixture' | 'category' | 'heading'
 const fixtureDragType = (kind: FixtureDragKind) => kind === 'fixture'
   ? 'application/x-karu-fixture'
@@ -143,7 +146,10 @@ function fixtureBreakdownGroups(
 }
 
 export default function FixturePanel({ session, pool }: { session: DocumentSession; pool: PdfWorkerPool }) {
+  perfCount('FixturePanel.render')
   const store = session.annotationStore, ui = useContext(FixtureUiContext)
+  const relatedMemory = useMemo(() => relatedSessionMemory(store), [store])
+  const [presetQuery, setPresetQuery] = useState('')
   const previews = useMemo(() => createFixturePreviews(store), [store])
   const symbolSearch = useContext(SymbolSearchContext)
   const table = useContext(QuantityTableContext)
@@ -190,10 +196,16 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   }, [dialog, moveFixtureId, csvOpen, breakdownId, preset, sources, editingRoom, roomSetDialog, roomSetConfirmation])
 
   useEffect(() => { let alive = true; void ensureSessionFixtures(session, pool).catch(e => { if (alive) setError(String(e)) }); return () => { alive = false } }, [session, pool, session.pageRevision])
+  useEffect(() => {
+    let alive = true
+    void ensureSessionRelatedReviews(session, pool)
+      .catch(e => { if (alive) setError(`関連候補の判断を読み込めませんでした：${String(e)}`) })
+    return () => { alive = false }
+  }, [session, pool, session.pageRevision])
   const drawingStatus = useSyncExternalStore(session.subscribeDrawingScan, session.getDrawingScanSnapshot)
   useEffect(() => { void session.scanDrawingInfos(pool) }, [session, pool, session.pageRevision])
-  const fixtures = useMemo(() => store.getCountFixtures(), [store, version])
-  const relations = useMemo(() => linkRelations(fixtures), [fixtures])
+  const fixtures = store.getCountFixturesSnapshot()
+  const relations = useMemo(() => perfTime('FixturePanel.linkRelations', () => linkRelations(fixtures)), [fixtures])
   const missingLinkSources = useMemo(() => new Set(fixtures
     .filter(f => f.link && ['rc', 'shape', 'steel', 'crossing'].includes(f.link.kind)
       && (relations.sources.get(f.id)?.length ?? 0) === 0)
@@ -279,7 +291,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   const format = (f: CountFixture, n: number) => quantityDecimals(f) === 0 ? String(n) : n.toFixed(2)
   const unit = (f: CountFixture) => (quantityDecimals(f) === 0 ? '' : ' ') + quantityUnit(f)
   const pageTotal = (id: string) => index.byPage(id).get(pageIndex) ?? 0
-  const groups = useMemo(() => groupFixtures(fixtures), [fixtures])
+  const groups = useMemo(() => perfTime('FixturePanel.groupFixtures', () => groupFixtures(fixtures)), [fixtures])
   const categories = useMemo(() => groups.map(g => ({ ...g, items: g.items.filter(f => `${fixtureCode(f)} ${f.name}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())) })).filter(g => g.items.length), [groups, search])
   const grouping = groupByBreakdown && hasBreakdown && breakdownOrder !== undefined
   const outlineGroups = useMemo<FixtureOutlineGroup[]>(() => grouping
@@ -301,6 +313,10 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       visibleDirectItems: group.directItems.filter(matches),
     })).filter(group => group.visibleItems.length)
   }, [outlineGroups, search])
+  useEffect(() => {
+    ui?.setBusy?.(busy)
+    return () => { ui?.setBusy?.(false) }
+  }, [session, busy])
   const canEdit = store.fixturesReady && !session.editRestriction && !busy
   const canReorder = canEdit && search.length === 0
   const reorderTitle = search.length ? '検索中は並べ替えできません' : 'ドラッグして並べ替え'
@@ -391,7 +407,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       event.preventDefault(); return
     }
     if (kind === 'heading' && !outlineGroups.some(group =>
-      group.groupKey === id && group.level !== undefined && group.level >= 2 && group.showHeading !== false,
+      group.groupKey === id && group.level !== undefined && group.level >= 1 && group.showHeading !== false,
     )) { event.preventDefault(); return }
     dragging.current = { kind, id }
     event.dataTransfer.setData(fixtureDragType(kind), id)
@@ -416,47 +432,44 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     const active = dragging.current!, target = targetAt(event, kind, id)
     const source = fixtures.find(f => f.id === active.id)
     if (grouping) {
-      const destinationHeading = kind === 'heading'
-        ? outlineGroups.find(group => group.groupKey === id && group.showHeading !== false)
-        : undefined
-      const destination = kind === 'fixture'
-        ? fixtures.find(fixture => fixture.id === id)
-        : destinationHeading?.items[0]
 
       if (active.kind === 'heading') {
         const sourceHeading = outlineGroups.find(group =>
           group.groupKey === active.id && group.showHeading !== false,
         )
-        const parentName = sourceHeading?.level === 2 ? '種目' : sourceHeading?.level === 3 ? '科目' : '中科目'
-        const sourcePath = sourceHeading?.groupKey ? JSON.parse(sourceHeading.groupKey) as string[] : undefined
-        const destinationPath = destinationHeading?.groupKey ? JSON.parse(destinationHeading.groupKey) as string[] : undefined
-        const valid = sourcePath !== undefined && destinationPath !== undefined
-          && sourceHeading?.level === destinationHeading?.level
-          && JSON.stringify(sourcePath.slice(0, -1)) === JSON.stringify(destinationPath.slice(0, -1))
-        if (!valid) {
-          setStatus(`同じ${parentName}の中でだけ入れ替えできます`)
+        const outlineTarget = kind === 'heading'
+          ? { kind: 'heading' as const, key: id, side: target.side }
+          : { kind: 'fixture' as const, id, side: target.side === 'before' ? 'before' as const : 'after' as const }
+        const reason = headingOutlineDropError(fixtures, active.id, outlineTarget, breakdownOrder!)
+        if (reason) {
+          setStatus(reason)
         } else {
           const next = moveHeadingInOutline(fixtures, active.id, {
             kind: 'heading', key: id, side: target.side === 'before' ? 'before' : 'after',
           }, breakdownOrder!)
           if (next) {
             store.setCountFixtures(next)
-            setStatus(`${sourceHeading!.category}を移しました（Ctrl+Z で戻せます）`)
+            const moved = next.find(fixture => fixture.id === sourceHeading!.items[0].id)!
+            const position = moved.breakdown!
+            const path = [position.section, position.subject, position.middle, position.item]
+              .slice(0, sourceHeading!.level!)
+              .filter(Boolean).join(' › ')
+            setStatus(`${sourceHeading!.category}を「${path}」へ移しました（Ctrl+Z で戻せます）`)
           }
         }
         endDrag()
         return
       }
 
-      if (source?.breakdown !== undefined || destination?.breakdown !== undefined || kind === 'heading') {
+      if (kind !== 'category') {
         const outlineTarget = kind === 'heading'
           ? { kind: 'heading' as const, key: id, side: 'inside' as const }
           : { kind: 'fixture' as const, id, side: target.side === 'before' ? 'before' as const : 'after' as const }
         const reason = active.kind === 'fixture'
           ? fixtureOutlineDropError(fixtures, active.id, outlineTarget, breakdownOrder!)
           : BREAKDOWN_REORDER_STATUS
-        if (reason || !source?.breakdown) {
-          setStatus(reason ?? BREAKDOWN_REORDER_STATUS)
+        if (reason || !source) {
+          setStatus(reason ?? '移す項目が見つかりません')
           endDrag()
           return
         }
@@ -464,16 +477,22 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
         if (next) {
           store.setCountFixtures(next)
           revealPanelFixture(source.id, next)
-          const position = next.find(fixture => fixture.id === source.id)!.breakdown!
-          setStatus(quantityBreakdownRowKey(source.breakdown) === quantityBreakdownRowKey(position)
+          const position = next.find(fixture => fixture.id === source.id)!.breakdown
+          const samePosition = source.breakdown === undefined || position === undefined
+            ? source.breakdown === position
+            : quantityBreakdownRowKey(source.breakdown) === quantityBreakdownRowKey(position)
+          const path = position
+            ? [position.section, position.subject, position.middle, position.item].filter(Boolean).join(' › ')
+            : '（内訳書の位置なし）'
+          setStatus(samePosition
             ? '並び替えました（Ctrl+Z で戻せます）'
-            : `${source.name}を「${[position.section, position.subject, position.middle, position.item].filter(Boolean).join(' › ')}」へ移しました（Ctrl+Z で戻せます）`)
+            : `${source.name}を「${path}」へ移しました（Ctrl+Z で戻せます）`)
         }
         endDrag()
         return
       }
 
-      if (active.kind !== 'fixture' || !source || (kind === 'fixture' && !destination)) {
+      if (active.kind !== 'fixture' || !source || source.breakdown !== undefined) {
         setStatus(BREAKDOWN_REORDER_STATUS)
         endDrag()
         return
@@ -501,8 +520,11 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   const dropClass = (kind: FixtureDragKind, id: string) => dropTarget?.kind === kind && dropTarget.id === id ? ` fixture-drop-${dropTarget.side}` : ''
   const nextOrder = fixtures.reduce((n, f) => Math.max(n, f.order + 1), 0)
   const saveFixture = (f: CountFixture) => {
-    store.setCountFixtures(dialog?.editing ? fixtures.map(p => p.id === f.id ? f : p) : [...fixtures, f], [], dialog?.editing ? [f.id] : [])
+    const editing = dialog?.editing === true
+    store.setCountFixtures(editing ? fixtures.map(p => p.id === f.id ? f : p) : [...fixtures, f], [], editing ? [f.id] : [])
+    if (!editing) relatedMemory.update({ originIds: [f.id], closed: false })
     store.selectFixture(f.id)
+    if (!editing && !f.link) ui?.select()
     if (f.link) {
       store.setRouteTemplate(null)
       setStatus('連動の項目は図面に拾いません（ほかの項目の拾いから計算します）')
@@ -513,12 +535,14 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     try {
       const next = appendFixtures(fixtures, items, options)
       if (next.length !== fixtures.length) {
+        const existingIds = new Set(fixtures.map(fixture => fixture.id))
+        const addedIds = next.filter(fixture => !existingIds.has(fixture.id))
+          .map(fixture => fixture.id)
         store.setCountFixtures(next)
+        relatedMemory.update({ originIds: addedIds, closed: false })
         if (selectAdded) {
-          const existingIds = new Set(fixtures.map(fixture => fixture.id))
           const added = next.find(fixture => !existingIds.has(fixture.id))!
-          setSelectedCategory(null)
-          store.selectFixture(added.id)
+          selectPanelFixture(added.id)
           setStatus(`${next.length - fixtures.length}件を追加しました`)
         }
       }
@@ -609,7 +633,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
             const proposed = nextQuantityLineStyle(fixtures)
             initial.style = { ...selected.style, color: proposed.color }; initial.line = proposed.line
           }
-          setDialog({ editing: false, duplicate: true, initial }); setError('')
+          setDialog({ editing: false, duplicate: true, initial: structuredClone(initial) }); setError('')
         } catch (reason) { setError(String(reason)) }
       }}>複製</button>
       <button disabled={!canEdit || !selected} onClick={removeSelectedFixture}>削除</button>
@@ -619,11 +643,12 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       <button disabled={!canEdit || !selected || selectedIndex < 0 || selectedIndex === selectedItems.length - 1} title={selectedIndex >= 0 && selectedIndex === selectedItems.length - 1 ? grouping ? selected?.breakdown ? '同じ細目の末尾です' : '分類の末尾です' : '分類の末尾です。分類ごと動かすときは、分類の見出しをドラッグします' : undefined} onClick={() => step(1)}>下へ</button>
       </div>
     </div>
+
     {store.visibleCountTotal(pageIndex) > 1000 && <p role="status">印が多いため略号の表示を省略しています</p>}
     <div className="fixture-actions">
       <div className="fixture-action-row">
-      <button disabled={!canEdit || fixtures.length >= 1000} onClick={() => setDialog({ editing: false, initial: { id: crypto.randomUUID(), name: '', code: '', category: selected?.category ?? groups[0]?.category ?? 'その他', style: nextCountStyle(fixtures), order: nextOrder } })}>項目を追加</button>
-      <button disabled={!canEdit} onClick={() => setPreset(true)}>標準マスタから追加</button>
+      <button disabled={!canEdit || fixtures.length >= 1000} onClick={() => setDialog({ editing: false, initial: structuredClone({ id: crypto.randomUUID(), name: '', code: '', category: selected?.category ?? groups[0]?.category ?? 'その他', style: nextCountStyle(fixtures), order: nextOrder }) })}>項目を追加</button>
+      <button disabled={!canEdit} onClick={() => { setPresetQuery(''); setPreset(true) }}>標準マスタから追加</button>
       <button disabled={!canEdit} onClick={() => {
         setBusy(true); setError('')
         void Promise.all((ui?.documents ?? []).filter(d => d !== session).map(async d => ({ name: d.name, fixtures: d.annotationStore.fixturesReady ? d.annotationStore.getCountFixtures() : await pool.getCountFixtures(d.docId) })))
@@ -814,15 +839,15 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       onScroll={() => setSampleHover(null)}>
       <div className="fixture-list-heading"><span>表示</span><span>印</span><span>見本</span><span>略号</span><span>名称</span><span>この図面</span><span>全図面</span></div>
       {panelGroups.map(({ key, category, level, groupKey, categoryTarget, ancestors, items: allItems, visibleItems: list, visibleDirectItems: directItems, showHeading }) => ancestors.some(ancestor => collapsed.has(ancestor)) ? null : <section key={key}>
-      {showHeading !== false && <div className={`fixture-category${categoryTarget !== undefined && selectedCategory === categoryTarget ? ' selected' : ''}${grouping && groupKey !== undefined && level !== undefined && level >= 2 ? dropClass('heading', groupKey) : categoryTarget !== undefined ? dropClass('category', categoryTarget) : ''}`} data-level={level} data-breakdown-heading={groupKey}
-        onDragOver={grouping && groupKey !== undefined && level !== undefined && level >= 2
+      {showHeading !== false && <div className={`fixture-category${categoryTarget !== undefined && selectedCategory === categoryTarget ? ' selected' : ''}${grouping && groupKey !== undefined ? dropClass('heading', groupKey) : categoryTarget !== undefined ? dropClass('category', categoryTarget) : ''}`} data-level={level} data-breakdown-heading={groupKey}
+        onDragOver={grouping && groupKey !== undefined
           ? event => dragOver(event, 'heading', groupKey)
           : categoryTarget === undefined ? undefined : event => dragOver(event, 'category', categoryTarget)}
-        onDrop={grouping && groupKey !== undefined && level !== undefined && level >= 2
+        onDrop={grouping && groupKey !== undefined
           ? event => drop(event, 'heading', groupKey)
           : categoryTarget === undefined ? undefined : event => drop(event, 'category', categoryTarget)}>
-        <button className={grouping && groupKey !== undefined && level !== undefined && level >= 2 ? 'fixture-outline-heading' : undefined}
-          {...(grouping ? groupKey !== undefined && level !== undefined && level >= 2 ? {
+        <button className={grouping && groupKey !== undefined && level !== undefined && level >= 1 ? 'fixture-outline-heading' : undefined}
+          {...(grouping ? groupKey !== undefined && level !== undefined && level >= 1 ? {
             draggable: canReorder,
             title: reorderTitle,
             onDragStart: (event: DragEvent<HTMLButtonElement>) => startDrag(event, 'heading', groupKey),
@@ -957,7 +982,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
           })
         }}
         onSave={saveFixture} onClose={() => setDialog(null)} />}
-      {preset && <FixturePresetDialog fixtures={fixtures} onAdd={(items, options) => addMany(items, true, options)} onClose={() => setPreset(false)} />}
+      {preset && <FixturePresetDialog initialQuery={presetQuery} fixtures={fixtures} onAdd={(items, options) => addMany(items, true, options)} onClose={() => setPreset(false)} />}
       {sources && <FixturePresetDialog sources={sources} onAdd={items => addMany(items)} onClose={() => setSources(null)} />}
     </Suspense>
   </section>

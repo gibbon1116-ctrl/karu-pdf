@@ -18,14 +18,14 @@
 
 ## これまでの事実（Claude Code が確認したこと）
 
-- SPEC-05f の試作（削除済み。`docs/調査/スナップの再検証.md`）: Worker で `page.toDisplayList(false)` を独自 Device で歩き、`strokePath` からページ座標の線分を取り出した。曲線は平坦度 0.25pt・最大 12 分割。七ヶ浜町 1〜3ページ（5.8万〜11.7万本）で 494〜567ms、A1（15万本）で 926ms。16pt 格子の索引 30〜50ms。端点の探索 p95 は 0.1ms 程度、操作中のフレーム p95 は変わらなかった。当時は「取り出し 500ms 以内」を基準にしていたため不採用。
+- SPEC-05f の試作（削除済み。非公開の調査資料）: Worker で `page.toDisplayList(false)` を独自 Device で歩き、`strokePath` からページ座標の線分を取り出した。曲線は平坦度 0.25pt・最大 12 分割。七ヶ浜町 1〜3ページ（5.8万〜11.7万本）で 494〜567ms、A1（15万本）で 926ms。16pt 格子の索引 30〜50ms。端点の探索 p95 は 0.1ms 程度、操作中のフレーム p95 は変わらなかった。当時は「取り出し 500ms 以内」を基準にしていたため不採用。
 - 今の「同じ記号を探す」（画像の照合、`src/core/symbolSearch.ts`・`src/client/SymbolSearchClient.ts`・`src/worker/symbolSearch.worker.ts`）は、七ヶ浜町1ページ目で描画 2.2〜3.8 秒＋照合 0.6〜2.7 秒。文字や線が重なった記号は見落とす（机 100 個余りのうち 58〜65 個）。
 - Worker の描画は `src/worker/pdf.worker.ts`（ページの表示リストのキャッシュ `displayListCache` がある）。照合用のページ描画の要求 `renderSearchImage`（SPEC-06h-1b）が参考になる。
 - 既存頂点のスナップ: `src/core/snap.ts`（`buildSnapIndex(points, bounds)`・`findSnap`）、`src/editor/MeasurementOverlay.tsx`。
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - 新規 `src/core/vectorPaths.ts` — 線分の配列の型、ページの判定、端点の取り出し（純粋な関数）
   - 新規 `src/core/vectorSymbolSearch.ts` — 線分による記号の照合（純粋な関数）

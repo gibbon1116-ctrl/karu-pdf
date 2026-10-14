@@ -61,13 +61,13 @@ function storedPosition(entries: readonly BreakdownEntry[]): CatalogPosition | u
   }
 }
 
-export default function FixturePresetDialog({ sources, fixtures = [], onAdd, onClose }: { sources?: Array<{ name: string; fixtures: CountFixture[] }>; fixtures?: readonly CountFixture[]; onAdd(items: Array<Preset | CountFixture>, options?: FixtureAppendOptions): void; onClose(): void }) {
+export default function FixturePresetDialog({ sources, fixtures = [], initialQuery, onAdd, onClose }: { sources?: Array<{ name: string; fixtures: CountFixture[] }>; fixtures?: readonly CountFixture[]; initialQuery?: string; onAdd(items: Array<Preset | CountFixture>, options?: FixtureAppendOptions): void; onClose(): void }) {
   const dialog = useRef<HTMLDialogElement>(null), searchInput = useRef<HTMLInputElement>(null)
   const [field, setField] = useState('0'), [unchecked, setUnchecked] = useState(new Set<number>()), [error, setError] = useState('')
   const [tab, setTab] = useState<'spec' | 'breakdown'>('spec'), [master, setMaster] = useState<MasterModule | null>(null), [loadError, setLoadError] = useState(''), [retry, setRetry] = useState(0)
   const [breakdownResult, setBreakdownResult] = useState<{ presets: FixturePreset[]; error?: string }>({ presets: [] })
   const [addedNotice, setAddedNotice] = useState('')
-  const [query, setQuery] = useState(''), [masterField, setMasterField] = useState('電気設備'), [category, setCategory] = useState('電線'), [type, setType] = useState('IV')
+  const [query, setQuery] = useState(initialQuery ?? ''), [masterField, setMasterField] = useState('電気設備'), [category, setCategory] = useState('電線'), [type, setType] = useState('IV')
   const [selected, setSelected] = useState<Record<string, CatalogSelection>>({})
   const [itemPositions, setItemPositions] = useState<Record<string, CatalogPosition | undefined>>({})
   const [positionOrder, setPositionOrder] = useState<string[]>([])
@@ -274,9 +274,18 @@ export default function FixturePresetDialog({ sources, fixtures = [], onAdd, onC
             selection={selected[item.key] ?? emptySelection}
             onChange={selection => selectItem(item.key, selection)}
             existing={existing}
+            fixtures={fixtures}
             position={selected[item.key]?.options.length
               ? itemPositions[item.key]
               : initialItemPosition(master, item, position)}
+            onChangePosition={next => {
+              setItemPositions(previous => ({ ...previous, [item.key]: { ...next } }))
+              setPositionOrder(previous => [
+                ...previous.filter(key => key !== item.key),
+                item.key,
+              ])
+              setError('')
+            }}
             onEditPosition={() => setPositionOrder(previous => [
               ...previous.filter(key => key !== item.key),
               item.key,

@@ -26,7 +26,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\quantity-pickup-expansion-ea43cf`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/app/documentModel.ts`、`src/App.tsx`、`src/editor/recentStore.ts`、`src/editor/fileAccess.ts`、文書名を表示している部品（タブ・上の帯など。`grep` で `session.name`・`.name` の利用を洗い出す）、`tests/`、`e2e/`
 - 変更しないファイル: `docs/`、`public/`、設定ファイル、`src/core/`、`src/worker/`
 

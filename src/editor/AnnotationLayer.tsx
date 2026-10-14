@@ -27,6 +27,7 @@ import { countFixtureId } from '../core/counts'
 import { pickupPoint, polygonCentroid } from '../core/rooms'
 
 import { scaleLabel } from '../core/measure'
+import { perfCount } from '../perf/counters'
 export const ScaleRegionInteractionContext = createContext<{
   drawPage: number | null; dialogPage: number | null; complete(rect: Rect): void
 }>({ drawPage: null, dialogPage: null, complete: () => {} })
@@ -61,6 +62,33 @@ export function MeasurementFeedbackPath({ points, kind, width, zoom, flash = fal
     data-testid={flash ? 'quantity-pickup-flash' : undefined} data-flash-id={flashId}
     points={points} strokeWidth={width + (flash ? 10 : 6) / Math.max(.01, zoom * CSS_PX_PER_PT)}
     fill="none" pointerEvents="none" aria-hidden="true" />
+}
+
+export function QuantityPointMarks({ annotation, zoom, store }: {
+  annotation: Pick<EditableAnnotation, 'id' | 'vertices' | 'quantity'>
+  zoom: number
+  store: Pick<AnnotationStore, 'getCountFixture' | 'highlightedVertex'>
+}) {
+  const points = annotation.quantity?.method === 'polyline' ? annotation.quantity.points : undefined
+  const vertices = annotation.vertices
+  if (!points?.length || !vertices?.length) return null
+  const scale = Math.max(.01, zoom * CSS_PX_PER_PT)
+  return <g pointerEvents="none" aria-hidden="true">{points.map((point, index) => {
+    const fixture = store.getCountFixture(point.itemId)
+    if (!fixture) return null
+    const vertexIndex = Math.min(point.at, vertices.length - 1)
+    const vertex = vertices[vertexIndex]
+    if (!vertex) return null
+    const highlighted = store.highlightedVertex?.annotationId === annotation.id
+      && store.highlightedVertex.vertexIndex === vertexIndex
+    const label = `◆${fixtureDrawingCode(fixture)}${point.count >= 2 ? '×' + point.count : ''}`
+    return <text key={index}
+      className={`annotation-point-mark${highlighted ? ' annotation-point-mark-highlighted' : ''}`}
+      data-point-index={index} data-point-vertex={vertexIndex}
+      x={vertex[0]} y={vertex[1]} dx={7 / scale} dy={14 / scale}
+      fontSize={(highlighted ? 14 : 12) / scale} strokeWidth={2 / scale}
+      pointerEvents="none">{label}</text>
+  })}</g>
 }
 
 export function QuantityRiseMarks({ annotation, zoom, highlightedRise }: {
@@ -261,6 +289,7 @@ function selectionBounds(quads: readonly Quad[]): Rect | null {
 export function AnnotationLayer(props: Props) {
   const sampleInteraction = useContext(FixtureSampleContext)
   const version = useSyncExternalStore(props.store.subscribe, props.store.getSnapshot)
+  perfCount('AnnotationLayer.render')
   const svgRef = useRef<SVGSVGElement>(null)
   const regionInteraction = useContext(ScaleRegionInteractionContext)
   const drawingRegion = regionInteraction.drawPage === props.pageIndex
@@ -300,7 +329,7 @@ export function AnnotationLayer(props: Props) {
       props.docId, props.pageIndex, input.from, input.to, input.mode,
     ),
   ), [props.docId, props.pageIndex, props.pool])
-  const annotations = props.store.getPageAnnotations(props.pageIndex).filter(a => props.store.isShownOnDrawing(a))
+  const annotations = props.store.getPageAnnotationsSnapshot(props.pageIndex).filter(a => props.store.isShownOnDrawing(a))
   const flash = props.store.flashId ? props.store.get(props.store.flashId) : undefined
   const flashPadding = 8 / (props.zoom * 96 / 72)
   const selectedIds = new Set(props.store.selectedIds())
@@ -900,6 +929,8 @@ export function AnnotationLayer(props: Props) {
         ) : annotation.kind === 'strikeout' ? (
           <line key={`${annotation.id}-quad-${index}`} className="annotation-text-mark-line" x1={(quad[0] + quad[4]) / 2} y1={(quad[1] + quad[5]) / 2} x2={(quad[2] + quad[6]) / 2} y2={(quad[3] + quad[7]) / 2} stroke={color(annotation.color)} />
         ) : null)}
+        {visible && annotation.quantity?.method === 'polyline' && !!annotation.quantity.points?.length &&
+          <QuantityPointMarks annotation={annotation} zoom={props.zoom} store={props.store} />}
         {visible && fixture && annotation.count && <CountMarker style={fixture.style} code={fixtureDrawingCode(fixture)} showCode={visibleCount <= 1000} x={(x0 + x1) / 2} y={(y0 + y1) / 2} />}
         {visible && !fixture && annotation.kind === 'symbol' && symbolGlyph && <text
           className="annotation-symbol"
@@ -1266,17 +1297,31 @@ export function AnnotationLayer(props: Props) {
       data-testid={`symbol-search-candidates-${props.pageIndex}`} viewBox={`0 0 ${props.pageSize.width} ${props.pageSize.height}`}>
       {props.store.visibleSymbolCandidates!.filter(c => c.pageIndex === props.pageIndex).map(c => <g key={c.id}
         data-testid="symbol-search-candidate" data-candidate-id={c.id} data-state={c.state} data-confidence={c.confidence} data-shape={c.shape?.decision ?? 'none'} data-other={c.otherFixture ? 'true' : undefined}
-        className={`symbol-search-candidate ${c.state}${c.shape?.decision === 'different' ? ' shape-different' : ''}${c.otherFixture ? ' other-fixture' : ''}`}
+        data-focused={props.store.focusedSymbolCandidateId === c.id ? 'true' : undefined}
+        className={`symbol-search-candidate ${c.state}${c.shape?.decision === 'different' ? ' shape-different' : ''}${c.otherFixture ? ' other-fixture' : ''}${props.store.focusedSymbolCandidateId === c.id ? ' focused' : ''}`}
         role="button" aria-label={`記号の候補${c.otherFixture ? '（他の項目で拾い済み）' : c.state === 'counted' ? '（拾い済み）' : ''}`} aria-pressed={c.state === 'chosen'} aria-disabled={c.state === 'counted' ? true : undefined} tabIndex={c.state === 'counted' ? -1 : 0}
         onPointerDown={e => { e.preventDefault(); e.stopPropagation() }} onPointerUp={e => { e.preventDefault(); e.stopPropagation() }}
-        onDoubleClick={e => { e.preventDefault(); e.stopPropagation() }} onClick={e => { e.preventDefault(); e.stopPropagation(); props.store.toggleSymbolCandidate(c.id) }}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); props.store.toggleSymbolCandidate(c.id) } }}>
+        onDoubleClick={e => { e.preventDefault(); e.stopPropagation() }} onClick={e => {
+          e.preventDefault(); e.stopPropagation()
+          if (c.state === 'counted') return
+          if (props.store.symbolReviewOpen) props.store.setFocusedSymbolCandidate(c.id)
+          props.store.toggleSymbolCandidate(c.id)
+        }}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault(); e.stopPropagation()
+          if (c.state === 'counted') return
+          if (props.store.symbolReviewOpen) props.store.setFocusedSymbolCandidate(c.id)
+          props.store.toggleSymbolCandidate(c.id)
+        } }}>
         <title>{c.extra === undefined ? `似ている度合い ${c.score.toFixed(2)}`
           : `線 ${c.score.toFixed(2)}・余分な線 ${Math.round(c.extra * 100)}%・添字 ${c.label || 'なし'}${c.gc ? '・G' : ''}${c.aroundCheck ? `・周りの線 ${Math.round((c.around ?? 0) * 100)}%` : ''}${c.imageScore === undefined ? '' : `・画像 ${c.imageScore.toFixed(2)}`}`}
           {c.shape?.decision === 'different' ? `・形の細部が違う（${c.shape.differences.map(feature => ({ topArc: '円弧', annexFrame: '外の枠', interiorLines: '中の斜線', interior: '中の塗り' }[feature])).join('・')}）`
             : c.shape?.decision === 'unknown' ? `・形の細部は不明（${c.shape.unknown.map(feature => ({ topArc: '円弧', annexFrame: '外の枠', interiorLines: '中の斜線', interior: '中の塗り' }[feature])).join('・')}）` : ''}
           {c.otherFixture ? `・他の項目（${props.store.symbolOtherFixtureLabel(c.otherFixture)}）で拾い済み` : ''}</title>
         <rect x={c.rect[0]} y={c.rect[1]} width={c.rect[2] - c.rect[0]} height={c.rect[3] - c.rect[1]} vectorEffect="non-scaling-stroke" />
+        {props.store.focusedSymbolCandidateId === c.id && <path className="symbol-search-focus-halo"
+          d={`M ${c.rect[0] - 2} ${c.rect[1] - 2} H ${c.rect[2] + 2} V ${c.rect[3] + 2} H ${c.rect[0] - 2} Z`}
+          vectorEffect="non-scaling-stroke" pointerEvents="none" />}
         {c.state === 'pending' && c.confidence === 'check' && <text className="symbol-search-question" x={c.rect[2]} y={c.rect[1]} textAnchor="end"
           fontSize={Math.min(c.rect[2] - c.rect[0], c.rect[3] - c.rect[1]) * .65}>?</text>}
         {c.state === 'chosen' && <text x={c.center[0]} y={c.center[1]} textAnchor="middle" dominantBaseline="central" fontSize={Math.min(c.rect[2] - c.rect[0], c.rect[3] - c.rect[1]) * .75}>✓</text>}

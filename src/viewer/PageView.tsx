@@ -18,6 +18,7 @@ import {
   type DetailSyncEvent,
 } from './detailRequestSync'
 import { CSS_PX_PER_PT, type PageLayout } from './pageLayout'
+import { perfCount } from '../perf/counters'
 
 interface Props {
   renderVariant?: string
@@ -98,6 +99,7 @@ function drawCanvas(canvas: HTMLCanvasElement | null, source: HTMLCanvasElement)
 
 export function PageView(props: Props) {
   useSyncExternalStore(props.annotationStore.subscribe, props.annotationStore.getSnapshot)
+  perfCount('PageView.render')
   const previewRef = useRef<HTMLCanvasElement>(null)
   const detailRef = useRef<HTMLCanvasElement>(null)
   const qualityRef = useRef(0)

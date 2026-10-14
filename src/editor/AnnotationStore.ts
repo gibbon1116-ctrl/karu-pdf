@@ -1,6 +1,11 @@
 import { QuantityIndex } from '../core/quantityIndex'
+import { isRouteSurfaceFixture, surfacePerimeterM } from '../core/routeSurface'
+import { nextRoutePointAt } from '../core/routePointAdd'
+import { perfCount, perfTime } from '../perf/counters'
 import { stableJson } from '../core/stableJson'
 import { parseQuantityCheckBasics, type QuantityCheckBasics } from '../core/quantityCheckBasics'
+import { parseRelatedReviews, serializeRelatedReviews, type RelatedReviews, type RelatedReviewDecision } from '../core/related/reviews'
+import type { ProjectMode, WorkType } from '../core/related/types'
 import type { CheckBasisKey } from '../core/breakdown/checkSheets'
 import { floorFromDrawingName, normalizeFloor } from '../core/location'
 import { mergeAutomaticDrawingInfo, type DrawingInfo } from '../core/drawingInfo'
@@ -15,12 +20,14 @@ import { History, type HistoryStep } from './history'
 import { IssueNumbers, issueColor, issueOrder, parseIssue, type Issue } from '../core/issues'
 import type { CloudIntensity } from '../core/cloud'
 import { countFixtureId, countMembers, parseCount, validCountComponents, type CountComponent, type CountMark } from '../core/counts'
-import { nextCountStyle, serializeCountFixtures, type CountFixture } from '../core/countFixtures'
+import { fixtureIdentity, nextCountStyle, serializeCountFixtures, type CountFixture } from '../core/countFixtures'
+import { isPerEquipmentComponent, perEquipmentComponentFixture } from '../core/perEquipment'
+import { fixtureLinkError } from '../core/fixtureLink'
 import { DEFAULT_ANNOTATION_FILTER, filterShowsCountMarks, matchesAnnotationFilter, type AnnotationFilter } from './annotationFilter'
 import type { SymbolShapeDecision } from '../core/symbolShapeDecision'
 import { parseRoomRegions, parseRoomSets, parseRoomSetLink, pickupPoint, pointInRoomRegion, roomAt, translateRoomRegion, type RoomRegion, type RoomSet, type RoomSetLink } from '../core/rooms'
 
-import { validRoutePerM, type RouteExtra } from '../core/quantity'
+import { validRoutePerM, validRoutePoints, type RouteExtra, type RoutePoint } from '../core/quantity'
 import { fixtureDimensionUpdateEnabled } from '../core/countFixtures'
 import { FIXTURE_DIMENSION_KEYS, planFixtureDimensions, type FixtureDimensionValues } from '../core/fixtureDimensions'
 import { backfillSummary, calculateBackfillVolume } from '../core/backfill'
@@ -78,11 +85,91 @@ export interface EditableAnnotation {
   madeByKaru: boolean
 }
 
+export type RelatedAdditionKind = 'route' | 'point' | 'component' | 'factor' | 'perimeter'
+
+export interface RelatedAdditionEffect {
+  itemId: string
+  name: string
+  kind: RelatedAdditionKind | 'source' | 'unchanged' | 'guidance'
+  changed?: number
+  skipped?: number
+  futureApplied?: boolean
+  reason?: string
+}
+
+export interface RelatedAdditionResult {
+  error?: string
+  changed: number
+  skipped: number
+  pointRows: number
+  pointSkipped: number
+  componentMarks: number
+  componentSkipped: number
+  linked: number
+  sourcesAdded: number
+  guidance: number
+  effects: RelatedAdditionEffect[]
+}
+
+type RelatedAdditionBatch = Array<{ before: HistoryState; after: HistoryState }>
+
+/** 振り分けだけを行う。印の有無と連動の保存検査は実行時に確認する。 */
+export function relatedAdditionKind(
+  origin: CountFixture,
+  target: CountFixture,
+  routeId?: string,
+): RelatedAdditionKind | undefined {
+  if (origin.link !== undefined || origin.id === target.id) return undefined
+
+  const originMethod = quantityMethod(origin)
+  const targetMethod = quantityMethod(target)
+  const targetKind = quantityKind(target)
+  if (originMethod === 'polyline') {
+    if (target.link !== undefined) return undefined
+    if (targetMethod === 'polyline' || isRouteSurfaceFixture(target)) return 'route'
+    if (routeId && targetMethod === 'click') return 'point'
+    return undefined
+  }
+
+  if (originMethod === 'click') {
+    if (targetMethod === 'click') {
+      return target.link === undefined ? 'component' : undefined
+    }
+    if (targetKind === 'length' || targetKind === 'area' || targetKind === 'volume') {
+      return 'factor'
+    }
+    return undefined
+  }
+
+  if (originMethod === 'polygon' || originMethod === 'lengthHeight') {
+    if (targetKind === 'area') return 'factor'
+    if (originMethod === 'polygon' && targetKind === 'length') return 'perimeter'
+    return undefined
+  }
+
+  if ((originMethod === 'polygonDepth' || originMethod === 'lengthWidthDepth')
+    && targetKind === 'volume') return 'factor'
+  return undefined
+}
+
 type ScaleChange = { pageIndex: number; scale: PageScale | null }
 type DrawingChange = { pageIndex: number; info: DrawingInfo | null }
 type RouteTemplate = { itemId: string; extra: NonNullable<QuantityMark['extra']>; count: number; cond?: RouteConditions; name: string }
 type PickupMemory = Array<{ itemId: string; cond?: RouteConditions; condition?: string; conditionSet?: boolean; members?: RouteTemplate; components?: CountComponent[] }>
-type HistoryState = AnnotationState[] & { routeTemplate?: RouteTemplate | null; pickupMemory?: PickupMemory; drawings?: DrawingChange[]; scales?: ScaleChange[]; scaleRegions?: Array<{ pageIndex: number; regions: ScaleRegion[] }>; roomRegions?: Array<{ pageIndex: number; regions: RoomRegion[] }>; roomSets?: RoomSet[]; quantityChecks?: QuantityCheckBasics; pageRoomSets?: Array<[number, RoomSetLink]>; issueMaximum?: number; fixtures?: CountFixture[] }
+type HistoryState = AnnotationState[] & {
+  routeTemplate?: RouteTemplate | null
+  pickupMemory?: PickupMemory
+  drawings?: DrawingChange[]
+  scales?: ScaleChange[]
+  scaleRegions?: Array<{ pageIndex: number; regions: ScaleRegion[] }>
+  roomRegions?: Array<{ pageIndex: number; regions: RoomRegion[] }>
+  roomSets?: RoomSet[]
+  quantityChecks?: QuantityCheckBasics
+  relatedReviews?: RelatedReviews
+  pageRoomSets?: Array<[number, RoomSetLink]>
+  issueMaximum?: number
+  fixtures?: CountFixture[]
+}
 interface AnnotationState extends Omit<EditableAnnotation, 'dirty'> {}
 interface StoredAnnotation extends AnnotationState {
   deleted: boolean
@@ -146,6 +233,20 @@ function cloneState(annotation: AnnotationState): AnnotationState {
 
 function publicAnnotation(annotation: StoredAnnotation, dirty: boolean): EditableAnnotation {
   return { ...cloneState(annotation), dirty }
+}
+
+function deepFreeze<T>(value: T): T {
+  const seen = new WeakSet<object>()
+  const freeze = (current: unknown): void => {
+    if (current === null || typeof current !== 'object' || seen.has(current)) return
+    // Typed arrays with elements cannot be frozen (legacyChangeData.pdf); they are copies already.
+    if (ArrayBuffer.isView(current) || current instanceof ArrayBuffer) return
+    seen.add(current)
+    for (const child of Object.values(current)) freeze(child)
+    Object.freeze(current)
+  }
+  freeze(value)
+  return value
 }
 
 function persistedState(state: AnnotationState): unknown {
@@ -237,6 +338,7 @@ export interface DirtySummary {
   rooms: number[]
   roomSets: boolean
   quantityChecks?: boolean
+  relatedReviews?: boolean
 }
 
 export class AnnotationStore {
@@ -245,7 +347,7 @@ export class AnnotationStore {
   setHighlightedVertex(value: { annotationId: string; vertexIndex: number } | null): void {
     if (this.vertexHighlight?.annotationId === value?.annotationId && this.vertexHighlight?.vertexIndex === value?.vertexIndex) return
     this.vertexHighlight = value ? { ...value } : null
-    this.notify(false)
+    this.notifyUi()
   }
   private riseHighlight: { annotationId: string; riseIndex: number } | null = null
   get highlightedRise(): Readonly<{ annotationId: string; riseIndex: number }> | null { return this.riseHighlight }
@@ -253,7 +355,7 @@ export class AnnotationStore {
   setHighlightedRise(value: { annotationId: string; riseIndex: number } | null): void {
     if (this.riseHighlight?.annotationId === value?.annotationId && this.riseHighlight?.riseIndex === value?.riseIndex) return
     this.riseHighlight = value ? { ...value } : null
-    this.notify(false)
+    this.notifyUi()
   }
   private flashTarget: string | null = null
   private flashTimer: ReturnType<typeof setTimeout> | null = null
@@ -262,9 +364,9 @@ export class AnnotationStore {
   /** Selection feedback only: never dirty, indexed, added to history or saved. */
   flashPickup(id: string): void {
     if (this.flashTimer !== null) clearTimeout(this.flashTimer)
-    this.flashTarget = id; this.flashVersion++; this.notify(false)
+    this.flashTarget = id; this.flashVersion++; this.notifyUi()
     this.flashTimer = setTimeout(() => {
-      this.flashTimer = null; this.flashTarget = null; this.notify(false)
+      this.flashTimer = null; this.flashTarget = null; this.notifyUi()
     }, 1500)
   }
   private filter: Readonly<AnnotationFilter> = DEFAULT_ANNOTATION_FILTER
@@ -273,6 +375,8 @@ export class AnnotationStore {
   get annotationFilter(): Readonly<AnnotationFilter> { return this.filter }
   get drawingFollowsFilter(): boolean { return this.followsFilter }
   private fixtures: CountFixture[] = []
+  private fixturesRevision = 0
+  private fixturesSnapshotCache: { revision: number; value: readonly CountFixture[] } | null = null
   private fixtureBaseline = '[]'
   private fixtureLoading: Promise<void> | null = null
   fixturesReady = false
@@ -280,6 +384,22 @@ export class AnnotationStore {
   selectedFixtureId: string | null = null
   // Allocated only by explicit visual search; excluded from persisted/history states.
   symbolCandidates: SymbolSearchCandidate[] | null = null
+  private symbolCandidateFocus: string | null = null
+  get focusedSymbolCandidateId(): string | null { return this.symbolCandidateFocus }
+  /** Display-only state: never saved, added to history or included in quantity. */
+  setFocusedSymbolCandidate(id: string | null): void {
+    if (this.symbolCandidateFocus === id) return
+    this.symbolCandidateFocus = id
+    this.notifyUi()
+  }
+  /** 「選んだ候補の確認」の窓が開いているか（表示だけ）。開いている間だけ、図面のクリックで候補を強調する。 */
+  symbolReviewOpen = false
+  setSymbolReviewOpen(open: boolean): void {
+    if (this.symbolReviewOpen === open) return
+    this.symbolReviewOpen = open
+    if (!open) this.symbolCandidateFocus = null
+    this.notifyUi()
+  }
   symbolSearchArea: { pageIndex: number; rect: Rect } | null = null
   symbolLabelFilter: string[] | null = null
   symbolGcFilter: 'all' | 'with' | 'without' = 'all'
@@ -291,7 +411,7 @@ export class AnnotationStore {
     if (current && area && current.pageIndex === area.pageIndex
       && current.rect.every((value, index) => value === area.rect[index])) return
     this.symbolSearchArea = area ? { pageIndex: area.pageIndex, rect: [...area.rect] } : null
-    this.notify(false)
+    this.notifyUi()
   }
   isSymbolCandidateVisible(c: SymbolSearchCandidate): boolean {
     return (this.symbolLabelFilter === null || this.symbolLabelFilter.includes(c.label))
@@ -301,17 +421,17 @@ export class AnnotationStore {
   }
   get visibleSymbolCandidates(): SymbolSearchCandidate[] | null { return this.symbolCandidates?.filter(c => this.isSymbolCandidateVisible(c)) ?? null }
   setSymbolCandidateFilters(labels: string[] | null, gc: 'all' | 'with' | 'without' = this.symbolGcFilter): void {
-    this.symbolLabelFilter = labels === null ? null : [...labels]; this.symbolGcFilter = gc; this.notify(false)
+    this.symbolLabelFilter = labels === null ? null : [...labels]; this.symbolGcFilter = gc; this.notifyUi()
   }
   setSymbolShapeFilter(value: 'same' | 'all'): void {
-    this.symbolShapeFilter = value; this.notify(false)
+    this.symbolShapeFilter = value; this.notifyUi()
   }
   setSymbolOtherFilter(value: 'hide' | 'show'): void {
     this.symbolOtherFilter = value
     if (value === 'hide') {
       for (const c of this.symbolCandidates ?? []) if (c.otherFixture && c.state === 'chosen') c.state = 'pending'
     }
-    this.notify(false)
+    this.notifyUi()
   }
   symbolOtherFixtureLabel(fixtureId: string): string {
     const fixture = this.getCountFixture(fixtureId)
@@ -321,41 +441,47 @@ export class AnnotationStore {
   private symbolCandidateRadius = 0
 
   clearSymbolCandidates(): void {
-    if (this.symbolCandidates === null && this.symbolSearchArea === null && this.symbolShapeFilter === 'same' && this.symbolOtherFilter === 'hide') return
+    if (this.symbolCandidates === null && this.symbolSearchArea === null && this.symbolShapeFilter === 'same' && this.symbolOtherFilter === 'hide'
+      && this.symbolCandidateFocus === null) return
     this.symbolCandidates = null; this.symbolSearchArea = null; this.symbolCandidateFixture = null; this.symbolCandidateRadius = 0
+    this.symbolCandidateFocus = null
     this.symbolLabelFilter = null; this.symbolGcFilter = 'all'; this.symbolShapeFilter = 'same'; this.symbolOtherFilter = 'hide'
-    this.notify(false)
+    this.notifyUi()
   }
   beginSymbolCandidates(fixtureId: string, sampleRect: Rect): void {
+    this.symbolCandidateFocus = null
     this.symbolCandidateFixture = fixtureId
     this.symbolCandidateRadius = Math.min(sampleRect[2] - sampleRect[0], sampleRect[3] - sampleRect[1]) / 2
     this.symbolLabelFilter = null; this.symbolGcFilter = 'all'; this.symbolShapeFilter = 'same'; this.symbolOtherFilter = 'hide'
-    this.symbolCandidates = []; this.notify(false)
+    this.symbolCandidates = []; this.notifyUi()
   }
   appendSymbolCandidates(candidates: Array<{ pageIndex: number; rect: Rect; center: Point; score: number; confidence?: 'high' | 'check'; imageScore?: number; extra?: number; label?: string; gc?: boolean; around?: number; aroundCheck?: boolean; shape?: SymbolShapeDecision }>): void {
     if (!this.symbolCandidates || this.symbolCandidateFixture !== this.selectedFixtureId) return
     for (const c of candidates) this.symbolCandidates.push({ ...c, label: c.label ?? '', gc: c.gc ?? false, rect: [...c.rect], center: [...c.center],
       shape: c.shape ? { decision: c.shape.decision, differences: [...c.shape.differences], unknown: [...c.shape.unknown] } : undefined,
       id: crypto.randomUUID(), state: 'pending' })
-    this.refreshSymbolCandidates(); this.notify(false)
+    this.refreshSymbolCandidates(); this.notifyUi()
   }
   toggleSymbolCandidate(id: string): void {
     const c = this.symbolCandidates?.find(c => c.id === id)
     if (!c || c.state === 'counted' || !this.isSymbolCandidateVisible(c)) return
-    c.state = c.state === 'chosen' ? 'pending' : 'chosen'; this.notify(false)
+    c.state = c.state === 'chosen' ? 'pending' : 'chosen'; this.notifyUi()
   }
   chooseSymbolCandidates(chosen: boolean): void {
     if (!this.symbolCandidates) return
     for (const c of this.visibleSymbolCandidates ?? []) if (c.state !== 'counted') c.state = chosen ? 'chosen' : 'pending'
-    this.notify(false)
+    this.notifyUi()
   }
   chooseHighConfidenceCandidates(): void {
     if (!this.symbolCandidates) return
     for (const c of this.visibleSymbolCandidates ?? []) if (c.state === 'pending' && c.confidence === 'high') c.state = 'chosen'
-    this.notify(false)
+    this.notifyUi()
   }
   private refreshSymbolCandidates(): void {
     if (!this.symbolCandidates?.length) return
+    perfTime('store.refreshSymbolCandidates', () => this.refreshSymbolCandidatesBody(this.symbolCandidates!))
+  }
+  private refreshSymbolCandidatesBody(candidates: SymbolSearchCandidate[]): void {
     const marks = new Map<number, Point[]>()
     const otherMarks = new Map<number, Array<{ center: Point; fixtureId: string }>>()
     for (const a of this.annotations.values()) {
@@ -369,7 +495,7 @@ export class AnnotationStore {
         const points = otherMarks.get(a.pageIndex) ?? []; points.push({ center, fixtureId }); otherMarks.set(a.pageIndex, points)
       }
     }
-    for (const c of this.symbolCandidates) {
+    for (const c of candidates) {
       delete c.otherFixture
       const counted = marks.get(c.pageIndex)?.some(p => Math.hypot(p[0] - c.center[0], p[1] - c.center[1]) <= this.symbolCandidateRadius)
       if (counted) { c.state = 'counted'; continue }
@@ -403,7 +529,7 @@ export class AnnotationStore {
     return after.map(a => a.id)
   }
   routeTemplate: RouteTemplate | null = null
-  setRouteTemplate(t: AnnotationStore['routeTemplate']): void { this.routeTemplate = t ? structuredClone(t) : null; this.notify(false) }
+  setRouteTemplate(t: AnnotationStore['routeTemplate']): void { this.routeTemplate = t ? structuredClone(t) : null; this.notifyUi() }
   routeTemplateItems(itemId: string): Partial<Pick<QuantityMark, 'count' | 'cond' | 'extra'>> {
     const active = this.routeTemplate?.itemId === itemId
     const t = active ? this.routeTemplate : this.lastRouteMembers.get(itemId)
@@ -414,7 +540,8 @@ export class AnnotationStore {
       const item = this.getCountFixture(e.itemId)
       if (!item || item.link !== undefined) return []
       const method = quantityMethod(item)
-      if (method !== 'polyline' && method !== 'lengthWidthDepth') return []
+      // R6b: 面積の線要素（保温 等）もこれからの経路に引き継ぐ。
+      if (method !== 'polyline' && method !== 'lengthWidthDepth' && !isRouteSurfaceFixture(item)) return []
       const cond = structuredClone(active
         ? e.cond ?? item.routeDefaults ?? {}
         : this.lastRouteConditions.get(e.itemId) ?? e.cond ?? item.routeDefaults ?? {})
@@ -452,7 +579,7 @@ export class AnnotationStore {
     const fixture = this.getCountFixture(itemId)
     if (!fixture || !this.supportsPickupMethod(fixture, method) || this.pickupMethods.get(itemId) === method) return
     this.pickupMethods.set(itemId, method)
-    this.notify(false)
+    this.notifyUi()
   }
 
   private areaHoleId: string | null = null
@@ -470,13 +597,13 @@ export class AnnotationStore {
     this.roomEditState = null
     this.roomEditCompletion = null
     this.areaHoleId = id
-    this.notify(false)
+    this.notifyUi()
     return true
   }
   endAreaHoles(): void {
     if (this.areaHoleId === null) return
     this.areaHoleId = null
-    this.notify(false)
+    this.notifyUi()
   }
 
   private roomEditState: { pageIndex: number; id: string; points: Point[] } | null = null
@@ -501,7 +628,7 @@ export class AnnotationStore {
     this.areaHoleId = null
     this.roomEditCompletion = null
     this.roomEditState = { pageIndex, id, points: region.points.map(point => [...point] as Point) }
-    this.notify(false)
+    this.notifyUi()
     return true
   }
   endRoomEdit(confirm = true): void {
@@ -516,7 +643,7 @@ export class AnnotationStore {
         || point[1] !== initial.points[index][1]))) {
       this.roomEditCompletion = { pageIndex: active.pageIndex, region: structuredClone(region) }
     }
-    this.notify(false)
+    this.notifyUi()
   }
   takeRoomEditCompletion(pageIndex: number): { pageIndex: number; region: RoomRegion } | null {
     if (this.roomEditCompletion?.pageIndex !== pageIndex) return null
@@ -535,13 +662,13 @@ export class AnnotationStore {
     this.roomEditState = null
     this.roomEditCompletion = null
     this.roomCaptureIndex = pageIndex
-    this.notify(false)
+    this.notifyUi()
     return true
   }
   endRoomCapture(): void {
     if (this.roomCaptureIndex === null) return
     this.roomCaptureIndex = null
-    this.notify(false)
+    this.notifyUi()
   }
   private roomSetAlignState: {
     pageIndex: number; setId: string; dx: number; dy: number
@@ -573,7 +700,7 @@ export class AnnotationStore {
     this.roomSetAlignState = {
       pageIndex, setId: link.id, dx: link.dx ?? 0, dy: link.dy ?? 0,
     }
-    this.notify(false)
+    this.notifyUi()
     return true
   }
 
@@ -590,7 +717,7 @@ export class AnnotationStore {
         pageIndex, setId: link.id, dx: link.dx ?? 0, dy: link.dy ?? 0,
       }
     }
-    this.notify(false)
+    this.notifyUi()
   }
 
   takeRoomSetAlignCompletion(pageIndex: number): {
@@ -606,12 +733,12 @@ export class AnnotationStore {
   setShowRoomRegions(value: boolean): void {
     if (this.showRoomRegions === value) return
     this.showRoomRegions = value
-    this.notify(false)
+    this.notifyUi()
   }
 
   private recentFixtures: readonly string[] = []
   get recentFixtureIds(): readonly string[] { return this.recentFixtures }
-  rememberRouteFixture(id: string): void { this.rememberFixture(id); this.notify(false) }
+  rememberRouteFixture(id: string): void { this.rememberFixture(id); this.notifyUi() }
   private rememberFixture(id: string): void {
     this.recentFixtures = [id, ...this.recentFixtures.filter(previous => previous !== id)].slice(0, 8)
   }
@@ -650,6 +777,14 @@ export class AnnotationStore {
   private quantityCheckLoading: Promise<void> | null = null
   private pendingQuantityChecks: { basics: QuantityCheckBasics; editIndex: number } | null = null
   quantityChecksReady = false
+  private relatedReviews: RelatedReviews = { version: 1, works: {}, decisions: {} }
+  private relatedReviewsRevision = 0
+  private relatedReviewsSnapshotCache: { revision: number; value: Readonly<RelatedReviews> } | null = null
+  private relatedReviewBaseline: RelatedReviews = { version: 1, works: {}, decisions: {} }
+  private relatedReviewLoading: Promise<void> | null = null
+  private pendingRelatedReviews: { reviews: RelatedReviews; editIndex: number } | null = null
+  relatedReviewsReady = false
+  get relatedReviewsLoading(): boolean { return this.relatedReviewLoading !== null }
   readonly pageRoomSets = new Map<number, RoomSetLink>()
   private readonly pageRoomSetBaselines = new Map<number, RoomSetLink>()
   private pendingPageRoomSets: Array<{ pageIndex: number; setId: RoomSetLink | null; editIndex: number }> = []
@@ -665,7 +800,22 @@ export class AnnotationStore {
   currentFloor = ''
   currentRoom = ''
   private version = 0
-  private dirtyCache: { version: number; summary: DirtySummary } | null = null
+  private contentRevision = 0
+  private pageAnnotationsCache: {
+    contentRevision: number
+    ids: Map<number, string[]>
+    pages: Map<number, readonly EditableAnnotation[]>
+  } | null = null
+  private countOverlayCache: {
+    contentRevision: number
+    fixturesReady: boolean
+    pages: Map<number, readonly number[]>
+  } | null = null
+  private issueOverlayCache: {
+    contentRevision: number
+    pages: Map<number, readonly number[]>
+  } | null = null
+  private dirtyCache: { contentRevision: number; summary: DirtySummary } | null = null
   private generation = 0
   private lastNudge: { key: string; step: HistoryStep<HistoryState>; at: number } | null = null
 
@@ -675,6 +825,7 @@ export class AnnotationStore {
   }
 
   getSnapshot = (): number => this.version
+  getContentRevision(): number { return this.contentRevision }
   subscribeDrawingFilterRelease = (listener: (reason: DrawingFilterReleaseReason) => void): (() => void) => {
     this.drawingFilterReleaseListeners.add(listener)
     return () => this.drawingFilterReleaseListeners.delete(listener)
@@ -683,12 +834,12 @@ export class AnnotationStore {
   setAnnotationFilter(filter: AnnotationFilter): void {
     if (this.filter.kind === filter.kind && this.filter.discipline === filter.discipline && this.filter.status === filter.status) return
     this.filter = Object.freeze({ ...filter })
-    this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false)
+    this.pruneHiddenSelection(); this.visibilityVersion++; this.notifyUi()
   }
   setDrawingFollowsFilter(value: boolean): void {
     if (this.followsFilter === value) return
     this.followsFilter = value
-    this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false)
+    this.pruneHiddenSelection(); this.visibilityVersion++; this.notifyUi()
   }
   releaseDrawingFilter(reason: DrawingFilterReleaseReason): void {
     if (!this.followsFilter) return
@@ -712,7 +863,7 @@ export class AnnotationStore {
   }
   prepareCountTool(): void {
     if (this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を数えるため')
-    if (this.selectedFixtureId && this.revealCountFixture(this.selectedFixtureId)) this.notify(false)
+    if (this.selectedFixtureId && this.revealCountFixture(this.selectedFixtureId)) this.notifyUi()
   }
   private revealCountFixture(id: string): boolean {
     const changed = this.hiddenFixtures.delete(id)
@@ -729,7 +880,10 @@ export class AnnotationStore {
     if (!preserveFixtureVisibility) { this.routeTemplate = null; this.lastRouteConditions.clear(); this.lastCondition.clear(); this.lastRouteMembers.clear(); this.lastCountComponents.clear() }
     if (!preserveFixtureVisibility) this.recentFixtures = []
     this.index = null; this.visibleCountCache = null
-    this.fixtures = []; this.fixtureBaseline = '[]'; this.fixtureLoading = null; this.fixturesReady = false
+    this.pageAnnotationsCache = null
+    this.countOverlayCache = null
+    this.issueOverlayCache = null
+    this.replaceFixtures([]); this.fixtureBaseline = '[]'; this.fixtureLoading = null; this.fixturesReady = false
     if (!preserveFixtureVisibility) { this.currentFloor = ''; this.currentRoom = ''; this.selectedFixtureId = null; this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.showQuantityValues = true }
     if (!preserveFixtureVisibility) { this.filter = DEFAULT_ANNOTATION_FILTER; this.followsFilter = false }
     this.legacyCountObjects.clear(); this.pendingFixtureSave = null
@@ -740,6 +894,9 @@ export class AnnotationStore {
     this.roomSets = []; this.roomSetBaseline = []; this.pendingRoomSets = null
     this.quantityChecks = { values: {} }; this.quantityCheckBaseline = { values: {} }
     this.quantityCheckLoading = null; this.pendingQuantityChecks = null; this.quantityChecksReady = false
+    this.replaceRelatedReviews({ version: 1, works: {}, decisions: {} })
+    this.relatedReviewBaseline = { version: 1, works: {}, decisions: {} }
+    this.relatedReviewLoading = null; this.pendingRelatedReviews = null; this.relatedReviewsReady = false
     this.pageRoomSets.clear(); this.pageRoomSetBaselines.clear(); this.pendingPageRoomSets = []
     this.roomSetAlignState = null
     this.roomSetAlignCompletion = null
@@ -965,6 +1122,89 @@ export class AnnotationStore {
 
   getQuantityChecks(): QuantityCheckBasics {
     return structuredClone(this.quantityChecks)
+  }
+
+  async ensureRelatedReviews(loader: () => Promise<RelatedReviews>): Promise<void> {
+    if (this.relatedReviewsReady) return
+    if (this.relatedReviewLoading) return this.relatedReviewLoading
+    const generation = this.generation
+    const request = Promise.resolve().then(loader).then(raw => {
+      if (generation !== this.generation) return
+      this.replaceRelatedReviews(parseRelatedReviews(raw))
+      this.relatedReviewBaseline = structuredClone(this.relatedReviews)
+      this.relatedReviewsReady = true
+      this.notify(false)
+    }).finally(() => {
+      if (generation === this.generation) this.relatedReviewLoading = null
+    })
+    this.relatedReviewLoading = request
+    return request
+  }
+
+  private replaceRelatedReviews(next: RelatedReviews): void {
+    this.relatedReviews = next
+    this.relatedReviewsRevision += 1
+    this.relatedReviewsSnapshotCache = null
+  }
+
+  /** 判断データの版。読込・変更・履歴の復元・reset で単調増加する。 */
+  getRelatedReviewsRevision(): number { return this.relatedReviewsRevision }
+
+  /** 同じ版では同じオブジェクト。内部から切り離し、入れ子まで freeze する。 */
+  getRelatedReviewsSnapshot(): Readonly<RelatedReviews> {
+    if (this.relatedReviewsSnapshotCache?.revision !== this.relatedReviewsRevision) {
+      const value = deepFreeze({
+        ...this.relatedReviews,
+        works: { ...this.relatedReviews.works },
+        // 未使用の文書では判断の深い複製を行わない。
+        decisions: Object.keys(this.relatedReviews.decisions).length
+          ? structuredClone(this.relatedReviews.decisions) : {},
+      })
+      this.relatedReviewsSnapshotCache = {
+        revision: this.relatedReviewsRevision, value,
+      }
+    }
+    return this.relatedReviewsSnapshotCache.value
+  }
+
+  getRelatedReviews(): RelatedReviews {
+    return structuredClone(this.relatedReviews)
+  }
+
+  private changeRelatedReviews(proposed: RelatedReviews): void {
+    if (!this.relatedReviewsReady) return
+    const next = parseRelatedReviews(serializeRelatedReviews(proposed))
+    if (stableJson(next) === stableJson(this.relatedReviews)) return
+    const before: HistoryState = [], after: HistoryState = []
+    before.relatedReviews = this.getRelatedReviews()
+    after.relatedReviews = structuredClone(next)
+    this.replaceRelatedReviews(next)
+    this.history.push({ before, after })
+    this.notify(false)
+  }
+
+  setRelatedProjectMode(mode: ProjectMode | undefined): void {
+    if (!this.relatedReviewsReady) return
+    const next = this.getRelatedReviews()
+    if (mode === undefined) delete next.projectMode
+    else next.projectMode = mode
+    this.changeRelatedReviews(next)
+  }
+
+  setRelatedWork(fixtureId: string, work: WorkType | undefined): void {
+    if (!this.relatedReviewsReady) return
+    const next = this.getRelatedReviews()
+    if (work === undefined) delete next.works[fixtureId]
+    else next.works = { ...next.works, [fixtureId]: work }
+    this.changeRelatedReviews(next)
+  }
+
+  setRelatedDecision(key: string, decision: RelatedReviewDecision | undefined): void {
+    if (!this.relatedReviewsReady) return
+    const next = this.getRelatedReviews()
+    if (decision === undefined) delete next.decisions[key]
+    else next.decisions = { ...next.decisions, [key]: structuredClone(decision) }
+    this.changeRelatedReviews(next)
   }
 
   setQuantityCheckBasic(key: CheckBasisKey, value: number | undefined): void {
@@ -1270,7 +1510,27 @@ export class AnnotationStore {
 
   getScale(pageIndex: number): PageScale | null { const s = this.scales.get(pageIndex); return s ? { ...s } : null }
 
-  getCountFixtures(): CountFixture[] { return structuredClone(this.fixtures) }
+  private replaceFixtures(next: CountFixture[]): void {
+    this.fixtures = next
+    this.contentRevision += 1
+    this.fixturesRevision += 1
+  }
+
+  /** 項目定義の版。項目の配列を置き換えるたびに増える（単調増加）。 */
+  getFixturesRevision(): number { return this.fixturesRevision }
+
+  /** 画面用の項目一覧。版が同じあいだは同じ配列を返す。配列・要素・入れ子をすべて Object.freeze 済み。内部の配列とは別物。 */
+  getCountFixturesSnapshot(): readonly CountFixture[] {
+    if (this.fixturesSnapshotCache?.revision !== this.fixturesRevision) {
+      const value = perfTime('store.fixturesSnapshot.build', () => {
+        return deepFreeze(structuredClone(this.fixtures))
+      })
+      this.fixturesSnapshotCache = { revision: this.fixturesRevision, value }
+    }
+    return this.fixturesSnapshotCache.value
+  }
+
+  getCountFixtures(): CountFixture[] { return perfTime('store.getCountFixtures', () => structuredClone(this.fixtures)) }
   /** 数量の索引と同じ注釈（削除済みを含む。索引・形の計量の側で除く）。項目の編集の見本の計算に使う（SPEC-B07-2b）。 */
   quantityAnnotations(): Iterable<AnnotationState> { return this.annotations.values() }
   hasCountMarks(): boolean { for (const a of this.annotations.values()) if (!a.deleted && (a.count || a.quantity)) return true; return false }
@@ -1301,7 +1561,7 @@ export class AnnotationStore {
         legacyIds.push(a.id)
       }
       serializeCountFixtures(nextFixtures)
-      this.fixtures = nextFixtures
+      this.replaceFixtures(nextFixtures)
       this.legacyCountObjects.clear(); for (const id of legacyIds) this.legacyCountObjects.add(id)
       this.fixtureBaseline = stableJson(this.fixtures)
       this.fixturesReady = true
@@ -1309,21 +1569,21 @@ export class AnnotationStore {
     })().finally(() => { if (generation === this.generation) this.fixtureLoading = null })
     return this.fixtureLoading
   }
-  selectFixture(id: string | null): void { if (id !== this.selectedFixtureId) this.clearSymbolCandidates(); if (id !== this.routeTemplate?.itemId) this.routeTemplate = null; this.selectedFixtureId = id; if (id !== null) this.rememberFixture(id); this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false) }
+  selectFixture(id: string | null): void { if (id !== this.selectedFixtureId) this.clearSymbolCandidates(); if (id !== this.routeTemplate?.itemId) this.routeTemplate = null; this.selectedFixtureId = id; if (id !== null) this.rememberFixture(id); this.pruneHiddenSelection(); this.visibilityVersion++; this.notifyUi() }
   isFixtureVisible(id: string): boolean { return !this.hiddenFixtures.has(id) && (!this.onlySelectedFixture || id === this.selectedFixtureId) }
   isCountVisible(mark: CountMark | null | undefined, quantity?: QuantityMark | null): boolean { return quantity ? [quantity.itemId, ...(quantity.extra ?? []).map(e => e.itemId)].some(id => this.isFixtureVisible(id)) : !mark || this.isFixtureVisible(countFixtureId(mark)) || mark.version === 2 && !!mark.extra?.some(e => this.isFixtureVisible(e.itemId)) }
   setFixtureVisible(ids: readonly string[], visible: boolean): void {
     if (visible && this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため')
     for (const id of ids) { if (visible) this.hiddenFixtures.delete(id); else this.hiddenFixtures.add(id) }
-    this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false)
+    this.pruneHiddenSelection(); this.visibilityVersion++; this.notifyUi()
   }
-  setShowQuantityValues(value: boolean): void { this.showQuantityValues = value; this.notify(false) }
-  setOnlySelectedFixture(value: boolean): void { if (value && this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため'); this.onlySelectedFixture = value; this.pruneHiddenSelection(); this.visibilityVersion++; this.notify(false) }
-  showAllFixtures(): void { if (this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため'); this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.visibilityVersion++; this.notify(false) }
+  setShowQuantityValues(value: boolean): void { this.showQuantityValues = value; this.notifyUi() }
+  setOnlySelectedFixture(value: boolean): void { if (value && this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため'); this.onlySelectedFixture = value; this.pruneHiddenSelection(); this.visibilityVersion++; this.notifyUi() }
+  showAllFixtures(): void { if (this.drawingHidesCounts()) this.releaseDrawingFilter('数量拾いの印を表示するため'); this.hiddenFixtures.clear(); this.onlySelectedFixture = false; this.visibilityVersion++; this.notifyUi() }
   private pruneHiddenSelection(): void { for (const id of this.selection) { const a = this.annotations.get(id); if (!a || a.deleted || !this.isShownOnDrawing(a)) this.selection.delete(id) } }
   quantityIndex(): QuantityIndex {
     if (!this.index || this.indexVersion !== this.quantityVersion) {
-      this.index = QuantityIndex.build(this.annotations.values(), this.fixtures)
+      this.index = perfTime('QuantityIndex.build', () => QuantityIndex.build(this.annotations.values(), this.fixtures))
       this.indexVersion = this.quantityVersion
     }
     return this.index
@@ -1335,7 +1595,7 @@ export class AnnotationStore {
   setCurrentLocation(key: 'floor' | 'room', value: string): void {
     if (value.length > 40) return
     if (key === 'floor') this.currentFloor = normalizeFloor(value); else this.currentRoom = value.trim()
-    this.notify(false)
+    this.notifyUi()
   }
   pickupLocation(pageIndex: number, point?: Point): { floor?: string; room?: string } {
     const regions = point ? this.effectiveRoomRegions(pageIndex) : undefined
@@ -1384,7 +1644,7 @@ export class AnnotationStore {
     for (const [id, t] of this.lastRouteMembers) {
       if (t.extra.some(e => e.itemId === itemId)) this.lastRouteMembers.set(id, { ...t, extra: t.extra.map(e => e.itemId === itemId ? { ...e, cond: undefined } : e) })
     }
-    this.notify(false)
+    this.notifyUi()
   }
   splitRoute(id: string, vertexIndex: number): string | undefined {
     const a = this.annotations.get(id), q = a?.quantity, points = a?.vertices
@@ -1399,8 +1659,14 @@ export class AnnotationStore {
         return normalizeRouteConditions({ ...c, ...(Array.isArray(rise) ? { rise: indices.map(i => rise[i]) } : {}) })
       }
       const selectedRises = indices.map(i => ({ ...rises[i], ...(moved && rises[i].at !== undefined ? { at: rises[i].at! - vertexIndex } : {}) }))
-      return { ...cloneQuantity(q), ...(moved ? { id: crypto.randomUUID(), slackM: 0 } : {}), rises: selectedRises,
+      const routePoints = (q.points ?? [])
+        .filter(point => moved ? point.at >= vertexIndex : point.at < vertexIndex)
+        .map(point => ({ ...point, at: point.at - (moved ? vertexIndex : 0) }))
+      const mark: QuantityMark = { ...cloneQuantity(q), ...(moved ? { id: crypto.randomUUID(), slackM: 0 } : {}), rises: selectedRises,
         addM: riseTotal(selectedRises), cond: condition(q.cond), extra: q.extra?.map(e => ({ ...e, cond: condition(e.cond) })) }
+      if (routePoints.length) mark.points = routePoints
+      else delete mark.points
+      return mark
     }
     const newId = crypto.randomUUID()
     const next: StoredAnnotation = { ...cloneState(a), id: newId, objNum: null, madeByKaru: true, deleted: false, revision: 0,
@@ -1426,6 +1692,14 @@ export class AnnotationStore {
     return annotations.flatMap(a => a.quantity ? routeMembers(a.quantity).map(e => e.itemId) : a.count ? countMembers(a.count).map(e => e.itemId) : [])
   }
   private restorePickupMemory(memory: PickupMemory): void {
+    const templateMemory = memory.find(entry =>
+      Object.hasOwn(entry, 'routeTemplateSnapshot')) as
+      (PickupMemory[number] & {
+        routeTemplateSnapshot: AnnotationStore['routeTemplate']
+      }) | undefined
+    if (templateMemory) {
+      this.routeTemplate = structuredClone(templateMemory.routeTemplateSnapshot)
+    }
     for (const m of memory) {
       if (m.cond === undefined) this.lastRouteConditions.delete(m.itemId); else this.lastRouteConditions.set(m.itemId, structuredClone(m.cond))
       if (!m.conditionSet) this.lastCondition.delete(m.itemId); else this.lastCondition.set(m.itemId, m.condition)
@@ -1502,7 +1776,7 @@ export class AnnotationStore {
     if (newFixtures.length) {
       before.fixtures = this.getCountFixtures()
       after.fixtures = structuredClone(fixtures)
-      this.fixtures = structuredClone(fixtures)
+      this.replaceFixtures(structuredClone(fixtures))
     }
     for (const { annotation, count } of changes) {
       before.push(cloneState(annotation))
@@ -1513,6 +1787,299 @@ export class AnnotationStore {
     this.history.push({ before, after }); this.pruneHiddenSelection(); this.notify()
     return undefined
   }
+  /**
+   * 同じ親項目の印と、これからの印の記憶にある基項目を分け直す。
+   * 印ごとの個数・施工条件・他の構成要素は変えない。
+   */
+  splitPerEquipmentComponent(fixtureId: string, itemId: string): string | undefined {
+    const existing = this.getCountFixtures()
+    const main = existing.find(fixture => fixture.id === fixtureId)
+    const base = existing.find(fixture => fixture.id === itemId)
+    if (!main || quantityMethod(main) !== 'click'
+      || (main.kind ?? 'count') !== 'count') {
+      return '親には個数の項目を指定してください。'
+    }
+    if (!base || !isPerEquipmentComponent(base)) {
+      return '機器ごとに分ける基の項目が見つかりません。'
+    }
+    if (main.id === base.id) return '同じ項目を構成要素にはできません。'
+    if (main.link !== undefined || base.link !== undefined) {
+      return '連動の項目は図面に拾いません。'
+    }
+
+    const targets = this.countMarkIdsOf(fixtureId).flatMap(id => {
+      const annotation = this.annotations.get(id)
+      return annotation && !annotation.deleted && !annotation.legacyChange
+        && annotation.count && !annotation.quantity ? [annotation] : []
+    })
+    if (targets.some(annotation => this.hasLinkedPickup(annotation))) {
+      return '連動の項目は図面に拾いません。'
+    }
+
+    const remembered = this.lastCountComponents.get(fixtureId)
+    const hasBase = (components: readonly CountComponent[]) =>
+      components.some(component => component.itemId === itemId)
+    if (!targets.some(annotation => annotation.count?.version === 2
+      && hasBase(annotation.count.extra ?? []))
+      && !hasBase(remembered ?? [])) return
+
+    const resolved = perEquipmentComponentFixture(base, main, existing)
+    const fixtures = [...existing, ...resolved.newFixtures]
+    try { serializeCountFixtures(fixtures) }
+    catch (reason) {
+      return reason instanceof Error ? reason.message : String(reason)
+    }
+    const byId = new Map(fixtures.map(fixture => [fixture.id, fixture]))
+    const replace = (components: readonly CountComponent[]): CountComponent[] =>
+      components.map(component => ({
+        ...component,
+        itemId: component.itemId === itemId
+          ? resolved.fixture.id : component.itemId,
+      }))
+    const validate = (components: readonly CountComponent[]): string | undefined => {
+      if (components.length > 10 || !validCountComponents(fixtureId, components)) {
+        return '機器別の項目との重複、または構成要素の値が不正です。'
+      }
+      for (const component of components) {
+        const fixture = byId.get(component.itemId)
+        if (!fixture) return '構成要素の項目が見つかりません。'
+        if (fixture.link !== undefined) return '連動の項目は図面に拾いません。'
+        if (quantityMethod(fixture) !== 'click') {
+          return '構成要素には個数の項目を指定してください。'
+        }
+      }
+    }
+    const proposals: Array<{
+      annotation: StoredAnnotation
+      count: Extract<CountMark, { version: 2 }>
+    }> = []
+    for (const annotation of targets) {
+      const current = annotation.count!
+      if (current.version !== 2 || !hasBase(current.extra ?? [])) continue
+      const components = replace(current.extra ?? [])
+      const error = validate(components)
+      if (error) return error
+      const count: Extract<CountMark, { version: 2 }> = {
+        ...current,
+        extra: components,
+      }
+      const parsed = parseCount(JSON.stringify(count))
+      if (parsed?.version !== 2
+        || stableJson(parsed.extra ?? []) !== stableJson(components)) {
+        return '構成要素を保存できません。項目ID・条件名や印の値を確認してください。'
+      }
+      proposals.push({ annotation, count })
+    }
+
+    const nextRemembered = remembered === undefined ? undefined : replace(remembered)
+    if (nextRemembered !== undefined) {
+      const error = validate(nextRemembered)
+      if (error) return error
+      const parsed = parseCount(JSON.stringify({
+        version: 2, id: crypto.randomUUID(), fixtureId, extra: nextRemembered,
+      }))
+      if (parsed?.version !== 2
+        || stableJson(parsed.extra ?? []) !== stableJson(nextRemembered)) {
+        return 'これからの印の構成要素を保存できません。'
+      }
+    }
+
+    const memoryIds = [
+      fixtureId, itemId, resolved.fixture.id,
+      ...this.pickupMemoryIds(targets),
+      ...proposals.flatMap(proposal => countMembers(proposal.count).map(e => e.itemId)),
+    ]
+    const before: HistoryState = [], after: HistoryState = []
+    before.pickupMemory = this.pickupMemory(memoryIds)
+    if (nextRemembered !== undefined) {
+      this.lastCountComponents.set(fixtureId, structuredClone(nextRemembered))
+    }
+    after.pickupMemory = this.pickupMemory(memoryIds)
+    if (resolved.newFixtures.length) {
+      before.fixtures = existing
+      after.fixtures = structuredClone(fixtures)
+      this.replaceFixtures(structuredClone(fixtures))
+    }
+    for (const { annotation, count } of proposals) {
+      before.push(cloneState(annotation))
+      annotation.count = cloneCount(count)
+      this.markTouched(annotation)
+      annotation.revision++
+      after.push(cloneState(annotation))
+    }
+    this.history.push({ before, after })
+    this.pruneHiddenSelection()
+    this.notify()
+    return undefined
+  }
+
+  addComponentToFixture(
+    fixtureId: string,
+    itemId: string,
+    newFixtures: readonly CountFixture[] = [],
+  ): { error?: string; changed: number; skipped: number } {
+    return this.applyRelatedComponentAddition(fixtureId, itemId, newFixtures)
+  }
+
+  private applyRelatedComponentAddition(
+    fixtureId: string,
+    itemId: string,
+    newFixtures: readonly CountFixture[],
+    batch?: RelatedAdditionBatch,
+  ): { error?: string; changed: number; skipped: number } {
+    const fail = (error: string) => ({ error, changed: 0, skipped: 0 })
+    const existing = this.getCountFixtures()
+    let fixtures = [...existing, ...newFixtures]
+    if (new Set(fixtures.map(f => f.id)).size !== fixtures.length) {
+      return fail('追加する項目のIDが重複しています。')
+    }
+
+    const byId = new Map(fixtures.map(f => [f.id, f]))
+    const main = existing.find(f => f.id === fixtureId)
+    let component = byId.get(itemId)
+    if (!main || quantityMethod(main) !== 'click') {
+      return fail('起点には個数の項目を指定してください。')
+    }
+    if (!component || quantityMethod(component) !== 'click') {
+      return fail('構成要素には個数の項目を指定してください。')
+    }
+    if (main.link !== undefined || component.link !== undefined) {
+      return fail('連動の項目は図面に拾いません。')
+    }
+    if (fixtureId === itemId) return fail('同じ項目を構成要素にはできません。')
+
+    const resolved = perEquipmentComponentFixture(component, main, fixtures)
+    component = resolved.fixture
+    itemId = component.id
+    newFixtures = [...newFixtures, ...resolved.newFixtures]
+    fixtures = [...existing, ...newFixtures]
+    byId.set(component.id, component)
+    if (component.link !== undefined) return fail('連動の項目は図面に拾いません。')
+    if (fixtureId === itemId) return fail('同じ項目を構成要素にはできません。')
+
+    try { serializeCountFixtures(fixtures) }
+    catch (reason) {
+      return fail(reason instanceof Error ? reason.message : String(reason))
+    }
+
+    const targets = this.countMarkIdsOf(fixtureId).flatMap(id => {
+      const annotation = this.annotations.get(id)
+      return annotation ? [annotation] : []
+    })
+    if (targets.some(a => this.hasLinkedPickup(a))) {
+      return fail('連動の項目は図面に拾いません。')
+    }
+
+    const validate = (components: readonly CountComponent[]): string | undefined => {
+      if (components.length > 10) return '構成要素は10件までです。'
+      if (!validCountComponents(fixtureId, components)) return '構成要素の値が不正です。'
+      for (const e of components) {
+        const fixture = byId.get(e.itemId)
+        if (!fixture) return '構成要素の項目が見つかりません。'
+        if (fixture.link !== undefined) return '連動の項目は図面に拾いません。'
+        if (quantityMethod(fixture) !== 'click') {
+          return '構成要素には個数の項目を指定してください。'
+        }
+      }
+    }
+    const normalize = (components: readonly CountComponent[]): CountComponent[] =>
+      components.map(e => ({
+        itemId: e.itemId,
+        count: e.count,
+        ...(e.condition !== undefined ? { condition: e.condition } : {}),
+      }))
+    const roundTrip = (
+      current: CountMark,
+      components: CountComponent[],
+    ): Extract<CountMark, { version: 2 }> | undefined => {
+      const next: Extract<CountMark, { version: 2 }> = {
+        ...(current.version === 2 ? current : {}),
+        version: 2,
+        id: current.id,
+        fixtureId,
+      }
+      if (components.length) next.extra = components
+      else delete next.extra
+      const parsed = parseCount(JSON.stringify(next))
+      return parsed?.version === 2
+        && stableJson(parsed.extra ?? []) === stableJson(components)
+        ? next : undefined
+    }
+
+    const proposals: Array<{
+      annotation: StoredAnnotation
+      count: Extract<CountMark, { version: 2 }>
+    }> = []
+    let skipped = 0
+    for (const annotation of targets) {
+      const current = annotation.count!
+      const components = current.version === 2 ? current.extra ?? [] : []
+      if (components.some(e => e.itemId === itemId)) continue
+      if (components.length >= 10) { skipped++; continue }
+
+      const nextComponents = normalize([...components, { itemId, count: 1 }])
+      const error = validate(nextComponents)
+      if (error) return fail(error)
+      const count = roundTrip(current, nextComponents)
+      if (!count) {
+        return fail('構成要素を保存できません。項目ID・条件名や印の値を確認してください。')
+      }
+      proposals.push({ annotation, count })
+    }
+
+    const previousComponents = this.lastCountComponents.get(fixtureId)
+    const remembered = previousComponents ?? []
+    const memoryChanged = !remembered.some(e => e.itemId === itemId)
+      && remembered.length < 10
+    let nextRemembered: CountComponent[] | undefined
+    if (memoryChanged) {
+      nextRemembered = normalize([...remembered, { itemId, count: 1 }])
+      const error = validate(nextRemembered)
+      if (error) return fail(error)
+      const memoryCount: CountMark = {
+        version: 2,
+        id: crypto.randomUUID(),
+        fixtureId,
+      }
+      if (!roundTrip(memoryCount, nextRemembered)) {
+        return fail('これからの印の構成要素を保存できません。')
+      }
+    }
+
+    if (!proposals.length && !memoryChanged) {
+      return { changed: 0, skipped }
+    }
+
+    const memoryIds = [
+      fixtureId,
+      itemId,
+      ...this.pickupMemoryIds(targets),
+      ...proposals.flatMap(p => countMembers(p.count).map(e => e.itemId)),
+    ]
+    const before: HistoryState = [], after: HistoryState = []
+    before.pickupMemory = this.pickupMemory(memoryIds)
+    if (nextRemembered) {
+      this.lastCountComponents.set(fixtureId, structuredClone(nextRemembered))
+    }
+    after.pickupMemory = this.pickupMemory(memoryIds)
+
+    if (newFixtures.length) {
+      before.fixtures = existing
+      after.fixtures = structuredClone(fixtures)
+      this.replaceFixtures(structuredClone(fixtures))
+    }
+    for (const { annotation, count } of proposals) {
+      before.push(cloneState(annotation))
+      annotation.count = cloneCount(count)
+      this.markTouched(annotation)
+      annotation.revision++
+      after.push(cloneState(annotation))
+    }
+
+    this.recordRelatedAdditionStep(before, after, batch)
+    // 件数は実際の印だけを数える。これからの印の記憶は含めない。
+    return { changed: proposals.length, skipped }
+  }
   // Compatibility wrapper for the current scope selector. Conditions on counted parts survive.
   updateRoute(id: string, count: number, extra: NonNullable<QuantityMark['extra']>, scope?: RouteScope): void {
     const q = this.get(id)?.quantity
@@ -1522,6 +2089,330 @@ export class AnnotationStore {
   setRouteItems(id: string, members: ReadonlyArray<RouteExtra>): void {
     this.setRouteMembers(id, members)
   }
+  addRouteMemberToFixture(
+    originId: string,
+    member: RouteExtra,
+    newFixtures: readonly CountFixture[] = [],
+  ): { error?: string; changed: number; skipped: number } {
+    const result = this.applyRelatedRouteAdditions(originId, [member], newFixtures)
+    return {
+      ...(result.error ? { error: result.error } : {}),
+      changed: result.changed,
+      skipped: result.skipped,
+    }
+  }
+
+  /** 関連候補の複数項目追加を、項目・経路・記憶まで一つの履歴にする。 */
+  addRelatedFixturesToRoute(
+    originId: string,
+    fixtures: readonly CountFixture[],
+    routeId?: string,
+  ): {
+    error?: string
+    changed: number
+    skipped: number
+    pointRows: number
+    pointSkipped: number
+  } {
+    return this.addRelatedRouteFixtures(originId, fixtures, routeId)
+  }
+
+  private addRelatedRouteFixtures(
+    originId: string,
+    fixtures: readonly CountFixture[],
+    routeId?: string,
+    batch?: RelatedAdditionBatch,
+  ): ReturnType<AnnotationStore['addRelatedFixturesToRoute']> {
+    const existingById = new Map(
+      this.getCountFixtures().map(fixture => [fixture.id, fixture]),
+    )
+    const newFixtures = fixtures.filter(fixture => !existingById.has(fixture.id))
+    // 既存IDでは、引数の内容ではなく文書に保存されている項目を使う。
+    const resolvedFixtures = fixtures.map(fixture =>
+      existingById.get(fixture.id) ?? fixture)
+    const origin = existingById.get(originId)
+    const members: RouteExtra[] = resolvedFixtures.flatMap(fixture => {
+      if (fixture.link !== undefined
+        || quantityMethod(fixture) !== 'polyline' && !isRouteSurfaceFixture(fixture)) {
+        return []
+      }
+      const perM = origin && isRouteSurfaceFixture(fixture)
+        ? surfacePerimeterM(origin) : undefined
+      return [{
+        itemId: fixture.id,
+        count: 1,
+        cond: {},
+        ...(perM !== undefined ? { perM } : {}),
+      }]
+    })
+    const pointItemIds = routeId ? resolvedFixtures
+      .filter(fixture =>
+        fixture.link === undefined && quantityMethod(fixture) === 'click')
+      .map(fixture => fixture.id) : []
+    return this.applyRelatedRouteAdditions(
+      originId, members, newFixtures, routeId, pointItemIds, batch,
+    )
+  }
+
+  private applyRelatedRouteAdditions(
+    originId: string,
+    additions: readonly RouteExtra[],
+    newFixtures: readonly CountFixture[],
+    routeId?: string,
+    pointItemIds: readonly string[] = [],
+    batch?: RelatedAdditionBatch,
+  ): {
+    error?: string
+    changed: number
+    skipped: number
+    pointRows: number
+    pointSkipped: number
+  } {
+    const fail = (error: string) => ({
+      error, changed: 0, skipped: 0, pointRows: 0, pointSkipped: 0,
+    })
+    const existing = this.getCountFixtures()
+    const fixtures = [...existing, ...newFixtures]
+    if (new Set(fixtures.map(fixture => fixture.id)).size !== fixtures.length) {
+      return fail('追加する項目のIDが重複しています。')
+    }
+    const byId = new Map(fixtures.map(fixture => [fixture.id, fixture]))
+    const origin = existing.find(fixture => fixture.id === originId)
+    if (!origin || origin.link !== undefined || quantityMethod(origin) !== 'polyline') {
+      return fail('起点には連動でない長さの項目を指定してください。')
+    }
+
+    const validate = (members: readonly RouteExtra[]): string | undefined => {
+      if (!members.length || members.length > 11) return '追加の線要素は10件までです。'
+      const ids = new Set<string>()
+      for (const [index, member] of members.entries()) {
+        const fixture = byId.get(member.itemId)
+        if (!fixture) return '線要素の項目が見つかりません。'
+        if (fixture.link !== undefined) return '連動の項目は図面に拾いません。'
+        if (ids.has(member.itemId) || !validRouteCount(member.count)
+          || member.cond !== undefined && !validRouteConditions(member.cond)
+          || member.perM !== undefined && !validRoutePerM(member.perM)) {
+          return '線要素の値が不正です。'
+        }
+        const method = quantityMethod(fixture)
+        if (index === 0) {
+          if (isRouteSurfaceFixture(fixture) || method !== 'polyline'
+            || (member.perM ?? 1) !== 1) {
+            return '主には長さの項目を指定してください。'
+          }
+        } else if (method !== 'polyline' && method !== 'lengthWidthDepth'
+          && !isRouteSurfaceFixture(fixture)) {
+          return '追加の線要素には長さ・面積・幅と深さで計算する項目を指定してください。'
+        }
+        ids.add(member.itemId)
+      }
+    }
+    const normalize = (member: RouteExtra): RouteExtra => {
+      const cond = normalizeRouteConditions(member.cond)
+      return {
+        itemId: member.itemId,
+        count: member.count,
+        cond: quantityMethod(byId.get(member.itemId)!) === 'lengthWidthDepth'
+          ? { ...cond, rise: null, slack: null } : cond,
+        ...(member.perM !== undefined ? { perM: member.perM } : {}),
+      }
+    }
+    const withMembers = (
+      quantity: QuantityMark,
+      members: readonly RouteExtra[],
+    ): QuantityMark => {
+      const [main, ...extra] = members
+      const next = {
+        ...quantity,
+        itemId: main.itemId,
+        count: main.count === 1 ? undefined : main.count,
+        cond: main.cond,
+        extra: extra.length ? extra : undefined,
+      }
+      if (next.count === undefined) delete next.count
+      if (next.extra === undefined) delete next.extra
+      return next
+    }
+
+    try {
+      serializeCountFixtures(fixtures)
+      // 起点そのものは「すでに主にある」として扱う。
+      for (const addition of additions) {
+        const error = validate(addition.itemId === originId
+          ? [addition] : [{ itemId: originId, count: 1, cond: {} }, addition])
+        if (error) return fail(error)
+      }
+      for (const itemId of pointItemIds) {
+        const fixture = byId.get(itemId)
+        if (!fixture || fixture.link !== undefined || quantityMethod(fixture) !== 'click') {
+          return fail('頂点には連動でない個数の項目を指定してください。')
+        }
+      }
+    } catch (reason) {
+      return fail(reason instanceof Error ? reason.message : String(reason))
+    }
+
+    const skippedRoutes = new Set<string>()
+    const append = (
+      quantity: QuantityMark,
+      skipped: () => void,
+    ): { quantity: QuantityMark; changed: boolean } => {
+      let next = quantity
+      let changed = false
+      for (const addition of additions) {
+        const current = routeMembers(next)
+        if (current.some(member => member.itemId === addition.itemId)) continue
+        if (current.length >= 11) { skipped(); continue }
+
+        const members = [...current, addition].map(normalize)
+        const error = validate(members)
+        if (error) throw new Error(error)
+        const proposed = withMembers(next, members)
+        if (serializeQuantityMark(proposed).length > 8000) {
+          skipped()
+          continue
+        }
+        next = proposed
+        changed = true
+      }
+      return { quantity: next, changed }
+    }
+
+    const targets = [...this.annotations.values()].filter(annotation =>
+      !annotation.deleted && !annotation.legacyChange
+      && annotation.quantity?.method === 'polyline'
+      && annotation.quantity.itemId === originId)
+    const proposals: Array<{
+      annotation: StoredAnnotation
+      quantity: QuantityMark
+      membersChanged: boolean
+    }> = []
+    let pointRows = 0
+    let pointSkipped = 0
+    let nextRemembered: NonNullable<AnnotationStore['routeTemplate']> | undefined
+    let nextTemplate: NonNullable<AnnotationStore['routeTemplate']> | undefined
+
+    try {
+      for (const annotation of targets) {
+        const canAddPoints = annotation.id === routeId && pointItemIds.length > 0
+        if (!additions.length && !canAddPoints) continue
+        if (this.hasLinkedPickup(annotation)) {
+          return fail('連動の項目は図面に拾いません。')
+        }
+
+        const result = append(annotation.quantity!, () =>
+          skippedRoutes.add(annotation.id))
+        let quantity = result.quantity
+        let pointsChanged = false
+        if (canAddPoints) {
+          for (const itemId of pointItemIds) {
+            const points = quantity.points ?? []
+            const at = nextRoutePointAt(points, annotation.vertices?.length ?? 0, itemId)
+            if (points.length >= 50 || at === undefined) {
+              pointSkipped++
+              continue
+            }
+            const nextPoints = [...points, { itemId, at, count: 1 }]
+            if (!validRoutePoints(nextPoints)) {
+              return fail('頂点の個数の値が不正です。')
+            }
+            const proposed = { ...quantity, points: nextPoints }
+            if (serializeQuantityMark(proposed).length > 8000) {
+              pointSkipped++
+              continue
+            }
+            quantity = proposed
+            pointsChanged = true
+            pointRows++
+          }
+        }
+        if (result.changed || pointsChanged) {
+          proposals.push({
+            annotation, quantity, membersChanged: result.changed,
+          })
+        }
+      }
+
+      const appendTemplate = (
+        template: NonNullable<AnnotationStore['routeTemplate']>,
+      ): NonNullable<AnnotationStore['routeTemplate']> | undefined => {
+        const quantity: QuantityMark = {
+          version: 1,
+          id: crypto.randomUUID(),
+          method: 'polyline',
+          itemId: template.itemId,
+          count: template.count,
+          cond: template.cond,
+          extra: template.extra,
+        }
+        const result = append(quantity, () => {})
+        if (!result.changed) return undefined
+        return {
+          ...template,
+          extra: structuredClone(result.quantity.extra ?? []),
+        }
+      }
+
+      if (additions.length) {
+        nextRemembered = appendTemplate(this.lastRouteMembers.get(originId) ?? {
+          itemId: originId, count: 1, cond: {}, extra: [], name: '',
+        })
+        if (this.routeTemplate?.itemId === originId) {
+          nextTemplate = appendTemplate(this.routeTemplate)
+        }
+      }
+    } catch (reason) {
+      return fail(reason instanceof Error ? reason.message : String(reason))
+    }
+
+    const changed = proposals.filter(proposal => proposal.membersChanged).length
+    const skipped = skippedRoutes.size
+    if (!proposals.length && !newFixtures.length && !nextRemembered && !nextTemplate) {
+      return { changed: 0, skipped, pointRows: 0, pointSkipped }
+    }
+
+    const memoryIds = [
+      originId,
+      ...additions.map(member => member.itemId),
+      ...this.pickupMemoryIds(targets),
+    ]
+    const before: HistoryState = [], after: HistoryState = []
+    before.pickupMemory = this.pickupMemory(memoryIds)
+    // 履歴だけの付加情報。PDF・経路・個数の保存形式には入れない。
+    if (nextTemplate) {
+      Object.assign(before.pickupMemory[0], {
+        routeTemplateSnapshot: structuredClone(this.routeTemplate),
+      })
+    }
+    if (nextRemembered) {
+      this.lastRouteMembers.set(originId, structuredClone(nextRemembered))
+    }
+    if (nextTemplate) this.routeTemplate = structuredClone(nextTemplate)
+    after.pickupMemory = this.pickupMemory(memoryIds)
+    if (nextTemplate) {
+      Object.assign(after.pickupMemory[0], {
+        routeTemplateSnapshot: structuredClone(this.routeTemplate),
+      })
+    }
+
+    if (newFixtures.length) {
+      before.fixtures = existing
+      after.fixtures = structuredClone(fixtures)
+      this.replaceFixtures(structuredClone(fixtures))
+    }
+    for (const { annotation, quantity } of proposals) {
+      before.push(cloneState(annotation))
+      annotation.quantity = cloneQuantity(quantity)
+      this.refreshQuantity(annotation)
+      this.markTouched(annotation)
+      annotation.revision++
+      after.push(cloneState(annotation))
+    }
+
+    this.recordRelatedAdditionStep(before, after, batch)
+    return { changed, skipped, pointRows, pointSkipped }
+  }
+
   setRouteMembers(id: string, members: ReadonlyArray<RouteExtra>): void {
     this.addFixturesAndSetRouteItems([], id, members)
   }
@@ -1541,8 +2432,9 @@ export class AnnotationStore {
         || e.perM !== undefined && !validRoutePerM(e.perM)) return
       const method = quantityMethod(f)
       if (i === 0) {
-        if (method !== 'polyline' || (e.perM ?? 1) !== 1) return
-      } else if (method !== 'polyline' && method !== 'lengthWidthDepth') return
+        if (isRouteSurfaceFixture(f) || method !== 'polyline' || (e.perM ?? 1) !== 1) return
+      } else if (method !== 'polyline' && method !== 'lengthWidthDepth'
+        && !isRouteSurfaceFixture(f)) return
       ids.add(e.itemId)
     }
     if (newFixtures.length) serializeCountFixtures(fixtures)
@@ -1563,7 +2455,7 @@ export class AnnotationStore {
     this.rememberRoute({ ...q, itemId: normalized[0].itemId, count: normalized[0].count, cond: normalized[0].cond, extra: normalized.slice(1) })
     if (!newFixtures.length && stableJson(current.map(e => ({ ...e, cond: routeConditionsKey(e.cond) }))) === stableJson(normalized.map(e => ({ ...e, cond: routeConditionsKey(e.cond) })))) return
     const before: HistoryState = [cloneState(a)], after: HistoryState = []
-    if (newFixtures.length) { before.fixtures = this.getCountFixtures(); after.fixtures = structuredClone(fixtures); this.fixtures = structuredClone(fixtures) }
+    if (newFixtures.length) { before.fixtures = this.getCountFixtures(); after.fixtures = structuredClone(fixtures); this.replaceFixtures(structuredClone(fixtures)) }
     before.pickupMemory = previousMemory; after.pickupMemory = this.pickupMemory(memoryIds)
     const [main, ...extra] = normalized
     a.quantity = { ...q, itemId: main.itemId, count: main.count === 1 ? undefined : main.count, cond: main.cond, extra: extra.length ? extra : undefined }
@@ -1573,6 +2465,40 @@ export class AnnotationStore {
     else this.refreshQuantity(a)
     this.markTouched(a); a.revision++; after.push(cloneState(a))
     this.history.push({ before, after }); this.pruneHiddenSelection(); this.notify()
+  }
+  setRoutePoints(id: string, points: readonly RoutePoint[]): string | undefined {
+    const current = this.annotations.get(id)
+    if (!current || current.deleted || current.legacyChange || current.quantity?.method !== 'polyline') {
+      return 'この拾いには頂点の個数を設定できません。'
+    }
+    if (!validRoutePoints(points)) {
+      return '頂点の個数は50件までです。項目・頂点・施工条件を確認し、数は1〜99の整数で、同じ項目と頂点を重複させずに入力してください。'
+    }
+    for (const point of points) {
+      const fixture = this.getCountFixture(point.itemId)
+      if (!fixture) return '頂点の個数の項目が見つかりません。'
+      if (quantityMethod(fixture) !== 'click') return '頂点には個数の項目を設定してください。'
+      if (fixture.link !== undefined) return '連動の項目は頂点の個数に設定できません。'
+    }
+    const next = points.map(point => ({
+      itemId: point.itemId, at: point.at, count: point.count,
+      ...(point.condition !== undefined ? { condition: point.condition } : {}),
+    }))
+    const proposed = cloneQuantity(current.quantity)
+    if (next.length) proposed.points = next
+    else delete proposed.points
+    try {
+      if (serializeQuantityMark(proposed).length > 8000) {
+        return '頂点の個数を追加すると経路の保存容量を超えます。項目数や施工条件の長さを減らしてください。'
+      }
+    } catch {
+      return '頂点の個数を保存できません。項目・数・施工条件を確認してください。'
+    }
+    this.mutate(id, a => {
+      a.quantity = proposed
+      this.refreshQuantity(a)
+    })
+    return undefined
   }
   setRouteRises(id: string, rises: readonly Rise[]): void {
     if (!validRises(rises)) return
@@ -1721,14 +2647,46 @@ export class AnnotationStore {
   }
   countOverlayObjNums(pageIndex: number): number[] {
     if (!this.fixturesReady) return []
-    const result: number[] = []
-    for (const a of this.annotations.values()) if (!a.deleted && a.pageIndex === pageIndex && (a.count && this.fixtureForCount(a.count) || a.quantity && this.getCountFixture(a.quantity.itemId)) && a.objNum !== null) result.push(a.objNum)
-    return result
+    if (!this.countOverlayCache
+      || this.countOverlayCache.contentRevision !== this.contentRevision
+      || this.countOverlayCache.fixturesReady !== this.fixturesReady) {
+      this.countOverlayCache = {
+        contentRevision: this.contentRevision,
+        fixturesReady: this.fixturesReady,
+        pages: new Map(),
+      }
+    }
+    const cache = this.countOverlayCache.pages
+    let cached = cache.get(pageIndex)
+    if (cached === undefined) {
+      cached = perfTime('store.countOverlayObjNums', () => {
+        const result: number[] = []
+        for (const a of this.annotations.values()) if (!a.deleted && a.pageIndex === pageIndex && (a.count && this.fixtureForCount(a.count) || a.quantity && this.getCountFixture(a.quantity.itemId)) && a.objNum !== null) result.push(a.objNum)
+        return result
+      })
+      cache.set(pageIndex, cached)
+    }
+    return [...cached]
   }
   issueOverlayObjNums(pageIndex: number): number[] {
-    const result: number[] = []
-    for (const a of this.annotations.values()) if (!a.deleted && !a.legacyChange && a.pageIndex === pageIndex && a.issue && a.issue.recordKind !== 'change' && a.objNum !== null) result.push(a.objNum)
-    return result
+    if (!this.issueOverlayCache
+      || this.issueOverlayCache.contentRevision !== this.contentRevision) {
+      this.issueOverlayCache = {
+        contentRevision: this.contentRevision,
+        pages: new Map(),
+      }
+    }
+    const cache = this.issueOverlayCache.pages
+    let cached = cache.get(pageIndex)
+    if (cached === undefined) {
+      cached = perfTime('store.issueOverlayObjNums', () => {
+        const result: number[] = []
+        for (const a of this.annotations.values()) if (!a.deleted && !a.legacyChange && a.pageIndex === pageIndex && a.issue && a.issue.recordKind !== 'change' && a.objNum !== null) result.push(a.objNum)
+        return result
+      })
+      cache.set(pageIndex, cached)
+    }
+    return [...cached]
   }
   fixtureDimensionMarks(next: CountFixture): { matched: number; customized: number } {
     const previous = this.getCountFixture(next.id)
@@ -1742,6 +2700,270 @@ export class AnnotationStore {
       else matched++
     }
     return { matched, customized }
+  }
+
+  private recordRelatedAdditionStep(
+    before: HistoryState,
+    after: HistoryState,
+    batch?: RelatedAdditionBatch,
+  ): void {
+    if (batch) {
+      batch.push({ before, after })
+      return
+    }
+    this.history.push({ before, after })
+    this.pruneHiddenSelection()
+    this.notify()
+  }
+
+  private commitRelatedAdditionBatch(batch: RelatedAdditionBatch): void {
+    if (!batch.length) return
+
+    const before: HistoryState = [], after: HistoryState = []
+    const beforeAnnotations = new Map<string, AnnotationState>()
+    const afterAnnotations = new Map<string, AnnotationState>()
+    const beforeMemory = new Map<string, PickupMemory[number]>()
+    const afterMemory = new Map<string, PickupMemory[number]>()
+
+    for (const step of batch) {
+      for (const annotation of step.before) {
+        if (!beforeAnnotations.has(annotation.id)) {
+          beforeAnnotations.set(annotation.id, annotation)
+        }
+      }
+      for (const annotation of step.after) {
+        afterAnnotations.set(annotation.id, annotation)
+      }
+      for (const memory of step.before.pickupMemory ?? []) {
+        if (!beforeMemory.has(memory.itemId)) {
+          beforeMemory.set(memory.itemId, memory)
+        }
+      }
+      for (const memory of step.after.pickupMemory ?? []) {
+        afterMemory.set(memory.itemId, memory)
+      }
+      if (step.before.fixtures !== undefined && before.fixtures === undefined) {
+        before.fixtures = step.before.fixtures
+      }
+      if (step.after.fixtures !== undefined) after.fixtures = step.after.fixtures
+    }
+
+    before.push(...beforeAnnotations.values())
+    after.push(...afterAnnotations.values())
+    if (beforeMemory.size) before.pickupMemory = [...beforeMemory.values()]
+    if (afterMemory.size) after.pickupMemory = [...afterMemory.values()]
+    this.recordRelatedAdditionStep(before, after)
+  }
+
+  applyRelatedAdditions(
+    originId: string,
+    fixtures: readonly CountFixture[],
+    routeId?: string,
+  ): RelatedAdditionResult {
+    const result: RelatedAdditionResult = {
+      changed: 0,
+      skipped: 0,
+      pointRows: 0,
+      pointSkipped: 0,
+      componentMarks: 0,
+      componentSkipped: 0,
+      linked: 0,
+      sourcesAdded: 0,
+      guidance: 0,
+      effects: [],
+    }
+    const existing = this.getCountFixtures()
+    const origin = existing.find(fixture => fixture.id === originId)
+    if (!origin) return { ...result, error: '起点の項目が見つかりません。' }
+
+    const byId = new Map(existing.map(fixture => [fixture.id, fixture]))
+    const byIdentity = new Map(
+      existing.map(fixture => [fixtureIdentity(fixture), fixture]),
+    )
+    const resolved: CountFixture[] = []
+    const newFixtures: CountFixture[] = []
+    const seen = new Set<string>()
+
+    for (const input of fixtures) {
+      // 既存IDの保存内容を優先し、標準マスタの同一項目も再利用する。
+      let fixture = byId.get(input.id)
+        ?? byIdentity.get(fixtureIdentity(input))
+        ?? input
+      if (relatedAdditionKind(origin, fixture, routeId) === 'component') {
+        fixture = perEquipmentComponentFixture(
+          fixture, origin, [...byId.values()],
+        ).fixture
+      }
+      if (!byId.has(fixture.id)) {
+        newFixtures.push(fixture)
+        byId.set(fixture.id, fixture)
+        byIdentity.set(fixtureIdentity(fixture), fixture)
+      }
+      if (!seen.has(fixture.id)) {
+        resolved.push(fixture)
+        seen.add(fixture.id)
+      }
+    }
+
+    const combined = [...existing, ...newFixtures]
+    try { serializeCountFixtures(combined) }
+    catch (reason) {
+      return {
+        ...result,
+        error: reason instanceof Error ? reason.message : String(reason),
+      }
+    }
+
+    const batch: RelatedAdditionBatch = []
+    const guide = (fixture: CountFixture, reason?: string): void => {
+      result.guidance++
+      result.effects.push({
+        itemId: fixture.id, name: fixture.name, kind: 'guidance',
+        ...(reason ? { reason } : {}),
+      })
+    }
+
+    if (newFixtures.length) {
+      const before: HistoryState = [], after: HistoryState = []
+      before.fixtures = structuredClone(existing)
+      after.fixtures = structuredClone(combined)
+      this.replaceFixtures(structuredClone(combined))
+      this.recordRelatedAdditionStep(before, after, batch)
+    }
+
+    if (origin.link === undefined && quantityMethod(origin) === 'polyline') {
+      const eligible = resolved.filter(fixture =>
+        relatedAdditionKind(origin, fixture, routeId) !== undefined)
+      const routeResult = eligible.length
+        ? this.addRelatedRouteFixtures(originId, eligible, routeId, batch)
+        : { changed: 0, skipped: 0, pointRows: 0, pointSkipped: 0 }
+      result.changed = routeResult.changed
+      result.skipped = routeResult.skipped
+      result.pointRows = routeResult.pointRows
+      result.pointSkipped = routeResult.pointSkipped
+
+      for (const fixture of resolved) {
+        const kind = relatedAdditionKind(origin, fixture, routeId)
+        if (!kind || routeResult.error) {
+          guide(fixture, routeResult.error)
+        } else {
+          result.effects.push({ itemId: fixture.id, name: fixture.name, kind })
+        }
+      }
+    } else {
+      const initialLinkedFixtures = this.getCountFixtures()
+      let linkedFixtures = initialLinkedFixtures
+
+      for (const resolvedFixture of resolved) {
+        const fixture = linkedFixtures.find(value => value.id === resolvedFixture.id)!
+        const kind = relatedAdditionKind(origin, fixture, routeId)
+        if (!kind) {
+          guide(fixture, origin.link !== undefined
+            ? '起点が連動の項目のため、自動では反映しません。'
+            : undefined)
+          continue
+        }
+
+        if (kind === 'component') {
+          const componentResult = this.applyRelatedComponentAddition(
+            originId, fixture.id, [], batch,
+          )
+          if (componentResult.error) {
+            guide(fixture, componentResult.error)
+          } else {
+            result.componentMarks += componentResult.changed
+            result.componentSkipped += componentResult.skipped
+            result.effects.push({
+              itemId: fixture.id,
+              name: fixture.name,
+              kind,
+              changed: componentResult.changed,
+              skipped: componentResult.skipped,
+              futureApplied: this.lastCountComponents.get(originId)
+                ?.some(component => component.itemId === fixture.id) ?? false,
+            })
+          }
+          continue
+        }
+
+        if (kind !== 'factor' && kind !== 'perimeter') {
+          guide(fixture)
+          continue
+        }
+        if (this.fixtureMarkCount(fixture.id) !== 0) {
+          guide(fixture, 'すでに印・拾いがあるため、連動には変更しません。')
+          continue
+        }
+
+        let link: NonNullable<CountFixture['link']>
+        let sourceAdded = false
+        if (fixture.link?.kind === 'factor') {
+          if (fixture.link.sources.some(source => source.itemId === originId)) {
+            result.effects.push({
+              itemId: fixture.id, name: fixture.name, kind: 'unchanged',
+            })
+            continue
+          }
+          if (fixture.link.sources.length >= 50) {
+            guide(fixture, '連動の元は50件までです。')
+            continue
+          }
+          link = {
+            ...fixture.link,
+            sources: [...fixture.link.sources, { itemId: originId, factor: 1 }],
+          }
+          sourceAdded = true
+        } else if (fixture.link !== undefined) {
+          guide(fixture, '既存の係数以外の連動は、自動では変更しません。')
+          continue
+        } else {
+          link = kind === 'perimeter'
+            ? {
+              kind: 'shape',
+              shape: { output: 'perimeter' },
+              sources: [{ itemId: originId }],
+            }
+            : {
+              kind: 'factor',
+              sources: [{ itemId: originId, factor: 1 }],
+            }
+        }
+
+        const proposed: CountFixture = { ...fixture, link }
+        const error = fixtureLinkError(proposed)
+        if (error) {
+          guide(fixture, error)
+          continue
+        }
+        const next = linkedFixtures.map(value =>
+          value.id === fixture.id ? proposed : value)
+        try { serializeCountFixtures(next) }
+        catch (reason) {
+          guide(fixture, reason instanceof Error ? reason.message : String(reason))
+          continue
+        }
+
+        linkedFixtures = next
+        if (sourceAdded) result.sourcesAdded++
+        else result.linked++
+        result.effects.push({
+          itemId: fixture.id,
+          name: fixture.name,
+          kind: sourceAdded ? 'source' : kind,
+        })
+      }
+
+      if (linkedFixtures !== initialLinkedFixtures) {
+        const before: HistoryState = [], after: HistoryState = []
+        before.fixtures = structuredClone(initialLinkedFixtures)
+        after.fixtures = structuredClone(linkedFixtures)
+        this.replaceFixtures(structuredClone(linkedFixtures))
+        this.recordRelatedAdditionStep(before, after, batch)
+      }
+    }
+
+    this.commitRelatedAdditionBatch(batch)
+    return result
   }
 
   setCountFixtures(fixtures: CountFixture[], removeIds: readonly string[] = [], refreshIds: readonly string[] = []): void {
@@ -1810,13 +3032,24 @@ export class AnnotationStore {
     const renameComponents = (components: readonly CountComponent[]): CountComponent[] => components
       .filter(e => !removeIds.includes(e.itemId))
       .map(e => ({ itemId: e.itemId, count: e.count, ...(e.condition !== undefined ? { condition: renameCondition(e.itemId, e.condition) as string } : {}) }))
+    const renamePoints = (points: readonly RoutePoint[]): RoutePoint[] => points
+      .filter(point => !removeIds.includes(point.itemId))
+      .map(point => ({
+        itemId: point.itemId, at: point.at, count: point.count,
+        ...(point.condition !== undefined
+          ? { condition: renameCondition(point.itemId, point.condition) as string } : {}),
+      }))
     // A longer name repeated across many members/rises can exceed the mark limit.
     // Reject the whole edit before changing fixtures, marks or inheritance memory.
     for (const edits of renames.values()) for (const name of edits.values()) if (!validCondition(name)) throw new Error('改名後の施工条件は1〜30文字で、前後の空白や改行を入れずに入力してください。')
     if (renames.size) for (const a of this.annotations.values()) {
       const q = a.quantity
-      if (a.deleted || q?.method !== 'polyline' || !routeMembers(q).some(e => renames.has(e.itemId))) continue
-      const renamed = { ...q, cond: renameRoute(q.itemId, q.cond), extra: q.extra?.map(e => ({ ...e, cond: renameRoute(e.itemId, e.cond) })) }
+      if (a.deleted || q?.method !== 'polyline'
+        || !(routeMembers(q).some(e => renames.has(e.itemId))
+          || q.points?.some(point => renames.has(point.itemId)))) continue
+      const renamed = { ...q, cond: renameRoute(q.itemId, q.cond),
+        extra: q.extra?.map(e => ({ ...e, cond: renameRoute(e.itemId, e.cond) })),
+        points: q.points ? renamePoints(q.points) : undefined }
       if (!parseQuantityMark(serializeQuantityMark(renamed))) throw new Error('施工条件の改名で経路の保存容量を超えます。条件名を短くしてください。')
     }
     if (renames.size) for (const a of this.annotations.values()) {
@@ -1853,11 +3086,13 @@ export class AnnotationStore {
     const calculationChanged = new Set(fixtures
       .filter(f => calculationKey(f) !== calculationKey(this.getCountFixture(f.id)))
       .map(f => f.id))
-    this.fixtures = structuredClone(fixtures)
+    this.replaceFixtures(structuredClone(fixtures))
     this.recentFixtures = this.recentFixtures.filter(id => fixtures.some(f => f.id === id))
     for (const a of this.annotations.values()) if (!a.deleted && (a.count || a.quantity)) {
       const id = a.quantity?.itemId ?? countFixtureId(a.count!)
-      const routeIds = [id, ...(a.quantity?.extra ?? []).map(e => e.itemId), ...(a.count?.version === 2 ? a.count.extra ?? [] : []).map(e => e.itemId)]
+      const routeIds = [id, ...(a.quantity?.extra ?? []).map(e => e.itemId),
+        ...(a.quantity?.method === 'polyline' ? a.quantity.points ?? [] : []).map(point => point.itemId),
+        ...(a.count?.version === 2 ? a.count.extra ?? [] : []).map(e => e.itemId)]
       const openingIds = (a.quantity?.openings ?? []).flatMap(o => o.itemId ? [o.itemId] : [])
       const affected = dimensionUpdates.has(a.id)
         || routeIds.some(id => removeIds.includes(id) || changed.has(id) || renames.has(id))
@@ -1893,6 +3128,9 @@ export class AnnotationStore {
           if (a.quantity.method === 'polyline') {
             a.quantity.cond = renameRoute(a.quantity.itemId, a.quantity.cond)
             a.quantity.extra = a.quantity.extra?.map(e => ({ ...e, cond: renameRoute(e.itemId, e.cond) }))
+            const points = renamePoints(a.quantity.points ?? [])
+            if (points.length) a.quantity.points = points
+            else delete a.quantity.points
           }
           const remaining = routeMembers(a.quantity).filter(e => !removeIds.includes(e.itemId))
           if (!remaining.length) { a.deleted = true; this.selection.delete(a.id) }
@@ -2092,7 +3330,12 @@ export class AnnotationStore {
     })
   }
   fixtureMarkCount(id: string): number {
-    return [...this.annotations.values()].filter(a => !a.deleted && (a.quantity?.itemId === id || a.quantity?.extra?.some(e => e.itemId === id) || a.count && countFixtureId(a.count) === id)).length
+    return [...this.annotations.values()].filter(a => !a.deleted && (
+      a.quantity?.itemId === id || a.quantity?.extra?.some(e => e.itemId === id)
+      || a.quantity?.method === 'polyline' && a.quantity.points?.some(point => point.itemId === id)
+      || a.count && (countFixtureId(a.count) === id
+        || a.count.version === 2 && a.count.extra?.some(component => component.itemId === id))
+    )).length
   }
   selectedQuantitiesOnly(): boolean {
     const annotations = this.selectedIds().map(id => this.annotations.get(id)!)
@@ -2139,9 +3382,43 @@ export class AnnotationStore {
   }
 
   getPageAnnotations(pageIndex: number): EditableAnnotation[] {
-    return [...this.annotations.values()]
+    return perfTime('store.getPageAnnotations', () => [...this.annotations.values()]
       .filter((annotation) => annotation.pageIndex === pageIndex && !annotation.deleted)
-      .map((annotation) => publicAnnotation(annotation, this.isAnnotationDirty(annotation)))
+      .map((annotation) => publicAnnotation(annotation, this.isAnnotationDirty(annotation))))
+  }
+
+  /** 描画用のページの注釈。getPageAnnotations と同じ内容・同じ順。contentRevision が同じあいだは同じ配列を返す。配列と各注釈（入れ子を含む）は Object.freeze 済み。 */
+  getPageAnnotationsSnapshot(pageIndex: number): readonly EditableAnnotation[] {
+    if (this.pageAnnotationsCache?.contentRevision === this.contentRevision) {
+      const cached = this.pageAnnotationsCache.pages.get(pageIndex)
+      if (cached !== undefined) return cached
+    }
+    return perfTime('store.pageSnapshot.build', () => {
+      if (!this.pageAnnotationsCache
+        || this.pageAnnotationsCache.contentRevision !== this.contentRevision) {
+        const ids = new Map<number, string[]>()
+        for (const annotation of this.annotations.values()) {
+          if (annotation.deleted) continue
+          const page = ids.get(annotation.pageIndex)
+          if (page) page.push(annotation.id)
+          else ids.set(annotation.pageIndex, [annotation.id])
+        }
+        this.pageAnnotationsCache = {
+          contentRevision: this.contentRevision,
+          ids,
+          pages: new Map(),
+        }
+      }
+      const cache = this.pageAnnotationsCache
+      const snapshot = deepFreeze((cache.ids.get(pageIndex) ?? []).map(id => {
+        const annotation = this.annotations.get(id)!
+        // cloneState has shared nested values, including measure.holes and legacyChangeData.
+        // Detach them before freezing so the store and mutable getters remain unfrozen.
+        return structuredClone(publicAnnotation(annotation, this.isAnnotationDirty(annotation)))
+      }))
+      cache.pages.set(pageIndex, snapshot)
+      return snapshot
+    })
   }
 
   get(id: string): EditableAnnotation | undefined {
@@ -2177,7 +3454,7 @@ export class AnnotationStore {
     if (this.selectedIds().length === next.length && next.every((value) => this.selection.has(value))) return
     this.selection.clear()
     for (const value of next) this.selection.add(value)
-    this.notify(false)
+    this.notifyUi()
   }
 
   toggleSelection(id: string): void {
@@ -2185,13 +3462,13 @@ export class AnnotationStore {
     if (!a || a.deleted || !this.isShownOnDrawing(a)) return
     if (this.selection.has(id)) this.selection.delete(id)
     else this.selection.add(id)
-    this.notify(false)
+    this.notifyUi()
   }
 
   clearSelection(): void {
     if (this.selection.size === 0) return
     this.selection.clear()
-    this.notify(false)
+    this.notifyUi()
   }
 
   selectInRect(pageIndex: number, rect: Rect): string[] {
@@ -2203,7 +3480,7 @@ export class AnnotationStore {
     for (const annotation of this.getPageAnnotations(pageIndex)) {
       if (this.isShownOnDrawing(annotation) && annotationInsideSelection(annotation, normalized)) this.selection.add(annotation.id)
     }
-    this.notify(false)
+    this.notifyUi()
     return this.selectedIds()
   }
 
@@ -2321,6 +3598,7 @@ export class AnnotationStore {
     if (input.deferHistory) this.pendingCreations.add(id)
     else this.history.push({ before: [], after: [cloneState(annotation)] })
     if (!input.deferNotify) this.notify()
+    else this.contentRevision += 1
     return this.get(id)!
   }
 
@@ -2684,7 +3962,10 @@ export class AnnotationStore {
       if (a && !a.deleted && a.count?.version === 1 && f) { this.applyFixtureToMark(a, f); normalized = true }
     }
     // These save-time corrections do not go through notify().
-    if (normalized) this.dirtyCache = null
+    if (normalized) {
+      this.contentRevision += 1
+      this.dirtyCache = null
+    }
     const entries = this.editEntries()
     this.pendingEdits = entries.map(({ annotation, edit }) => ({
       id: annotation.id,
@@ -2706,6 +3987,13 @@ export class AnnotationStore {
       const basics = this.getQuantityChecks()
       this.pendingQuantityChecks = { basics, editIndex: result.length }
       result.push({ kind: 'setQuantityChecks', pageIndex: 0, basics })
+    }
+    this.pendingRelatedReviews = null
+    if (this.relatedReviewsReady
+      && stableJson(this.relatedReviews) !== stableJson(this.relatedReviewBaseline)) {
+      const reviews = this.getRelatedReviews()
+      this.pendingRelatedReviews = { reviews, editIndex: result.length }
+      result.push({ kind: 'setRelatedReviews', pageIndex: 0, reviews })
     }
     this.pendingRoomSets = null
     if (stableJson(this.roomSets) !== stableJson(this.roomSetBaseline)) {
@@ -2753,6 +4041,10 @@ export class AnnotationStore {
       this.quantityCheckBaseline = structuredClone(this.pendingQuantityChecks.basics)
     }
     this.pendingQuantityChecks = null
+    if (this.pendingRelatedReviews && !failed.has(this.pendingRelatedReviews.editIndex)) {
+      this.relatedReviewBaseline = structuredClone(this.pendingRelatedReviews.reviews)
+    }
+    this.pendingRelatedReviews = null
     if (this.pendingRoomSets && !failed.has(this.pendingRoomSets.editIndex)) {
       this.roomSetBaseline = structuredClone(this.pendingRoomSets.sets)
     }
@@ -2792,12 +4084,12 @@ export class AnnotationStore {
 
   isDirty(): boolean {
     const summary = this.dirtySummary()
-    return summary.annotations > 0 || summary.fixtures || summary.scales.length > 0 || summary.drawings.length > 0 || summary.rooms.length > 0 || summary.roomSets || !!summary.quantityChecks
+    return summary.annotations > 0 || summary.fixtures || summary.scales.length > 0 || summary.drawings.length > 0 || summary.rooms.length > 0 || summary.roomSets || !!summary.quantityChecks || !!summary.relatedReviews
   }
 
   dirtySummary(): DirtySummary {
-    if (this.dirtyCache?.version === this.version) return this.dirtyCache.summary
-    const summary: DirtySummary = {
+    if (this.dirtyCache?.contentRevision === this.contentRevision) return this.dirtyCache.summary
+    const summary: DirtySummary = perfTime('store.dirtySummary.compute', () => ({
       annotations: this.editEntries().length,
       fixtures: stableJson(this.fixtures) !== this.fixtureBaseline,
       scales: [...new Set([...this.scales].filter(([i, scale]) => stableJson(scale) !== stableJson(this.scaleBaselines.get(i) ?? null)).map(([i]) => i).concat([...this.scaleRegions].filter(([i, regions]) => stableJson(regions) !== stableJson(this.scaleRegionBaselines.get(i) ?? [])).map(([i]) => i)))].sort((a, b) => a - b),
@@ -2812,8 +4104,11 @@ export class AnnotationStore {
       ...(this.quantityChecksReady
         && stableJson(this.quantityChecks) !== stableJson(this.quantityCheckBaseline)
         ? { quantityChecks: true } : {}),
-    }
-    this.dirtyCache = { version: this.version, summary }
+      ...(this.relatedReviewsReady
+        && stableJson(this.relatedReviews) !== stableJson(this.relatedReviewBaseline)
+        ? { relatedReviews: true } : {}),
+    }))
+    this.dirtyCache = { contentRevision: this.contentRevision, summary }
     return summary
   }
 
@@ -2827,7 +4122,10 @@ export class AnnotationStore {
       Object.assign(annotation, before); if (previousMemory) this.restorePickupMemory(previousMemory); return
     }
     const after = cloneState(annotation)
-    if (samePersisted(before, after)) return
+    if (samePersisted(before, after)) {
+      if (stableJson(before) !== stableJson(after)) this.contentRevision += 1
+      return
+    }
     this.markTouched(annotation)
     annotation.revision += 1
     this.history.push({ before: Object.assign([before], { pickupMemory: previousMemory }), after: Object.assign([after], { pickupMemory: rememberPickup ? this.pickupMemory(memoryIds) : undefined }) })
@@ -2852,14 +4150,17 @@ export class AnnotationStore {
         continue
       }
       const next = cloneState(annotation)
-      if (samePersisted(previous, next)) continue
+      if (samePersisted(previous, next)) {
+        if (stableJson(previous) !== stableJson(next)) this.contentRevision += 1
+        continue
+      }
       this.markTouched(annotation)
       annotation.revision += 1
       before.push(previous)
       after.push(next)
     }
     if (before.length === 0 && !fixtures) return
-    if (fixtures) { before.fixtures = this.getCountFixtures(); after.fixtures = structuredClone(fixtures); this.fixtures = structuredClone(fixtures) }
+    if (fixtures) { before.fixtures = this.getCountFixtures(); after.fixtures = structuredClone(fixtures); this.replaceFixtures(structuredClone(fixtures)) }
     if (rememberPickup) after.pickupMemory = this.pickupMemory(memoryIds)
     this.history.push({ before, after })
     if (this.drawingFilterActive()) this.pruneHiddenSelection()
@@ -2873,13 +4174,14 @@ export class AnnotationStore {
       const auto = this.automaticDrawings.get(item.pageIndex)
       this.drawings.set(item.pageIndex, auto ? mergeAutomaticDrawingInfo(item.info, auto) : item.info)
     }
-    if (target.fixtures) this.fixtures = structuredClone(target.fixtures)
+    if (target.fixtures) this.replaceFixtures(structuredClone(target.fixtures))
     if (target.issueMaximum !== undefined) this.issueNumbers.renumber(target.issueMaximum)
     for (const item of target.scales ?? []) this.scales.set(item.pageIndex, item.scale ? { ...item.scale } : null)
     for (const item of target.scaleRegions ?? []) this.scaleRegions.set(item.pageIndex, structuredClone(item.regions))
     for (const item of target.roomRegions ?? []) this.roomRegions.set(item.pageIndex, structuredClone(item.regions))
     if (target.roomSets) this.roomSets = structuredClone(target.roomSets)
     if (target.quantityChecks) this.quantityChecks = structuredClone(target.quantityChecks)
+    if (target.relatedReviews) this.replaceRelatedReviews(structuredClone(target.relatedReviews))
     if (target.pageRoomSets) {
       this.pageRoomSets.clear()
       for (const [pageIndex, setId] of target.pageRoomSets) this.pageRoomSets.set(pageIndex, { ...setId })
@@ -3045,7 +4347,21 @@ export class AnnotationStore {
     step: HistoryStep<HistoryState>,
     mapper: (state: AnnotationState) => AnnotationState,
   ): HistoryStep<HistoryState> {
-    return { before: Object.assign(step.before.map(mapper), { routeTemplate: step.before.routeTemplate, pickupMemory: step.before.pickupMemory, drawings: step.before.drawings, scales: step.before.scales, scaleRegions: step.before.scaleRegions, roomRegions: step.before.roomRegions, roomSets: step.before.roomSets, quantityChecks: step.before.quantityChecks, pageRoomSets: step.before.pageRoomSets, issueMaximum: step.before.issueMaximum, fixtures: step.before.fixtures }), after: Object.assign(step.after.map(mapper), { routeTemplate: step.after.routeTemplate, pickupMemory: step.after.pickupMemory, drawings: step.after.drawings, scales: step.after.scales, scaleRegions: step.after.scaleRegions, roomRegions: step.after.roomRegions, roomSets: step.after.roomSets, quantityChecks: step.after.quantityChecks, pageRoomSets: step.after.pageRoomSets, issueMaximum: step.after.issueMaximum, fixtures: step.after.fixtures }) }
+    const mapState = (state: HistoryState): HistoryState => Object.assign(state.map(mapper), {
+      routeTemplate: state.routeTemplate,
+      pickupMemory: state.pickupMemory,
+      drawings: state.drawings,
+      scales: state.scales,
+      scaleRegions: state.scaleRegions,
+      roomRegions: state.roomRegions,
+      roomSets: state.roomSets,
+      quantityChecks: state.quantityChecks,
+      relatedReviews: state.relatedReviews,
+      pageRoomSets: state.pageRoomSets,
+      issueMaximum: state.issueMaximum,
+      fixtures: state.fixtures,
+    })
+    return { before: mapState(step.before), after: mapState(step.after) }
   }
 
   private markTouched(annotation: AnnotationState): void {
@@ -3056,8 +4372,18 @@ export class AnnotationStore {
   }
 
   private notify(quantityChanged = true): void {
+    this.contentRevision += 1
+    perfCount(quantityChanged ? 'store.notify.quantity' : 'store.notify.ui')
     if (quantityChanged) { this.quantityVersion += 1; this.refreshSymbolCandidates() }
     this.version += 1
+    perfCount('store.listenerCalls', this.listeners.size)
+    for (const listener of this.listeners) listener()
+  }
+
+  private notifyUi(): void {
+    perfCount('store.notify.uiOnly')
+    this.version += 1
+    perfCount('store.listenerCalls', this.listeners.size)
     for (const listener of this.listeners) listener()
   }
 }

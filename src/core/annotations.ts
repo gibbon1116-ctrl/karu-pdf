@@ -1,5 +1,6 @@
 import { fixtureCode, fixtureDrawingCode } from './countFixtures'
 import { writeQuantityChecks, type QuantityCheckBasics } from './quantityCheckBasics'
+import { writeRelatedReviews, type RelatedReviews } from './related/reviews'
 import { writeDrawingInfo, type DrawingInfo } from './drawingInfo'
 import { writePageRoomSet, writeRoomRegions, writeRoomSets, type RoomRegion, type RoomSet } from './rooms'
 import { parseQuantityMark, serializeQuantityMark, quantityPoints, quantityDashes, type QuantityMark } from './quantity'
@@ -124,6 +125,7 @@ export type AnnotationEdit =
   | { kind: 'setRoomRegions'; pageIndex: number; regions: RoomRegion[] }
   | { kind: 'setRoomSets'; pageIndex: 0; sets: RoomSet[] }
   | { kind: 'setQuantityChecks'; pageIndex: 0; basics: QuantityCheckBasics }
+  | { kind: 'setRelatedReviews'; pageIndex: 0; reviews: RelatedReviews }
   | { kind: 'setPageRoomSet'; pageIndex: number; setId: string | null; dx?: number; dy?: number }
   | { kind: 'setPageScale'; pageIndex: number; scale: PageScale | null }
   | { kind: 'createMeasure'; pageIndex: number; vertices: Point[]; measure: MeasureSettings; text: string; color: RGB; borderWidth: number; fontSize: number; opacity: number; quantity?: QuantityMark | null; quantityDash?: QuantityLineStyle['dash'] }
@@ -1496,6 +1498,7 @@ export function applyEdits(
     try {
       if (edit.kind === 'setCountFixtures') { writeCountFixtures(doc, edit.fixtures); continue }
       if (edit.kind === 'setQuantityChecks') { writeQuantityChecks(doc, edit.basics); continue }
+      if (edit.kind === 'setRelatedReviews') { writeRelatedReviews(doc, edit.reviews); continue }
       page = pages.get(edit.pageIndex)
       if (!page) {
         page = doc.loadPage(edit.pageIndex)

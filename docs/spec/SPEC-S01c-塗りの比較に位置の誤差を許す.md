@@ -70,7 +70,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\.codex\worktrees\dfd5\PDF編集アプリ`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/core/symbolFeatureProfile.ts`、`tests/symbolFeatureProfile.test.ts`
 - 変更しないファイル: 上以外。
 

@@ -93,7 +93,7 @@ describe('breakdown data integrity', () => {
       ...breakdownEntries('昇降機設備'),
       ...breakdownEntries('建築'),
     ])
-    expect(breakdownEntries('建築')).toHaveLength(799)
+    expect(breakdownEntries('建築')).toHaveLength(804)
 
     for (const book of ['建築', '機械設備', '昇降機設備'] as const) {
       expect(breakdownEntries(book)).toBe(breakdownEntries(book))
@@ -223,9 +223,9 @@ describe('mechanical and elevator breakdown data', () => {
   const mechanical = breakdownEntries('機械設備')
   const elevator = breakdownEntries('昇降機設備')
 
-  it('adds 397 mechanical rows in 35 groups and elevator rows in 6 groups', () => {
+  it('adds 406 mechanical rows (397 format rows and 9 supplement rows) in 35 groups and elevator rows in 6 groups', () => {
     expect(MECHANICAL_GROUPS).toHaveLength(35)
-    expect(mechanical).toHaveLength(397)
+    expect(mechanical).toHaveLength(406)
     expect(ELEVATOR_GROUPS).toHaveLength(6)
     expect(elevator).toHaveLength(ELEVATOR_GROUPS.reduce((total, group) => total + group.rows.length, 0))
 
@@ -861,20 +861,21 @@ describe('searchBreakdown', () => {
 })
 
 describe('summaryChoices', () => {
-  it('returns detector choices and no standard panel-name choices', () => {
+  it('returns detector choices and standard panel-name choices', () => {
     expect(summaryChoices('熱感知器', '形式').length).toBeGreaterThan(0)
     expect(summaryChoices('熱感知器', '形式')).toBe(ELECTRICAL_CHOICES['熱感知器|形式'])
-    expect(summaryChoices('分電盤', '盤名称')).toEqual([])
+    // U6: 盤名称にも標準の選択肢（電灯分電盤 等）がある。
+    expect(summaryChoices('分電盤', '盤名称')).toContain('電灯分電盤')
     expect(summaryChoices('存在しない細目', '形式')).toEqual([])
   })
 })
 
 describe('SPEC-B11-2 building breakdown', () => {
-  it('appends 101 building groups and 799 rows with unique positional keys', () => {
+  it('appends 101 building groups and 804 rows (793 + 11 supplements) with unique positional keys', () => {
     const building = breakdownEntries('建築')
     expect(BUILDING_GROUPS).toHaveLength(101)
-    expect(building).toHaveLength(799)
-    expect(new Set(building.map(entry => entry.key)).size).toBe(799)
+    expect(building).toHaveLength(804)
+    expect(new Set(building.map(entry => entry.key)).size).toBe(804)
     expect(new Set(building.map(entry =>
       JSON.stringify([entry.section, entry.subject, entry.middle ?? '']),
     )).size).toBe(101)
@@ -992,6 +993,6 @@ describe('SPEC-B11-2 building breakdown', () => {
 
     expect(breakdownEntries('電気設備')).toHaveLength(974)
     expect(breakdownEntries().slice(0, legacyKeys.length).map(entry => entry.key)).toEqual(legacyKeys)
-    expect(breakdownEntries()).toHaveLength(legacyKeys.length + 799)
+    expect(breakdownEntries()).toHaveLength(legacyKeys.length + 804)
   })
 })

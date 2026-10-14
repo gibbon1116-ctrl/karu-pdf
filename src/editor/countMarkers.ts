@@ -1,11 +1,13 @@
 import { quantityLine, quantityMethod } from '../core/countFixtures'
 import { quantityDashes } from '../core/quantity'
-import { createElement } from 'react'
+import { createElement, memo } from 'react'
 import type { Point } from '../core/annotations'
 import { countHex, type CountStyle } from '../core/countFixtures'
 
 type Polygon = Point[]
 export interface CountMarkerData { outline: Polygon[]; fills: Polygon[]; strokes: Polygon[]; bright: boolean; color: string; opacity: number; code: { x: number; y: number; size: number } }
+type CountMarkerGeometry = Pick<CountMarkerData, 'outline' | 'fills' | 'strokes'>
+const markerGeometryCache = new Map<string, CountMarkerGeometry>()
 function regular(n: number, r: number, angle = -Math.PI / 2): Polygon { return Array.from({ length: n }, (_, i) => [Math.cos(angle + i * Math.PI * 2 / n) * r, Math.sin(angle + i * Math.PI * 2 / n) * r] as Point) }
 function polygon(shape: CountStyle['shape'], r: number): Polygon {
   if (shape === 'circle' || shape === 'doubleCircle') return regular(48, r)
@@ -30,7 +32,10 @@ function leftHalf(points: Polygon): Polygon {
   })
   return result
 }
-export function countMarkerData(style: CountStyle, x = 0, y = 0): CountMarkerData {
+function markerGeometry(style: CountStyle): CountMarkerGeometry {
+  const key = `${style.shape}|${style.size}|${style.fill}`
+  const cached = markerGeometryCache.get(key)
+  if (cached !== undefined) return cached
   const r = style.size / 2, outer = polygon(style.shape, r), outline = [outer], fills: Polygon[] = [], strokes: Polygon[] = []
   const inner = style.shape === 'doubleCircle' ? regular(48, r * .68) : undefined
   if (inner) outline.push(inner)
@@ -52,13 +57,35 @@ export function countMarkerData(style: CountStyle, x = 0, y = 0): CountMarkerDat
     hits.sort((a, b) => a[0] - b[0])
     for (let i = 0; i + 1 < hits.length; i += 2) strokes.push([hits[i], hits[i + 1]])
   }
+  const geometry = { outline, fills, strokes }
+  markerGeometryCache.set(key, geometry)
+  if (markerGeometryCache.size > 256) markerGeometryCache.clear()
+  return geometry
+}
+export function countMarkerData(style: CountStyle, x = 0, y = 0): CountMarkerData {
+  const r = style.size / 2, { outline, fills, strokes } = markerGeometry(style)
   const luminance = style.color.map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4)
   const move = (ps: Polygon[]) => ps.map(p => p.map(([a, b]) => [a + x, b + y] as Point))
   return { outline: move(outline), fills: move(fills), strokes: move(strokes), bright: luminance[0] * .2126 + luminance[1] * .7152 + luminance[2] * .0722 > .6, color: countHex(style.color), opacity: style.opacity, code: { x: x + r, y: y - r, size: style.size * .7 } }
 }
 export function countSvgPath(polygons: Polygon[], close = true): string { return polygons.map(p => p.length ? `M${p.map(([x, y]) => `${x},${y}`).join('L')}${close ? 'Z' : ''}` : '').join(' ') }
 export function countPdfPath(polygons: Polygon[], close = true): string { return polygons.map(p => p.map(([x, y], i) => `${x.toFixed(4)} ${y.toFixed(4)} ${i ? 'l' : 'm'}`).join('\n') + (close ? '\nh' : '')).join('\n') }
-export function CountMarker({ style, code = '', x = 0, y = 0, showCode = true }: { style: CountStyle; code?: string; x?: number; y?: number; showCode?: boolean }) {
+function sameCountMarkerProps(a: Parameters<typeof CountMarkerView>[0], b: Parameters<typeof CountMarkerView>[0]): boolean {
+  if (!Object.is(a.code, b.code) || !Object.is(a.showCode, b.showCode) || !Object.is(a.x, b.x) || !Object.is(a.y, b.y)) return false
+  if (a.style === b.style) return true
+  const keys = new Set([...Object.keys(a.style), ...Object.keys(b.style)])
+  for (const key of keys) {
+    if (!Object.hasOwn(a.style, key) || !Object.hasOwn(b.style, key)) return false
+    if (key === 'color') {
+      if (a.style.color.length !== b.style.color.length) return false
+      for (let i = 0; i < a.style.color.length; i++) {
+        if (!Object.is(a.style.color[i], b.style.color[i])) return false
+      }
+    } else if (!Object.is(a.style[key as keyof CountStyle], b.style[key as keyof CountStyle])) return false
+  }
+  return true
+}
+function CountMarkerView({ style, code = '', x = 0, y = 0, showCode = true }: { style: CountStyle; code?: string; x?: number; y?: number; showCode?: boolean }) {
   const d = countMarkerData(style, x, y), outline = countSvgPath(d.outline)
   return createElement('g', { opacity: d.opacity, pointerEvents: 'none', 'data-count-shape': style.shape, 'data-count-fill': style.fill },
     d.bright && createElement('path', { d: outline, fill: 'none', stroke: '#404040', strokeWidth: 1.8 }),
@@ -66,6 +93,8 @@ export function CountMarker({ style, code = '', x = 0, y = 0, showCode = true }:
     createElement('path', { d: outline + ' ' + countSvgPath(d.strokes, false), fill: 'none', stroke: d.color, strokeWidth: .8, strokeLinejoin: 'round' }),
     style.showCode && showCode && code && createElement('text', { x: d.code.x, y: d.code.y, fontSize: d.code.size, fill: d.bright ? '#404040' : d.color, fontFamily: 'KaruBIZUDGothic, sans-serif' }, code))
 }
+
+export const CountMarker = memo(CountMarkerView, sameCountMarkerProps)
 
 export function QuantitySwatch({ fixture, preview = false }: { preview?: boolean; fixture: import('../core/countFixtures').CountFixture }) {
   const line = quantityLine(fixture)

@@ -2,6 +2,7 @@ import {
   COUNT_UNITS,
   fixtureBreakdownError,
   type BreakdownBook,
+  type BreakdownPosition,
   type FixturePreset,
   type QuantityKind,
   type QuantityMethod,
@@ -135,6 +136,53 @@ export function summaryChoices(
         : undefined
   const key = `${rowName}|${label}`
   return choices !== undefined && Object.hasOwn(choices, key) ? choices[key] : []
+}
+
+function summaryEntryForFixture(
+  position: BreakdownPosition | undefined,
+  name: string,
+): BreakdownEntry | undefined {
+  if (!position) return undefined
+  const rowName = position.item || name
+  return breakdownEntries(position.book).find(entry =>
+    entry.section === position.section
+    && entry.subject === position.subject
+    && (entry.middle ?? '') === (position.middle ?? '')
+    && entry.row.name === rowName,
+  )
+}
+
+/** 項目の内訳書の位置と名称に対応する摘要の標準の選択肢。 */
+export function summaryChoicesForFixture(
+  position: BreakdownPosition | undefined,
+  name: string,
+  label: string,
+): readonly string[] {
+  const entry = summaryEntryForFixture(position, name)
+  if (!entry) return []
+  if (!entry.row.separate) {
+    return summaryChoices(entry.row.name, label, entry.book)
+  }
+  return [...new Set(entry.details
+    .filter(detail => detail.name === name)
+    .flatMap(detail => detail.summary ?? [])
+    .filter(slot => slot.label === label)
+    .flatMap(slot => slot.choices ?? []))]
+}
+
+/** 項目の内訳書の位置と名称に対応する摘要の区分名。 */
+export function summaryLabelsForFixture(
+  position: BreakdownPosition | undefined,
+  name: string,
+): readonly string[] {
+  const entry = summaryEntryForFixture(position, name)
+  if (!entry) return []
+  const labels = entry.row.separate
+    ? entry.details
+      .filter(detail => detail.name === name)
+      .flatMap(detail => (detail.summary ?? []).map(slot => slot.label))
+    : entry.row.summary ?? []
+  return [...new Set(labels.map(label => label.trim()).filter(Boolean))]
 }
 
 /** 細目の摘要の区分を、項目を分けない施工条件として扱うか。 */

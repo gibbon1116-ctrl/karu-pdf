@@ -54,7 +54,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/core/quantity.ts`、`src/app/routeSets.ts`、`tests/`、`e2e/`（期待値の文字の更新だけ）
 - 変更しないファイル: 上以外。
 

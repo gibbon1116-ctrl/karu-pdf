@@ -154,7 +154,7 @@ describe('visual search count marks', () => {
   it('sets and removes the transient search area with non-dirty notifications and ignores unchanged bounds', async () => {
     const store = await setup()
     expect(store.symbolSearchArea).toBeNull()
-    const notify = vi.spyOn(store as unknown as { notify(changed: boolean): void }, 'notify')
+    const notify = vi.spyOn(store as unknown as { notifyUi(): void }, 'notifyUi')
     const changed = vi.fn()
     const unsubscribe = store.subscribe(changed)
     const area = { pageIndex: 1, rect: [10, 20, 110, 80] as Rect }
@@ -164,7 +164,6 @@ describe('visual search count marks', () => {
     expect(store.symbolSearchArea).not.toBe(area)
     expect(store.symbolSearchArea?.rect).not.toBe(area.rect)
     expect(notify).toHaveBeenCalledTimes(1)
-    expect(notify).toHaveBeenLastCalledWith(false)
     expect(changed).toHaveBeenCalledTimes(1)
 
     store.setSymbolSearchArea({ pageIndex: area.pageIndex, rect: [...area.rect] })
@@ -174,9 +173,7 @@ describe('visual search count marks', () => {
     store.setSymbolSearchArea(null)
     expect(store.symbolSearchArea).toBeNull()
     expect(notify).toHaveBeenCalledTimes(2)
-    expect(notify).toHaveBeenLastCalledWith(false)
     expect(changed).toHaveBeenCalledTimes(2)
-    expect(notify.mock.calls.every(([dirty]) => dirty === false)).toBe(true)
 
     unsubscribe()
     notify.mockRestore()
@@ -187,13 +184,12 @@ describe('visual search count marks', () => {
     const area = { pageIndex: 0, rect: [10, 20, 110, 80] as Rect }
     expect(store.symbolCandidates).toBeNull()
     store.setSymbolSearchArea(area)
-    const notify = vi.spyOn(store as unknown as { notify(changed: boolean): void }, 'notify')
+    const notify = vi.spyOn(store as unknown as { notifyUi(): void }, 'notifyUi')
 
     store.clearSymbolCandidates()
     expect(store.symbolSearchArea).toBeNull()
     expect(store.symbolCandidates).toBeNull()
     expect(notify).toHaveBeenCalledTimes(1)
-    expect(notify).toHaveBeenLastCalledWith(false)
 
     store.beginSymbolCandidates('led', sampleRect)
     store.appendSymbolCandidates([candidate(40, 50)])
@@ -205,7 +201,6 @@ describe('visual search count marks', () => {
     expect(store.symbolSearchArea).toBeNull()
     expect(store.symbolCandidates).toBeNull()
     expect(notify).toHaveBeenCalledTimes(1)
-    expect(notify).toHaveBeenLastCalledWith(false)
 
     notify.mockRestore()
   })

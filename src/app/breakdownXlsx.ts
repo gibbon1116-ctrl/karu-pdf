@@ -10,7 +10,7 @@ import {
   type QuantityKind,
 } from '../core/countFixtures'
 import type { QuantityIndex } from '../core/quantityIndex'
-import { readFixtureLink } from '../core/fixtureLink'
+import { readFixtureLink, fixtureLinkSectionText } from '../core/fixtureLink'
 import type { XlsxCell, XlsxMerge, XlsxSheet, XlsxStyle } from '../core/xlsxWriter'
 
 export interface BreakdownSheetOptions {
@@ -187,7 +187,11 @@ function linkSummary(
     const code = original?.code || original?.name || source.itemId
     const operation = source.perM !== undefined
       ? `÷${source.perM}m` : `×${source.factor ?? 1}`
-    if (link.kind !== 'mass') return `${code}${operation}`
+    if (link.kind !== 'mass') {
+      const calculatedSource = basis.get(source.itemId)
+      return `${code}${operation}`
+        + (calculatedSource !== undefined ? fixtureLinkSectionText(calculatedSource) : '')
+    }
     const prefix = source.perM !== undefined || (source.factor ?? 1) !== 1 ? operation : ''
     return `${code}${prefix}×${basis.get(source.itemId)?.unitMassKg ?? 0}kg÷1000`
       + (link.densityTPerM3 !== undefined ? `÷${link.densityTPerM3}t/㎥` : '')

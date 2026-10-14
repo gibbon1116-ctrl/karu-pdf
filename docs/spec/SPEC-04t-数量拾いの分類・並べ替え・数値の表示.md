@@ -31,7 +31,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\quantity-pickup-expansion-ea43cf`
+- 対象フォルダ: `<作業フォルダ>`
 - 新しく作るファイル: `src/app/fixtureOrder.ts`（並べ替えの純粋な関数）、`tests/fixtureOrder.test.ts`、`e2e/quantity-order.annotate.spec.ts`
 - 変更してよいファイル: `src/app/FixtureDialog.tsx`、`src/app/FixturePanel.tsx`、`src/app/HelpDialog.tsx`、`src/editor/AnnotationStore.ts`、`src/editor/AnnotationLayer.tsx`、`src/editor/MeasurementOverlay.tsx`、`src/styles.css`、`tests/`、`e2e/`（既存の試験で、今回の変更で文字や操作が変わる箇所だけ）
 - 変更しないファイル: `docs/`、`public/`、設定ファイル、`.env.*`、`src/core/`（保存の形は変えない）、`src/worker/`、`src/viewer/`、`scripts/`

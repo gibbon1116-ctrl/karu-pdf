@@ -10,7 +10,7 @@
 
 ## 背景
 
-計画: `docs/調査/連動B05_計画.md`。B05-1 で `CountFixture.link`（`src/core/fixtureLink.ts`）と、数量の索引の連動の計算（`QuantityIndex.linkResult(id)`）、店の `linkDependents(id)` ができた。この SPEC で画面を作る。集計表・Excel は B05-3。
+計画: 非公開の調査資料。B05-1 で `CountFixture.link`（`src/core/fixtureLink.ts`）と、数量の索引の連動の計算（`QuantityIndex.linkResult(id)`）、店の `linkDependents(id)` ができた。この SPEC で画面を作る。集計表・Excel は B05-3。
 
 ## 対象
 

@@ -49,7 +49,7 @@ Claude Code の計測で、残りの主因は保存のときの MuPDF のジャ�
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/core/editTransaction.ts`、`src/core/annotations.ts`（区切りの呼出しを足すだけ）、`tests/`（下の試験の追加）
 - 変更しないファイル: 上記以外。特に `src/worker/`、`src/client/`、`src/app/`、`src/editor/`、`e2e/`
 

@@ -10,7 +10,7 @@
 
 ## 目的
 
-計画: `docs/調査/施工条件別数量拾い_計画.md`。前提: SPEC-07a（`QuantityEntry.condition`・`part`・`riseIndex`、`QuantityIndex.byCondition`）、SPEC-07b（`CountFixture.conditions`）、SPEC-07f（順に確認の `reviewCursor.ts`）。
+計画: 非公開の調査資料。前提: SPEC-07a（`QuantityEntry.condition`・`part`・`riseIndex`、`QuantityIndex.byCondition`）、SPEC-07b（`CountFixture.conditions`）、SPEC-07f（順に確認の `reviewCursor.ts`）。
 
 利用者の指示:
 - 材料・規格・施工条件・数量単位ごとに集計する。
@@ -126,7 +126,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - `src/app/QuantityTable.tsx`、`src/app/QuantityBreakdown.tsx`、`src/app/annotationCsv.ts`、`src/app/CsvExportDialog.tsx`、`src/app/HelpDialog.tsx`
   - `src/core/quantityIndex.ts`（集計の補助を足すだけ。entry の作り方は変えない）

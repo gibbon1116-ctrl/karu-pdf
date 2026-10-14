@@ -27,7 +27,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\quantity-pickup-expansion-ea43cf`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/core/countFixtures.ts`、`src/app/FixtureDialog.tsx`、`src/app/FixturePanel.tsx`、`tests/countFixtures.test.ts`、`e2e/`（新しい試験か、`quantity-length` などへの追加）
 - 変更しないファイル: 上以外
 

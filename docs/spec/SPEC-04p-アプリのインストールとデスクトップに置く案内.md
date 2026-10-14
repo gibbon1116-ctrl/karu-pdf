@@ -29,7 +29,7 @@
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: 新規 `src/app/installApp.ts`（インストールの状態の管理）、新規 `src/app/InstallAppUi.tsx`（案内の帯・手順の画面）、`src/App.tsx`（帯と画面を置くことと、メニューへの接続だけ）、`src/app/MenuBar.tsx`（ヘルプの項目の追加だけ）、`src/app/StartScreen.tsx`（インストールの欄の追加だけ）、`src/app/HelpDialog.tsx`（説明の追加）、`src/styles.css`、`tests/`、`e2e/`
 - 変更しないファイル: 上記以外。`vite.config.ts`（manifest）、`src/main.tsx`、`src/security/`、`scripts/` は変えない
 

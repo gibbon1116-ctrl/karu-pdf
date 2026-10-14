@@ -133,6 +133,8 @@ test('連動の元と先を一覧・カード・集計表に表示し、構成�
       && rect.bottom <= window.innerHeight - 8
   })).toBe(true)
 
+  // 候補に規格・摘要の行が付いて背が高くなったので、先に見える所へ動かす（スクロールでカードは閉じる）。
+  await boxes.nth(1).scrollIntoViewIfNeeded()
   await boxes.nth(1).hover()
   await expect(card).toContainText('摘要: 種別 壁用')
   await picker.getByLabel('構成要素を検索', { exact: true }).hover()

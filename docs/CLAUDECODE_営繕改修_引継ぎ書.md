@@ -10,7 +10,7 @@
 
 | 項目 | 状態 |
 |---|---|
-| 作業場所 | `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ` |
+| 作業場所 | `<作業フォルダ>` |
 | ブランチ | `codex/eizen-review-upgrade`（origin へ push 済み） |
 | 試用版 1.2.1 のソースコミット | `6eabc2bd77767909513db9cb199b38dd5486ca99` |
 | その後のコミット | 文書（本書・報告）と、アプリのインストールの案内（SPEC-04p。`fb9d7c6`・`749dc6f`。公開サイトにだけ反映し、1.2.1 の配布物には入っていない）。`git log --oneline 6eabc2b..HEAD` で確かめる |
@@ -63,7 +63,7 @@
 復元先が未使用であることを確認し、旧版を別フォルダーに作る。現作業ツリーを `reset --hard` する必要はない。
 
 ```powershell
-Set-Location 'C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ'
+Set-Location '<作業フォルダ>'
 git worktree add --detach ../karu-pdf-before-eizen karu-pdf-before-eizen-20261003
 Set-Location ../karu-pdf-before-eizen
 npm.cmd ci
@@ -217,7 +217,7 @@ npm.cmd run build
 ### 起動・状態確認
 
 ```powershell
-Set-Location 'C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ'
+Set-Location '<作業フォルダ>'
 git branch --show-current
 git status --short
 git log --oneline -5
@@ -283,13 +283,13 @@ npm.cmd run package:fixed
 
 ```text
 かるPDFの営繕業務向け改修を、この作業ツリーで引き続き進めてください。
-作業場所：C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ
+作業場所：<作業フォルダ>
 ブランチ：codex/eizen-review-upgrade（origin へ push 済み）
 試用版 1.2.1 のソースコミット：6eabc2bd77767909513db9cb199b38dd5486ca99
 公開サイト（main）：1.2.1 にアプリのインストールの案内（SPEC-04p）を加えたもの（749dc6f）
 
 まずAGENTS.md、docs/CLAUDECODE_営繕改修_引継ぎ書.md、
-docs/営繕改修_実用性レビュー.md、docs/調査/営繕改修_試用版報告_1.2.1.md、
+docs/営繕改修_実用性レビュー.md、非公開の調査資料、
 docs/営繕改修_復元と性能判定.mdを読み、
 現在のGit状態と導入前タグ・bundleが残っていることを確認してください。
 実装済み機能、ローカル試用版、試験記録を使い、調査・実装を最初からやり直さないでください。

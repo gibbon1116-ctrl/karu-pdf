@@ -49,7 +49,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\.codex\worktrees\dfd5\PDF編集アプリ`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/client/SymbolSearchClient.ts`、`e2e/symbol-search.annotate.spec.ts`
 - 変更しないファイル: 上以外。
 

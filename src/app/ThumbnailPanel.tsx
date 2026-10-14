@@ -3,6 +3,7 @@ import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore 
 import type { RenderScheduler } from '../client/RenderScheduler'
 import type { PageSize } from '../core/mupdfDoc'
 import type { AnnotationStore } from '../editor/AnnotationStore'
+import { perfCount } from '../perf/counters'
 
 const THUMBNAIL_WIDTH = 120
 const ITEM_GAP = 14
@@ -71,6 +72,7 @@ export function ThumbnailPanel({ docId, pageSizes, currentPage, scheduler, annot
   const drawingUi = useContext(DrawingUiContext)
   const [contextPage, setContextPage] = useState<number | null>(null)
   const version = useSyncExternalStore(annotationStore.subscribe, annotationStore.getSnapshot)
+  perfCount('ThumbnailPanel.render')
   void version
   const scrollerRef = useRef<HTMLDivElement>(null)
   const userScrollingRef = useRef(false)

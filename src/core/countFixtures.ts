@@ -55,6 +55,30 @@ export function fixtureCode(f: Pick<CountFixture, 'code' | 'spec'>): string { re
 export function fixtureDrawingCode(f: Pick<CountFixture, 'code' | 'spec' | 'kind'>): string { return f.kind === 'length' ? fixtureCode(f) : f.code }
 /** 長さ・面積・体積の札や経路構成用。個数の印の横の文字には使わない。 */
 export function fixtureLabelCode(f: Pick<CountFixture, 'code' | 'spec' | 'kind' | 'name'>): string { return fixtureDrawingCode(f) || f.name }
+/** 候補の一覧に出す文字。記号は名称と違うときだけ。detail は規格と摘要（「区分 値」を「・」でつなぐ）。 */
+export function fixtureChoiceLabel(f: Pick<CountFixture, 'code' | 'spec' | 'name' | 'summary' | 'kind'>): {
+  code: string
+  name: string
+  detail: string
+  text: string
+} {
+  const normalizeItemName = (value: string) =>
+    value.normalize('NFKC').replace(/\s+/g, '')
+  const name = f.name
+  const trimmedCode = f.code.trim()
+  const code = normalizeItemName(trimmedCode) === normalizeItemName(name)
+    ? '' : trimmedCode
+  const spec = f.spec?.trim() ?? ''
+  const parts: string[] = []
+  if (spec && !code.includes(spec)) parts.push(`規格 ${spec}`)
+  for (const field of f.summary ?? []) {
+    const value = field.value.trim()
+    if (value) parts.push([field.label.trim(), value].filter(Boolean).join(' '))
+  }
+  const detail = parts.join('・')
+  const text = [code, name, detail ? `（${detail}）` : ''].filter(Boolean).join(' ')
+  return { code, name, detail, text }
+}
 export function quantityKind(f: CountFixture): QuantityKind { return f.kind ?? 'count' }
 /** 数量の単位。換算があれば換算後の単位を使う。 */
 export function quantityUnit(f: Pick<CountFixture, 'kind' | 'unit' | 'convert' | 'link' | 'attributes'>): string {
@@ -144,7 +168,7 @@ export function fixtureBackfillError(
   }
 }
 
-function validFixtureBreakdown(value: unknown): value is BreakdownPosition {
+export function validFixtureBreakdown(value: unknown): value is BreakdownPosition {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const p = value as Partial<Record<keyof BreakdownPosition, unknown>>
   return BREAKDOWN_BOOKS.some(book => book === p.book)

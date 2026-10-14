@@ -27,6 +27,7 @@ function setup() {
     pageRoomSets: new Map<number, string>(),
   })
   Object.defineProperty(store, 'notify', { value: notify })
+  Object.defineProperty(store, 'notifyUi', { value: notify })
   Object.defineProperty(store, 'history', { value: { push } })
   Object.defineProperty(store, 'selectedIds', { value: () => ['area'] })
   Object.defineProperty(store, 'get', {

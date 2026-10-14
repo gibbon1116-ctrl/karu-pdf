@@ -20,8 +20,10 @@ import {
   summaryIsCondition,
   type BreakdownEntry,
 } from '../src/core/breakdownMaster'
-import { ELECTRICAL_DETAILS, ELECTRICAL_ROW_MASTERS } from '../src/core/breakdown/electricalDetails'
+import { ELECTRICAL_CHOICES, ELECTRICAL_DETAILS } from '../src/core/breakdown/electricalDetails'
+import { MASTER_ABSORPTIONS } from '../src/core/breakdown/masterAbsorption'
 import { MECHANICAL_DETAILS, PIPE_LOCATIONS } from '../src/core/breakdown/mechanicalDetails'
+import { MERGED_ROW_CATEGORY } from '../src/core/breakdown/mergedRows'
 import { BUILDING_GROUPS } from '../src/core/breakdown/buildingGroups'
 import {
   BUILDING_DETAILS,
@@ -71,6 +73,21 @@ const detailSources = [
   { book: '建築', details: BUILDING_RENOVATION_DETAILS, categories: {}, section: '庁舎（改修）' },
 ] as const
 
+function expectedMasterKey(type: { field: string; category: string; type: string }): string {
+  return `master:${JSON.stringify([type.field, type.category, type.type])}`
+}
+
+const absorbedMasterKeys = new Set(
+  MASTER_ABSORPTIONS.map(absorption => `master:${JSON.stringify(absorption.master)}`),
+)
+const remainingQuantityMasters = QUANTITY_MASTER.filter(type =>
+  !absorbedMasterKeys.has(expectedMasterKey(type)),
+)
+
+function itemsWithoutStandardEntries(): readonly CatalogItem[] {
+  return items.filter(item => !item.key.startsWith('std:'))
+}
+
 function requiredItem(predicate: (item: CatalogItem) => boolean): CatalogItem {
   const item = items.find(predicate)
   if (item === undefined) throw new Error('試験に必要な品目が見つかりません。')
@@ -83,7 +100,7 @@ function requiredEntry(predicate: (entry: BreakdownEntry) => boolean): Breakdown
   return entry
 }
 
-function expectedCategory(entry: BreakdownEntry): string {
+function expectedBaseCategory(entry: BreakdownEntry): string {
   if (entry.book === '建築') {
     return entry.middle?.startsWith('撤去')
       ? '撤去'
@@ -96,16 +113,60 @@ function expectedCategory(entry: BreakdownEntry): string {
   return entry.subject
 }
 
-function expectedRowKey(entry: BreakdownEntry): string {
-  const parts = [expectedCategory(entry), entry.row.name]
-  const hasDifferentUnit = entries.some(other =>
-    !other.row.separate
-    && other.book === entry.book
-    && other.row.name === entry.row.name
-    && other.row.unit !== entry.row.unit,
-  )
+function expectedCategory(entry: BreakdownEntry): string {
+  if (entry.book === '電気設備' || entry.book === '機械設備') {
+    return MERGED_ROW_CATEGORY[entry.book][entry.row.name] ?? expectedBaseCategory(entry)
+  }
+  return expectedBaseCategory(entry)
+}
+
+function isExpectedLumpSumRow(entry: BreakdownEntry): boolean {
+  // 電気・機械設備の1式・別紙明細の行で、明細から品目が1つもできない行は、行自体が1式の品目になる（SPEC-U2）。
+  if ((entry.book !== '電気設備' && entry.book !== '機械設備') || !entry.row.separate) return false
+  const items = catalogItemsForBreakdownRow(entry)
+  return items.length > 0 && items.every(item => item.key.startsWith('row:'))
+}
+
+function isExpectedCatalogRow(entry: BreakdownEntry): boolean {
+  return !entry.row.separate || isExpectedLumpSumRow(entry)
+}
+
+let expectedCatalogRows: readonly BreakdownEntry[] | undefined
+function catalogRows(): readonly BreakdownEntry[] {
+  return expectedCatalogRows ??= entries.filter(isExpectedCatalogRow)
+}
+
+/** 実装の rowKey と同じ: [分類, 名称]（建築と、同じ編に単位違いの同名の行がある名称は単位も）。 */
+function expectedScopedParts(entry: BreakdownEntry): unknown[] {
+  const parts: unknown[] = [expectedBaseCategory(entry), entry.row.name]
+  const hasDifferentUnit = catalogRows().some(other =>
+    other.book === entry.book && other.row.name === entry.row.name && other.row.unit !== entry.row.unit)
   if (entry.book === '建築' || hasDifferentUnit) parts.push(entry.row.unit)
-  return `row:${JSON.stringify(entry.book === '電気設備' ? parts : [entry.book, ...parts])}`
+  return entry.book === '電気設備' ? parts : [entry.book, ...parts]
+}
+
+function expectedOwnRowKey(entry: BreakdownEntry): string {
+  const scoped = expectedScopedParts(entry)
+  const base = `row:${JSON.stringify(scoped)}`
+  if (entry.book !== '電気設備' && entry.book !== '機械設備') return base
+  // 同じ基の鍵で摘要の区分が違う行は、最初の区分の並び以外を鍵の末尾の配列で分ける。
+  const first = catalogRows().find(other =>
+    other.book === entry.book && `row:${JSON.stringify(expectedScopedParts(other))}` === base)!
+  const summary = entry.row.summary ?? []
+  return JSON.stringify(first.row.summary ?? []) === JSON.stringify(summary)
+    ? base
+    : `row:${JSON.stringify([...scoped, summary])}`
+}
+
+function expectedRowKey(entry: BreakdownEntry): string {
+  if (entry.book !== '電気設備' && entry.book !== '機械設備') return expectedOwnRowKey(entry)
+  // 名称・単位・摘要の区分の並びが同じ行は、最初の行の鍵の品目にまとまる（SPEC-U2）。
+  const first = catalogRows().find(other =>
+    other.book === entry.book
+    && other.row.name === entry.row.name
+    && other.row.unit === entry.row.unit
+    && JSON.stringify(other.row.summary ?? []) === JSON.stringify(entry.row.summary ?? []))!
+  return expectedOwnRowKey(first)
 }
 
 function expectedDetailKey(book: BreakdownEntry['book'], rowName: string, name: string, section?: string): string {
@@ -131,11 +192,9 @@ const position: CatalogPosition = {
 
 describe('catalogItems', () => {
   it('contains all three sources in source order, deduplicates rows and reuses the list', () => {
-    const masterKeys = [...new Set(QUANTITY_MASTER.map(type =>
-      `master:${JSON.stringify([type.field, type.category, type.type])}`,
-    ))]
-    // 別紙明細でない行は、すべて規格のある品目に対応する（SPEC-B16、例外なし）。
-    const rowKeys = [...new Set(entries.filter(entry => !entry.row.separate).map(expectedRowKey))]
+    const masterKeys = [...new Set(remainingQuantityMasters.map(expectedMasterKey))]
+    // 別紙明細でない行と、電気・機械設備の品目がない1式の行を品目として扱う。
+    const rowKeys = [...new Set(entries.filter(isExpectedCatalogRow).map(expectedRowKey))]
     const detailKeys = detailSources.flatMap(({ book, details, section }) =>
       Object.entries(details).flatMap(([rowName, templates]) =>
         templates
@@ -148,18 +207,19 @@ describe('catalogItems', () => {
       ),
     )
 
-    expect(items.map(item => item.key)).toEqual([...masterKeys, ...rowKeys, ...detailKeys])
-    expect(items.filter(item => item.key.startsWith('master:'))).toHaveLength(masterKeys.length)
-    expect(items.filter(item => item.key.startsWith('row:'))).toHaveLength(rowKeys.length)
-    expect(items.filter(item => item.key.startsWith('detail:'))).toHaveLength(detailKeys.length)
-    expect(new Set(items.map(item => item.key)).size).toBe(items.length)
-    expect(items.every(item => item.options.length > 0)).toBe(true)
-    expect(items.filter(item => !item.options.length).map(item => item.key)).toEqual([])
+    const comparableItems = itemsWithoutStandardEntries()
+    expect(comparableItems.map(item => item.key)).toEqual([...masterKeys, ...rowKeys, ...detailKeys])
+    expect(comparableItems.filter(item => item.key.startsWith('master:'))).toHaveLength(masterKeys.length)
+    expect(comparableItems.filter(item => item.key.startsWith('row:'))).toHaveLength(rowKeys.length)
+    expect(comparableItems.filter(item => item.key.startsWith('detail:'))).toHaveLength(detailKeys.length)
+    expect(new Set(comparableItems.map(item => item.key)).size).toBe(comparableItems.length)
+    expect(comparableItems.every(item => item.options.length > 0)).toBe(true)
+    expect(comparableItems.filter(item => !item.options.length).map(item => item.key)).toEqual([])
     expect(catalogItems()).toBe(items)
   })
 
-  it('retains every master type, specification and condition in source order', () => {
-    for (const type of QUANTITY_MASTER) {
+  it('retains every unabsorbed master type, specification and condition in source order', () => {
+    for (const type of remainingQuantityMasters) {
       const item = requiredItem(candidate =>
         candidate.key === `master:${JSON.stringify([type.field, type.category, type.type])}`,
       )
@@ -186,13 +246,66 @@ describe('catalogItems', () => {
     }
   })
 
+  it('removes absorbed masters and retains their specifications and conditions on every merge target', () => {
+    const sourceEntries = masterEntries()
+    for (const absorption of MASTER_ABSORPTIONS) {
+      const [field, category, type] = absorption.master
+      const key = `master:${JSON.stringify(absorption.master)}`
+      expect(items.some(item => item.key === key), key).toBe(false)
+
+      const source = sourceEntries.filter(entry =>
+        entry.field === field && entry.category === category && entry.type === type,
+      )
+      expect(source.length, key).toBeGreaterThan(0)
+      expect(absorption.targets.length, key).toBeGreaterThan(0)
+      const sourceKeys = new Set(source.map(entry => entry.key))
+
+      for (const target of absorption.targets) {
+        const targets = items.filter(item => {
+          if (item.field !== field) return false
+          if ('row' in target) {
+            return item.key.startsWith('row:')
+              && item.name === target.row
+              && (target.unit === undefined || item.unit === target.unit)
+          }
+          return item.key.startsWith('detail:')
+            && item.breakdownItem === target.detailRow
+            && item.name === target.detail
+        })
+        expect(targets.length, `${key}/${JSON.stringify(target)}`).toBeGreaterThan(0)
+        if (absorption.mode === 'drop') continue
+
+        for (const item of targets) {
+          const options = item.options.filter(option => sourceKeys.has(option.key))
+          expect(options.map(option => option.key), `${key}/${item.key}`)
+            .toEqual(source.map(entry => entry.key))
+          for (const [index, option] of options.entries()) {
+            const entry = source[index]
+            expect(option.name, option.key).toBe(item.name)
+            expect(option.formerName, option.key).toBe(entry.name)
+            for (const property of ['code', 'spec', 'kind', 'method', 'defaults', 'conditions'] as const) {
+              expect(option[property], `${item.key}/${option.key}/${property}`)
+                .toEqual(entry[property])
+            }
+          }
+        }
+      }
+    }
+  })
+
   it('unifies wiring accessory categories and assigns electrical breakdown items', () => {
     for (const category of ['コンセント', 'スイッチ']) {
       const types = QUANTITY_MASTER.filter(type => type.category === category)
       expect(types.length).toBeGreaterThan(0)
       for (const type of types) {
+        const optionKeys = new Set(masterEntries()
+          .filter(entry => entry.field === type.field
+            && entry.category === type.category && entry.type === type.type)
+          .map(entry => entry.key))
         const item = requiredItem(candidate =>
-          candidate.key === `master:${JSON.stringify([type.field, type.category, type.type])}`,
+          candidate.field === type.field
+          && candidate.key.startsWith('detail:')
+          && candidate.options.some(option => optionKeys.has(option.key)),
         )
         expect(item.category).toBe('配線器具')
       }
@@ -200,8 +313,10 @@ describe('catalogItems', () => {
     expect(conduit.breakdownItem).toBe('電線管')
     expect(requiredItem(item => item.key.startsWith('master:') && item.type === 'MD').breakdownItem)
       .toBe('金属ダクト')
-    expect(requiredItem(item => item.key.startsWith('master:') && item.type === 'DL').breakdownItem)
-      .toBe('ＬＥＤ照明器具')
+    expect(requiredItem(item =>
+      item.field === '電気設備' && item.key.startsWith('row:')
+      && item.name === 'ＬＥＤ照明器具' && item.unit === '個',
+    ).breakdownItem).toBe('ＬＥＤ照明器具')
   })
 
   it('uses material categories and the first matching quantity row', () => {
@@ -263,6 +378,7 @@ describe('catalogItems', () => {
     for (const item of items) {
       expect(item.search).toBe(normalizeMasterText([
         item.field, item.category, item.type, item.name,
+        ...(item.formerNames ?? []),
         ...item.options.flatMap(option => [option.label, option.spec ?? '']),
         ...item.slots.flatMap(slot => [slot.label, ...(slot.choices ?? [])]),
       ].join(' ')))
@@ -275,23 +391,17 @@ describe('catalogItemsForBreakdownRow', () => {
     for (const entry of entries) {
       const actual = catalogItemsForBreakdownRow(entry)
       if (!entry.row.separate) {
-        // SPEC-B17: 対応する電気器具を先に並べ、従来の行の品目を最後に残す。
-        const rowMaster = entry.book === '電気設備'
-          && Object.hasOwn(ELECTRICAL_ROW_MASTERS, entry.row.name)
-          ? ELECTRICAL_ROW_MASTERS[entry.row.name]
-          : undefined
-        const masterKeys = rowMaster === undefined ? [] : items
-          .filter(item =>
-            item.key.startsWith('master:')
-            && item.field === '電気設備'
-            && rowMaster.types.includes(item.type),
-          )
-          .map(item => `${item.key}#row:${expectedRowKey(entry)}`)
+        // SPEC-U1: 既存マスタの規格は行の品目に吸収され、品目は一つになる。
         expect(actual.map(item => item.key), entry.key)
-          .toEqual([...masterKeys, expectedRowKey(entry)])
+          .toEqual([expectedRowKey(entry)])
         expect(actual.every(item =>
           item.unit === entry.row.unit && item.options.length > 0,
         ), entry.key).toBe(true)
+        continue
+      }
+      if (isExpectedLumpSumRow(entry)) {
+        expect(actual.map(item => item.key), entry.key).toEqual([expectedRowKey(entry)])
+        expect(actual.every(item => item.unit === '式' && item.options.length > 0), entry.key).toBe(true)
         continue
       }
       const expectedKeys = entry.details.flatMap(template => {
@@ -345,9 +455,10 @@ describe('catalogItemsForBreakdownRow', () => {
 })
 
 describe('SPEC-B28 representativeBreakdownPosition', () => {
-  it('maps DL and its row overlays to the headquarters lighting branch', () => {
+  it('maps the absorbed lighting item to the headquarters lighting branch', () => {
     const dl = requiredItem(item =>
-      item.key.startsWith('master:') && item.field === '電気設備' && item.type === 'DL',
+      item.key.startsWith('row:') && item.field === '電気設備'
+      && item.name === 'ＬＥＤ照明器具' && item.unit === '個',
     )
     const expected = {
       book: '電気設備',
@@ -365,9 +476,18 @@ describe('SPEC-B28 representativeBreakdownPosition', () => {
     )
     expect(lightingRows.some(entry => entry.row.unit === '灯')).toBe(true)
     for (const entry of lightingRows) {
-      const overlay = catalogItemsForBreakdownRow(entry).find(item => item.type === 'DL')
-      expect(overlay, entry.key).toBeDefined()
-      expect(representativeBreakdownPosition(overlay!), entry.key).toEqual(expected)
+      const lighting = catalogItemsForBreakdownRow(entry)
+        .find(item => item.key === expectedRowKey(entry))
+      expect(lighting, entry.key).toBeDefined()
+      expect(lighting!.name, entry.key).toBe('ＬＥＤ照明器具')
+      expect(lighting!.unit, entry.key).toBe(entry.row.unit)
+      expect(lighting!.options.some(option =>
+        option.code === 'DL' && option.formerName !== undefined,
+      ), entry.key).toBe(true)
+      // 「灯」の行は屋外の外灯だけにある（庁舎の行が無いので屋外が代表）。
+      expect(representativeBreakdownPosition(lighting!), entry.key).toEqual(lighting!.unit === '個'
+        ? expected
+        : { book: '電気設備', section: '屋外', subject: '構内配電線路', middle: '外灯', item: 'ＬＥＤ照明器具' })
     }
   })
 
@@ -442,7 +562,7 @@ describe('SPEC-B28 representativeBreakdownPosition', () => {
 
 describe('SPEC-B30', () => {
   it('assigns a representative breakdown position to every catalog item', () => {
-    const missing = catalogItems()
+    const missing = itemsWithoutStandardEntries()
       .filter(item => representativeBreakdownPosition(item) === undefined)
       .map(item => item.key)
     expect(missing).toEqual([])
@@ -461,15 +581,15 @@ describe('SPEC-B30', () => {
     expect(unmatched).toEqual([])
   })
 
-  it('requires every representative master key to exist in the catalog', () => {
+  it('requires every unabsorbed representative master key to exist in the catalog', () => {
     const keys = new Set(catalogItems().map(item => item.key))
     const unmatched = REPRESENTATIVE_POSITION_ROWS
       .map(row => `master:${JSON.stringify(row.master)}`)
-      .filter(key => !keys.has(key))
+      .filter(key => !keys.has(key) && !absorbedMasterKeys.has(key))
     expect(unmatched).toEqual([])
   })
 
-  it('maps paving without a middle and C2 to the outlet branch', () => {
+  it('maps paving without a middle and the absorbed outlet item to the lighting branch', () => {
     const paving = requiredItem(item =>
       item.key === `master:${JSON.stringify(['建築', '外部（面積）', '舗装'])}`,
     )
@@ -482,14 +602,18 @@ describe('SPEC-B30', () => {
     })
     expect(pavingPosition).not.toHaveProperty('middle')
 
-    const c2 = requiredItem(item =>
-      item.key === `master:${JSON.stringify(['電気設備', 'コンセント', 'C2'])}`,
+    const outletItem = requiredItem(item =>
+      item.field === '電気設備' && item.key.startsWith('detail:')
+      && item.breakdownItem === '配線器具' && item.name === 'コンセント',
     )
-    expect(representativeBreakdownPosition(c2)).toEqual({
+    expect(outletItem.options.some(option =>
+      option.code === 'C2' && option.formerName !== undefined,
+    )).toBe(true)
+    expect(representativeBreakdownPosition(outletItem)).toEqual({
       book: '電気設備',
       section: '庁舎',
       subject: '電灯設備',
-      middle: 'コンセント分岐',
+      middle: '電灯分岐',
       item: '配線器具',
     })
   })
@@ -764,7 +888,7 @@ describe('catalogPresets', () => {
   })
 
   it('validates every catalog option without changing source data', () => {
-    for (const item of items) {
+    for (const item of itemsWithoutStandardEntries()) {
       for (const option of item.options) {
         const [preset] = catalogPresets(item, { options: [option.key] }, position)
         expect(preset, `${item.key}/${option.key}`).toBeDefined()
@@ -933,44 +1057,48 @@ describe('mechanical and elevator catalog', () => {
     }
   })
 
-  it('preserves the electrical catalog key sequence and mechanical master mappings', () => {
-    const masterKeys = [...new Set(QUANTITY_MASTER
+  it('preserves the electrical catalog key sequence and unabsorbed mechanical master mappings', () => {
+    const masterKeys = [...new Set(remainingQuantityMasters
       .filter(type => type.field === '電気設備')
-      .map(type => `master:${JSON.stringify([type.field, type.category, type.type])}`))]
-    // 同じ名前で単位の違う行（ＬＥＤ照明器具 個／灯 など）だけ、単位を鍵に入れて別の品目にする（SPEC-B16）。
-    const electricalUnits = new Map<string, Set<string>>()
-    for (const entry of entries) {
-      if (entry.book !== '電気設備' || entry.row.separate) continue
-      const units = electricalUnits.get(entry.row.name) ?? new Set<string>()
-      units.add(entry.row.unit)
-      electricalUnits.set(entry.row.name, units)
-    }
+      .map(expectedMasterKey))]
+    // 同名の行は摘要区分と単位に応じてまとめた鍵で照合する。
     const rowKeys = [...new Set(entries
-      .filter(entry => entry.book === '電気設備' && entry.pickable)
-      .map(entry => `row:${JSON.stringify(electricalUnits.get(entry.row.name)!.size > 1
-        ? [expectedCategory(entry), entry.row.name, entry.row.unit]
-        : [expectedCategory(entry), entry.row.name])}`))]
+      .filter(entry => entry.book === '電気設備' && (entry.pickable || isExpectedLumpSumRow(entry)))
+      .map(expectedRowKey))]
     const detailKeys = Object.entries(ELECTRICAL_DETAILS).flatMap(([rowName, templates]) =>
       templates
         .filter(template => template.master === undefined
           && (template.variants !== undefined || kindForUnit(template.unit) !== undefined || template.linked === 'carry'))
         .map(template => `detail:${JSON.stringify([rowName, template.name])}`),
     )
-    expect(items.filter(item => item.field === '電気設備').map(item => item.key))
+    expect(itemsWithoutStandardEntries()
+      .filter(item => item.field === '電気設備')
+      .map(item => item.key))
       .toEqual([...masterKeys, ...rowKeys, ...detailKeys])
 
     const mechanicalMasters = items.filter(item =>
       item.field === '機械設備' && item.key.startsWith('master:'),
     )
-    expect(mechanicalMasters.length).toBeGreaterThan(0)
+    const mechanicalMasterKeys = [...new Set(remainingQuantityMasters
+      .filter(type => type.field === '機械設備')
+      .map(expectedMasterKey))]
+    expect(mechanicalMasters.map(item => item.key)).toEqual(mechanicalMasterKeys)
     expect(mechanicalMasters.every(item => item.breakdownItem === undefined)).toBe(true)
   })
 })
 
 describe('conditionCandidatesFor', () => {
-  it('keeps every rule type and category consistent with the catalog', () => {
-    const types = new Set(items.map(item => item.type))
-    const categories = new Set(items.map(item => item.category))
+  it('keeps every rule type and category consistent with the catalog or absorbed masters', () => {
+    const types = new Set([
+      ...items.map(item => item.type),
+      ...MASTER_ABSORPTIONS.map(absorption => absorption.master[2]),
+    ])
+    const categories = new Set([
+      ...items.map(item => item.category),
+      ...MASTER_ABSORPTIONS.map(absorption =>
+        CATEGORY_ALIASES[absorption.master[1]] ?? absorption.master[1],
+      ),
+    ])
     const unmatchedTypes = [...new Set(CONDITION_RULES.flatMap(rule =>
       (rule.types ?? []).filter(type => !types.has(type)),
     ))]
@@ -1015,7 +1143,7 @@ describe('catalog construction conditions', () => {
   ]
 
   it('adds the required candidates to duct, board, rack, lighting and detector presets', () => {
-    const cases: Array<{ item: CatalogItem; conditions: string[] }> = [
+    const cases: Array<{ item: CatalogItem; conditions: string[]; code?: string }> = [
       {
         item: requiredItem(item => item.name === 'ライティングダクト'),
         conditions: ['直付', 'つり下げ', '埋込み'],
@@ -1034,12 +1162,20 @@ describe('catalog construction conditions', () => {
         conditions: ['天井付', '壁付', 'システム天井'],
       },
       {
-        item: requiredItem(item => item.key.startsWith('master:') && item.type === 'DL'),
+        item: requiredItem(item =>
+          item.field === '電気設備' && item.key.startsWith('row:')
+          && item.name === 'ＬＥＤ照明器具' && item.unit === '個',
+        ),
         conditions: lighting,
+        code: 'DL',
       },
     ]
-    for (const { item, conditions } of cases) {
-      const [preset] = catalogPresets(item, { options: [item.options[0].key] })
+    for (const { item, conditions, code } of cases) {
+      const option = code === undefined
+        ? item.options[0]
+        : item.options.find(option => option.code === code)!
+      expect(option).toBeDefined()
+      const [preset] = catalogPresets(item, { options: [option.key] })
       expect(preset.conditions, item.key).toEqual(conditions)
     }
   })
@@ -1112,13 +1248,27 @@ describe('catalog construction conditions', () => {
 
   it('returns the same ordered candidates as creating each catalog option', () => {
     for (const item of items) {
+      const optionIdentity = (option: CatalogItem['options'][number]) => JSON.stringify([
+        option.name,
+        option.code,
+        option.spec ?? '',
+        Object.entries(option.summary ?? {}).sort(([left], [right]) => left.localeCompare(right)),
+      ])
+      const identityCounts = new Map<string, number>()
       for (const option of item.options) {
+        const identity = optionIdentity(option)
+        identityCounts.set(identity, (identityCounts.get(identity) ?? 0) + 1)
+      }
+
+      for (const option of item.options) {
+        if ((identityCounts.get(optionIdentity(option)) ?? 0) > 1) continue
         const [preset] = catalogPresets(item, { options: [option.key] })
         expect(catalogConditionsForFixture({
           code: option.code,
           spec: option.spec,
           name: option.name,
           category: item.category,
+          summary: Object.entries(option.summary ?? {}).map(([label, value]) => ({ label, value })),
         }), `${item.key}/${option.key}`).toEqual(preset.conditions ?? [])
       }
     }
@@ -1148,8 +1298,17 @@ describe('searchCatalog', () => {
     const iv = requiredItem(item => item.key.startsWith('master:') && item.type === 'IV')
     const matched = result.results.find(result => result.item === iv)!
     expect(matched.options.map(option => option.spec)).toEqual(['60sq'])
-    expect(searchCatalog('ＤＬ　φ１５０').results.find(result => result.item.type === 'DL')
-      ?.options.map(option => option.spec)).toEqual(['φ150'])
+    const lighting = requiredItem(item =>
+      item.field === '電気設備' && item.key.startsWith('row:')
+      && item.name === 'ＬＥＤ照明器具' && item.unit === '個',
+    )
+    const lightingMatch = searchCatalog('ＤＬ　φ１５０', Infinity).results
+      .find(result => result.item === lighting)
+    expect(lightingMatch).toBeDefined()
+    expect(lightingMatch!.options.map(option => ({
+      code: option.code,
+      spec: option.spec,
+    }))).toEqual([{ code: 'DL', spec: 'φ150' }])
   })
 
   it('requires option-specific terms to match the same option', () => {
@@ -1170,9 +1329,10 @@ describe('searchCatalog', () => {
     expect(searchCatalog('')).toEqual({ results: [], total: 0 })
     expect(searchCatalog(' \t\n　')).toEqual({ results: [], total: 0 })
     const all = searchCatalog('電気設備', Infinity)
-    const expected = items.filter(item => item.field === '電気設備')
-    expect(all.results.map(result => result.item)).toEqual(expected)
-    expect(all.total).toBe(expected.length)
+    const expected = itemsWithoutStandardEntries().filter(item => item.field === '電気設備')
+    const comparableResults = all.results.filter(result => !result.item.key.startsWith('std:'))
+    expect(comparableResults.map(result => result.item.key)).toEqual(expected.map(item => item.key))
+    expect(all.total).toBe(all.results.length)
     expect(searchCatalog('電気設備').results).toEqual(all.results.slice(0, 200))
     expect(searchCatalog('電気設備', 2.9)).toEqual({
       results: all.results.slice(0, 2), total: all.total,
@@ -1198,9 +1358,10 @@ describe('SPEC-B10-3 mechanical row conversions and link categories', () => {
 
     expect(item.unit).toBe('㎡')
     expect(item.category).toBe('ダクト')
-    expect(item.options).toHaveLength(20)
-    expect(new Set(item.options.map(option => option.key)).size).toBe(20)
-    for (const option of item.options) {
+    const nonStandardOptions = item.options.filter(option => !option.key.startsWith('std:'))
+    expect(nonStandardOptions).toHaveLength(20)
+    expect(new Set(nonStandardOptions.map(option => option.key)).size).toBe(20)
+    for (const option of nonStandardOptions) {
       expect(option.kind).toBe('length')
       expect(option.method).toBe('polyline')
       expect(option.convert?.unit).toBe('㎡')
@@ -1266,7 +1427,7 @@ describe('SPEC-B10-3 mechanical row conversions and link categories', () => {
     expect(entry).toBeDefined()
     const rowItems = catalogItemsForBreakdownRow(entry!)
     expect(rowItems).toHaveLength(1)
-    expect(rowItems[0].options).toEqual([{
+    expect(rowItems[0].options.filter(option => option.formerName === undefined)).toEqual([{
       key: 'item',
       label: '',
       code: '',
@@ -1315,8 +1476,9 @@ describe('SPEC-B11-2 building catalog', () => {
       expect(catalogItemsForBreakdownRow(entry), entry.key).toEqual([item])
       if (linkRuleForDetail(entry.row.name) !== undefined) {
         const variants = BUILDING_ROW_VARIANTS[entry.row.name]?.variants ?? []
-        expect(item.options, entry.key).toHaveLength(1 + variants.length)
-        expect(item.options[0].key, entry.key).toBe('item')
+        const nonStandardOptions = item.options.filter(option => !option.key.startsWith('std:'))
+        expect(nonStandardOptions, entry.key).toHaveLength(1 + variants.length)
+        expect(nonStandardOptions[0].key, entry.key).toBe('item')
       }
     }
   })
@@ -1484,9 +1646,7 @@ describe('SPEC-B11-2 building catalog', () => {
   })
 
   it('retains master order and includes all three-book rows with unit-aware keys', () => {
-    const masterKeys = [...new Set(QUANTITY_MASTER.map(type =>
-      `master:${JSON.stringify([type.field, type.category, type.type])}`,
-    ))]
+    const masterKeys = [...new Set(remainingQuantityMasters.map(expectedMasterKey))]
     const rowKeys: string[] = []
     const seenRows = new Set<string>()
 
@@ -1517,15 +1677,28 @@ describe('SPEC-B11-2 building catalog', () => {
       }
     }
 
-    const expected = [...masterKeys, ...rowKeys, ...detailKeys]
-    const actual = items.filter(item => item.key.startsWith('master:') || item.field !== '建築')
+    const allRowKeys = [...new Set(entries
+      .filter(entry => entry.book !== '建築' && (entry.pickable || isExpectedLumpSumRow(entry)))
+      .map(expectedRowKey))]
+    expect(rowKeys).toEqual(allRowKeys.filter(key => rowKeys.includes(key)))
+    const expected = [...masterKeys, ...allRowKeys, ...detailKeys]
+    const actual = itemsWithoutStandardEntries()
+      .filter(item => item.key.startsWith('master:') || item.field !== '建築')
     expect(actual).toHaveLength(expected.length)
     expect(actual.map(item => item.key)).toEqual(expected)
   })
 
-  it('keeps every B03e condition-rule type and category present in the catalog', () => {
-    const types = new Set(items.map(item => item.type))
-    const categories = new Set(items.map(item => item.category))
+  it('keeps every B03e condition-rule type and category present in the catalog or absorbed masters', () => {
+    const types = new Set([
+      ...items.map(item => item.type),
+      ...MASTER_ABSORPTIONS.map(absorption => absorption.master[2]),
+    ])
+    const categories = new Set([
+      ...items.map(item => item.category),
+      ...MASTER_ABSORPTIONS.map(absorption =>
+        CATEGORY_ALIASES[absorption.master[1]] ?? absorption.master[1],
+      ),
+    ])
 
     for (const rule of CONDITION_RULES) {
       for (const type of rule.types ?? []) {
@@ -1763,23 +1936,12 @@ describe('SPEC-B16 catalog coverage, conversions and compatibility', () => {
     expect(resolved[0].key).not.toBe(resolved[1].key)
   })
 
-  it('preserves legacy row keys when a non-building name has no unit conflict', () => {
+  it('preserves the first row key when non-building rows merge', () => {
     for (const entry of entries) {
       if (entry.book === '建築' || entry.row.separate) continue
-      const conflicting = entries.some(other =>
-        !other.row.separate
-        && other.book === entry.book
-        && other.row.name === entry.row.name
-        && other.row.unit !== entry.row.unit,
-      )
-      if (conflicting) continue
-      const parts = [expectedCategory(entry), entry.row.name]
-      const legacyKey = `row:${JSON.stringify(
-        entry.book === '電気設備' ? parts : [entry.book, ...parts],
-      )}`
       expect(catalogItemsForBreakdownRow(entry)
         .filter(item => item.key.startsWith('row:'))
-        .map(item => item.key), entry.key).toEqual([legacyKey])
+        .map(item => item.key), entry.key).toEqual([expectedRowKey(entry)])
     }
   })
 
@@ -2056,51 +2218,44 @@ describe('SPEC-B17 electrical row master overlays', () => {
 
   function rowMaster(entry: BreakdownEntry, type: string): CatalogItem {
     const item = catalogItemsForBreakdownRow(entry).find(item =>
-      item.key.startsWith('master:') && item.type === type,
+      item.key.startsWith('row:') && item.options.some(option => option.code === type),
     )
-    if (item === undefined) throw new Error(`器具の種類が見つかりません: ${type}`)
+    if (item === undefined) throw new Error(`器具の規格が見つかりません: ${type}`)
     return item
   }
 
-  it('offers seven lighting types followed by the unchanged symbol-only item', () => {
+  it('offers one lighting item with its own option and seven absorbed lighting types', () => {
     const choices = catalogItemsForBreakdownRow(lightingEntry)
-    expect(choices).toHaveLength(8)
-    expect(choices.slice(0, -1).map(item => item.type))
-      .toEqual(['DL', 'BL', 'BE', 'BR', 'PD', 'SP', 'OL'])
-    expect(choices[7]).toBe(requiredItem(item =>
+    expect(choices).toHaveLength(1)
+    expect(choices[0]).toBe(requiredItem(item =>
       item.key === expectedRowKey(lightingEntry),
     ))
-    expect(choices[7].options).toEqual([{
+    expect(choices[0].options.find(option => option.key === 'item')).toEqual({
       key: 'item',
       label: '',
       code: '',
       name: 'ＬＥＤ照明器具',
       kind: 'count',
       method: 'click',
-    }])
+    })
 
-    for (const item of choices.slice(0, -1)) {
-      const base = requiredItem(candidate =>
-        candidate.key.startsWith('master:')
-        && candidate.field === '電気設備'
-        && candidate.type === item.type,
-      )
-      expect(item.key).toBe(`${base.key}#row:${expectedRowKey(lightingEntry)}`)
-      expect(item).not.toBe(base)
-      expect(item.options).toBe(base.options)
-      expect(item.name).toBe(base.name)
-      expect(item.category).toBe(base.category)
-      expect(item.unit).toBe('個')
-      expect(item.breakdownItem).toBe('ＬＥＤ照明器具')
-      expect(item.slots).toEqual([{ label: '記号' }])
-      expect(item.defaultSymbolFromCode).toBe(true)
-      expect(items.some(candidate => candidate.key === item.key)).toBe(false)
-    }
-    expect(rowMaster(lightingEntry, 'DL').options.map(option => option.spec))
+    const item = choices[0]
+    expect([...new Set(item.options.filter(option =>
+      option.formerName !== undefined && !option.key.startsWith('std:'),
+    ).map(option => option.code))])
+      .toEqual(['DL', 'BL', 'BE', 'BR', 'PD', 'SP', 'OL'])
+    expect(item.category).toBe('照明器具')
+    expect(item.unit).toBe('個')
+    expect(item.breakdownItem).toBe('ＬＥＤ照明器具')
+    expect(item.slots).toEqual([{ label: '記号', choices: ELECTRICAL_CHOICES['ＬＥＤ照明器具|記号'] }])
+    expect(items).toContain(item)
+    expect(rowMaster(lightingEntry, 'DL').options
+      .filter(option => option.code === 'DL' && !option.key.startsWith('std:'))
+      .map(option => option.spec))
       .toEqual(['φ100', 'φ125', 'φ150', 'φ200'])
   })
 
-  it('adds DL φ150 with its master attributes, row position and default symbol', () => {
+  it('adds DL φ150 with the format name, master attributes, row position and fixed symbol', () => {
     const item = rowMaster(lightingEntry, 'DL')
     const option = item.options.find(option => option.spec === 'φ150')!
     expect(option).toBeDefined()
@@ -2108,7 +2263,7 @@ describe('SPEC-B17 electrical row master overlays', () => {
     expect(preset).toMatchObject({
       category: '照明器具',
       code: 'DL',
-      name: 'ダウンライト',
+      name: 'ＬＥＤ照明器具',
       spec: 'φ150',
       kind: 'count',
       method: 'click',
@@ -2123,25 +2278,25 @@ describe('SPEC-B17 electrical row master overlays', () => {
       summary: [{ label: '記号', value: 'DL' }],
     })
     expect(quantityUnit(preset as CountFixture)).toBe('個')
-    const base = requiredItem(candidate =>
-      candidate.key === `master:${JSON.stringify(['電気設備', '照明器具', 'DL'])}`,
-    )
-    const [basePreset] = catalogPresets(base, { options: [option.key] })
-    expect(preset.conditions).toEqual(basePreset.conditions)
+    expect(preset.conditions).toEqual(catalogConditionsForFixture({
+      name: 'ダウンライト',
+      code: 'DL',
+      spec: 'φ150',
+      category: '照明器具',
+    }))
     expect(fixtureBreakdownError(preset)).toBeUndefined()
   })
 
-  it('uses entered symbols, splits multiple symbols and defaults blank symbols', () => {
+  it('keeps absorbed symbols fixed and splits symbols only for the free option', () => {
     const item = rowMaster(lightingEntry, 'DL')
     const option = item.options.find(option => option.spec === 'φ150')!
     const presets = catalogPresets(item, {
       options: [option.key],
       text: { 記号: ' L-1、L-2 ' },
     }, lightingPosition)
-    expect(presets.map(preset => preset.code)).toEqual(['DL', 'DL'])
+    expect(presets.map(preset => preset.code)).toEqual(['DL'])
     expect(presets.map(preset => preset.summary)).toEqual([
-      [{ label: '記号', value: 'L-1' }],
-      [{ label: '記号', value: 'L-2' }],
+      [{ label: '記号', value: 'DL' }],
     ])
     const [blank] = catalogPresets(item, {
       options: [option.key],
@@ -2156,6 +2311,15 @@ describe('SPEC-B17 electrical row master overlays', () => {
     }, lightingPosition)
     expect(freeSymbol.code).toBe('L-1')
     expect(freeSymbol.name).toBe('ＬＥＤ照明器具')
+    const freeSymbols = catalogPresets(fallback, {
+      options: ['item'],
+      text: { 記号: ' L-1、L-2 ' },
+    }, lightingPosition)
+    expect(freeSymbols.map(preset => preset.code)).toEqual(['L-1', 'L-2'])
+    expect(freeSymbols.map(preset => preset.summary)).toEqual([
+      [{ label: '記号', value: 'L-1' }],
+      [{ label: '記号', value: 'L-2' }],
+    ])
     const [empty] = catalogPresets(fallback, { options: ['item'] })
     expect(empty.code).toBe('')
     expect(empty).not.toHaveProperty('summary')
@@ -2170,12 +2334,16 @@ describe('SPEC-B17 electrical row master overlays', () => {
     )
     const indoorItem = rowMaster(lightingEntry, 'DL')
     const outdoorItem = rowMaster(outdoor, 'DL')
-    expect(catalogItemsForBreakdownRow(outdoor)).toHaveLength(8)
+    expect(catalogItemsForBreakdownRow(outdoor)).toHaveLength(1)
     expect(outdoorItem.unit).toBe('灯')
     expect(outdoorItem.key).not.toBe(indoorItem.key)
     expect(indoorItem.unit).toBe('個')
+    const outdoorOption = outdoorItem.options.find(option =>
+      option.code === 'DL' && option.spec === 'φ100',
+    )!
+    expect(outdoorOption).toBeDefined()
     const [preset] = catalogPresets(outdoorItem, {
-      options: [outdoorItem.options[0].key],
+      options: [outdoorOption.key],
     }, {
       book: outdoor.book,
       section: outdoor.section,
@@ -2188,54 +2356,54 @@ describe('SPEC-B17 electrical row master overlays', () => {
     expect(preset.summary).toEqual([{ label: '記号', value: 'DL' }])
   })
 
-  it('offers both guidance-light types and defaults to their codes rather than type names', () => {
+  it('offers both guidance-light types as options with their fixed symbols', () => {
     const entry = requiredEntry(entry =>
       entry.book === '電気設備'
       && entry.row.name === '誘導灯'
       && !entry.row.separate,
     )
     const choices = catalogItemsForBreakdownRow(entry)
-    expect(choices).toHaveLength(3)
-    expect(choices.map(item => item.type))
-      .toEqual(['誘導灯（避難口）', '誘導灯（通路）', '誘導灯'])
-    expect(choices.map(item => item.unit)).toEqual([
-      entry.row.unit, entry.row.unit, entry.row.unit,
-    ])
-    for (const [index, code] of ['GA', 'GB'].entries()) {
-      const item = choices[index]
-      const [preset] = catalogPresets(item, { options: [item.options[0].key] })
+    expect(choices).toHaveLength(1)
+    expect(choices[0].name).toBe('誘導灯')
+    expect(choices[0].unit).toBe(entry.row.unit)
+    for (const code of ['GA', 'GB']) {
+      const item = choices[0]
+      const option = item.options.find(option => option.code === code)!
+      expect(option).toBeDefined()
+      const [preset] = catalogPresets(item, { options: [option.key] })
       expect(preset.code).toBe(code)
       expect(preset.summary).toEqual([{ label: '記号', value: code }])
     }
   })
 
-  it('requires every mapped type to exist in the electrical quantity master', () => {
-    for (const [name, master] of Object.entries(ELECTRICAL_ROW_MASTERS)) {
-      for (const type of master.types) {
-        expect(QUANTITY_MASTER.some(candidate =>
-          candidate.field === '電気設備' && candidate.type === type,
-        ), `${name}: 電気設備の標準マスタに ${type} がありません`).toBe(true)
-      }
+  it('requires every electrical absorption source to exist in the quantity master', () => {
+    for (const absorption of MASTER_ABSORPTIONS) {
+      const [field, category, type] = absorption.master
+      if (field !== '電気設備') continue
+      expect(QUANTITY_MASTER.some(candidate =>
+        candidate.field === field && candidate.category === category && candidate.type === type,
+      ), `${category}: 電気設備の標準マスタに ${type} がありません`).toBe(true)
     }
   })
 
-  it('preserves the specification-path DL key, options, unit and position behavior', () => {
+  it('shares the absorbed lighting item without mutating its options or position behavior', () => {
     const base = requiredItem(item =>
-      item.key === `master:${JSON.stringify(['電気設備', '照明器具', 'DL'])}`,
+      item.field === '電気設備' && item.key.startsWith('row:')
+      && item.name === 'ＬＥＤ照明器具' && item.unit === '個',
     )
     const before = JSON.stringify(base)
     catalogItemsForBreakdownRow(lightingEntry)
     expect(JSON.stringify(base)).toBe(before)
     expect(base.unit).toBe('個')
-    expect(base.slots).toEqual([])
-    expect(base).not.toHaveProperty('defaultSymbolFromCode')
-    expect(base.options.map(option => option.spec))
+    expect(base.slots).toEqual([{ label: '記号', choices: ELECTRICAL_CHOICES['ＬＥＤ照明器具|記号'] }])
+    expect(base.formerNames).toContain('ダウンライト')
+    expect(base.options.filter(option => option.code === 'DL').map(option => option.spec))
       .toEqual(['φ100', 'φ125', 'φ150', 'φ200'])
 
     const option = base.options.find(option => option.spec === 'φ150')!
     const [withoutPosition] = catalogPresets(base, { options: [option.key] })
     expect(withoutPosition).not.toHaveProperty('breakdown')
-    expect(withoutPosition).not.toHaveProperty('summary')
+    expect(withoutPosition.summary).toEqual([{ label: '記号', value: 'DL' }])
     expect(withoutPosition).not.toHaveProperty('unit')
     expect(quantityUnit(withoutPosition as CountFixture)).toBe('個')
 
@@ -2244,7 +2412,7 @@ describe('SPEC-B17 electrical row master overlays', () => {
       ...lightingPosition,
       item: 'ＬＥＤ照明器具',
     })
-    expect(withPosition).not.toHaveProperty('summary')
+    expect(withPosition.summary).toEqual([{ label: '記号', value: 'DL' }])
     expect(catalogItems()).toBe(items)
   })
 })

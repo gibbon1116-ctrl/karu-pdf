@@ -41,7 +41,7 @@
 3. **実測**（Edge、`npm run build` の配布物で。測定中は他の重い試験を動かさない）:
    - 図面: `test-data/real/七ヶ浜町_実施設計図.pdf`（実際の CAD 出力の図面。無ければ `test-data/shichigahama-drawing.pdf`）の、線の多いページ（平面図など）を3枚。`test-data/heavy-300p.pdf` の A1 のページ。
    - 測るもの: 1ページの線の取り出しの時間と本数、送る量、索引を作る時間、使う記憶の量、1回の探索の時間（A・B・C・D それぞれ、p50・p95）、400% に拡大して面積を 20 点置く間のフレーム間隔の p95（`e2e/measure.perf.spec.ts` と同じ操作。スナップ オフ・A だけ・A+B・A+B+C・A+B+C+D の5通り）、スナップ オフのときに今と差が無いこと。
-   - 結果を `docs/調査/スナップの再検証.md` に書く（Codex が書いてよい唯一の docs のファイル）。表で、各方式の数値と採否、採否の理由を示す。
+   - 結果を 非公開の調査資料 に書く（Codex が書いてよい唯一の docs のファイル）。表で、各方式の数値と採否、採否の理由を示す。
 4. **採否の基準**（この基準で決めること。迷うときは不採用）:
    - 線の取り出しと索引作り: 1ページあたり 500ms 以下（Worker で行い、画面は止めない）。
    - 1回の探索: p95 で 1ms 以下。
@@ -62,8 +62,8 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\quantity-pickup-expansion-ea43cf`
-- 新しく作るファイル: `src/core/snap.ts`（索引と探索。純粋な関数）、採用した方式に必要な Worker 側の取り出しのファイル、`tests/snap.test.ts`、`e2e/snap.annotate.spec.ts`、`e2e/snap.perf.spec.ts`（実測。`bench` の対象にする場合は `playwright.config.ts` を変えずに済む名前 `*.perf.spec.ts` にする）、`docs/調査/スナップの再検証.md`
+- 対象フォルダ: `<作業フォルダ>`
+- 新しく作るファイル: `src/core/snap.ts`（索引と探索。純粋な関数）、採用した方式に必要な Worker 側の取り出しのファイル、`tests/snap.test.ts`、`e2e/snap.annotate.spec.ts`、`e2e/snap.perf.spec.ts`（実測。`bench` の対象にする場合は `playwright.config.ts` を変えずに済む名前 `*.perf.spec.ts` にする）、非公開の調査資料
 - 変更してよいファイル: `src/worker/`、`src/client/PdfWorkerPool.ts`、`src/editor/MeasurementOverlay.tsx`、`src/editor/AnnotationLayer.tsx`、`src/app/ToolRow.tsx`、`src/ui/ToolIcon.tsx`、`src/App.tsx`、`src/app/HelpDialog.tsx`、`src/styles.css`、`tests/`、`e2e/`
 - 変更しないファイル: 上以外の `docs/`、`public/`、設定ファイル、`.env.*`、`scripts/`、保存の形
 
@@ -87,7 +87,7 @@
 
 - [ ] `npx tsc --noEmit`、`npm test`、`npm run build` が成功する。
 - [ ] 新しい e2e と、既存の `measure`・`quantity-*` の e2e、`e2e/measure.perf.spec.ts` が成功する。
-- [ ] `docs/調査/スナップの再検証.md` に実測の表と採否がある。
+- [ ] 非公開の調査資料 に実測の表と採否がある。
 
 ## 報告してほしいこと
 

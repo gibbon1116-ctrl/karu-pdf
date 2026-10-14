@@ -10,7 +10,7 @@
 
 ## 目的
 
-計画: `docs/調査/施工条件別数量拾い_計画.md`（必ず読むこと）。
+計画: 非公開の調査資料（必ず読むこと）。
 
 利用者の指示（2026-10-08）:
 - 経路構成の「全長／平面＋立上り／立上りのみ」をやめる。
@@ -38,7 +38,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - `src/core/quantity.ts`、`src/core/counts.ts`、`src/core/quantityIndex.ts`、`src/core/annotations.ts`（数量の読み書きの箇所だけ）
   - `src/editor/AnnotationStore.ts`

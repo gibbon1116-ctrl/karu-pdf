@@ -28,7 +28,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/editor/AnnotationLayer.tsx`、`src/editor/MeasurementOverlay.tsx`（`MeasurementShape` に強調を足す場合のみ）、`src/styles.css`、`tests/`、新規 `e2e/selection-front.annotate.spec.ts`
 - 変更しないファイル: 上以外（特に `AnnotationStore.ts`・`annotations.ts`・保存の処理）。`docs/`、設定ファイル、`scripts/`
 

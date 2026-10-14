@@ -26,7 +26,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - `src/app/FixturePanel.tsx` — 「拾う／管理」の表示の切り分け、最近使った項目
   - 新規 `src/app/PickupBar.tsx` — 拾いバー

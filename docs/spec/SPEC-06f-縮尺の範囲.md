@@ -22,7 +22,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/core/measure.ts`、`src/core/annotations.ts`（edit の種類と適用だけ）、`src/worker/pdf.worker.ts`・`src/worker/protocol.ts`・`src/client/PdfWorkerPool.ts`（開く・ページ整理の応答に範囲を足す）、`src/editor/AnnotationStore.ts`、`src/editor/MeasurementOverlay.tsx`、`src/editor/AnnotationLayer.tsx`（範囲の枠の描画と、範囲を描く操作）、`src/app/ScaleDialog.tsx`、`src/app/documentModel.ts`、`src/App.tsx`（縮尺の画面と範囲の操作のつなぎ、状態欄）、`src/app/ToolRow.tsx`（計測▼の項目）、`src/app/HelpDialog.tsx`、`src/styles.css`、`tests/`、新規 `e2e/scale-regions.annotate.spec.ts`
 - 変更しないファイル: 上以外。`docs/`、設定ファイル、`scripts/`
 

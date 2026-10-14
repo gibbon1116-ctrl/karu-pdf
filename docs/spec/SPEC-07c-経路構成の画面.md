@@ -10,7 +10,7 @@
 
 ## 目的
 
-計画: `docs/調査/施工条件別数量拾い_計画.md`。前提: SPEC-07a（データ・ストアの操作）と SPEC-07b（候補・既定）の実装。必ず両方の SPEC を読むこと。
+計画: 非公開の調査資料。前提: SPEC-07a（データ・ストアの操作）と SPEC-07b（候補・既定）の実装。必ず両方の SPEC を読むこと。
 
 利用者の指示:
 - 「全長／平面＋立上り／立上りのみ」の選択肢をやめる。
@@ -123,7 +123,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\karupdf-quantity-ui-8301e6`
+- 対象フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - `src/app/RouteItems.tsx`、`src/app/LinePicker.tsx`、`src/app/routeSets.ts`、`src/app/FormatPanel.tsx`、`src/app/PickupBar.tsx`、`src/app/HelpDialog.tsx`
   - `src/editor/AnnotationStore.ts`（`splitRoute`・頂点の強調・引継ぎの解除だけ）

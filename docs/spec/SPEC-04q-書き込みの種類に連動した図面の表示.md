@@ -37,7 +37,7 @@
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル:
   - 新規 `src/editor/annotationFilter.ts`（絞り込みの型・判定・表示名。一覧と図面の両方で使う）
   - `src/editor/AnnotationStore.ts`（絞り込みと図面への反映の状態、図面での判定、隠れたものを出す処理、解除の通知）

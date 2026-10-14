@@ -33,7 +33,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\quantity-pickup-expansion-ea43cf`
+- 対象フォルダ: `<作業フォルダ>`
 - 新しく作るファイル: `src/core/quantityIndex.ts`（集計の索引。純粋な関数かクラス）、`src/core/location.ts`（階の正規化と、図面名称からの階の読み取り）、`tests/quantityIndex.test.ts`、`tests/location.test.ts`、`e2e/quantity-location-route.annotate.spec.ts`
 - 変更してよいファイル: `src/core/countFixtures.ts`、`src/core/counts.ts`、`src/core/quantity.ts`、`src/core/annotations.ts`（読み書きの検査の上限など、必要な最小限）、`src/editor/`、`src/app/`、`src/App.tsx`、`src/styles.css`、`tests/`、`e2e/`
 - 変更しないファイル: `docs/`、`public/`、設定ファイル、`.env.*`、`scripts/`、`src/worker/`（受け渡しに必要な最小限は可）

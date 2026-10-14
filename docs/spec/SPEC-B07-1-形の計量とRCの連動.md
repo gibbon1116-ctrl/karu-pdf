@@ -10,7 +10,7 @@
 
 ## 背景
 
-計画: `docs/調査/連動B07_計画.md`（§2 RC 部材の式、§3 形の連動）。データは Claude が作成済み（**変えないこと**）: `src/core/breakdown/rcData.ts`（`REBAR_MASS_KG_PER_M`、`rebarDiameterMm`、`REBAR_REQUIRED_FACTOR`、`DEFAULT_ANCHORAGE_D`・`DEFAULT_LAP_D`、`MAX_DIAMETER_WITHOUT_HOOK`、`MIN_DIAMETER_GAS_PRESSURE`、`rebarJoints`、`barCount`）。
+計画: 非公開の調査資料（§2 RC 部材の式、§3 形の連動）。データは Claude が作成済み（**変えないこと**）: `src/core/breakdown/rcData.ts`（`REBAR_MASS_KG_PER_M`、`rebarDiameterMm`、`REBAR_REQUIRED_FACTOR`、`DEFAULT_ANCHORAGE_D`・`DEFAULT_LAP_D`、`MAX_DIAMETER_WITHOUT_HOOK`、`MIN_DIAMETER_GAS_PRESSURE`、`rebarJoints`、`barCount`）。
 
 この SPEC は計算（core）まで。画面は B07-2。
 

@@ -6,8 +6,14 @@
 // 選択肢: 公共建築工事標準仕様書（建築工事編）でよく使う規格（鉄筋の種類と呼び名、コンクリートの強度・スランプ、
 // 鋼材の種類、塗装の種別）。選択肢は「よく使うもの」に絞った。無い値は画面で手入力する。
 import type { DetailTemplate, SummarySlot } from './types'
+import { BUILDING_ASSEMBLY_CHOICES, BUILDING_ASSEMBLY_DETAIL_CHOICES } from './buildingChoices'
+import { BUILDING_STANDARD_CHOICES, BUILDING_STANDARD_DETAIL_CHOICES } from './buildingStandardChoices'
+import { BUILDING_ALL_CHOICES, BUILDING_ALL_DETAIL_CHOICES } from './buildingAllChoices'
+import { mergeChoices, withDetailChoices } from './commonChoices'
 
 const slot = (label: string, choices?: readonly string[]): SummarySlot => (choices ? { label, choices } : { label })
+/** 部位の組（U4）で作った別紙明細の区分の選択肢（buildingChoices.ts）。 */
+const detailChoices = (key: string): readonly string[] | undefined => BUILDING_ASSEMBLY_DETAIL_CHOICES[key]
 const list = (text: string) => text.split('、')
 const renovationKinds = list('防水改修、外壁改修、建具改修、内装改修、耐震（躯体）改修')
 
@@ -20,8 +26,8 @@ const cleaning: DetailTemplate[] = [
   { name: '整理清掃後片付け（部位）', unit: '㎡', summary: [slot('部位')], note: '延べ面積以外の部位。必要に応じて計上' },
 ]
 const outsideScaffold: DetailTemplate[] = [
-  { name: '枠組本足場', unit: '㎡', summary: [slot('種別'), slot('枠幅', list('600、900、1200')), slot('高さ')] },
-  { name: '安全手すり', unit: 'm', summary: [slot('種別')] },
+  { name: '枠組本足場', unit: '㎡', summary: [slot('種別', detailChoices('枠組本足場|種別')), slot('枠幅', list('600、900、1200')), slot('高さ', detailChoices('枠組本足場|高さ'))] },
+  { name: '安全手すり', unit: 'm', summary: [slot('種別', detailChoices('安全手すり|種別'))] },
   { name: '一側足場', unit: '㎡', summary: [slot('種別')], note: '必要に応じて計上' },
   { name: '登り桟橋', unit: 'm', note: '必要に応じて計上' },
 ]
@@ -36,7 +42,7 @@ const insideFinishScaffold: DetailTemplate[] = [
 const disaster: DetailTemplate[] = [
   { name: '養生防護棚（直線部）', unit: 'm', note: '必要に応じて計上' },
   { name: '養生防護棚（コーナー部）', unit: 'か所', note: '必要に応じて計上' },
-  { name: '垂直ネット張り', unit: '㎡', summary: [slot('種別')] },
+  { name: '垂直ネット張り', unit: '㎡', summary: [slot('種別', detailChoices('垂直ネット張り|種別'))] },
   { name: '小幅ネット', unit: 'm' },
   { name: '水平ネット張り', unit: '㎡', note: '必要に応じて計上' },
 ]
@@ -47,7 +53,7 @@ const transport: DetailTemplate[] = [
 ]
 
 /** 新営の別紙明細（細目の名称 → 明細）。 */
-export const BUILDING_DETAILS: Readonly<Record<string, readonly DetailTemplate[]>> = {
+const buildingDetailBase: Readonly<Record<string, readonly DetailTemplate[]>> = {
   養生: curing,
   整理清掃後片付け: cleaning,
   外部足場: outsideScaffold,
@@ -68,7 +74,7 @@ export const BUILDING_DETAILS: Readonly<Record<string, readonly DetailTemplate[]
 }
 
 /** 改修（種目「庁舎（改修）」）の別紙明細。 */
-export const BUILDING_RENOVATION_DETAILS: Readonly<Record<string, readonly DetailTemplate[]>> = {
+const buildingRenovationDetailBase: Readonly<Record<string, readonly DetailTemplate[]>> = {
   墨出し: [{ name: '墨出し', unit: '㎡', summary: [slot('改修の種類', renovationKinds)] }],
   養生: [{ name: '養生', unit: '㎡', summary: [slot('改修の種類', [...renovationKinds, '搬出入路部分'])] }],
   整理清掃後片付け: [{ name: '整理清掃後片付け', unit: '㎡', summary: [slot('改修の種類', [...renovationKinds, '搬出入路部分'])] }],
@@ -119,4 +125,11 @@ function choicesFor(): Record<string, readonly string[]> {
   return result
 }
 
-export const BUILDING_CHOICES: Readonly<Record<string, readonly string[]>> = choicesFor()
+// 部位の組（R7）の品目の選択肢（U4）は buildingChoices.ts。既にある鍵は変えない。
+export const BUILDING_CHOICES: Readonly<Record<string, readonly string[]>> = mergeChoices(mergeChoices({ ...BUILDING_ASSEMBLY_CHOICES, ...choicesFor() }, BUILDING_STANDARD_CHOICES), BUILDING_ALL_CHOICES)
+
+// 標準単価積算基準の細目・摘要（U6、buildingStandardChoices.ts）を別紙明細の明細の区分に重ねる。
+/** 新営の別紙明細（細目の名称 → 明細）。 */
+export const BUILDING_DETAILS: Readonly<Record<string, readonly DetailTemplate[]>> = withDetailChoices(buildingDetailBase, mergeChoices(BUILDING_STANDARD_DETAIL_CHOICES, BUILDING_ALL_DETAIL_CHOICES))
+/** 改修（種目「庁舎（改修）」）の別紙明細。 */
+export const BUILDING_RENOVATION_DETAILS: Readonly<Record<string, readonly DetailTemplate[]>> = withDetailChoices(buildingRenovationDetailBase, mergeChoices(BUILDING_STANDARD_DETAIL_CHOICES, BUILDING_ALL_DETAIL_CHOICES))

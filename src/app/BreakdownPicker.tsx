@@ -148,20 +148,14 @@ export default function BreakdownPicker({ fixtures, onChange }: {
     const target = targetsByKey.get(targetKey(entry, item))
     if (!target || !master) return null
     const selection = selected[target.key] ?? emptySelection
-    const defaultSymbol = target.item.defaultSymbolFromCode
-      && target.item.slots.some(slot =>
-        slot.label === '記号' && !slot.condition && !slot.choices?.length,
-      )
-      ? target.item.options[0]?.code
-      : undefined
+
     return <CatalogChooser
       key={target.key}
       item={target.item}
-      selection={defaultSymbol
-        ? { ...selection, text: { 記号: defaultSymbol, ...selection.text } }
-        : selection}
+      selection={selection}
       onChange={selection => select(target.key, selection)}
       existing={existing}
+      fixtures={fixtures}
       position={{
         book: entry.book,
         section: entry.section,
@@ -282,7 +276,7 @@ export default function BreakdownPicker({ fixtures, onChange }: {
                 {entry.subject}／{entry.middle ? `${entry.middle}／` : ''}
               </small>}
               {/* 拾えない単位（t など）でも連動の規則がある細目は品目があり、連動の項目として追加できる */}
-              {!row.separate && items.length ? <>
+              {items.length > 0 && (!row.separate || items.some(item => item.key.startsWith('row:'))) ? <>
                 {rowMasters.length > 0 && <>
                   <div className="breakdown-row-heading">
                     <span>{name(entry)}</span><span>{row.unit}</span>

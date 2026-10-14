@@ -43,7 +43,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\quantity-pickup-expansion-ea43cf`
+- 対象フォルダ: `<作業フォルダ>`
 - 新しく作るファイル:
   - `src/core/quantity.ts` — 拾いの印の型・読み書き・値の計算・表示の文字列（純粋な関数）
   - `tests/quantity.test.ts`、`tests/quantity.integration.test.ts`

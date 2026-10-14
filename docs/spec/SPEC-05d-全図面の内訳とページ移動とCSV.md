@@ -21,7 +21,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ\.claude\worktrees\quantity-pickup-expansion-ea43cf`
+- 対象フォルダ: `<作業フォルダ>`
 - 新しく作るファイル: `src/app/QuantityBreakdown.tsx`（内訳の画面）、`e2e/quantity-breakdown.annotate.spec.ts`
 - 変更してよいファイル: `src/app/FixturePanel.tsx`、`src/app/annotationCsv.ts`、`src/app/CsvExportDialog.tsx`（必要なら）、`src/App.tsx`（ページと位置への移動の接続）、`src/editor/AnnotationStore.ts`、`src/core/quantityIndex.ts`、`src/app/HelpDialog.tsx`、`src/styles.css`、`tests/`、`e2e/`
 - 変更しないファイル: `docs/`、`public/`、設定ファイル、`.env.*`、`scripts/`、`src/worker/`、保存の形（`src/core/countFixtures.ts`・`counts.ts`・`quantity.ts` の保存の欄）

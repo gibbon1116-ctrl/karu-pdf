@@ -8,7 +8,7 @@ import { commitFocusedField } from './app/pendingInput'
 import { DocumentWorkspace } from './app/DocumentWorkspace'
 import { loadSplitSettings, saveSplitSettings, type SplitSettings } from './app/SplitView'
 import { prepareSplitDisplays } from './app/splitRendering'
-import type { DocumentViewState } from './app/documentModel'
+import type { DocumentViewState, RelatedAddContext } from './app/documentModel'
 import type { ViewPosition } from './viewer/viewSync'
 import type { OrganizeWorkspaceState } from './app/DocumentWorkspace'
 import { HelpDialog } from './app/HelpDialog'
@@ -35,7 +35,7 @@ import { scaleLabel, ratioScale, pointInScaleRegion, MAX_SCALE_REGIONS, type Sca
 import { ScaleRegionInteractionContext } from './editor/AnnotationLayer'
 import type { Point, Rect } from './core/annotations'
 import { ToolRow } from './app/ToolRow'
-import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS, FixtureUiContext, SnapUiContext, ensureSessionFixtures, type SidePanelTab } from './app/documentModel'
+import { createDocId, DocumentSession, DocumentTabsModel, MAX_OPEN_DOCUMENTS, FixtureUiContext, SnapUiContext, ensureSessionFixtures, ensureSessionRelatedReviews, type SidePanelTab } from './app/documentModel'
 import { allSessionAnnotations } from './app/AnnotationListPanel'
 import { createIssueCsv, createCsv } from './app/annotationCsv'
 import { StartScreen } from './app/StartScreen'
@@ -45,7 +45,8 @@ import { PdfWorkerPool, type ApplyAndSaveResult, type PageLayoutTimings, type Pr
 import type { RasterizeOptions } from './core/rasterize'
 import { BlobPdfWriteTarget, type PdfWriteTarget } from './core/pdfStreamWriter'
 import { FixtureSampleContext, type EditorTool } from './editor/AnnotationLayer'
-import { quantityKind, type CountFixtureSample } from './core/countFixtures'
+import { quantityKind, type CountFixture, type CountFixtureSample } from './core/countFixtures'
+import { addFixtureItems, saveNewFixture } from './app/fixtureAdd'
 import type { EditableAnnotation } from './editor/AnnotationStore'
 import { annotationFilterLabel } from './editor/annotationFilter'
 import { downloadPdf, pickOpenHandles, pickSaveHandle, requestWritePermission, writePdf, writePdfWithoutOverwrite, type PdfFileHandle } from './editor/fileAccess'
@@ -72,10 +73,12 @@ import { registerPwa } from './pwa'
 import './styles.css'
 
 const FixtureDialog = lazy(() => import('./app/FixtureDialog'))
+const FixturePresetDialog = lazy(() => import('./app/FixturePresetDialog'))
 const SymbolSearchPanel = lazy(() => import('./app/SymbolSearchPanel'))
 
 import { fixtureSampleRectFitsPage, fixtureSamplesMatch } from './app/fixtureSampleMatch'
 import { appendFixtures } from './app/fixtureAppend'
+import { perfCount } from './perf/counters'
 
 declare global {
   interface Window {
@@ -348,6 +351,7 @@ export default function App() {
   activeRef.current = active
   organizeRef.current = organize
   useSyncExternalStore(active?.annotationStore.subscribe ?? noopSubscribe, active?.annotationStore.getSnapshot ?? zeroSnapshot)
+  perfCount('App.render')
   useEffect(() => {
     if (scaleRegionDrawing && scaleRegionDrawing.session !== active) setScaleRegionDrawing(null)
   }, [active, scaleRegionDrawing])
@@ -1191,6 +1195,21 @@ export default function App() {
   const [fixtureEdit, setFixtureEdit] = useState<{
     session: DocumentSession; id: string; initialSection?: 'rc'
   } | null>(null)
+  const [fixturePreset, setFixturePreset] = useState<{
+    session: DocumentSession; query: string; context?: RelatedAddContext
+  } | null>(null)
+  const [fixtureCreate, setFixtureCreate] = useState<{
+    session: DocumentSession; initial: CountFixture; context?: RelatedAddContext
+  } | null>(null)
+  const [fixturePanelBusy, setFixturePanelBusy] = useState<{
+    session: DocumentSession; busy: boolean
+  } | null>(null)
+  const canEditFixtures = (session: DocumentSession): boolean =>
+    session.annotationStore.fixturesReady && !session.editRestriction
+    && !(fixturePanelBusy?.session === session && fixturePanelBusy.busy)
+  const fixtureCreateStore = fixtureCreate?.session.annotationStore
+  const fixtureCreatePreviews = useMemo(() => fixtureCreateStore
+    ? createFixturePreviews(fixtureCreateStore) : undefined, [fixtureCreateStore])
   const fixtureEditStore = fixtureEdit?.session.annotationStore
   const fixtureEditPreviews = useMemo(() => fixtureEditStore
     ? createFixturePreviews(fixtureEditStore) : undefined, [fixtureEditStore])
@@ -2111,9 +2130,46 @@ export default function App() {
             const y = (rect[1] + rect[3]) / 2 - height / (6 * (96 / 72) * viewer.getZoom())
             viewer.scrollToPosition(page, (rect[0] + rect[2]) / 2, y)
           } }}>
-          <FixtureUiContext.Provider value={{ documents, select: () => void changeTool('count'), open: () => openSidePanel('fixtures', false), edit: id => {
-            void ensureSessionFixtures(active, pool).then(() => setFixtureEdit({ session: active, id })).catch(reason => showStatus(String(reason)))
-          } }}>
+          <FixtureUiContext.Provider value={{
+            documents,
+            select: () => void changeTool('count'),
+            open: () => openSidePanel('fixtures', false),
+            canEdit: canEditFixtures(active),
+            setBusy: busy => setFixturePanelBusy(previous =>
+              previous?.session === active && previous.busy === busy
+                ? previous : { session: active, busy }),
+            retryRelatedReviews: () => {
+              void ensureSessionRelatedReviews(active, pool)
+                .catch(reason => showStatus(`関連候補の判断を読み込めませんでした：${String(reason)}`))
+            },
+            addFromMaster: (query, context) => {
+              if (!canEditFixtures(active)) return
+              setFixtureCreate(null)
+              setFixturePreset({
+                session: active, query,
+                ...(context ? { context: { ...context } } : {}),
+              })
+            },
+            createFixture: (initial, context) => {
+              if (!canEditFixtures(active)
+                || active.annotationStore.getCountFixtures().length >= 1000) return
+              setFixturePreset(null)
+              setFixtureCreate({
+                session: active, initial: structuredClone(initial),
+                ...(context ? { context: { ...context } } : {}),
+              })
+            },
+            edit: id => {
+              if (active.editRestriction) return
+              void ensureSessionFixtures(active, pool)
+                .then(() => {
+                  if (activeRef.current === active && canEditFixtures(active)) {
+                    setFixtureEdit({ session: active, id })
+                  }
+                })
+                .catch(reason => showStatus(String(reason)))
+            },
+          }}>
           <DocumentWorkspace
           onNavigate={rememberNavigation}
           key={`${active.docId}:${active.pageRevision}`}
@@ -2148,7 +2204,13 @@ export default function App() {
           />
           {symbolSearch?.session === active && !organize && <Suspense fallback={null}><SymbolSearchPanel key={`${active.docId}:${symbolSearch.fixtureId}`} selection={symbolSearch} pool={pool}
             onClose={closeSymbolSearch} onRecapture={() => startSymbolSearch(active, symbolSearch.fixtureId, { capture: true })} onRequestArea={requestSymbolSearchArea}
-            onPage={index => viewerRef.current?.scrollToPage(index)} onStatus={showStatus} registerDispose={registerSymbolSearchDispose} /></Suspense>}
+            onPage={index => viewerRef.current?.scrollToPage(index)} onLocate={(page, rect) => {
+              const viewer = viewerRef.current
+              if (!viewer || organizeRef.current) { active.view.page = page + 1; refreshTabs(); return }
+              const height = document.querySelector<HTMLElement>('[data-testid="viewer"]')?.clientHeight ?? 0
+              const y = (rect[1] + rect[3]) / 2 - height / (6 * (96 / 72) * viewer.getZoom())
+              viewer.scrollToPosition(page, (rect[0] + rect[2]) / 2, y)
+            }} onStatus={showStatus} registerDispose={registerSymbolSearchDispose} /></Suspense>}
           </FixtureUiContext.Provider>
           </QuantityNavigationContext.Provider>
           </DrawingSnapContext.Provider>
@@ -2221,6 +2283,59 @@ export default function App() {
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
       <DesktopStepsDialog open={desktopStepsOpen} onClose={() => setDesktopStepsOpen(false)} />
       <ExternalSendAlert />
+      {fixturePreset?.session === active && fixturePreset && <Suspense fallback={null}>
+        <FixturePresetDialog
+          key={`${fixturePreset.session.docId}:${fixturePreset.query}`}
+          initialQuery={fixturePreset.query}
+          fixtures={fixturePreset.session.annotationStore.getCountFixtures()}
+          onAdd={(items, options) => {
+            const session = fixturePreset.session
+            if (activeRef.current !== session || !canEditFixtures(session)) {
+              throw new Error('現在は編集できません')
+            }
+            const added = addFixtureItems(
+              session.annotationStore, items, options, fixturePreset.context, showStatus,
+            )
+            if (added.length && !added[0].link && !fixturePreset.context) void changeTool('count')
+          }}
+          onClose={() => setFixturePreset(null)}
+        />
+      </Suspense>}
+      {fixtureCreate?.session === active && fixtureCreate && <Suspense fallback={null}>
+        <FixtureDialog
+          key={`${fixtureCreate.session.docId}:${fixtureCreate.initial.id}`}
+          initial={fixtureCreate.initial}
+          fixtures={fixtureCreate.session.annotationStore.getCountFixtures()}
+          editing={false}
+          dimensionMarkCounts={draft =>
+            fixtureCreate.session.annotationStore.fixtureDimensionMarks(draft)}
+          {...(fixtureCreatePreviews ?? {})}
+          onOpenFixture={(id, section) => {
+            const session = fixtureCreate.session
+            if (!canEditFixtures(session)) return
+            const fixture = session.annotationStore.getCountFixture(id)
+            if (!fixture || fixture.link) return
+            setFixtureCreate(null)
+            setFixtureEdit({ session, id, initialSection: section })
+          }}
+          onSave={fixture => {
+            const session = fixtureCreate.session
+            if (activeRef.current !== session || !canEditFixtures(session)
+              || session.annotationStore.getCountFixtures().length >= 1000) return
+            try {
+              saveNewFixture(
+                session.annotationStore, fixture, fixtureCreate.context, showStatus,
+              )
+            } catch (reason) {
+              showStatus(reason instanceof Error ? reason.message : String(reason))
+              return
+            }
+            if (!fixture.link && !fixtureCreate.context) void changeTool('count')
+            setFixtureCreate(null)
+          }}
+          onClose={() => setFixtureCreate(null)}
+        />
+      </Suspense>}
       {fixtureEdit && fixtureEdit.session.annotationStore.getCountFixture(fixtureEdit.id) && <Suspense fallback={null}><FixtureDialog
         key={`${fixtureEdit.session.docId}:${fixtureEdit.id}`}
         initial={structuredClone(fixtureEdit.session.annotationStore.getCountFixture(fixtureEdit.id)!)}

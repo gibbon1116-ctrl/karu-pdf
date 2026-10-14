@@ -7,7 +7,7 @@ import { compareFloors, quantityPartSummary, type QuantityEntry, type QuantityIn
 import type { DocumentSession } from './documentModel'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { nextReview, refreshReview, reviewOrder, type ReviewCursor } from './reviewCursor'
-import { fixtureLinkRoundsUp, fixtureLinkSourceUnit, fixtureLinkSourceShowsFactor, fixtureLinkBasisNumber } from '../core/fixtureLink'
+import { fixtureLinkRoundsUp, fixtureLinkSourceUnit, fixtureLinkSourceShowsFactor, fixtureLinkBasisNumber, fixtureLinkSectionText } from '../core/fixtureLink'
 import { backfillDetail, backfillSummary } from '../core/backfill'
 
 function basisNumber(value: number): string {
@@ -139,6 +139,7 @@ export default function QuantityBreakdown({ fixture, index, session, pool, onClo
             ? ` ÷ ${basisNumber(source.perM)} m`
             : fixtureLinkSourceShowsFactor(fixture, source)
               ? ` × ${basisNumber(source.factor ?? 1)}` : ''}
+          {fixtureLinkSectionText(source)}
           {' ＝ '}{fixtureLinkBasisNumber(fixture, source.subtotal)} {quantityUnit(fixture)}
           {source.note && `（${source.note}）`}
         </li>

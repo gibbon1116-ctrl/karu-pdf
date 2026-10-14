@@ -45,7 +45,7 @@
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: 上の「だけが使っているもの」に挙げたファイル、`e2e/` の配布形態別の試験（`fixed-*.spec.ts`、`single-*.spec.ts`）で本文修正を確かめている部分
 - 削除してよいファイル: `src/app/TextCorrectionDialog.tsx`、`src/core/textCorrection.ts`、`tests/textCorrection.integration.test.ts`、`e2e/text-correction.annotate.spec.ts`
 - 変更しないファイル: 上記以外。特に `package.json`、`package-lock.json`、`vite.config.ts`、`playwright.config.ts`、`scripts/`、`docs/`、`test-data/`、`bench-results/`、`dist*/`、`release/`、`work/`

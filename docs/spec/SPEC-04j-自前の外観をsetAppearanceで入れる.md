@@ -48,7 +48,7 @@ SPEC-04i で注釈の検索を索引化したが、遅さは変わらなかっ�
 
 ## 対象
 
-- 作業フォルダ: `C:\Users\gibbo\.codex\worktrees\dda9\PDF編集アプリ`
+- 作業フォルダ: `<作業フォルダ>`
 - 変更してよいファイル: `src/core/annotations.ts`（個数カウントと指摘の外観の入れ方だけ）、`tests/`（下の試験の追加）
 - 変更しないファイル: 上記以外。特に `e2e/`、`src/app/`、`src/editor/`、`src/worker/`、`src/client/`
 

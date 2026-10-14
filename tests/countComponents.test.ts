@@ -116,6 +116,156 @@ it('inherits only for the same main fixture, including bulk symbol candidates, a
   expect(components(store, createMark(store).id)).toBeUndefined()
 })
 
+it('adds a fixture component only to marks that do not already contain it', async () => {
+  const { store, id } = await setup()
+  const second = createMark(store).id
+  const third = createMark(store).id
+  const existing: CountComponent[] = [
+    { itemId: SB, count: 3, condition: OLD_CONDITION },
+  ]
+  expect(store.setCountComponents([id], existing)).toBeUndefined()
+
+  expect(store.addComponentToFixture(SW, SB)).toEqual({ changed: 2, skipped: 0 })
+  expect(components(store, id)).toEqual(existing)
+  expect(components(store, second)).toEqual([{ itemId: SB, count: 1 }])
+  expect(components(store, third)).toEqual([{ itemId: SB, count: 1 }])
+  expect(store.quantityIndex().total(SB)).toBe(5)
+})
+
+it('skips full marks while updating other marks and future marks', async () => {
+  const { store, id } = await setup()
+  const second = createMark(store).id
+  const full = Array.from({ length: 10 }, (_, i) => ({ itemId: 'C' + i, count: 1 }))
+  expect(store.setCountComponents([id], full)).toBeUndefined()
+  // 記憶を空にし、満杯の印とこれからの印を別々に検査する。
+  expect(store.setCountComponents([second], [])).toBeUndefined()
+
+  expect(store.addComponentToFixture(SW, OTHER)).toEqual({ changed: 1, skipped: 1 })
+  expect(components(store, id)).toEqual(full)
+  expect(components(store, second)).toEqual([{ itemId: OTHER, count: 1 }])
+  expect(components(store, createMark(store).id))
+    .toEqual([{ itemId: OTHER, count: 1 }])
+})
+
+it('does not exceed the remembered ten-component limit', async () => {
+  const { store, id } = await setup()
+  const full = Array.from({ length: 10 }, (_, i) => ({ itemId: 'C' + i, count: 1 }))
+  expect(store.setCountComponents([id], full)).toBeUndefined()
+
+  expect(store.addComponentToFixture(SW, OTHER)).toEqual({ changed: 0, skipped: 1 })
+  expect(components(store, createMark(store).id)).toEqual(full)
+  store.undo()
+  // 履歴が増えていなければ、次は満杯にした操作が戻る。
+  store.undo()
+  expect(components(store, id)).toBeUndefined()
+})
+
+it('remembers a component without any existing marks and restores memory with undo/redo', async () => {
+  const store = new AnnotationStore()
+  await store.ensureCountFixtures(async () => fixtures, async () => {})
+
+  expect(store.addComponentToFixture(SW, OTHER)).toEqual({ changed: 0, skipped: 0 })
+  const inherited = createMark(store).id
+  expect(components(store, inherited)).toEqual([{ itemId: OTHER, count: 1 }])
+
+  store.undo()
+  store.undo()
+  store.redo()
+  expect(components(store, createMark(store).id))
+    .toEqual([{ itemId: OTHER, count: 1 }])
+})
+
+it('restores new fixtures, all changed marks and future-mark memory in one undo/redo', async () => {
+  const { store, id } = await setup()
+  const second = createMark(store).id
+  const beforeFirst = structuredClone(store.get(id)?.count)
+  const beforeSecond = structuredClone(store.get(second)?.count)
+  const added = fixture('R5B_NEW', 16)
+
+  expect(store.addComponentToFixture(SW, added.id, [added]))
+    .toEqual({ changed: 2, skipped: 0 })
+  expect(store.getCountFixture(added.id)).toEqual(added)
+  expect(components(store, id)).toEqual([{ itemId: added.id, count: 1 }])
+  expect(components(store, second)).toEqual([{ itemId: added.id, count: 1 }])
+  expect(store.quantityIndex().total(added.id)).toBe(2)
+
+  const inherited = createMark(store).id
+  expect(components(store, inherited)).toEqual([{ itemId: added.id, count: 1 }])
+  store.undo()
+  store.undo()
+  expect(store.getCountFixture(added.id)).toBeUndefined()
+  expect(store.get(id)?.count).toEqual(beforeFirst)
+  expect(store.get(second)?.count).toEqual(beforeSecond)
+
+  store.redo()
+  expect(store.getCountFixture(added.id)).toEqual(added)
+  expect(components(store, id)).toEqual([{ itemId: added.id, count: 1 }])
+  expect(components(store, second)).toEqual([{ itemId: added.id, count: 1 }])
+  expect(components(store, createMark(store).id))
+    .toEqual([{ itemId: added.id, count: 1 }])
+})
+
+it('does not create another history step when every mark and memory already contain the component', async () => {
+  const { store, id } = await setup()
+  expect(store.addComponentToFixture(SW, OTHER)).toEqual({ changed: 1, skipped: 0 })
+  expect(store.addComponentToFixture(SW, OTHER)).toEqual({ changed: 0, skipped: 0 })
+  store.undo()
+  expect(components(store, id)).toBeUndefined()
+  expect(components(store, createMark(store).id)).toBeUndefined()
+})
+
+it('rejects missing, non-count and identical fixtures without mutation', async () => {
+  const { store, id } = await setup()
+  const before = structuredClone(store.get(id)?.count)
+  for (const [mainId, itemId] of [
+    [LINE, SB],
+    [SW, LINE],
+    ['MISSING', SB],
+    [SW, 'MISSING'],
+    [SW, SW],
+  ]) {
+    const result = store.addComponentToFixture(mainId, itemId)
+    expect(result.error).toBeTruthy()
+    expect(result.changed).toBe(0)
+    expect(result.skipped).toBe(0)
+    expect(store.get(id)?.count).toEqual(before)
+  }
+  expect(components(store, createMark(store).id)).toBeUndefined()
+})
+
+it('rejects linked source and target fixtures before changing anything', async () => {
+  const { store, id } = await setup()
+  const before = structuredClone(store.get(id)?.count)
+  // この試験は「link が存在する」という禁止条件だけを検査する。
+  const link = {} as NonNullable<CountFixture['link']>
+  const spy = vi.spyOn(store, 'getCountFixtures')
+
+  spy.mockReturnValue(fixtures.map(f => f.id === SW ? { ...f, link } : f))
+  expect(store.addComponentToFixture(SW, SB).error)
+    .toBe('連動の項目は図面に拾いません。')
+  spy.mockReturnValue(fixtures.map(f => f.id === SB ? { ...f, link } : f))
+  expect(store.addComponentToFixture(SW, SB).error)
+    .toBe('連動の項目は図面に拾いません。')
+  spy.mockRestore()
+
+  expect(store.get(id)?.count).toEqual(before)
+  expect(components(store, createMark(store).id)).toBeUndefined()
+})
+
+it('rejects duplicate IDs and invalid new fixtures without adding fixtures or memory', async () => {
+  const { store, id } = await setup()
+  const before = structuredClone(store.get(id)?.count)
+  const invalid = { ...fixture('R5B_INVALID', 16), order: Number.NaN }
+
+  expect(store.addComponentToFixture(SW, SB, [fixture(SB, 16)]).error)
+    .toBeTruthy()
+  expect(store.addComponentToFixture(SW, invalid.id, [invalid]).error)
+    .toBeTruthy()
+  expect(store.getCountFixture(invalid.id)).toBeUndefined()
+  expect(store.get(id)?.count).toEqual(before)
+  expect(components(store, createMark(store).id)).toBeUndefined()
+})
+
 it('uses remembered/default component conditions when the composition has no condition', async () => {
   const { store, id } = await setup()
   store.lastCondition.set(SB, '露出')

@@ -1,4 +1,4 @@
-// 建築の鉄筋コンクリートの連動のデータ（SPEC-B07）。Claude が作成。根拠は docs/調査/内訳書標準書式対応_計画.md §7.1・連動B07_計画.md。
+// 建築の鉄筋コンクリートの連動のデータ（SPEC-B07）。Claude が作成。根拠は 非公開の調査資料 §7.1・連動B07_計画.md。
 
 /** 異形棒鋼の単位質量（kg/m）。JIS G 3112（鉄筋コンクリート用棒鋼）。 */
 export const REBAR_MASS_KG_PER_M: Readonly<Record<string, number>> = {

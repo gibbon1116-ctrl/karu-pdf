@@ -4,7 +4,7 @@ import { CountItems } from './CountItems'
 import { routeMembers, type PartCondition, type RoutePart, type QuantityOpening, quantityLabel, quantityPoints, quantityDimensions, QUANTITY_DIMENSIONS } from '../core/quantity'
 import { polygonArea, polylineLength } from '../core/measure'
 import { fixtureCode, fixtureDrawingCode, quantityKind, quantityMethod, QUANTITY_METHODS } from '../core/countFixtures'
-import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import { SYMBOL_OPTIONS, type RGB, type SymbolName } from '../core/annotations'
 import { ISSUE_STATUS_CHOICES, issueStatusChoice, issueStatusLabel, type IssueStatusChoice } from '../core/issues'
@@ -19,6 +19,9 @@ import { FixtureUiContext } from './documentModel'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 import { QuantityValueInput } from '../editor/QuantityValueInput'
 import { groupFixtures } from './fixtureOrder'
+import { relatedSessionMemory } from './relatedState'
+
+const RelatedSuggestions = lazy(() => import('./RelatedSuggestions'))
 
 const COLORS: Array<{ name: string; value: RGB; css: string }> = [
   { name: '赤', value: [1, 0, 0], css: '#e00000' },
@@ -87,16 +90,27 @@ function formatToolLabel(tool: FormatTool): string {
   return labels[tool]
 }
 
+import { relatedAdditionStatus } from './fixtureAdd'
+
 export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsChange }: Props) {
   useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [pickupError, setPickupError] = useState('')
+  const [routeApplyStatus, setRouteApplyStatus] = useState('')
   const fixtureUi = useContext(FixtureUiContext)
+  const relatedMemory = useMemo(() => relatedSessionMemory(store), [store])
+  const relatedState = useSyncExternalStore(
+    relatedMemory.subscribe, relatedMemory.getSnapshot, relatedMemory.getSnapshot,
+  )
+  const requestedRelatedStore = useRef<AnnotationStore | null>(null)
   const textEditorOpen = useSyncExternalStore(
     subscribeActiveTextEditor,
     getActiveTextEditorSnapshot,
     getActiveTextEditorSnapshot,
   )
   const activeSelection = selected ?? (store.selectedPickupsOnly() ? store.get(store.primarySelection()!) ?? null : null)
+  useEffect(() => {
+    setRouteApplyStatus('')
+  }, [store, activeSelection?.id, store.selectedFixtureId])
   const target = activeSelection?.legacyChange ? null : activeSelection?.count || activeSelection?.quantity ? 'count' : formatTool(activeSelection?.kind ?? (tool === 'select' ? 'text' : tool))
   const requestedCountStore = useRef<AnnotationStore | null>(null)
   useEffect(() => {
@@ -105,6 +119,12 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
       requestedCountStore.current = store
       fixtureUi?.open()
     }
+  }, [target, store, fixtureUi])
+  useEffect(() => {
+    if (target !== 'count' || store.relatedReviewsReady
+      || requestedRelatedStore.current === store || !fixtureUi?.retryRelatedReviews) return
+    requestedRelatedStore.current = store
+    fixtureUi.retryRelatedReviews()
   }, [target, store, fixtureUi])
   const values: EditableAnnotation | ToolFormat | null = activeSelection ?? (target ? defaults[target] : null)
   const textTarget = target === 'text' || target === 'callout'
@@ -186,13 +206,66 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
     const fixture = quantity ? store.getCountFixture(quantity.itemId) : activeSelection?.count ? store.fixtureForCount(activeSelection.count) : store.getCountFixture(store.selectedFixtureId)
     return <aside className="format-panel" aria-label="書式" data-testid="format-panel">
       <h2>数量拾い</h2>{pickupError && <p role="alert">{pickupError}</p>}
+      {routeApplyStatus && <p role="status"><small>{routeApplyStatus}</small></p>}
       {/* What is loaded on the route comes first; item details and location follow. */}
       {quantity?.method === 'polyline' && activeSelection?.measure && activeSelection.vertices && store.selectedIds().length === 1 && <RouteItems annotation={activeSelection} store={store} />}
       {store.selectedIds().length >= 2 && store.selectedIds().every(id => store.get(id)?.quantity?.method === 'polyline') && <BulkRouteConditions key={store.selectedIds().join(',')} store={store} />}
       {store.selectedPickupsOnly() && fixture && quantity?.method !== 'polyline' && store.selectedIds().every(id => { const a = store.get(id); return a?.quantity ? a.quantity.method !== 'polyline' && a.quantity.itemId === fixture.id : !!a?.count && store.fixtureForCount(a.count)?.id === fixture.id }) && <PickupCondition key={fixture.id + store.selectedIds().join(',')} store={store} fixture={fixture} />}
       {store.selectedIds().length === 1 && activeSelection?.count && !activeSelection.quantity && fixture && <CountItems key={activeSelection.id + ':' + fixture.id} annotation={activeSelection} store={store} />}
       {fixture ? <><p>{fixtureCode(fixture)} {fixture.name}</p>{quantityMethod(fixture) === 'click' ? <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + fixture.style.size * (1 + .7 * fixtureDrawingCode(fixture).length))} 50`} aria-label="印の見本"><CountMarker style={fixture.style} code={fixtureDrawingCode(fixture)} /></svg> : <QuantitySwatch fixture={fixture} />}
-        <button onClick={() => fixtureUi?.edit(fixture.id)}>項目を編集…</button></> : <button onClick={() => fixtureUi?.open()}>数量拾いの一覧で項目を選んでください</button>}
+        <button onClick={() => fixtureUi?.edit(fixture.id)}>項目を編集…</button>
+        <Suspense fallback={<p>関連の候補を読み込んでいます…</p>}>
+          <RelatedSuggestions
+            store={store}
+            fixtures={store.getCountFixturesSnapshot()}
+            selectedFixtureId={fixture.id}
+            routeId={quantity?.method === 'polyline'
+              && store.selectedIds().length === 1
+              && store.selectedIds()[0] === activeSelection?.id
+              ? activeSelection?.id : undefined}
+            state={relatedState}
+            onStateChange={relatedMemory.update}
+            onOpenMaster={(query, context) => fixtureUi?.addFromMaster(query, context)}
+            onCreateFixture={(initial, context) => fixtureUi?.createFixture(initial, context)}
+            onApplyRelated={(fixtureIds, context) => {
+              if (fixtureUi?.canEdit !== true) return
+              setPickupError('')
+              setRouteApplyStatus('')
+              try {
+                const origin = store.getCountFixture(context.originFixtureId)
+                if (!origin) {
+                  throw new Error('起点の項目が見つかりません。')
+                }
+                const ids = [...new Set(fixtureIds)]
+                const current = store.getCountFixtures()
+                const matches = ids.map(id => current.find(fixture => fixture.id === id))
+                if (!matches.length || matches.some(fixture => !fixture)) {
+                  throw new Error('反映する項目が見つかりません。')
+                }
+                const fixtures = matches.filter(
+                  (fixture): fixture is NonNullable<typeof fixture> => fixture !== undefined,
+                )
+                const result = store.applyRelatedAdditions(
+                  origin.id, fixtures, context.routeId,
+                )
+                if (result.error) throw new Error(result.error)
+                setRouteApplyStatus(relatedAdditionStatus(origin, result))
+              } catch (reason) {
+                setPickupError(reason instanceof Error ? reason.message : String(reason))
+              }
+            }}
+            onSelectFixture={id => {
+              store.selectFixture(id)
+              if (store.getCountFixture(id)?.link) store.setRouteTemplate(null)
+              else fixtureUi?.select()
+            }}
+            canAddFixtures={fixtureUi?.canEdit === true
+              && store.getCountFixturesSnapshot().length < 1000}
+            canEditReviews={fixtureUi?.canEdit === true}
+            onRetryReviews={() => fixtureUi?.retryRelatedReviews?.()}
+          />
+        </Suspense>
+      </> : <button onClick={() => fixtureUi?.open()}>数量拾いの一覧で項目を選んでください</button>}
       {store.selectedPickupsOnly() && <PickupLocation key={store.selectedIds().join(',') + ':' + store.getSnapshot()} store={store} />}
       {(activeSelection?.count || quantity) && <label>項目を変更<select aria-label="項目を変更" value={fixture?.id ?? ''} onChange={e => setPickupError(store.reassignCounts(store.selectedIds(), e.currentTarget.value) ?? '')}>
         {!fixture && <option value="">項目を選んでください</option>}{store.getCountFixtures().filter(f => quantity && (quantity.method === 'polygon' || quantity.method === 'lengthHeight' || quantity.method === 'polygonDepth' || quantity.method === 'lengthWidthDepth')

@@ -370,8 +370,17 @@ button, input { font: inherit; }
 .header-footer-dialog > footer span { flex: 1; }
 .annotation-selection { fill: rgba(20, 115, 230, 0.15); stroke: #1473e6; stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
 .annotation-selection-path { fill: none; stroke: #1473e6; opacity: .55; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
-.annotation-rise-mark { fill: #1473e6; stroke: #fff; paint-order: stroke; font-weight: bold; pointer-events: none; }
+.annotation-rise-mark, .annotation-point-mark { fill: #1473e6; stroke: #fff; paint-order: stroke; font-weight: bold; pointer-events: none; }
 .annotation-rise-mark-highlighted { fill: #ff8a00; }
+.annotation-point-mark { fill: #0b6e4f; }
+.annotation-point-mark-highlighted { fill: #ff8a00; }
+.route-points { margin: 8px 0; padding: 8px 0; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; }
+.route-points > h4 { margin: 0 0 6px; font-size: inherit; }
+.route-point-row { margin-bottom: 8px; }
+.route-point-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.route-point-controls > select { min-width: 0; max-width: 100%; }
+.route-point-row > small { display: block; margin-top: 3px; color: #555; overflow-wrap: anywhere; }
+.route-point-error { display: block; margin-top: 4px; color: #b00020; }
 .annotation-draft { display: none; fill: none; stroke: #e00000; stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
 .annotation-line-draft, .annotation-line-preview, .annotation-ink-draft { display: none; fill: none; stroke: #e00000; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 .annotation-line-preview { stroke: #1473e6; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
@@ -678,6 +687,26 @@ button, input { font: inherit; }
 .fixture-sample-rect { fill: #0068b722; stroke: #0068b7; stroke-width: 1.5; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
 .symbol-search-panel { position: absolute; z-index: 20; top: 8px; right: 8px; box-sizing: border-box; width: 260px; max-width: calc(100% - 16px); max-height: calc(100% - 16px); overflow: auto; padding: 10px; background: #fff; color: #222; border: 1px solid #999; border-radius: 4px; box-shadow: 0 2px 8px #0004; font-size: 12px; }
 .symbol-search-panel h2 { margin: 0 0 8px; font-size: 14px; }
+.symbol-candidate-review { position: absolute; z-index: 21; top: 8px; left: 8px; box-sizing: border-box; display: flex; flex-direction: column; width: 300px; max-width: calc(100% - 16px); max-height: min(70vh, 70%); overflow: hidden; background: #fff; color: #222; border: 1px solid #999; border-radius: 4px; box-shadow: 0 2px 8px #0004; font-size: 12px; }
+.symbol-candidate-review-header { display: flex; flex-shrink: 0; align-items: center; gap: 4px; padding: 8px; border-bottom: 1px solid #ddd; cursor: move; }
+.symbol-candidate-review-header.dragging,
+.symbol-candidate-review-header.dragging * { user-select: none; }
+.symbol-candidate-review-header h2 { flex: 1; min-width: 0; margin: 0; font-size: 14px; }
+.symbol-candidate-review-header button { flex-shrink: 0; }
+.symbol-candidate-review-body { display: flex; flex-direction: column; min-height: 0; padding: 0 8px 8px; overflow: hidden; }
+.symbol-candidate-review-body[hidden] { display: none; }
+.symbol-candidate-review-body p { flex-shrink: 0; margin: 6px 0; }
+.symbol-candidate-review-actions { display: flex; flex-shrink: 0; flex-wrap: wrap; gap: 4px; }
+.symbol-candidate-review-list { min-height: 0; margin: 8px 0 0; padding: 0; overflow: auto; overscroll-behavior: contain; list-style: none; }
+.symbol-candidate-review-row { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; margin-bottom: 4px; border: 1px solid #ddd; border-radius: 3px; }
+.symbol-candidate-review-row.focused { background: #fff0cf; border-color: #d56b00; }
+.symbol-candidate-review-row input { justify-self: center; margin: 0; }
+.symbol-candidate-review-locate { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 6px; min-width: 0; padding: 4px; text-align: left; color: inherit; background: transparent; border: 0; cursor: pointer; }
+.symbol-candidate-review-locate:focus-visible { outline: 2px solid #0068b7; outline-offset: -2px; }
+.symbol-candidate-review-image { display: flex; align-items: center; justify-content: center; width: 96px; height: 96px; overflow: hidden; color: #666; background: #fff; font-size: 11px; }
+.symbol-candidate-review-image canvas { display: block; max-width: 96px; max-height: 96px; object-fit: contain; }
+.symbol-candidate-review-details { display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.symbol-candidate-review-warning { color: #925300; font-weight: bold; }
 .symbol-search-panel p { margin: 6px 0; }
 .symbol-search-panel fieldset { margin: 8px 0; padding: 6px; }
 .symbol-search-panel label { display: block; margin: 4px 0; }
@@ -709,6 +738,16 @@ button, input { font: inherit; }
 .symbol-search-candidate text,
 .symbol-search-candidate.other-fixture.chosen text { fill: #008127; pointer-events: none; }
 .symbol-search-candidate.other-fixture:not(.counted) { cursor: pointer; }
+/* 強調は線を太くして外側の枠を点滅させるだけにし、選択・未選択の色はそのまま見せる。 */
+.symbol-search-candidates .symbol-search-candidate.focused > rect { fill: #ff950018; stroke-width: 3.5; }
+.symbol-search-candidates .symbol-search-focus-halo { fill: none; stroke: #f58200; stroke-width: 2.5; opacity: 0; pointer-events: none; animation: symbol-candidate-focus-pulse .5s ease-in-out 3; }
+@keyframes symbol-candidate-focus-pulse {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .symbol-search-candidates .symbol-search-focus-halo { animation: none; }
+}
 .symbol-search-candidate.counted,
 .symbol-search-candidate.other-fixture { cursor: default; }
 .symbol-search-candidate.counted rect,
@@ -974,6 +1013,9 @@ button, input { font: inherit; }
 
 .fixture-breakdown { min-width: 0; }
 .fixture-breakdown fieldset { min-width: 0; }
+.fixture-breakdown-position-field { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; margin: 6px 0; font-size: 13px; }
+.fixture-breakdown-position-field > label { display: grid; grid-template-columns: 4em minmax(0, 1fr); align-items: center; gap: 8px; flex: 1 1 220px; min-width: 0; }
+.fixture-breakdown-position-field > select { flex: 0 1 12em; width: auto; min-width: 7em; }
 .fixture-dialog-details .fixture-breakdown fieldset > label,
 .fixture-dialog-details .fixture-breakdown > label { display: grid; grid-template-columns: 4em minmax(0, 1fr); align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
 .fixture-breakdown input,
@@ -1420,4 +1462,182 @@ dialog.breakdown-move-dialog {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.related-suggestions {
+  font-size: 12px;
+  margin: 6px 0;
+}
+
+.related-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.related-settings select {
+  font-size: 12px;
+}
+
+.related-list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.related-card {
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin: 4px 0;
+  background: #fff;
+}
+
+.related-card h4 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.related-card p {
+  margin: 2px 0;
+}
+
+.related-card button {
+  padding: 1px 4px;
+  font-size: 11px;
+  margin: 2px 2px 0 0;
+}
+
+.related-flag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #fff3cd;
+  font-size: 10px;
+}
+
+.related-master {
+  color: #555;
+  font-size: 11px;
+}
+
+.format-panel .related-suggestions {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.format-panel .related-suggestions details,
+.format-panel .related-suggestions summary,
+.format-panel .related-card {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+}
+
+.format-panel .related-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.format-panel .related-settings label {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  align-items: center;
+  margin: 0;
+}
+
+.format-panel .related-list {
+  max-height: none;
+  overflow: visible;
+}
+
+.format-panel .related-card h4,
+.format-panel .related-card p,
+.format-panel .related-card small {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.format-panel .related-card button,
+.format-panel .related-card select {
+  font-size: 12px;
+}
+
+.format-panel .related-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.format-panel .related-actions button {
+  margin: 0;
+  white-space: normal;
+}
+
+.format-panel .related-card fieldset {
+  margin: 6px 0 0;
+}
+
+.format-panel .related-registered {
+  opacity: 0.65;
+}
+
+.format-panel .related-note p {
+  margin: 0;
+}
+
+/* 部位の組（R7d）: 役割ごとの見出しと、どれか1つの畳み */
+.related-suggestions .related-role-section {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.related-suggestions .related-role-heading {
+  margin: 0.5rem 0 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.related-suggestions .related-oneof-alternatives {
+  min-width: 0;
+}
+
+.related-suggestions .related-oneof-alternatives > summary {
+  padding: 0.35rem 0;
+  cursor: pointer;
+}
+
+.related-suggestions .related-oneof-alternatives > .related-list {
+  margin-top: 0.5rem;
+}
+
+/* 構成要素・線要素の候補の名称と規格・摘要（SPEC-U7） */
+.line-picker .line-picker-choice-label {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+  max-width: 100%;
+  text-align: left;
+}
+
+.line-picker .line-picker-choice-label > small.line-picker-detail {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  text-overflow: clip;
 }

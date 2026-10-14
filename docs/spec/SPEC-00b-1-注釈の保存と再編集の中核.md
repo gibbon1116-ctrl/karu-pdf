@@ -26,7 +26,7 @@
 
 ## 対象
 
-- 対象フォルダ: `C:\Users\gibbo\Desktop\PDF編集アプリ`
+- 対象フォルダ: `<作業フォルダ>`
 - 新しく作るファイル:
   - `src/core/textLayout.ts`: 文字の配置の計算（純関数）
   - `src/core/fontMetrics.ts`: TTF の表から ascender と unitsPerEm を読む

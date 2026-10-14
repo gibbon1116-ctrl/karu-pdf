@@ -8,6 +8,8 @@
 // - 公共建築工事標準仕様書（機械設備工事編）: 保温の施工箇所の呼び方
 // 選択肢は「よく使うもの」に絞った。無い値は画面で手入力する。配管の施工箇所は単価が変わる区分なので施工条件にする。
 import type { DetailTemplate, SummarySlot } from './types'
+import { ANEMO_SIZES, DUCT_SIZES, GRILLE_SIZES, LINEAR_SIZES, WASTE_CHOICES, withDetailChoices } from './commonChoices'
+import { MECHANICAL_STANDARD_CHOICES, MECHANICAL_STANDARD_DETAIL_CHOICES } from './mechanicalStandardChoices'
 
 const slot = (label: string, choices?: readonly string[]): SummarySlot => (choices ? { label, choices } : { label })
 const condition = (label: string, choices: readonly string[]): SummarySlot => ({ label, choices, condition: true })
@@ -85,6 +87,45 @@ function choicesFor(): Record<string, readonly string[]> {
   result['瞬間流量計|形式'] = list('電磁式、超音波式')
   result['送水口|形式'] = list('壁埋込形、壁付形、スタンド形')
   result['散水ヘッド|形式'] = list('開放形、閉鎖形')
+  // ── U3（2026-10-14）: 選択肢の無かった区分に、よく使う値を足した。無い値は「ほかの値」で入れる ──
+  Object.assign(result, WASTE_CHOICES)
+  result['シーリングディフューザー|寸法'] = ANEMO_SIZES
+  result['線状吹出口|寸法'] = LINEAR_SIZES
+  for (const name of ['吹出口', '吸込口', '給気口', '排煙口', '排気ガラリ']) result[`${name}|寸法`] = GRILLE_SIZES
+  for (const name of ['風量調節ダンパー', '防火ダンパー', '防火防煙ダンパー', 'ピストンダンパー', '逆流防止ダンパー']) result[`${name}|寸法`] = DUCT_SIZES
+  result['排気フード|材質'] = list('ステンレス鋼板、溶融亜鉛めっき鋼板')
+  result['排気フード|形状'] = list('壁付形、島形')
+  result['排気フード|寸法'] = list('900×600、1200×600、1200×900、1500×900、1800×900')
+  result['グリス除去装置|形状'] = list('グリスフィルター形、ルーバー形')
+  result['鏡|寸法'] = list('450×600、600×900、900×900、1200×900')
+  result['化粧棚|寸法'] = list('450、600、750、900')
+  result['ファンコイルユニット|形式'] = list('床置形、天井吊形、天井隠ぺい形、壁掛形')
+  result['カセット形ファンコイルユニット|形式'] = list('1方向吹出し、2方向吹出し、4方向吹出し')
+  result['水石けん入れ|形式'] = list('壁付形、カウンター取付形')
+  result['圧力計|形式'] = list('ブルドン管圧力計、連成計')
+  for (const [label, values] of Object.entries(valve)) result[`弁類|${label}`] = values
+  result['地中埋設標|材質'] = list('コンクリート製、樹脂製、金属製')
+  result['トラップ装置|用途'] = list('蒸気用、空調ドレン用')
+  result['弁装置|用途'] = list('減圧弁装置、温度調節弁装置、電磁弁装置')
+  result['伸縮管継手|用途'] = list('蒸気用、温水用、冷温水用、給湯用')
+  result['送水口|材質等'] = list('黄銅製、ステンレス製')
+  result['放水口|材質等'] = list('黄銅製、ステンレス製')
+  result['放水口|呼称'] = list('単口形、双口形')
+  result['ベントキャップ|口径等'] = list('100、125、150、175、200、250')
+  result['マルチパッケージ形空気調和機|附属品'] = list('リモコン、集中コントローラー、冷媒分岐管')
+  result['排水管|管種'] = list('硬質ポリ塩化ビニル管（VP）、硬質ポリ塩化ビニル管（VU）、リブ付硬質ポリ塩化ビニル管、遠心力鉄筋コンクリート管')
+  result['排水管|呼び径'] = list('75、100、125、150、200、250、300')
+  result['桝類|種類'] = list('汚水桝、雨水桝、インバート桝、ためます、トラップ桝、小口径桝')
+  result['桝類|蓋種類'] = list('鋳鉄製防臭蓋、鋳鉄製密閉蓋、コンクリート蓋、格子蓋')
+  result['桝類|深さ'] = list('600以下、900以下、1200以下、1500以下')
+  result['集合装置|自動切替調整装置'] = list('あり、なし')
+  result['集合装置|ボンベ本数'] = list('2本、4本、6本、8本、10本')
+  result['フレキシブルダクト|口径'] = list('100、125、150、175、200、250、300')
+  result['消火器|仕様'] = list('粉末（ABC）10型、粉末（ABC）20型、強化液 6L、二酸化炭素 5kg')
+  result['スプリンクラーヘッド|形式'] = list('閉鎖型（標準型）、閉鎖型（小区画型）、閉鎖型（側壁型）、開放型')
+  for (const name of ['パネル形エアフィルター', '全熱交換ユニット']) result[`${name}|予備品`] = list('ろ材 1回分、ろ材 2回分')
+  // 標準単価積算基準の細目・摘要の区分（U6）。既にある値は残し、後ろに足す。
+  for (const [key, values] of Object.entries(MECHANICAL_STANDARD_CHOICES)) result[key] = [...new Set([...(result[key] ?? []), ...values])]
   return result
 }
 
@@ -93,7 +134,7 @@ export const MECHANICAL_CHOICES: Readonly<Record<string, readonly string[]>> = c
 /** 細目の摘要の区分のうち、施工条件として扱うもの（項目を分けず、拾うときに選ぶ）。キーは `${細目}|${区分}`。 */
 export const MECHANICAL_CONDITION_SLOTS: ReadonlySet<string> = new Set(Object.keys(PIPE_KINDS).map(name => `${name}|区分`))
 
-export const MECHANICAL_DETAILS: Readonly<Record<string, readonly DetailTemplate[]>> = {
+const mechanicalDetailBase: Readonly<Record<string, readonly DetailTemplate[]>> = {
   保温: [
     { name: '配管保温', unit: 'm', summary: [slot('保温材', list('グラスウール保温筒、ロックウール保温筒、ポリスチレンフォーム保温筒')), slot('呼び径', nominal), condition('施工箇所', insulationPlaces)], note: '保温を要する配管の長さ' },
     { name: 'ダクト保温', unit: '㎡', summary: [slot('保温材', list('グラスウール保温板、ロックウール保温板')), condition('施工箇所', insulationPlaces)], note: 'ダクトの表面積' },
@@ -119,10 +160,10 @@ export const MECHANICAL_DETAILS: Readonly<Record<string, readonly DetailTemplate
   デッキプレート開口切断: [{ name: 'デッキプレート開口切断', unit: 'か所', summary: [slot('口径', nominal)] }],
   冷媒管: [{ name: '冷媒管', unit: 'm', summary: [slot('管種', list('冷媒用断熱材被覆銅管、冷媒用銅管')), slot('管径', list('6.35×9.52、6.35×12.7、9.52×15.88、9.52×19.05、12.7×25.4、15.88×28.58')), condition('施工箇所', PIPE_LOCATIONS)] }],
   合成樹脂製支持受: [{ name: '合成樹脂製支持受', unit: '個', summary: [slot('呼び径', nominal)] }],
-  たわみ継手: [{ name: 'たわみ継手', unit: 'か所', summary: [slot('寸法')] }],
-  消音エルボ: [{ name: '消音エルボ', unit: '個', summary: [slot('寸法')] }],
-  チャンバー類: [{ name: 'チャンバー', unit: '個', summary: [slot('種類', list('消音チャンバー、吹出口用チャンバー')), slot('寸法')] }],
-  制気口ボックス類: [{ name: '制気口ボックス', unit: '個', summary: [slot('寸法')] }],
+  たわみ継手: [{ name: 'たわみ継手', unit: 'か所', summary: [slot('寸法', DUCT_SIZES)] }],
+  消音エルボ: [{ name: '消音エルボ', unit: '個', summary: [slot('寸法', DUCT_SIZES)] }],
+  チャンバー類: [{ name: 'チャンバー', unit: '個', summary: [slot('種類', list('消音チャンバー、吹出口用チャンバー')), slot('寸法', DUCT_SIZES)] }],
+  制気口ボックス類: [{ name: '制気口ボックス', unit: '個', summary: [slot('寸法', GRILLE_SIZES)] }],
   文字標識等: [{ name: '文字標識', unit: 'か所', summary: [slot('種類', list('配管識別表示、弁札、機器名称板'))] }],
   表示板: [{ name: '表示板', unit: '枚' }],
   標識板: [{ name: '標識板', unit: '枚' }],
@@ -136,7 +177,7 @@ export const MECHANICAL_DETAILS: Readonly<Record<string, readonly DetailTemplate
   ],
   はつり補修: [{ name: 'はつり補修', unit: 'か所', summary: [slot('口径', nominal)] }],
   配管分岐・閉塞: [{ name: '配管分岐・閉塞', unit: 'か所', summary: [slot('呼び径', nominal)] }],
-  ダクト分岐・閉塞: [{ name: 'ダクト分岐・閉塞', unit: 'か所', summary: [slot('寸法')] }],
+  ダクト分岐・閉塞: [{ name: 'ダクト分岐・閉塞', unit: 'か所', summary: [slot('寸法', DUCT_SIZES)] }],
   取外し再取付け: [{ name: '機器取外し再取付け', unit: '台', summary: [slot('名称')] }],
   機器固定用アンカー: [{ name: '機器固定用アンカー', unit: '本', summary: [slot('呼び', list('M10、M12、M16、M20'))] }],
 }
@@ -156,3 +197,6 @@ export const MECHANICAL_ROW_VARIANTS: Readonly<Record<string, { pick: 'length'; 
     }),
   },
 }
+
+// 別紙明細の明細の区分に、Claude が作った選択肢（U6、mechanicalStandardChoices.ts）を重ねる。
+export const MECHANICAL_DETAILS: Readonly<Record<string, readonly DetailTemplate[]>> = withDetailChoices(mechanicalDetailBase, MECHANICAL_STANDARD_DETAIL_CHOICES)
