@@ -2,8 +2,42 @@ import { expect, test, type Page } from '@playwright/test'
 import mupdf from 'mupdf'
 import { readCountFixtures, writeCountFixtures, type CountFixture } from '../src/core/countFixtures'
 import { RELATED_RULES } from '../src/core/related/rules'
+import { listAnnotations } from '../src/core/annotations'
+import { QuantityIndex } from '../src/core/quantityIndex'
+import { readRelatedReviews } from '../src/core/related/reviews'
 
 test.use({ serviceWorkers: 'block' })
+
+test.beforeEach(async ({ page }) => {
+  // Each test has a fresh browser context; also fix the preferences on reload.
+  await page.addInitScript(() => {
+    localStorage.setItem('karu-pdf:group-by-breakdown', 'true')
+    localStorage.removeItem('karu-pdf:quantity-table-group-by-breakdown-v2')
+    localStorage.removeItem('karu-pdf:fixture-panel-group-by-breakdown')
+    localStorage.setItem('karu-pdf:quantity-table-collapsed', '[]')
+  })
+})
+
+function savedData(bytes: number[]) {
+  const doc = new mupdf.PDFDocument(new Uint8Array(bytes))
+  try {
+    const fixtures = readCountFixtures(doc)
+    const annotations = Array.from({ length: doc.countPages() }, (_, pageIndex) =>
+      listAnnotations(doc, pageIndex)).flat()
+    const index = QuantityIndex.build(annotations.map(a => ({
+      ...a, id: String(a.objNum),
+    })), fixtures)
+    return {
+      fixtures,
+      pickups: annotations.filter(a => a.count || a.quantity).map(a => ({
+        pageIndex: a.pageIndex, rect: a.rect, vertices: a.vertices,
+        count: a.count, quantity: a.quantity, measure: a.measure,
+      })),
+      totals: fixtures.map(f => ({ id: f.id, total: index.total(f.id) })),
+      reviews: readRelatedReviews(doc),
+    }
+  } finally { doc.destroy() }
+}
 
 function blankPdf(): number[] {
   const doc = new mupdf.PDFDocument()
@@ -36,14 +70,30 @@ async function open(page: Page, bytes = blankPdf()) {
   return panel
 }
 
-async function tableContents(page: Page): Promise<string[]> {
+async function tableContents(page: Page, expected?: string[]): Promise<string[]> {
   await page.getByTestId('fixture-panel').getByRole('button', {
     name: '集計表を開く', exact: true,
   }).click()
   // 集計表はダイアログではなく領域（e2e/quantity-table.annotate.spec.ts と同じ）
   const region = page.getByRole('region', { name: '数量の集計表', exact: true })
   await expect(region).toBeVisible()
-  const contents = await region.getByRole('table').allTextContents()
+  await expect(region.getByRole('checkbox', {
+    name: '内訳書の位置でまとめる', exact: true,
+  })).toBeChecked()
+  // Visibility precedes the lazy master effect, including on a cached reopen.
+  // Require the complete hierarchy before taking a snapshot; never accept the
+  // temporary category view as the baseline.
+  await expect(region.locator('.quantity-table-heading-label')).toHaveText([
+    '電気設備', '庁舎', '電灯設備', '電灯分岐', '配線器具（別紙明細）',
+  ])
+  const tables = region.getByRole('table')
+  await expect(tables).toHaveCount(1)
+  const item = tables.locator('tr[data-fixture-id]')
+  await expect(item).toHaveCount(1)
+  await expect(item.locator('.quantity-table-fixed-2')).toHaveText('コンセント')
+  await expect(item.locator('.quantity-table-fixed-5 button')).toHaveText('1')
+  if (expected) await expect.poll(() => tables.allTextContents()).toEqual(expected)
+  const contents = await tables.allTextContents()
   expect(contents.length).toBeGreaterThan(0)
   await region.getByRole('button', { name: '集計表を閉じる', exact: true }).click()
   await expect(region).toBeHidden()
@@ -204,6 +254,18 @@ test('関連候補の判断・マスタ検索で数量を変えず、保存後�
   const quantitiesBefore = await panel.locator('.fixture-total-button').allTextContents()
   const tableBefore = await tableContents(page)
   const fixtureNamesBefore = await panel.locator('.fixture-row-name').allTextContents()
+  const fixturesBefore = await page.evaluate(() => window.__karu!.getCountFixtures())
+  const before = savedData(await page.evaluate(async () => [...(await window.__karu!.saveToBytes())!]))
+  expect(before.fixtures).toHaveLength(1)
+  expect(before.fixtures[0].breakdown).toEqual({
+    book: '電気設備', section: '庁舎', subject: '電灯設備',
+    middle: '電灯分岐', item: '配線器具',
+  })
+  expect(before.pickups).toHaveLength(1)
+  expect(before.pickups[0].count).toMatchObject({
+    version: 2, fixtureId: before.fixtures[0].id,
+  })
+  expect(before.totals).toEqual([{ id: before.fixtures[0].id, total: 1 }])
 
   const first = candidates.first()
   const ruleIds = await first.getAttribute('data-rule-ids')
@@ -227,24 +289,28 @@ test('関連候補の判断・マスタ検索で数量を変えず、保存後�
     .toEqual(quantitiesBefore)
   expect(await panel.locator('.fixture-row-name').allTextContents())
     .toEqual(fixtureNamesBefore)
-  expect(await tableContents(page)).toEqual(tableBefore)
+  expect(await page.evaluate(() => window.__karu!.getCountFixtures())).toEqual(fixturesBefore)
+  expect(await tableContents(page, tableBefore)).toEqual(tableBefore)
 
   // 保存は既存の e2e と同じく試験用の入口で行う（e2e/count-fixtures.annotate.spec.ts の savedFixtures）
   const bytes = await page.evaluate(async () => [...(await window.__karu!.saveToBytes())!])
   expect(bytes.length).toBeGreaterThan(0)
-  const saved = new mupdf.PDFDocument(new Uint8Array(bytes))
-  try {
-    const fixtures = readCountFixtures(saved)
-    expect(fixtures).toHaveLength(fixtureNamesBefore.length)
-    expect(fixtures.some(fixture => fixture.category === '配線器具')).toBe(true)
-  } finally {
-    saved.destroy()
-  }
+  const saved = savedData(bytes)
+  expect(saved.fixtures).toEqual(before.fixtures)
+  expect(saved.pickups).toEqual(before.pickups)
+  expect(saved.totals).toEqual(before.totals)
+  expect(saved.fixtures.some(fixture => fixture.category === '配線器具')).toBe(true)
+  expect(Object.values(saved.reviews.decisions)).toContainEqual(expect.objectContaining({
+    decision: '不要', ruleIds: ruleIds!.split(' '),
+    originFixtureIds: [before.fixtures[0].id],
+  }))
 
   const reopened = await open(page, bytes)
   expect(await reopened.locator('.fixture-row-name').allTextContents())
     .toEqual(fixtureNamesBefore)
   expect(await reopened.locator('.fixture-total-button').allTextContents())
     .toEqual(quantitiesBefore)
-  expect(await tableContents(page)).toEqual(tableBefore)
+  expect(await tableContents(page, tableBefore)).toEqual(tableBefore)
+  const resaved = savedData(await page.evaluate(async () => [...(await window.__karu!.saveToBytes())!]))
+  expect(resaved).toEqual(saved)
 })
