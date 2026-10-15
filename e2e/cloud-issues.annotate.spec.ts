@@ -422,6 +422,43 @@ test('雲多角形は02iと同じ4点・Enter・Backspace・Shift・頂点編集
   await expect.poll(()=>page.evaluate(()=>window.__karu!.getEditableAnnotations(0).find(a=>a.kind==='cloudPolygon')!.vertices![0][1])).toBeCloseTo(220,3)
   await reopen(page);await expect.poll(()=>page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.kind==='cloudPolygon').length)).toBe(1)
 })
+for (const pageIndex of [0, 1]) {
+  test(`指摘の欄外クリックは確定だけで、次のクリックで次番号を置く（p.${pageIndex + 1}）`, async ({ page }) => {
+    await open(page)
+    await page.keyboard.press('n')
+    await click(page, 100, 220)
+    const input = page.getByTestId('issue-editor')
+    await expect(input).toBeVisible()
+    await input.fill('確定する指摘')
+    // 入力欄内のクリックは編集を続ける。
+    await input.click()
+    await expect(input).toBeVisible()
+    const target = page.getByTestId(`annotation-layer-${pageIndex}`)
+    await target.scrollIntoViewIfNeeded()
+    const p = await target.evaluate(element => {
+      const svg = element as SVGSVGElement, box = svg.getBoundingClientRect(), view = svg.viewBox.baseVal
+      return { x: box.left + 400 * box.width / view.width, y: box.top + 400 * box.height / view.height }
+    })
+    expect(await page.evaluate(p => document.elementFromPoint(p.x, p.y)?.closest('.annotation-layer')?.getAttribute('data-testid'), p)).toBe(`annotation-layer-${pageIndex}`)
+    await page.mouse.click(p.x, p.y)
+    await expect(input).toHaveCount(0)
+    expect((await issues(page)).map(a => [a.number, a.text])).toEqual([[1, '確定する指摘']])
+    expect(await page.evaluate(index => window.__karu!.getEditableAnnotations(index).filter(a => a.issue).length, pageIndex)).toBe(pageIndex === 0 ? 1 : 0)
+    await expect(page.getByRole('button', { name: '指摘', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await page.mouse.click(p.x, p.y)
+    await expect(input).toBeVisible()
+    await input.fill('次の指摘')
+    await input.press('Control+Enter')
+    await expect(input).toHaveCount(0)
+    expect(await page.evaluate(index => window.__karu!.getEditableAnnotations(index).filter(a => a.issue).map(a => [a.issue!.number, a.text]), pageIndex))
+      .toEqual(pageIndex === 0 ? [[1, '確定する指摘'], [2, '次の指摘']] : [[2, '次の指摘']])
+    await reopen(page)
+    expect((await issues(page))[0]).toMatchObject({ number: 1, text: '確定する指摘' })
+    if (pageIndex === 1) await page.getByTestId('annotation-layer-1').scrollIntoViewIfNeeded()
+    await expect.poll(() => page.evaluate(index => window.__karu!.getEditableAnnotations(index).find(a => a.issue?.number === 2)?.text, pageIndex)).toBe('次の指摘')
+  })
+}
+
 test('指摘は1・2・3、削除後4となり、最大番号の問い合わせは文書ごとに1回',async({page})=>{
   await open(page);await page.keyboard.press('n')
   await place(page,100,220,'最初');await place(page,160,250,'二番目');await place(page,220,280,'三番目')
