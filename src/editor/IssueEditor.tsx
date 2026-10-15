@@ -25,7 +25,13 @@ export function IssueEditor({ annotation, store, zoom, onClose, registerCommit }
       textarea.focus()
     })
     registerCommit(async () => close())
-    const outside = (event: PointerEvent) => { if (!(event.target as Element | null)?.closest('[data-text-symbol]') && !input.current?.contains(event.target as Node)) close() }
+    const outside = (event: PointerEvent) => {
+      if (input.current?.contains(event.target as Node)) return
+      if ((event.target as Element | null)?.closest('[data-text-symbol]')) return
+      // このクリックは入力の確定だけ。別ページでも次の指摘を作らない。
+      if ((event.target as Element | null)?.closest('.annotation-layer')) event.preventDefault()
+      close()
+    }
     document.addEventListener('pointerdown', outside, true)
     return () => { setActiveTextInserter(null); setTextEditorComposing(false); registerCommit(null); document.removeEventListener('pointerdown', outside, true) }
   }, [])
