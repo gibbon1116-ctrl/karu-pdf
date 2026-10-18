@@ -725,7 +725,8 @@ it('B06 calculates heavy and bulky carry, alone increase and excluded source bas
   })
   expect(heavy.sources[0].subtotal).toBeCloseTo(2.04, 12)
   expect(heavy.sources[1]).toMatchObject({
-    itemId: '容積機器', quantity: 1, subtotal: 0, note: '容積品',
+    itemId: '容積機器', quantity: 1, subtotal: 0,
+    note: '容積品 200kg/㎥（区分違い: 重量品だけ）',
   })
   expect(heavy.sources[2]).toMatchObject({
     itemId: '小型機器', quantity: 10, subtotal: 0, note: '100kg未満',
@@ -737,6 +738,9 @@ it('B06 calculates heavy and bulky carry, alone increase and excluded source bas
     itemId: '質量なし', quantity: 3, unitMassKg: 0, subtotal: 0,
   })
   expect(heavy.warnings).toEqual([
+    '容積機器は容積品（200kg/㎥）のため、'
+    + '区分『重量品』のこの項目には入れていません。'
+    + '区分を外すと重量品・容積品の両方を合計します。',
     '外形なしの外形（幅・奥行・高さ）が未設定です。',
     '質量なしの質量が未設定です。',
   ])
@@ -747,7 +751,10 @@ it('B06 calculates heavy and bulky carry, alone increase and excluded source bas
 
   const bulky = results.get('bulky')!
   expect(bulky.total).toBeCloseTo(.51, 12)
-  expect(bulky.sources[0]).toMatchObject({ subtotal: 0, note: '重量品' })
+  expect(bulky.sources[0]).toMatchObject({
+    subtotal: 0,
+    note: '重量品 1,200kg（区分違い: 容積品だけ）',
+  })
   expect(bulky.sources[1]).toMatchObject({ unitMassKg: 300, factor: 1.7 })
   expect(bulky.sources[1].subtotal).toBeCloseTo(.51, 12)
 })
@@ -817,10 +824,11 @@ it('B06 treats exactly 600 kg/m3 as heavy and ignores non-count carry sources', 
     '長さは個数の項目ではないため、搬入の元から除外します。',
   ])
   expect(results.get('heavy')!.sources[1]).toMatchObject({
-    itemId: '長さ', subtotal: 0, note: '個数以外',
+    itemId: '長さ', subtotal: 0, note: '対象外の機器（個数以外）',
   })
   expect(results.get('bulky')!.total).toBe(0)
-  expect(results.get('bulky')!.sources[0].note).toBe('重量品')
+  expect(results.get('bulky')!.sources[0].note).toBe('重量品 600kg（区分違い: 容積品だけ）')
+  expect(results.get('bulky')!.sources[0].carryClass).toBe('heavy')
 })
 
 it('B06 auto carry filters disposal rows, preserves bases and applies overrides last', () => {
@@ -987,7 +995,8 @@ it('B06 unknown waste types preserve mass output and explicit density overrides 
 
 const b06InvalidLinks: unknown[] = [
   { kind: 'carry', sources: [] },
-  ...[null, {}, { class: 'other' }, { class: 'heavy', alone: 1 }].map(carry => ({
+  // SPEC-T15: carry: {}（区分の省略＝重量品・容積品の両方）は正しい形
+  ...[null, { class: 'other' }, { class: 'heavy', alone: 1 }].map(carry => ({
     kind: 'carry', sources: [], carry,
   })),
   { kind: 'factor', sources: [], carry: { class: 'heavy' } },
@@ -1361,4 +1370,137 @@ it('B07-2a: excavation uses the configured depth when the metric has no depth', 
   expect(result.warnings).toEqual([])
   expect(result.total).toBeCloseTo(51.52, 8)
   expect(result.sources[0].note).toContain('余幅 0.8m（ゆとり 0.5、法 0.3）')
+})
+
+it('nameExcludes は1〜20件・各40字を受け付け、読込時に複製する', () => {
+  const words = Array.from({ length: 20 }, (_, index) =>
+    `${index}`.padEnd(40, '除'))
+  const target = linked('exclude-valid', {
+    kind: 'factor',
+    sources: [],
+    auto: { nameIncludes: ['壁'], nameExcludes: words },
+  })
+  expect(fixtureLinkError(target)).toBeUndefined()
+
+  const read = readFixtureLink(target)
+  expect(read).toEqual(target.link)
+  expect(read?.auto?.nameExcludes).not.toBe(words)
+  words[0] = '変更'
+  expect(read?.auto?.nameExcludes?.[0]).toBe('0'.padEnd(40, '除'))
+
+  expect(error({
+    kind: 'factor',
+    sources: [],
+    auto: { nameExcludes: ['撤去'] },
+  })).toBeUndefined()
+})
+
+it.each([
+  [],
+  Array.from({ length: 21 }, (_, index) => `除外${index}`),
+  [''],
+  ['除'.repeat(41)],
+  [' 撤去'],
+  ['撤去 '],
+  ['撤\r去'],
+  ['撤\n去'],
+  ['撤\t去'],
+  ['撤\u2028去'],
+  ['撤\u2029去'],
+  ['撤去', 1],
+  '撤去',
+  null,
+])('不正なnameExcludes %j を拒否する', nameExcludes => {
+  expect(error({
+    kind: 'factor',
+    sources: [],
+    auto: { nameExcludes },
+  })).toContain('除外語')
+})
+
+it('nameExcludes のいずれかを名称に含む項目だけを自動の元から除く', () => {
+  const wall = { ...fixture('wall', 'area'), name: '壁下地' }
+  const removal = { ...fixture('removal', 'area'), name: '壁下地撤去' }
+  const temporary = { ...fixture('temporary', 'area'), name: '仮設壁下地' }
+  const other = { ...fixture('other', 'area'), name: '床下地' }
+  const target = linked('exclude-target', {
+    kind: 'factor',
+    factor: 1,
+    sources: [],
+    auto: {
+      nameIncludes: ['壁下地'],
+      nameExcludes: ['撤去', '仮設'],
+      kinds: ['area'],
+    },
+  }, 'area')
+  const fixtures = [wall, removal, temporary, other, target]
+
+  expect(selectB072Sources(fixtures, target).map(source => source.itemId))
+    .toEqual([wall.id])
+
+  const result = calculate(fixtures, [
+    row(wall.id, 10),
+    row(removal.id, 20),
+    row(temporary.id, 30),
+    row(other.id, 40),
+  ]).get(target.id)
+  expect(result?.total).toBeCloseTo(10, 9)
+})
+
+it('nameExcludes は手動指定した元を削除しない', () => {
+  const original = { ...fixture('manual-removal'), name: '壁撤去' }
+  const target = linked('manual-exclude-target', {
+    kind: 'factor',
+    sources: [{ itemId: original.id, factor: 2 }],
+    auto: { nameIncludes: ['壁'], nameExcludes: ['撤去'] },
+  })
+  expect(selectB072Sources([original, target], target)).toEqual([
+    { itemId: original.id, factor: 2 },
+  ])
+})
+
+it('nameExcludes のない旧autoとoriginAnyをそのまま読込・照合できる', () => {
+  const wall = { ...fixture('legacy-wall'), name: '壁下地', category: '分類A' }
+  const removal = {
+    ...fixture('legacy-removal'), name: '壁下地撤去', category: '分類A',
+  }
+  const other = { ...fixture('legacy-other'), name: '壁下地', category: '分類B' }
+  const target = linked('legacy-target', {
+    kind: 'factor',
+    sources: [],
+    auto: {
+      originAny: [{ categories: ['分類A'], nameIncludes: ['壁下地'] }],
+      kinds: ['count'],
+    },
+  })
+  expect(fixtureLinkError(target)).toBeUndefined()
+  const read = readFixtureLink(target)
+  expect(read).toEqual(target.link)
+  expect(read?.auto?.nameExcludes).toBeUndefined()
+  expect(selectB072Sources([wall, removal, other, target], target)
+    .map(source => source.itemId)).toEqual([wall.id, removal.id])
+})
+
+it('originAnyとnameExcludesを併用すると枝のAND・ORと除外を維持する', () => {
+  const a = { ...fixture('branch-a'), name: '壁A', category: '分類A' }
+  const b = { ...fixture('branch-b'), name: '壁B', category: '分類B' }
+  const crossed = {
+    ...fixture('branch-crossed'), name: '壁B', category: '分類A',
+  }
+  const removal = {
+    ...fixture('branch-removal'), name: '壁A撤去', category: '分類A',
+  }
+  const target = linked('branch-target', {
+    kind: 'factor',
+    sources: [],
+    auto: {
+      originAny: [
+        { categories: ['分類A'], nameIncludes: ['壁A'] },
+        { categories: ['分類B'], nameIncludes: ['壁B'] },
+      ],
+      nameExcludes: ['撤去'],
+    },
+  })
+  expect(selectB072Sources([a, b, crossed, removal, target], target)
+    .map(source => source.itemId)).toEqual([a.id, b.id])
 })

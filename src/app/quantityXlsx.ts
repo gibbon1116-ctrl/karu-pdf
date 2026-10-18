@@ -124,11 +124,8 @@ function linkBasisSheets(
       }
       if (source.note) notes.push(`（${source.note}）`)
       if (link?.kind === 'carry') {
-        const carryClass = source.note === '重量品' || source.note === '容積品'
-          ? source.note
-          : source.factor !== undefined
-            ? link.carry?.class === 'bulky' ? '容積品' : '重量品'
-            : '区分未判定'
+        const carryClass = source.carryClass === 'heavy' ? '重量品'
+          : source.carryClass === 'bulky' ? '容積品' : '区分未判定'
         notes.push(`区分: ${carryClass}、補正率 ${source.factor ?? '適用なし'}${link.carry?.alone ? '（単独搬入・30％増し）' : ''}`)
       }
       const densityNote = linkDensityNote(fixture, result.densityTPerM3)

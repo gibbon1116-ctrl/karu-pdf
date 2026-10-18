@@ -239,7 +239,7 @@ it('容積品と区分違いで除外した元のnoteを備考に示す', () => 
   expect(included[8].value).toContain('補正率 2.5')
   const excluded = rows.find(row => row[2]?.value === heavy.code)!
   expect(excluded[7].value).toBe(0)
-  expect(excluded[8].value).toContain('（重量品）')
+  expect(excluded[8].value).toContain('区分違い')
   expect(excluded[8].value).toContain('区分: 重量品')
   expect(excluded[8].value).toContain('補正率 適用なし')
 })

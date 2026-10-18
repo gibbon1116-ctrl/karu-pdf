@@ -423,7 +423,8 @@ test('標準マスタの器具取付は照明器具を自動で元にし、後�
 
 test('標準マスタの機器搬入は重量品の補正率と単独搬入を反映する', async ({ page }) => {
   test.setTimeout(180_000)
-  let dialog = await addDialog(page, 'P-1', '盤 P-1')
+  // SPEC-T15: 電気の機器搬入は受変電・電力貯蔵装置等（単価積算基準 第3編）。受配電盤を元にする
+  let dialog = await addDialog(page, 'P-1', '受配電盤 P-1')
   await setFixtureCategory(dialog, '盤類')
   await openDetails(dialog, '.fixture-attributes')
   await dialog.getByLabel('単体質量（kg）', { exact: true }).fill('1200')
@@ -431,7 +432,7 @@ test('標準マスタの機器搬入は重量品の補正率と単独搬入を�
   await dialog.getByLabel('奥行（mm）', { exact: true }).fill('400')
   await dialog.getByLabel('高さ（mm）', { exact: true }).fill('1800')
   await dialog.getByRole('button', { name: '追加する', exact: true }).click()
-  await fixtureRow(page, 'P-1', '盤 P-1').click()
+  await fixtureRow(page, 'P-1', '受配電盤 P-1').click()
   await point(page, 100, 200)
 
   const carry = await addStandardLinkedDetail(page, '機器搬入', '重量品')
@@ -446,8 +447,8 @@ test('標準マスタの機器搬入は重量品の補正率と単独搬入を�
   await closeBreakdown(page)
 
   dialog = await editDialog(page, carry.code, carry.name)
-  await expect(dialog.getByRole('radio', { name: '重量品', exact: true })).toBeChecked()
-  await expect(preview(dialog)).toContainText('重量品・補正率 0.85')
+  await expect(dialog.getByRole('radio', { name: '重量品だけ', exact: true })).toBeChecked()
+  await expect(preview(dialog)).toContainText('重量品 1,200kg・補正率 0.85')
   await dialog.getByLabel('単独搬入（補正率を30％増し）', { exact: true }).check()
   await expect(preview(dialog)).toContainText('合計 1.33 t')
   await expect(preview(dialog)).toContainText('補正率 1.105')
@@ -638,6 +639,7 @@ test('見本、連動の札、拾い防止、根拠、元の削除とUndo、上�
   await expect(dialog.locator('.fixture-link')).toHaveAttribute('open', '')
   await dialog.getByLabel('数量を手で上書きする', { exact: true }).check()
   await dialog.getByLabel('上書きの数量', { exact: true }).fill('10')
+  await dialog.getByLabel('上書きの理由の候補', { exact: true }).selectOption('other')
   await dialog.getByLabel('上書きの理由', { exact: true }).fill('現場の指示による')
   await expect(preview(dialog)).toContainText('合計 10 個')
   await dialog.getByRole('button', { name: '変更する', exact: true }).click()

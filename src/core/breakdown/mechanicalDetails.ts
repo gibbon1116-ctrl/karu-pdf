@@ -154,6 +154,7 @@ const mechanicalDetailBase: Readonly<Record<string, readonly DetailTemplate[]>> 
   機器用基礎: [{ name: '機器用基礎', unit: '基', summary: [slot('寸法'), slot('種類', list('コンクリート基礎、防振基礎、鋼製架台'))] }],
   '搬入・据付費': [
     { name: '機器搬入', unit: 't', linked: 'carry', summary: [slot('区分', list('重量品、容積品'))] },
+    { name: '機器搬出', unit: 't', linked: 'carry', summary: [slot('区分', list('重量品、容積品'))], note: '改修の撤去機器（単価積算基準 第4編第2章第1節2）' },
     { name: '機器据付', unit: '台', summary: [slot('名称')] },
   ],
   防火区画貫通処理: [{ name: '防火区画貫通処理', unit: 'か所', summary: [slot('工法', list('認定工法、モルタル充填')), slot('口径', nominal), slot('部位', list('壁、床'))] }],

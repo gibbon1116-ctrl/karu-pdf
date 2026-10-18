@@ -322,6 +322,7 @@ export default function FixturePresetDialog({ sources, fixtures = [], initialQue
         if (sources) onAdd(selectedItems)
         else {
           const { fixtureFromPreset } = await import('../core/quantityMaster')
+          const { linkFromRule } = await import('../core/breakdown/linkFromRule')
           const available = [...fixtures]
           const additions = selectedItems.map(item => {
             const fixture = fixtureFromPreset(item, available)
@@ -357,8 +358,7 @@ export default function FixturePresetDialog({ sources, fixtures = [], initialQue
                   hasSource = available.some(original =>
                     original.id !== fixture.id && !original.link && original.steel !== undefined)
                 } else {
-                  const hasAutoCondition = Object.values(rule.auto)
-                    .some(value => value !== undefined)
+                  const hasAutoCondition = linkRuleAuto(rule) !== undefined
                   hasSource = hasAutoCondition && fixtureLinkSources(available, {
                     ...fixture,
                     link: { kind: rule.kind, sources: [], auto: rule.auto },
@@ -366,35 +366,20 @@ export default function FixturePresetDialog({ sources, fixtures = [], initialQue
                 }
                 if (!unsupportedUnit && !hasSource) continue
               }
-              const carryClass = fixture.summary?.some(field =>
-                field.label.trim() === '区分' && field.value.trim() === '容積品')
-                ? 'bulky' as const : 'heavy' as const
-              fixture.link = {
-                kind: rule.waste ? 'mass' : rule.kind,
-                sources: [],
-                ...(linkRuleAuto(rule) !== undefined ? { auto: linkRuleAuto(rule) } : {}),
-                ...(rule.factor !== undefined ? { factor: rule.factor } : {}),
-                ...(rule.kind === 'rc' && rule.rc !== undefined ? { rc: { ...rule.rc } } : {}),
-                ...(rule.kind === 'shape' && rule.shape !== undefined ? { shape: { ...rule.shape } } : {}),
-                ...(rule.kind === 'crossing' && rule.crossing !== undefined ? {
-                  crossing: {
-                    ...rule.crossing,
-                    ...(rule.crossing.barrierItemIds !== undefined
-                      ? { barrierItemIds: [...rule.crossing.barrierItemIds] } : {}),
-                    ...(rule.crossing.barrierNameIncludes !== undefined
-                      ? { barrierNameIncludes: [...rule.crossing.barrierNameIncludes] } : {}),
-                  },
-                } : {}),
-                ...(rule.kind === 'steel' && rule.steel !== undefined ? {
-                  steel: { ...rule.steel },
-                } : {}),
-                ...(rule.kind === 'carry' ? { carry: { class: carryClass } } : {}),
-              }
+              fixture.link = linkFromRule(
+                rule,
+                fixture.name,
+                fixture.summary ?? [],
+                fixture.breakdown?.book,
+              )
               delete fixture.convert
               delete fixture.rc
               delete fixture.steel
+              const carryClass = fixture.link.carry?.class
               linkedNames.push(fixture.name + (rule.kind === 'carry'
-                ? `（${carryClass === 'bulky' ? '容積品' : '重量品'}）` : ''))
+                ? `（${carryClass === 'heavy' ? '重量品'
+                  : carryClass === 'bulky' ? '容積品' : '両方（元ごとに判定）'}）`
+                : ''))
             }
           }
           const rcLinkedNames = unique(additions

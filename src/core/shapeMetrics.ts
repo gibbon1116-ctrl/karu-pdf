@@ -22,6 +22,11 @@ export interface ShapeMetrics {
   grossAreaM2: number
   perimeterM: number
   lengthM: number
+  /** 立上り・余長を含まない、その条件に計上する平面長。 */
+  baseLengthM?: number
+  /** この拾いに設定された、名称で扉と確認できる開口の幅の合計。 */
+  doorWidthM?: number
+  doorWidthWarnings?: string[]
   heightM?: number
   widthM?: number
   depthM?: number
@@ -144,6 +149,8 @@ export function collectShapeMetrics(
               grossAreaM2: 0,
               perimeterM: routeLengthM,
               lengthM: routeLengthM,
+              baseLengthM: member.cond.plan !== null
+                && condition === member.cond.plan ? lengthM : 0,
               pathPoints,
               riseCount: rises.length,
               ...(crossingParts !== undefined ? { crossingParts } : {}),
@@ -186,11 +193,34 @@ export function collectShapeMetrics(
         }
       }
 
+      let doorWidthM = 0
+      const doorWidthWarnings: string[] = []
+      for (const opening of q.openings ?? []) {
+        if (opening.itemId === undefined) continue
+        const fixture = byId.get(opening.itemId)
+        if (!fixture || !/扉|ドア|戸|出入口/u.test(fixture.name)) continue
+        const widthM = openingSize(opening.itemId)?.widthM ?? opening.widthM
+        if (widthM === undefined || !Number.isFinite(widthM)
+          || widthM <= 0 || widthM > 100) {
+          doorWidthWarnings.push(`${fixture.name}の開口幅が未設定のため引いていません。`)
+          continue
+        }
+        doorWidthM += widthM * opening.count
+      }
+
+      const fixture = byId.get(q.itemId)!
+      const heightM = q.heightM ?? fixture.defaults?.heightM
+      const widthM = q.widthM ?? fixture.defaults?.widthM
+      const depthM = q.depthM ?? fixture.defaults?.depthM
+
       add({
         ...common,
         itemId: q.itemId,
         method: q.method,
         count: 1,
+        ...(!enclosing ? { baseLengthM: lengthM } : {}),
+        ...(doorWidthM !== 0 ? { doorWidthM } : {}),
+        ...(doorWidthWarnings.length ? { doorWidthWarnings } : {}),
         areaM2,
         grossAreaM2,
         perimeterM,
@@ -198,9 +228,9 @@ export function collectShapeMetrics(
         ...(pathPoints !== undefined ? { pathPoints } : {}),
         ...(!hasScale ? { crossingOnly: true } : {}),
         ...(q.condition !== undefined ? { condition: q.condition } : {}),
-        ...(q.heightM !== undefined ? { heightM: q.heightM } : {}),
-        ...(q.widthM !== undefined ? { widthM: q.widthM } : {}),
-        ...(q.depthM !== undefined ? { depthM: q.depthM } : {}),
+        ...(heightM !== undefined ? { heightM } : {}),
+        ...(widthM !== undefined ? { widthM } : {}),
+        ...(depthM !== undefined ? { depthM } : {}),
         ...(enclosing ? {
           polygonM: {
             outer: toMeters(vertices),

@@ -502,5 +502,41 @@
     "string": "segment",
     "reason": "交差の計算の線分（幾何の segment）の型名・変数名。分析サービス Segment ではなく、通信はしない。",
     "maxOccurrences": 11
+  },
+  {
+    "file": "src/core/takeoff/master.data.ts",
+    "string": "segment",
+    "reason": "数量方式の入力形状の説明文（route/segment/level）の語。分析サービス Segment ではなく、通信はしない。",
+    "maxOccurrences": 40
+  },
+  {
+    "file": "dist-fixed/assets/master.data-*.js",
+    "string": "segment",
+    "reason": "数量方式の入力形状の説明文（route/segment/level）の語。分析サービス Segment ではなく、通信はしない。",
+    "maxOccurrences": 40
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "segment",
+    "reason": "数量方式の入力形状の説明文（route/segment/level）の語。分析サービス Segment ではなく、通信はしない。",
+    "maxOccurrences": 40
+  },
+  {
+    "file": "src/core/takeoff/master.ts",
+    "string": "https://json-schema.org/draft/2020-12/schema",
+    "reason": "JSON Schema の方言を示す識別子（$schema）。検証器は読むだけで、通信はしない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/master-*.js",
+    "string": "https://json-schema.org/draft/2020-12/schema",
+    "reason": "JSON Schema の方言を示す識別子（$schema）。検証器は読むだけで、通信はしない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "https://json-schema.org/draft/2020-12/schema",
+    "reason": "JSON Schema の方言を示す識別子（$schema）。検証器は読むだけで、通信はしない。",
+    "maxOccurrences": 2
   }
 ]

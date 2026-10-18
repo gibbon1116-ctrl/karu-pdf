@@ -1,6 +1,9 @@
-import { parseFixtureOpening, quantityKind, quantityMethod, quantityOutputKind, quantityUnit, quantityDecimals, type CountFixture } from './countFixtures'
-import { pipeOuterDiameterMm } from './backfill'
-import { computeRcMember, rcMemberError, rcBarCountText, type RcMember, type RcResult } from './rcMember'
+import { BREAKDOWN_BOOKS, parseFixtureOpening, quantityKind, quantityMethod, quantityOutputKind, quantityUnit, quantityDecimals, type CountFixture } from './countFixtures'
+import { pipeOuterDiameterMm, pipeSizeKeys } from './backfill'
+import {
+  computeRcMember, rcMemberError, rcBarCountText, rcMemberForSection,
+  type RcMember, type RcResult,
+} from './rcMember'
 import { steelMemberError, steelSection } from './steelMember'
 import { STEEL_REQUIRED_FACTOR } from './breakdown/steelData'
 import { createPageCrossingCounter, type PageCrossingBarrier } from './crossings'
@@ -19,7 +22,7 @@ export interface FixtureLinkSource {
   perM?: number
   conditions?: string[]
   sign?: -1
-  factorFrom?: 'openingArea' | 'openingPerimeter' | 'openingWidth'
+  factorFrom?: 'openingArea' | 'openingPerimeter' | 'openingWidth' | 'outerCircumference'
 }
 
 export interface FixtureLink {
@@ -41,7 +44,9 @@ export interface FixtureLink {
     basis?: 'design' | 'required'
   }
   shape?: {
-    output: 'area' | 'perimeter' | 'lengthTimesHeight' | 'excavation'
+    output: 'area' | 'perimeter' | 'baseLength' | 'lengthTimesHeight' | 'excavation'
+    lengthBasis?: 'perimeter' | 'baseEdge'
+    deductDoorWidths?: boolean
     heightM?: number
     marginM?: number
     clearanceM?: number
@@ -51,7 +56,8 @@ export interface FixtureLink {
   auto?: LinkAutoSources
   /** autoで選ぶ元の係数。標準規則のfactorを保持し、省略時は1。 */
   factor?: number
-  carry?: { class: 'heavy' | 'bulky'; alone?: boolean }
+  /** classの省略は重量品・容積品の両方。元ごとに判定する。 */
+  carry?: { class?: 'heavy' | 'bulky'; alone?: boolean }
   condition?: { mode: 'fixed'; value: string }
   rounding?: 'total' | 'each' | 'none'
   densityTPerM3?: number
@@ -83,6 +89,8 @@ export interface LinkBasisSource {
   pipeOuterDiameterMm?: number
   auto?: boolean
   note?: string
+  /** 機器搬入・搬出で、元の質量÷容積から判定した区分（判定できた元だけ） */
+  carryClass?: 'heavy' | 'bulky'
   subtotal: number
 }
 
@@ -177,8 +185,17 @@ export function fixtureLinkError(
   }
   if (link.kind === 'shape') {
     if (!record(link.shape)
-      || !['area', 'perimeter', 'lengthTimesHeight', 'excavation'].includes(String(link.shape.output))) {
-      return '形の連動の出力は面積・周長・長さ×高さ・根切りから選んでください。'
+      || !['area', 'perimeter', 'baseLength', 'lengthTimesHeight', 'excavation'].includes(String(link.shape.output))) {
+      return '形の連動の出力は面積・周長・底辺の長さ・長さ×高さ・根切りから選んでください。'
+    }
+    if (link.shape.lengthBasis !== undefined
+      && link.shape.lengthBasis !== 'perimeter'
+      && link.shape.lengthBasis !== 'baseEdge') {
+      return '形の連動の長さの基準は外周・底辺から選んでください。'
+    }
+    if (link.shape.deductDoorWidths !== undefined
+      && typeof link.shape.deductDoorWidths !== 'boolean') {
+      return '扉の幅の控除は真偽値で指定してください。'
     }
     for (const [key, maximum] of [
       ['heightM', 100], ['marginM', 5], ['clearanceM', 5], ['depthM', 100],
@@ -240,6 +257,51 @@ export function fixtureLinkError(
   }
   if (link.auto !== undefined) {
     if (!record(link.auto)) return '連動の自動の元の設定が正しくありません。'
+    if (link.auto.books !== undefined
+      && (!Array.isArray(link.auto.books)
+        || link.auto.books.length === 0
+        || link.auto.books.length > BREAKDOWN_BOOKS.length
+        || !Array.from(link.auto.books).every(value =>
+          BREAKDOWN_BOOKS.some(book => book === value)))) {
+      return '連動の自動の元の内訳書の編は建築・電気設備・機械設備・昇降機設備から1〜4件で選んでください。'
+    }
+    if (link.auto.sizeMatch !== undefined
+      && (typeof link.auto.sizeMatch !== 'string'
+        || link.auto.sizeMatch.length > 40
+        || pipeSizeKeys(link.auto.sizeMatch).length !== 1
+        || pipeSizeKeys(link.auto.sizeMatch)[0] !== link.auto.sizeMatch)) {
+      return '連動の呼び径は正規化した呼び径を1つ指定してください。'
+    }
+    if (link.auto.factorFrom !== undefined
+      && !['openingArea', 'openingPerimeter', 'openingWidth', 'outerCircumference']
+        .includes(String(link.auto.factorFrom))) {
+      return '自動の元の係数は開口の面積・周長・幅・管の外周から選んでください。'
+    }
+    if (link.auto.originAny !== undefined) {
+      if (!Array.isArray(link.auto.originAny)
+        || link.auto.originAny.length === 0
+        || link.auto.originAny.length > 100) {
+        return '関連ルールの起点条件は1〜100件で設定してください。'
+      }
+      for (const match of Array.from(link.auto.originAny)) {
+        if (!record(match)
+          || match.categories === undefined && match.nameIncludes === undefined) {
+          return '関連ルールの起点には分類または名称を設定してください。'
+        }
+        for (const key of ['categories', 'nameIncludes'] as const) {
+          const values = match[key]
+          if (values !== undefined && (!Array.isArray(values)
+            || values.length === 0 || values.length > 20
+            || !Array.from(values).every(value =>
+              typeof value === 'string'
+              && value.length > 0 && value.length <= 40
+              && value === value.trim()
+              && !/[\r\n\t\u2028\u2029]/u.test(value)))) {
+            return '関連ルールの起点の分類・名称は各40字、1〜20件で設定してください。'
+          }
+        }
+      }
+    }
     for (const key of ['categories', 'nameIncludes'] as const) {
       const values = link.auto[key]
       if (values !== undefined && (!Array.isArray(values) || values.length > 20
@@ -248,6 +310,17 @@ export function fixtureLinkError(
           && !/[\r\n\t\u2028\u2029]/.test(value)))) {
         return '連動の自動の元の分類・名称の語は各40字、20件までで設定してください。'
       }
+    }
+    if (link.auto.nameExcludes !== undefined
+      && (!Array.isArray(link.auto.nameExcludes)
+        || link.auto.nameExcludes.length === 0
+        || link.auto.nameExcludes.length > 20
+        || !Array.from(link.auto.nameExcludes).every(value =>
+          typeof value === 'string'
+          && value.length > 0 && value.length <= 40
+          && value === value.trim()
+          && !/[\r\n\t\u2028\u2029]/u.test(value)))) {
+      return '連動の自動の元の名称の除外語は各40字、1〜20件で設定してください。'
     }
     if (link.auto.condition !== undefined && !validCondition(link.auto.condition)) {
       return '連動の自動の元の施工条件は1〜30文字で、前後の空白や改行を入れずに設定してください。'
@@ -280,9 +353,10 @@ export function fixtureLinkError(
   }
   if (link.kind === 'carry') {
     if (!record(link.carry)
-      || (link.carry.class !== 'heavy' && link.carry.class !== 'bulky')
+      || (link.carry.class !== undefined
+        && link.carry.class !== 'heavy' && link.carry.class !== 'bulky')
       || (link.carry.alone !== undefined && typeof link.carry.alone !== 'boolean')) {
-      return '機器搬入の連動には重量品・容積品の区分と、必要なら単独搬入を設定してください。'
+      return '機器搬入・搬出の区分は省略するか重量品・容積品を指定し、単独搬入は真偽値で設定してください。'
     }
   } else if (link.carry !== undefined) {
     return '搬入の区分は機器搬入の連動だけに設定できます。'
@@ -301,8 +375,9 @@ export function fixtureLinkError(
       return '連動の元の引き算はsign: -1で設定してください。'
     }
     if (source.factorFrom !== undefined
-      && !['openingArea', 'openingPerimeter', 'openingWidth'].includes(String(source.factorFrom))) {
-      return '開口からの係数は面積・周長・幅から選んでください。'
+      && !['openingArea', 'openingPerimeter', 'openingWidth', 'outerCircumference']
+        .includes(String(source.factorFrom))) {
+      return '寸法からの係数は開口の面積・周長・幅・管の外周から選んでください。'
     }
     if (source.factor !== undefined && source.perM !== undefined) {
       return '連動の係数と間隔は同時に設定できません。'
@@ -373,6 +448,10 @@ export function readFixtureLink(
     ...(link.shape !== undefined ? {
       shape: {
         output: link.shape.output,
+        ...(link.shape.lengthBasis !== undefined
+          ? { lengthBasis: link.shape.lengthBasis } : {}),
+        ...(link.shape.deductDoorWidths !== undefined
+          ? { deductDoorWidths: link.shape.deductDoorWidths } : {}),
         ...(link.shape.heightM !== undefined ? { heightM: link.shape.heightM } : {}),
         ...(link.shape.marginM !== undefined ? { marginM: link.shape.marginM } : {}),
         ...(link.shape.clearanceM !== undefined ? { clearanceM: link.shape.clearanceM } : {}),
@@ -400,19 +479,33 @@ export function readFixtureLink(
     } : {}),
     ...(link.auto !== undefined ? {
       auto: {
+        ...(link.auto.books !== undefined ? { books: [...link.auto.books] } : {}),
         ...(link.auto.categories !== undefined ? { categories: [...link.auto.categories] } : {}),
         ...(link.auto.nameIncludes !== undefined ? { nameIncludes: [...link.auto.nameIncludes] } : {}),
+        ...(link.auto.nameExcludes !== undefined ? { nameExcludes: [...link.auto.nameExcludes] } : {}),
         ...(link.auto.condition !== undefined ? { condition: link.auto.condition } : {}),
         ...(link.auto.kinds !== undefined ? { kinds: [...link.auto.kinds] } : {}),
         ...(link.auto.outputKinds !== undefined ? { outputKinds: [...link.auto.outputKinds] } : {}),
         ...(link.auto.rcKinds !== undefined ? { rcKinds: [...link.auto.rcKinds] } : {}),
+        ...(link.auto.originAny !== undefined ? {
+          originAny: link.auto.originAny.map(match => ({
+            ...(match.categories !== undefined
+              ? { categories: [...match.categories] } : {}),
+            ...(match.nameIncludes !== undefined
+              ? { nameIncludes: [...match.nameIncludes] } : {}),
+          })),
+        } : {}),
+        ...(link.auto.factorFrom !== undefined
+          ? { factorFrom: link.auto.factorFrom } : {}),
+        ...(link.auto.sizeMatch !== undefined
+          ? { sizeMatch: link.auto.sizeMatch } : {}),
         ...(link.auto.minMassKg !== undefined ? { minMassKg: link.auto.minMassKg } : {}),
       },
     } : {}),
     ...(link.factor !== undefined ? { factor: link.factor } : {}),
     ...(link.carry !== undefined ? {
       carry: {
-        class: link.carry.class,
+        ...(link.carry.class !== undefined ? { class: link.carry.class } : {}),
         ...(link.carry.alone !== undefined ? { alone: link.carry.alone } : {}),
       },
     } : {}),
@@ -481,9 +574,19 @@ export function fixtureLinkSources(
   for (const original of fixtures) {
     if (original.id === fixture.id || original.link !== undefined || manualIds.has(original.id)) continue
     if (link.kind === 'steel' && original.steel === undefined) continue
+    if (auto.books !== undefined && original.breakdown !== undefined
+      && !auto.books.includes(original.breakdown.book)) continue
     if (auto.categories !== undefined && !auto.categories.includes(original.category)) continue
     if (auto.nameIncludes !== undefined
       && !auto.nameIncludes.some(word => original.name.includes(word))) continue
+    if (auto.nameExcludes !== undefined
+      && auto.nameExcludes.some(word => original.name.includes(word))) continue
+    if (auto.originAny !== undefined && !auto.originAny.some(match =>
+      (match.categories === undefined || match.categories.includes(original.category))
+      && (match.nameIncludes === undefined
+        || match.nameIncludes.some(word => original.name.includes(word))))) continue
+    if (auto.sizeMatch !== undefined
+      && !pipeSizeKeys(original.code, original.spec ?? '').includes(auto.sizeMatch)) continue
     if (auto.condition !== undefined && !original.conditions?.includes(auto.condition)) continue
     if (auto.kinds !== undefined && !auto.kinds.includes(original.kind ?? 'count')) continue
     if (auto.outputKinds !== undefined
@@ -496,6 +599,7 @@ export function fixtureLinkSources(
       itemId: original.id,
       factor: link.factor ?? 1,
       auto: true,
+      ...(auto.factorFrom !== undefined ? { factorFrom: auto.factorFrom } : {}),
       ...(auto.condition !== undefined ? { conditions: [auto.condition] } : {}),
     })
   }
@@ -536,6 +640,16 @@ function openingFactorFor(
   result: LinkResult,
 ): number {
   if (source.factorFrom === undefined) return 1
+  if (source.factorFrom === 'outerCircumference') {
+    const diameterMm = pipeOuterDiameterMm(original)
+    if (diameterMm === undefined) {
+      result.warnings.push(
+        `${original.name}: 外径が分かりません（項目の外径を入れてください）`,
+      )
+      return 0
+    }
+    return Math.PI * diameterMm / 1000
+  }
   const opening = parseFixtureOpening(original.opening)
   if (!opening) {
     result.warnings.push(`${original.name}の開口寸法が未設定です。係数を0にします。`)
@@ -697,6 +811,194 @@ function rcOutputNote(
     + (bySize.size > 1 ? `｜合計 ${mass(rcOutputValue(rc, settings))}t` : '')
 }
 
+interface ShapePoint {
+  x: number
+  y: number
+}
+
+interface ShapeLengthMetric {
+  method: string
+  lengthM: number
+  perimeterM: number
+  count: number
+  heightM?: number
+  baseLengthM?: number
+  doorWidthM?: number
+  doorWidthWarnings?: readonly string[]
+  pathPoints?: unknown
+}
+
+export interface ShapeLengthTimesHeightResult {
+  quantity: number
+  note: string
+  warnings: string[]
+}
+
+function shapePoint(value: unknown): ShapePoint | undefined {
+  let x: unknown
+  let y: unknown
+
+  if (Array.isArray(value)) {
+    x = value[0]
+    y = value[1]
+  } else if (typeof value === 'object' && value !== null) {
+    if (!('x' in value) || !('y' in value)) return undefined
+    x = value.x
+    y = value.y
+  } else {
+    return undefined
+  }
+
+  if (typeof x !== 'number' || typeof y !== 'number'
+    || !Number.isFinite(x) || !Number.isFinite(y)) return undefined
+
+  return { x, y }
+}
+
+/**
+ * 点列は図面座標、perimeterMは既存の縮尺適用後の外周。
+ * 同じ閉じた輪郭の外周比で図面座標の辺長をmへ換算する。
+ */
+export function shapeBaseEdgeLength(
+  pathPoints: unknown,
+  perimeterM: number,
+): number | undefined {
+  if (!Array.isArray(pathPoints) || pathPoints.length < 3
+    || !Number.isFinite(perimeterM) || perimeterM <= 0) return undefined
+
+  const points: ShapePoint[] = []
+  for (const value of pathPoints) {
+    const point = shapePoint(value)
+    if (!point) return undefined
+    points.push(point)
+  }
+
+  let coordinatePerimeter = 0
+  let longestHorizontal = 0
+  const maximumSlope = Math.tan(10 * Math.PI / 180)
+
+  for (let index = 0; index < points.length; index += 1) {
+    const start = points[index]
+    const end = points[(index + 1) % points.length]
+    if (!start || !end) return undefined
+
+    const dx = end.x - start.x
+    const dy = end.y - start.y
+    const length = Math.hypot(dx, dy)
+    coordinatePerimeter += length
+
+    if (length > 0
+      && Math.abs(dy) <= Math.abs(dx) * maximumSlope) {
+      longestHorizontal = Math.max(longestHorizontal, length)
+    }
+  }
+
+  if (coordinatePerimeter <= 0 || longestHorizontal <= 0) return undefined
+
+  const lengthM = longestHorizontal / coordinatePerimeter * perimeterM
+  return Number.isFinite(lengthM) ? lengthM : undefined
+}
+
+export function shapeBaseLength(metric: ShapeLengthMetric): {
+  lengthM: number
+  label: string
+  warnings: string[]
+} {
+  const polygon = metric.method === 'polygon' || metric.method === 'polygonDepth'
+  if (polygon) {
+    const lengthM = shapeBaseEdgeLength(metric.pathPoints, metric.perimeterM)
+    if (lengthM === undefined) {
+      return {
+        lengthM: 0,
+        label: '底辺未取得',
+        warnings: ['傾き10°以内の底辺を取得できないため、この拾いの数量を0にします。'],
+      }
+    }
+    return { lengthM, label: '底辺', warnings: [] }
+  }
+
+  if (!['polyline', 'lengthHeight', 'lengthWidthDepth'].includes(metric.method)) {
+    return {
+      lengthM: 0,
+      label: '平面長未取得',
+      warnings: ['底辺・平面長を使える拾い方ではないため、この拾いの数量を0にします。'],
+    }
+  }
+
+  const lengthM = metric.baseLengthM ?? metric.lengthM
+  if (!Number.isFinite(lengthM) || lengthM < 0) {
+    return {
+      lengthM: 0,
+      label: '平面長不正',
+      warnings: ['平面長が正しくないため、この拾いの数量を0にします。'],
+    }
+  }
+  return { lengthM, label: '線の平面長', warnings: [] }
+}
+
+export function shapeBaseLengthQuantity(
+  metric: ShapeLengthMetric,
+  settings: NonNullable<FixtureLink['shape']>,
+): ShapeLengthTimesHeightResult {
+  const calculated = shapeBaseLength(metric)
+  const warnings = [...calculated.warnings]
+  const deduction = settings.deductDoorWidths ? metric.doorWidthM ?? 0 : 0
+  if (settings.deductDoorWidths) warnings.push(...metric.doorWidthWarnings ?? [])
+
+  let length = calculated.lengthM - deduction
+  if (length < 0) {
+    warnings.push('扉の幅が底辺・平面長を超えるため、この拾いの数量を0にします。')
+    length = 0
+  }
+  const quantity = length * metric.count
+  const display = (value: number): string => String(Number(value.toFixed(6)))
+
+  return {
+    quantity,
+    note: `${calculated.label} ${display(calculated.lengthM)}m`
+      + (deduction ? ` − 扉幅 ${display(deduction)}m` : '')
+      + (metric.count === 1 ? '' : ` × ${display(metric.count)}（拾いの数）`)
+      + ` = ${display(quantity)}m`,
+    warnings,
+  }
+}
+
+export function shapeLengthTimesHeight(
+  metric: ShapeLengthMetric,
+  settings: NonNullable<FixtureLink['shape']>,
+): ShapeLengthTimesHeightResult {
+  const warnings: string[] = []
+  const height = settings.heightM ?? metric.heightM
+  if (height === undefined) {
+    warnings.push('連動に使う高さが未設定です。')
+  }
+
+  const polygon = metric.method === 'polygon'
+    || metric.method === 'polygonDepth'
+  let length = polygon ? metric.perimeterM
+    : metric.baseLengthM ?? metric.lengthM
+  let label = polygon ? '外周' : '線の平面長'
+
+  if (settings.lengthBasis === 'baseEdge') {
+    const calculated = shapeBaseLength(metric)
+    length = calculated.lengthM
+    label = calculated.label
+    warnings.push(...calculated.warnings)
+  }
+
+  const quantity = length * (height ?? 0) * metric.count
+  const display = (value: number) => String(Number(value.toFixed(6)))
+  const repeat = metric.count === 1 ? '' : ` × ${display(metric.count)}（拾いの数）`
+
+  return {
+    quantity,
+    note: `${label} ${display(length)}m × ${
+      height === undefined ? '高さ未設定' : `${display(height)}m`
+    }${repeat} = ${display(quantity)}㎡`,
+    warnings,
+  }
+}
+
 function appendMetricSource(
   fixture: CountFixture,
   original: CountFixture,
@@ -765,17 +1067,18 @@ function appendMetricSource(
           const error = rcMemberError(original.rc!, {
             fromShape: metric.method === 'polygonDepth',
             fromLine: metric.method === 'polyline',
+            fromSection: metric.method === 'lengthWidthDepth',
           })
           if (error) throw new Error(error)
         }
         const sizeMatches = sizes === undefined
           ? original.rc!.bars
           : original.rc!.bars.filter(bar => sizes.includes(bar.size))
-        const member = filtered ? {
+        const member = rcMemberForSection(filtered ? {
           ...original.rc!,
           bars: sizeMatches.filter(bar =>
             !grades.length || bar.grade === undefined || grades.includes(bar.grade)),
-        } : original.rc!
+        } : original.rc!, metric)
 
         const rc = computeRcMember(member, metric)
         quantity = rcOutputValue(rc, settings)
@@ -824,14 +1127,22 @@ function appendMetricSource(
           case 'perimeter':
             quantity = metric.perimeterM * metric.count
             break
-          case 'lengthTimesHeight': {
-            const height = settings.heightM ?? metric.heightM
-            if (height === undefined) {
-              result.warnings.push(`${original.name}の連動に使う高さが未設定です。`)
+          case 'baseLength': {
+            const calculated = shapeBaseLengthQuantity(metric, settings)
+            quantity = calculated.quantity
+            note = `${metric.annotationId}: ${calculated.note}`
+            for (const warning of calculated.warnings) {
+              result.warnings.push(`${original.name}（${metric.annotationId}）: ${warning}`)
             }
-            const length = metric.method === 'polygon' || metric.method === 'polygonDepth'
-              ? metric.perimeterM : metric.lengthM
-            quantity = length * (height ?? 0) * metric.count
+            break
+          }
+          case 'lengthTimesHeight': {
+            const calculated = shapeLengthTimesHeight(metric, settings)
+            quantity = calculated.quantity
+            note = `${metric.annotationId}: ${calculated.note}`
+            for (const warning of calculated.warnings) {
+              result.warnings.push(`${original.name}（${metric.annotationId}）: ${warning}`)
+            }
             break
           }
           case 'excavation': {
@@ -1072,6 +1383,43 @@ export function computeLinks(
         continue
       }
       const openingFactor = openingFactorFor(source, original, result)
+      if (link.kind === 'shape' && source.sign === -1
+        && source.factorFrom === 'openingWidth') {
+        const rows = original.link !== undefined
+          ? results.get(original.id)?.entries ?? []
+          : ordinaryEntries.get(original.id) ?? entriesOf(original.id)
+        if (original.link === undefined) ordinaryEntries.set(original.id, rows)
+        const conditions = source.conditions?.length
+          ? new Set(source.conditions) : undefined
+        let quantity = 0
+        let subtotal = 0
+        for (const row of rows) {
+          if (conditions && !conditions.has(row.condition ?? '')) continue
+          quantity += row.value
+          const value = -row.value * openingFactor * (source.factor ?? 1)
+          subtotal += value
+          result.entries.push({
+            itemId: fixture.id,
+            annotationId: row.annotationId,
+            pageIndex: row.pageIndex,
+            value,
+            ...(row.floor !== undefined ? { floor: row.floor } : {}),
+            ...(row.room !== undefined ? { room: row.room } : {}),
+            ...(link.condition !== undefined
+              ? { condition: link.condition.value }
+              : row.condition !== undefined ? { condition: row.condition } : {}),
+          })
+        }
+        result.sources.push({
+          itemId: original.id,
+          quantity,
+          factor: -openingFactor * (source.factor ?? 1),
+          subtotal,
+          ...(source.auto ? { auto: true } : {}),
+          note: `建具 ${quantity}個 × 開口幅 ${openingFactor}m（引き算）`,
+        })
+        continue
+      }
       if (link.kind === 'crossing') {
         appendCrossingSource(
           fixture, original, source, metricsOf, crossingsOf, openingFactor, result,
@@ -1101,6 +1449,7 @@ export function computeLinks(
         : undefined
       let note: string | undefined
       let carryFactor: number | undefined
+      let sourceCarryClass: 'heavy' | 'bulky' | undefined
       let skipSource = false
 
       if (link.kind === 'mass') {
@@ -1121,13 +1470,14 @@ export function computeLinks(
       } else if (link.kind === 'carry') {
         if ((original.kind ?? 'count') !== 'count') {
           result.warnings.push(`${original.name}は個数の項目ではないため、搬入の元から除外します。`)
-          note = '個数以外'
+          note = '対象外の機器（個数以外）'
           skipSource = true
         } else {
           const attributes = original.attributes
           const massKg = attributes?.massKg
-          unitMassKg = massKg ?? 0
-          if (massKg === undefined) {
+          unitMassKg = massKg !== undefined && Number.isFinite(massKg)
+            ? massKg : 0
+          if (massKg === undefined || !Number.isFinite(massKg)) {
             result.warnings.push(`${original.name}の質量が未設定です。`)
             note = '質量未設定'
             skipSource = true
@@ -1139,6 +1489,8 @@ export function computeLinks(
             const depthMm = attributes?.depthMm
             const heightMm = attributes?.heightMm
             if (widthMm === undefined || depthMm === undefined || heightMm === undefined
+              || !Number.isFinite(widthMm) || !Number.isFinite(depthMm)
+              || !Number.isFinite(heightMm)
               || widthMm <= 0 || depthMm <= 0 || heightMm <= 0) {
               result.warnings.push(`${original.name}の外形（幅・奥行・高さ）が未設定です。`)
               note = '外形未設定'
@@ -1148,8 +1500,26 @@ export function computeLinks(
               const densityKgPerM3 = massKg / volumeM3
               const carryClass = densityKgPerM3 >= CARRY_HEAVY_DENSITY_KG_PER_M3
                 ? 'heavy' : 'bulky'
-              if (carryClass !== link.carry!.class) {
-                note = carryClass === 'heavy' ? '重量品' : '容積品'
+              sourceCarryClass = carryClass
+              const carryLabel = carryClass === 'heavy' ? '重量品' : '容積品'
+              const densityText = densityKgPerM3.toLocaleString('ja-JP', {
+                maximumFractionDigits: 0,
+              })
+              const carryBasis = carryClass === 'heavy'
+                ? `${massKg.toLocaleString('ja-JP', {
+                  maximumFractionDigits: 3,
+                })}kg`
+                : `${densityText}kg/㎥`
+              const selectedClass = link.carry?.class
+
+              if (selectedClass !== undefined && carryClass !== selectedClass) {
+                const selectedLabel = selectedClass === 'heavy' ? '重量品' : '容積品'
+                note = `${carryLabel} ${carryBasis}（区分違い: ${selectedLabel}だけ）`
+                result.warnings.push(
+                  `${original.name}は${carryLabel}（${densityText}kg/㎥）のため、`
+                  + `区分『${selectedLabel}』のこの項目には入れていません。`
+                  + '区分を外すと重量品・容積品の両方を合計します。',
+                )
                 skipSource = true
               } else {
                 if (carryClass === 'heavy') {
@@ -1163,7 +1533,12 @@ export function computeLinks(
                   carryFactor = CARRY_BULKY_FACTORS.find(entry =>
                     densityKgPerM3 < entry.belowKgPerM3)?.factor ?? 1
                 }
-                carryFactor *= link.carry!.alone ? CARRY_ALONE_INCREASE : 1
+                carryFactor *= link.carry?.alone ? CARRY_ALONE_INCREASE : 1
+                const factorText = carryFactor.toLocaleString('ja-JP', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 6,
+                })
+                note = `${carryLabel} ${carryBasis}・補正率 ${factorText}`
               }
             }
           }
@@ -1193,13 +1568,21 @@ export function computeLinks(
         ...(unitMassKg !== undefined ? { unitMassKg } : {}),
         ...(source.auto ? { auto: true } : {}),
         ...(note !== undefined ? { note } : {}),
+        ...(sourceCarryClass !== undefined ? { carryClass: sourceCarryClass } : {}),
       }
       if (source.factorFrom !== undefined || source.sign !== undefined) {
         if (link.kind !== 'carry' && source.perM === undefined) {
           basis.factor = (source.factor ?? 1) * openingFactor * (source.sign ?? 1)
         }
-        const openingNote = source.factorFrom !== undefined
-          ? `${source.factorFrom}=${openingFactor}` : undefined
+        const diameterMm = source.factorFrom === 'outerCircumference'
+          ? pipeOuterDiameterMm(original) : undefined
+        const openingNote = source.factorFrom === 'outerCircumference'
+          ? diameterMm === undefined
+            ? '外径未設定'
+            : `${original.code || original.name} 外径 ${diameterMm.toFixed(1)}mm：`
+              + `π×${Number((diameterMm / 1000).toFixed(6))} ㎡/m`
+          : source.factorFrom !== undefined
+            ? `${source.factorFrom}=${openingFactor}` : undefined
         basis.note = [basis.note, openingNote, source.sign === -1 ? '引き算' : undefined]
           .filter(Boolean).join('、') || undefined
       }
@@ -1257,6 +1640,9 @@ export function computeLinks(
             ? { condition: link.condition.value }
             : row.condition !== undefined ? { condition: row.condition } : {}),
         })
+      }
+      if (source.factorFrom === 'outerCircumference') {
+        basis.note = `${basis.note ?? ''} × ${basis.quantity.toFixed(2)} m`
       }
       result.sources.push(basis)
     }

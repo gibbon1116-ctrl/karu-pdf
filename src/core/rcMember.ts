@@ -89,7 +89,7 @@ function nonnegative(value: unknown): value is number {
 
 export function rcMemberError(
   member: unknown,
-  options: { fromShape?: boolean; fromLine?: boolean } = {},
+  options: { fromShape?: boolean; fromLine?: boolean; fromSection?: boolean } = {},
 ): string | undefined {
   if (!record(member) || typeof member.kind !== 'string'
     || !Object.hasOwn(roles, member.kind)) {
@@ -101,12 +101,13 @@ export function rcMemberError(
       return 'RC部材の寸法は0より大きい有限の数で入れてください。'
     }
   }
-  if (!options.fromShape && kind === 'wall') {
+  if (!options.fromShape && !options.fromSection && kind === 'wall') {
     if (!positive(member.thicknessMm)) return 'RC部材の厚さを入れてください。'
     if (options.fromLine && !positive(member.heightMm)) {
       return 'RC部材の高さを入れてください。'
     }
-  } else if (!options.fromShape && kind !== 'slab' && kind !== 'foundationSlab') {
+  } else if (!options.fromShape && !options.fromSection
+    && kind !== 'slab' && kind !== 'foundationSlab') {
     if (!positive(member.widthMm) || !positive(member.depthMm)) {
       return 'RC部材の幅とせい・長さを入れてください。'
     }
@@ -119,7 +120,7 @@ export function rcMemberError(
     if ((kind !== 'beam' && kind !== 'foundationBeam')
       || !nonnegative(member.slabDeductMm)
       || (member.depthMm === undefined
-        ? !options.fromShape
+        ? !options.fromShape && !options.fromSection
         : !positive(member.depthMm) || member.slabDeductMm >= member.depthMm)) {
       return '梁の床板控除は0以上、梁のせい未満で入れてください。'
     }
@@ -314,9 +315,37 @@ function rcShapeDimensions(member: RcMember, metrics: ShapeMetrics): {
   return { width, depth, height, length, text }
 }
 
+/** 長さ×幅×深さは、線に断面寸法を与えたRC部材として計算する。 */
+export function rcMemberForSection(member: RcMember, metrics: ShapeMetrics): RcMember {
+  if (metrics.method !== 'lengthWidthDepth') return member
+
+  if (member.kind === 'wall') {
+    return {
+      ...member,
+      ...(member.thicknessMm === undefined && metrics.widthM !== undefined
+        ? { thicknessMm: metrics.widthM * 1000 } : {}),
+      ...(member.heightMm === undefined && metrics.depthM !== undefined
+        ? { heightMm: metrics.depthM * 1000 } : {}),
+    }
+  }
+  return {
+    ...member,
+    ...(member.widthMm === undefined && metrics.widthM !== undefined
+      ? { widthMm: metrics.widthM * 1000 } : {}),
+    ...(member.depthMm === undefined && metrics.depthM !== undefined
+      ? { depthMm: metrics.depthM * 1000 } : {}),
+  }
+}
+
 export function computeRcMember(member: RcMember, metrics: ShapeMetrics): RcResult {
   const fromShape = metrics.method === 'polygonDepth'
-  const fromLine = metrics.method === 'polyline'
+  const fromSection = metrics.method === 'lengthWidthDepth'
+  if (fromSection && member.kind !== 'beam'
+    && member.kind !== 'foundationBeam' && member.kind !== 'wall') {
+    throw new Error('長さ×幅×深さのRC部材は梁・基礎梁・壁から選んでください。')
+  }
+  member = rcMemberForSection(member, metrics)
+  const fromLine = metrics.method === 'polyline' || fromSection
   const error = rcMemberError(member, { fromShape, fromLine })
   if (error) throw new Error(error)
   if (![metrics.count, metrics.areaM2, metrics.lengthM, metrics.perimeterM]

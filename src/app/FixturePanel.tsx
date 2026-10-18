@@ -884,15 +884,18 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
         <button className="fixture-row" aria-label={`${fixtureCode(f)} ${f.name}`.trim()} aria-pressed={f.id === selected?.id} onClick={() => selectPanelFixture(f.id)}>
           {quantityKind(f) === 'count' ? <svg className="fixture-swatch" viewBox="-14 -14 28 28" aria-hidden="true"><CountMarker style={{ ...f.style, size: 24, opacity: 1 }} showCode={false} /></svg> : <QuantitySwatch fixture={f} />}
           <span className="fixture-sample-cell">{quantityKind(f) === 'count' && f.sample && <img className="fixture-sample-thumbnail" src={`data:image/png;base64,${f.sample.png}`} alt={`${f.name}の見本`} draggable={false} />}</span>
-          <span className="fixture-row-code" title={fixtureCode(f)}>{f.code}{' '}
-            {f.link && (missingLinkSources.has(f.id)
+          <span className="fixture-row-code" title={fixtureCode(f)}>
+          <span className="fixture-row-code-text">{f.code}</span>
+          {f.link && <span className="fixture-row-code-badges">
+            {missingLinkSources.has(f.id)
               ? <span className="fixture-link-badge fixture-link-missing"
                 title="元になる項目がありません。項目を開くと案内が出ます。"
                 style={{ color: '#b42318', backgroundColor: '#fff1f0' }}>元なし</span>
               : <span className="fixture-link-badge" title={index.linkResult(f.id)?.error}>
                 {index.linkResult(f.id)?.error ? '連動の誤り' : '連動'}
-              </span>)}
-            {f.link && index.linkResult(f.id)?.overridden && <span className="fixture-link-badge fixture-link-override">上書き</span>}
+              </span>}
+            {index.linkResult(f.id)?.overridden && <span className="fixture-link-badge fixture-link-override">上書き</span>}
+          </span>}
           </span><span className="fixture-row-name">{f.name}{f.spec && <span className="fixture-row-spec"> {f.spec}</span>}{(quantityKind(f) !== 'count' || f.convert || f.link?.kind === 'mass' || f.link?.kind === 'carry' || f.link?.kind === 'rc' || f.link?.kind === 'shape' || f.link?.kind === 'crossing' || f.link?.kind === 'steel') && <span className="fixture-row-unit">{quantityUnit(f)}</span>}{((f.link && !missingLinkSources.has(f.id) && !!relations.sources.get(f.id)?.length)
             || !!relations.dependents.get(f.id)?.length)
             && <span className="fixture-row-relation">

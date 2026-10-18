@@ -4,6 +4,7 @@ import type { RelatedAddContext } from './documentModel'
 import type { AnnotationStore } from '../editor/AnnotationStore'
 import { appendFixtures, type FixtureAppendOptions } from './fixtureAppend'
 import { relatedSessionMemory } from './relatedState'
+import { scopePlanForContext } from './relatedLinkRules'
 
 function selectAddedFixtures(
   store: AnnotationStore, added: readonly CountFixture[], keepSelection = false,
@@ -39,7 +40,9 @@ function commitAddedFixtures(
   const origin = store.getCountFixture(context.originFixtureId)
   if (!origin) throw new Error('起点の項目が見つかりません。')
 
-  const result = store.applyRelatedAdditions(origin.id, added, context.routeId)
+  const result = store.applyRelatedAdditions(
+    origin.id, added, context.routeId, scopePlanForContext(context),
+  )
   if (result.error) throw new Error(result.error)
   report?.(relatedAdditionStatus(origin, result))
   return origin.link === undefined && quantityMethod(origin) === 'polyline'
@@ -124,6 +127,11 @@ export function relatedAdditionStatus(
       messages.push(`${effect.name} の連動（係数）の元に ${origin.name} を追加しました`)
     } else if (effect.kind === 'unchanged') {
       messages.push(`${effect.name} の連動の元には ${origin.name} がすでに入っています`)
+    } else if (effect.kind === 'scopeLink') {
+      messages.push(
+        `${effect.name} を ${origin.name} の連動にしました`
+        + (effect.reason ? `（${effect.reason}）` : ''),
+      )
     } else if (effect.kind === 'guidance') {
       messages.push(
         `${effect.name} は図面で拾ってください`

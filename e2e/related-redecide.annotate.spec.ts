@@ -65,8 +65,11 @@ test('不要から必要に変更すると項目を追加でき、起点との�
   await expect(dialog).toBeHidden()
 
   await expect.poll(async () => (await page.evaluate(() => window.__karu!.getCountFixtures()))
-    .find(fixture => fixture.name === '天井耐震補強')?.link)
-    .toEqual({ kind: 'factor', sources: [{ itemId: origin.id, factor: 1 }] })
+    .find(fixture => fixture.name === '天井耐震補強'))
+    // 原本 Excel（v25）で天井耐震補強（A-ceiling-38）は確認の記録だけで数量を作らない分類のため、天井の面積を係数1で写す連動を付けない
+    .toMatchObject({ name: '天井耐震補強' })
+  expect((await page.evaluate(() => window.__karu!.getCountFixtures()))
+    .find(fixture => fixture.name === '天井耐震補強')?.link).toBeUndefined()
 })
 
 test('必要に変更してダイアログを閉じても、判断済みのカードから後で追加できる', async ({ page }) => {
@@ -89,6 +92,9 @@ test('必要に変更してダイアログを閉じても、判断済みのカ�
   await expect(dialog).toBeHidden()
 
   await expect.poll(async () => (await page.evaluate(() => window.__karu!.getCountFixtures()))
-    .find(fixture => fixture.name === '天井耐震補強')?.link)
-    .toEqual({ kind: 'factor', sources: [{ itemId: origin.id, factor: 1 }] })
+    .find(fixture => fixture.name === '天井耐震補強'))
+    // 原本 Excel（v25）で天井耐震補強（A-ceiling-38）は確認の記録だけで数量を作らない分類のため、天井の面積を係数1で写す連動を付けない
+    .toMatchObject({ name: '天井耐震補強' })
+  expect((await page.evaluate(() => window.__karu!.getCountFixtures()))
+    .find(fixture => fixture.name === '天井耐震補強')?.link).toBeUndefined()
 })

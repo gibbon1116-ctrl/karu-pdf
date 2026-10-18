@@ -128,7 +128,7 @@ export default function QuantityBreakdown({ fixture, index, session, pool, onClo
             {' × 質量 '}{source.unitMassKg === undefined ? '未設定' : basisNumber(source.unitMassKg)}kg
             {' × 補正率 '}{source.factor === undefined ? '適用なし' : basisNumber(source.factor)}
             {' ÷ 1000'}
-            {source.factor !== undefined && `（${fixture.link!.carry?.class === 'bulky' ? '容積品' : '重量品'}）`}
+            {source.factor !== undefined && source.carryClass !== undefined && `（${source.carryClass === 'bulky' ? '容積品' : '重量品'}）`}
           </> : fixture.link!.kind === 'mass' ? <>
             {source.perM !== undefined
               ? ` ÷ ${basisNumber(source.perM)} m`

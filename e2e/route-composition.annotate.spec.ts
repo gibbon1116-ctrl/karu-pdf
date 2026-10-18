@@ -350,6 +350,7 @@ test('SPEC-B27: 線の柱とスパイラル筋の径・ピッチ計算、t換算
     await dialog.getByLabel('数量を換算する', { exact: true }).check()
     await dialog.getByLabel('換算後の単位', { exact: true }).selectOption('t')
     await dialog.getByLabel('換算の係数', { exact: true }).fill('0.00056')
+    await dialog.getByLabel('換算の根拠の候補', { exact: true }).selectOption('other')
     await dialog.getByLabel('換算の根拠', { exact: true }).fill('D10 0.56kg/m ÷ 1000')
   })
   await row(page, '柱', '柱').click()

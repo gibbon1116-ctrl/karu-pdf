@@ -87,10 +87,21 @@ export interface EditableAnnotation {
 
 export type RelatedAdditionKind = 'route' | 'point' | 'component' | 'factor' | 'perimeter'
 
+export type RelatedAdditionPlan =
+  | { kind: 'existing' }
+  | { kind: 'existing-link' }
+  | { kind: 'none'; reason: string }
+  | { kind: 'placement'; placement: 'route' | 'component' | 'point' }
+  | {
+    kind: 'link'
+    link: NonNullable<CountFixture['link']>
+    note: string
+  }
+
 export interface RelatedAdditionEffect {
   itemId: string
   name: string
-  kind: RelatedAdditionKind | 'source' | 'unchanged' | 'guidance'
+  kind: RelatedAdditionKind | 'source' | 'unchanged' | 'guidance' | 'scopeLink'
   changed?: number
   skipped?: number
   futureApplied?: boolean
@@ -2759,6 +2770,10 @@ export class AnnotationStore {
     originId: string,
     fixtures: readonly CountFixture[],
     routeId?: string,
+    planFor?: (
+      origin: CountFixture,
+      target: CountFixture,
+    ) => RelatedAdditionPlan,
   ): RelatedAdditionResult {
     const result: RelatedAdditionResult = {
       changed: 0,
@@ -2783,17 +2798,22 @@ export class AnnotationStore {
     const resolved: CountFixture[] = []
     const newFixtures: CountFixture[] = []
     const seen = new Set<string>()
+    const scopePlans = new Map<string, RelatedAdditionPlan>()
 
     for (const input of fixtures) {
       // 既存IDの保存内容を優先し、標準マスタの同一項目も再利用する。
       let fixture = byId.get(input.id)
         ?? byIdentity.get(fixtureIdentity(input))
         ?? input
-      if (relatedAdditionKind(origin, fixture, routeId) === 'component') {
+      const plan = planFor?.(origin, fixture) ?? { kind: 'existing' as const }
+      if ((plan.kind === 'existing'
+        || (plan.kind === 'placement' && plan.placement === 'component'))
+        && relatedAdditionKind(origin, fixture, routeId) === 'component') {
         fixture = perEquipmentComponentFixture(
           fixture, origin, [...byId.values()],
         ).fixture
       }
+      scopePlans.set(fixture.id, plan)
       if (!byId.has(fixture.id)) {
         newFixtures.push(fixture)
         byId.set(fixture.id, fixture)
@@ -2831,8 +2851,108 @@ export class AnnotationStore {
       this.recordRelatedAdditionStep(before, after, batch)
     }
 
+    const existingResolved: CountFixture[] = []
+    for (const resolvedFixture of resolved) {
+      const plan = scopePlans.get(resolvedFixture.id)
+      if (!plan || plan.kind === 'existing') {
+        existingResolved.push(resolvedFixture)
+        continue
+      }
+
+      if (plan.kind === 'existing-link') {
+        if (resolvedFixture.link !== undefined) {
+          result.effects.push({
+            itemId: resolvedFixture.id,
+            name: resolvedFixture.name,
+            kind: 'unchanged',
+          })
+        } else {
+          guide(resolvedFixture, '保持する既存の連動が見つかりません。')
+        }
+        continue
+      }
+
+      if (plan.kind === 'placement') {
+        const actual = relatedAdditionKind(origin, resolvedFixture, routeId)
+        if (actual !== plan.placement) {
+          guide(
+            resolvedFixture,
+            '許可された配置と実行できる配置が一致しないため、'
+              + '自動では配置しません。対象の位置を図面で拾ってください。',
+          )
+        } else {
+          existingResolved.push(resolvedFixture)
+        }
+        continue
+      }
+
+      if (plan.kind === 'none') {
+        guide(resolvedFixture, plan.reason)
+        continue
+      }
+
+      const current = this.getCountFixtures()
+      const fixture = current.find(value => value.id === resolvedFixture.id)
+      if (!fixture) {
+        guide(resolvedFixture, '反映する項目が見つかりません。')
+        continue
+      }
+
+      if (origin.id === fixture.id || origin.link !== undefined) {
+        guide(fixture, '起点が同じ項目または連動の項目のため、自動では反映しません。')
+        continue
+      }
+
+      if (fixture.link !== undefined) {
+        if (JSON.stringify(fixture.link) === JSON.stringify(plan.link)) {
+          result.effects.push({
+            itemId: fixture.id,
+            name: fixture.name,
+            kind: 'unchanged',
+          })
+        } else {
+          guide(fixture, 'すでに別の連動があるため、自動では変更しません。')
+        }
+        continue
+      }
+
+      if (this.fixtureMarkCount(fixture.id) !== 0) {
+        guide(fixture, 'すでに印・拾いがあるため、連動には変更しません。')
+        continue
+      }
+
+      const next = current.map(value => value.id === fixture.id
+        ? { ...value, link: structuredClone(plan.link) }
+        : value)
+
+      try {
+        serializeCountFixtures(next)
+      } catch (reason) {
+        guide(
+          fixture,
+          reason instanceof Error ? reason.message : String(reason),
+        )
+        continue
+      }
+
+      const before: HistoryState = []
+      const after: HistoryState = []
+      before.fixtures = structuredClone(current)
+      after.fixtures = structuredClone(next)
+      this.replaceFixtures(structuredClone(next))
+      this.recordRelatedAdditionStep(before, after, batch)
+
+      result.linked += 1
+      result.effects.push({
+        itemId: fixture.id,
+        name: fixture.name,
+        kind: 'scopeLink',
+        reason: plan.note,
+      })
+    }
+
     if (origin.link === undefined && quantityMethod(origin) === 'polyline') {
-      const eligible = resolved.filter(fixture =>
+      const eligible = existingResolved.filter(fixture =>
         relatedAdditionKind(origin, fixture, routeId) !== undefined)
       const routeResult = eligible.length
         ? this.addRelatedRouteFixtures(originId, eligible, routeId, batch)
@@ -2842,7 +2962,7 @@ export class AnnotationStore {
       result.pointRows = routeResult.pointRows
       result.pointSkipped = routeResult.pointSkipped
 
-      for (const fixture of resolved) {
+      for (const fixture of existingResolved) {
         const kind = relatedAdditionKind(origin, fixture, routeId)
         if (!kind || routeResult.error) {
           guide(fixture, routeResult.error)
@@ -2854,7 +2974,7 @@ export class AnnotationStore {
       const initialLinkedFixtures = this.getCountFixtures()
       let linkedFixtures = initialLinkedFixtures
 
-      for (const resolvedFixture of resolved) {
+      for (const resolvedFixture of existingResolved) {
         const fixture = linkedFixtures.find(value => value.id === resolvedFixture.id)!
         const kind = relatedAdditionKind(origin, fixture, routeId)
         if (!kind) {

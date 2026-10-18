@@ -25,6 +25,7 @@ async function add(page:Page,code:string,name:string,spec:string,length=false,sc
  await d.getByLabel('名称',{exact:true}).fill(name);await d.getByLabel('略号',{exact:true}).fill(code);await d.getByLabel('規格',{exact:true}).fill(spec)
  if(length)await d.getByRole('radio',{name:'長さ',exact:true}).check()
  if(scope){if(scope === 'rise') await d.getByLabel('平面の既定',{exact:true}).selectOption('excluded'); if(scope !== 'all') await d.getByLabel('その他の加算の既定',{exact:true}).selectOption('excluded');await d.getByLabel('その他の加算（初期値）').fill('1')}
+ if (!await d.getByTestId('fixture-advanced').evaluate(element => (element as HTMLDetailsElement).open)) await d.getByTestId('fixture-advanced').locator(':scope > summary').click()
  await expect(d.getByRole('radio',{name:length?'全図面の合計':'場所別（階・部屋ごと）',exact:true})).toBeChecked()
  await d.getByRole('button',{name:'追加する',exact:true}).click()
 }
@@ -81,7 +82,7 @@ test('locations, drawing-name fallback, bulk Undo, shared route, spec duplicatio
  await panel.getByRole('button',{name:'複製',exact:true}).click();const d=page.getByRole('dialog',{name:'項目を追加',exact:true})
  await expect(d.getByLabel('規格',{exact:true})).toBeFocused()
  expect(await d.getByLabel('規格',{exact:true}).evaluate(el=>{const i=el as HTMLInputElement;return i.selectionEnd!-i.selectionStart!})).toBe('5.5sq-3C'.length)
- await d.getByRole('radio',{name:'個数',exact:true}).check();await expect(d.getByRole('radio',{name:'場所別（階・部屋ごと）',exact:true})).toBeChecked()
+ await d.getByRole('radio',{name:'個数',exact:true}).check();if (!await d.getByTestId('fixture-advanced').evaluate(element => (element as HTMLDetailsElement).open)) await d.getByTestId('fixture-advanced').locator(':scope > summary').click();await expect(d.getByRole('radio',{name:'場所別（階・部屋ごと）',exact:true})).toBeChecked()
  await d.getByRole('radio',{name:'長さ',exact:true}).check();await expect(d.getByRole('radio',{name:'全図面の合計',exact:true})).toBeChecked()
  await d.getByRole('radio',{name:'場所別（階・部屋ごと）',exact:true}).check();await d.getByRole('radio',{name:'体積',exact:true}).check();await expect(d.getByRole('radio',{name:'場所別（階・部屋ごと）',exact:true})).toBeChecked()
  await d.getByRole('radio',{name:'長さ',exact:true}).check();await d.getByRole('radio',{name:'全図面の合計',exact:true}).check()

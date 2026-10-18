@@ -454,6 +454,7 @@ export function serializeCountFixtures(fixtures: readonly CountFixture[]): strin
       ?? (f.rc === undefined ? undefined : rcMemberError(f.rc, {
         fromShape: quantityMethod(f) === 'polygonDepth',
         fromLine: quantityMethod(f) === 'polyline',
+        fromSection: quantityMethod(f) === 'lengthWidthDepth',
       }))
     if (error) throw new Error(error)
     normalized.push(f.link === undefined && f.rc === undefined && f.steel === undefined ? f : {

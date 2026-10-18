@@ -90,6 +90,8 @@ test('関連の追加を線要素・頂点に反映し、関連の選択肢と�
     '[data-testid="related-suggestion"][data-rule-ids~="E-015"]',
   ).filter({ hasText: '防火区画' }).first()
   await expect(fireCandidate).toBeVisible()
+  const beforeFire = new Set((await page.evaluate(() => window.__karu!.getCountFixtures()))
+    .map(fixture => fixture.id))
   await fireCandidate.getByRole('button', { name: '追加する', exact: true }).click()
 
   const master = page.getByRole('dialog', { name: '標準マスタから追加', exact: true })
@@ -99,15 +101,26 @@ test('関連の追加を線要素・頂点に反映し、関連の選択肢と�
   await master.getByRole('button', { name: '選んだ項目を追加（1件）', exact: true }).click()
   await expect(master).toBeHidden()
 
+  // SPEC-T12: E-015（防火区画等貫通処理）は原本「同一開口に複数回路が通っても開口1件」。
+  // 経路の頂点は貫通の位置ではないので、項目だけ作り、頂点へは自動で置かない。
   const pointSelect = right.getByLabel('頂点の個数1の項目', { exact: true })
-  await expect(pointSelect).toBeVisible()
-  await expect(right.getByLabel('頂点の個数1の位置', { exact: true })).toHaveValue('1')
-  const fireId = await pointSelect.inputValue()
+  await expect(pointSelect).toHaveCount(0)
   // 保存（saveToBytes）は選択を外すので、ここでは画面のストアの項目を見る。
   const afterFire = await page.evaluate(() => window.__karu!.getCountFixtures())
-  const fire = afterFire.find(fixture => fixture.id === fireId)
+  const fire = afterFire.find(fixture =>
+    !beforeFire.has(fixture.id) && fixture.name.includes('防火区画'))
   expect(fire).toBeDefined()
-  expect(fire!.name).toContain('防火区画')
+  const fireId = fire!.id
+
+  // 利用者が頂点に置く操作は従来どおり使える。
+  const addFireFirst = right.getByRole('button', {
+    name: `頂点に ${fire!.name} を足す`, exact: true,
+  })
+  await expect(addFireFirst).toBeEnabled()
+  await addFireFirst.click()
+  await expect(pointSelect).toBeVisible()
+  await expect(pointSelect).toHaveValue(fireId)
+  await expect(right.getByLabel('頂点の個数1の位置', { exact: true })).toHaveValue('1')
 
   const groups = pointSelect.locator('optgroup')
   await expect(groups.first()).toHaveAttribute('label', '関連の項目')

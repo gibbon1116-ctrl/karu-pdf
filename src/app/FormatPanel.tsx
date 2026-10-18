@@ -20,6 +20,7 @@ import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 import { QuantityValueInput } from '../editor/QuantityValueInput'
 import { groupFixtures } from './fixtureOrder'
 import { relatedSessionMemory } from './relatedState'
+import { scopePlanForContext } from './relatedLinkRules'
 
 const RelatedSuggestions = lazy(() => import('./RelatedSuggestions'))
 
@@ -246,7 +247,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
                   (fixture): fixture is NonNullable<typeof fixture> => fixture !== undefined,
                 )
                 const result = store.applyRelatedAdditions(
-                  origin.id, fixtures, context.routeId,
+                  origin.id, fixtures, context.routeId, scopePlanForContext(context),
                 )
                 if (result.error) throw new Error(result.error)
                 setRouteApplyStatus(relatedAdditionStatus(origin, result))

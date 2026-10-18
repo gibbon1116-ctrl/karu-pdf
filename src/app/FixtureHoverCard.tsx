@@ -68,6 +68,7 @@ function linkDescription(link: FixtureLink): string {
         area: '面積',
         perimeter: '周長',
         lengthTimesHeight: '長さ×高さ',
+        baseLength: '線の長さ・底辺',
         excavation: '根切り',
       }[link.shape.output]
       return `形から（${output}）`

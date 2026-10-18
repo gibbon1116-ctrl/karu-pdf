@@ -3,11 +3,27 @@
 // 規則は「この明細を追加したら、どの項目を元に、どう計算するか」の既定値。項目ごとに直せる。
 // 元の選び方（auto）は計算のたびに今の項目一覧から選び直すので、あとから器具を足しても元に入る。
 
+import type { BreakdownBook } from '../countFixtures'
+import type { FixtureLink, FixtureLinkSource } from '../fixtureLink'
+
 export interface LinkAutoSources {
+  /** 内訳書の編。位置のある項目だけを絞り、位置の無い項目は除外しない。1〜4件。 */
+  books?: readonly BreakdownBook[]
+  /** 関連ルールの any。枝どうしはOR、同じ枝の名称・分類はAND。 */
+  originAny?: ReadonlyArray<{
+    categories?: readonly string[]
+    nameIncludes?: readonly string[]
+  }>
+  /** 自動選択した元にも、手動の元と同じ動的係数を付ける。 */
+  factorFrom?: FixtureLinkSource['factorFrom']
+  /** 呼び径。元の略号・規格の正規化したトークンと比較する。 */
+  sizeMatch?: string
   /** 元にする項目の分類（CountFixture.category）。どれか */
   categories?: readonly string[]
   /** 元にする項目の名称に含まれる語。どれか */
   nameIncludes?: readonly string[]
+  /** 名称にいずれかの語を含む項目を自動の元から除く。各40字、1〜20件。 */
+  nameExcludes?: readonly string[]
   /** 元にする項目の施工条件の候補にこの条件があること。あれば、元の施工条件をこの条件だけに絞る */
   condition?: string
   /** 元にする項目の種別 */
@@ -29,14 +45,14 @@ export interface LinkRule {
   kind: 'factor' | 'mass' | 'carry' | 'rc' | 'shape' | 'crossing' | 'steel'
   factor?: number
   auto: LinkAutoSources
-  /** 搬入・搬出: 摘要の「区分」から重量品・容積品を決める */
+  /** 搬入・搬出: 摘要の「区分」を反映する。未選択なら元ごとに区分を判定する。 */
   carry?: true
   /** 発生材: 見かけ比重は項目の発生材の種類（attributes.wasteType）から決める */
   waste?: true
   /** RC の出力（kind 'rc'） */
   rc?: { output: 'concrete' | 'formwork' | 'rebar' | 'gasJoint' | 'lapJoint'; basis?: 'design' | 'required' }
   /** 形の出力（kind 'shape'） */
-  shape?: { output: 'area' | 'perimeter' | 'lengthTimesHeight' | 'excavation'; heightM?: number; clearanceM?: number }
+  shape?: NonNullable<FixtureLink['shape']>
   crossing?: {
     barrierItemIds?: string[]
     barrierNameIncludes?: string[]
@@ -148,12 +164,12 @@ export const LINK_RULES: readonly LinkRule[] = [
   {
     id: 'carry-in', label: '機器搬入（100kg以上の機器）', details: ['機器搬入'], kind: 'carry', carry: true,
     auto: { kinds: ['count'], minMassKg: 100 },
-    note: '公共建築設備数量積算基準 第2編第1章第1節、標準単価積算基準 表 M1-1-68: 単体 100kg 以上。重量品・容積品の補正率を乗じた質量 t。',
+    note: '単体100kg以上。電気設備は受変電・電力貯蔵装置等、機械設備は機器の種類を限らない。元ごとに質量÷容積600kg/㎥以上を重量品、未満を容積品とし、表M1-1-68の補正率を適用する。区分未選択は両方を合計し、単独搬入は30％増し。根拠: 設備数量積算基準 第2編第1章第1節、単価積算基準 第3編第1章5・第4編第1章第1節5。',
   },
   {
     id: 'carry-out', label: '機器搬出（100kg以上の撤去機器）', details: ['機器搬出'], kind: 'carry', carry: true,
     auto: { kinds: ['count'], minMassKg: 100, condition: '撤去（廃棄）' },
-    note: '搬入と同じ区分・補正率。撤去（廃棄）の機器を元にする。',
+    note: '撤去（廃棄）の単体100kg以上の機器を元にする。電気設備は受変電・電力貯蔵装置等、機械設備は機器の種類を限らない。区分・補正率は機器搬入と同じで、区分未選択は重量品・容積品の両方を合計する。根拠: 単価積算基準 第3編第2章第2節・第4編第2章第1節2。',
   },
   {
     id: 'waste', label: '発生材（撤去（廃棄）の質量 → ㎥）', details: ['発生材積込', '発生材運搬', '発生材処分'], kind: 'mass', waste: true,
@@ -169,6 +185,44 @@ export const LINK_RULES: readonly LinkRule[] = [
 export function linkRuleAuto(rule: LinkRule): LinkAutoSources | undefined {
   const hasCondition = Object.values(rule.auto).some(value => value !== undefined)
   return hasCondition || rule.kind === 'steel' ? structuredClone(rule.auto) as LinkAutoSources : undefined
+}
+
+/**
+ * 搬入・搬出の自動の元を内訳書の編に合わせる。
+ *
+ * 公共建築工事標準単価積算基準（令和8年改定）第3編第1章5
+ * 「機器搬入」（E22）・第2章第2節「機器搬出」は、
+ * 電気の対象を受変電・電力貯蔵装置等とする。
+ * 関連する細目は表E1-2-22〜25・29。
+ * 下記の名称語は、この対象を自動選択するための候補語。
+ *
+ * 第4編第1章第1節5・第2章第1節2の機械設備は、
+ * 単体100kg以上の機器について種類を限定しない。
+ * 最低質量・種別・撤去条件など、baseの他の条件は維持する。
+ */
+export function carryAutoFor(
+  book: BreakdownBook | undefined,
+  base: LinkAutoSources,
+): LinkAutoSources {
+  const auto = structuredClone(base)
+
+  if (book === '電気設備') {
+    return {
+      ...auto,
+      books: ['電気設備'],
+      nameIncludes: [
+        '受配電盤', '受電盤', '配電盤', '引込盤', '高圧',
+        'キュービクル', '変圧器', 'トランス', 'コンデンサ',
+        'リアクトル', '直流電源', '蓄電池', '電力貯蔵', '無停電',
+      ],
+    }
+  }
+
+  if (book === '機械設備') {
+    return { ...auto, books: ['機械設備'] }
+  }
+
+  return auto
 }
 
 export function linkRuleForDetail(name: string): LinkRule | undefined {

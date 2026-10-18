@@ -34,6 +34,17 @@ const positive = (value: number | undefined): number =>
 const diameterKey = (value: string): string =>
   value.normalize('NFKC').replace(/\s+/gu, '').toUpperCase()
 
+/** 呼び径は外径の数値へ置き換えず、表記を正規化して比較する。 */
+export function pipeSizeKeys(...values: readonly string[]): string[] {
+  const keys = values.flatMap(value => {
+    const text = diameterKey(value).replace(/[Ø⌀]/gu, 'Φ')
+    return text.match(
+      /(?<![A-Z0-9.])(?:Φ\d+(?:\.\d+)?|\d+(?:\.\d+)?A|[A-Z]{1,6}-?\d+(?:\.\d+)?)(?![A-Z0-9.])/gu,
+    ) ?? []
+  })
+  return [...new Set(keys)]
+}
+
 export function pipeOuterDiameterMm(fixture: CountFixture): number | undefined {
   if (fixture.attributes?.outerDiameterMm !== undefined) {
     const diameter = positive(fixture.attributes.outerDiameterMm)

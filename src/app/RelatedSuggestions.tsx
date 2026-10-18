@@ -22,12 +22,22 @@ import {
   WORK_TYPES,
   type ProjectMode,
   type WorkType,
+  type RelatedRule,
 } from '../core/related/types'
 import { perfCount, perfTime } from '../perf/counters'
 import type { DocumentSession, RelatedAddContext } from './documentModel'
 import { loadRelated, type RelatedModel } from './relatedModel'
 import type { RelatedSessionState } from './relatedState'
 import { createRelatedFixture } from './relatedFixture'
+import RuleScopeBlock from './RuleScopeBlock'
+import { loadRuleScopes } from './takeoffModel'
+import type { TakeoffRuleScopes } from '../core/takeoff/types'
+import {
+  scopePlanForRules,
+  withRelatedScopeContext,
+  relatedOriginMatches,
+  type ScopeRuleOptions,
+} from './relatedLinkRules'
 import {
   relatedCountComponentChoices,
   resolveRelatedCountComponent,
@@ -64,17 +74,29 @@ function registeredRelatedFixtures(
   fixtures: readonly CountFixture[],
   store: DocumentSession['annotationStore'],
   routeId?: string,
+  scopes?: TakeoffRuleScopes,
+  scopeOptions: ScopeRuleOptions = {},
 ): CountFixture[] {
   if (!suggestion.flags.registered || suggestion.decision !== undefined
     || !origin || origin.link !== undefined
     || suggestion.kind !== 'item' && suggestion.kind !== 'check') return []
 
   return fixtures.filter(fixture => {
-    const kind = relatedAdditionKind(origin, fixture, routeId)
-    if (!kind) return false
-    if ((kind === 'factor' || kind === 'perimeter')
-      && (store.fixtureMarkCount(fixture.id) !== 0
-        || fixture.link !== undefined && fixture.link.kind !== 'factor')) return false
+    const plan = scopePlanForRules(
+      suggestion.ruleIds, scopes, origin, fixture, scopeOptions,
+    )
+    if (plan.kind === 'none') return false
+
+    if (plan.kind === 'link') {
+      if (fixture.id === origin.id || fixture.link !== undefined
+        || store.fixtureMarkCount(fixture.id) !== 0) return false
+    } else {
+      const kind = relatedAdditionKind(origin, fixture, routeId)
+      if (!kind) return false
+      if ((kind === 'factor' || kind === 'perimeter')
+        && (store.fixtureMarkCount(fixture.id) !== 0
+          || fixture.link !== undefined && fixture.link.kind !== 'factor')) return false
+    }
 
     if (suggestion.kind === 'check') {
       return !!suggestion.create?.name
@@ -135,6 +157,13 @@ export default function RelatedSuggestions({
   const [reviewError, setReviewError] = useState('')
   const [documentListOpen, setDocumentListOpen] = useState(false)
   const [model, setModel] = useState<RelatedModel | null>(null)
+  const [ruleScopes, setRuleScopes] = useState<TakeoffRuleScopes>()
+  const [relatedRules, setRelatedRules] = useState<readonly RelatedRule[]>([])
+
+  const ruleContextFor = (suggestion: RelatedSuggestion): ScopeRuleOptions => ({
+    originMatch: relatedOriginMatches(suggestion.ruleIds, relatedRules),
+    projectMode: store.getRelatedReviewsSnapshot().projectMode,
+  })
   const [loadError, setLoadError] = useState('')
   const [retry, setRetry] = useState(0)
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
@@ -173,12 +202,22 @@ export default function RelatedSuggestions({
     setLoadError('')
     void Promise.all([
       loadRelated(),
-      import('../core/related/rules').then(module => module.RELATED_RULES_VERSION),
-    ]).then(([value, version]) => {
+      import('../core/related/rules').then(module => ({
+        version: module.RELATED_RULES_VERSION,
+        rules: module.RELATED_RULES,
+      })),
+      loadRuleScopes(),
+    ]).then(([value, loaded, scopes]) => {
+      const { version, rules } = loaded
       if (typeof version !== 'string' || !version.trim()) {
         throw new Error('関連ルールの版が不正です。')
       }
-      if (alive) { setModel(value); setRulesVersion(version) }
+      if (alive) {
+        setRuleScopes(scopes)
+        setRelatedRules(rules)
+        setModel(value)
+        setRulesVersion(version)
+      }
     }).catch(reason => {
       if (alive) setLoadError(reason instanceof Error ? reason.message : String(reason))
     })
@@ -397,6 +436,27 @@ export default function RelatedSuggestions({
     })))
   }
 
+  const componentChoicesFor = (
+    suggestion: RelatedSuggestion,
+    origin: CountFixture | undefined,
+    all: readonly CountFixture[],
+  ): RelatedCountComponentChoice[] => {
+    if (!origin || !ruleScopes) return []
+    return relatedCountComponentChoices(suggestion, origin, all, model)
+      .filter(choice => {
+        try {
+          const { fixture } = resolveRelatedCountComponent(choice, all)
+          const plan = scopePlanForRules(
+            suggestion.ruleIds, ruleScopes, origin, fixture,
+            ruleContextFor(suggestion),
+          )
+          return plan.kind === 'placement' && plan.placement === 'component'
+        } catch {
+          return false
+        }
+      })
+  }
+
   const addRelatedComponent = (
     suggestion: RelatedSuggestion,
     originId: string,
@@ -408,7 +468,7 @@ export default function RelatedSuggestions({
     try {
       const all = store.getCountFixtures()
       const origin = all.find(fixture => fixture.id === originId)
-      const choices = relatedCountComponentChoices(suggestion, origin, all, model)
+      const choices = componentChoicesFor(suggestion, origin, all)
       const currentChoice = choices.find(value => value.key === choice.key)
       if (!currentChoice) {
         setReviewError('構成要素にする候補が変わりました。もう一度選んでください。')
@@ -455,8 +515,8 @@ export default function RelatedSuggestions({
       return
     }
     if (!canReview || !canAddFixtures || !rulesVersion || !origin) return
-    const choices = relatedCountComponentChoices(
-      suggestion, origin, store.getCountFixtures(), model,
+    const choices = componentChoicesFor(
+      suggestion, origin, store.getCountFixtures(),
     )
     if (!choices.length) {
       setReviewError('構成要素にできる個数の項目がありません。')
@@ -502,17 +562,19 @@ export default function RelatedSuggestions({
     const canCreate = !!createOrigin && (suggestion.kind === 'item'
       || suggestion.kind === 'check' && !!suggestion.create)
     const addSuggestion = () => {
-      if (!canAddFixtures || !canCreate || !createOrigin) return
-      const context: RelatedAddContext = {
+      if (!canAddFixtures || !canCreate || !createOrigin || !ruleScopes) return
+      const context = withRelatedScopeContext({
         originFixtureId: createOrigin.id,
         ...(routeId && createOrigin.id === selectedFixtureId ? { routeId } : {}),
-      }
+      }, suggestion.ruleIds, ruleScopes, ruleContextFor(suggestion))
       if (suggestion.kind === 'item' && !suggestion.flags.unresolved && query) {
         if (decide(suggestion, '必要')) onOpenMaster(query, context)
         return
       }
       try {
-        const initial = createRelatedFixture(suggestion, createOrigin, fixtures)
+        const initial = createRelatedFixture(
+          suggestion, createOrigin, fixtures, ruleScopes,
+        )
         if (decide(suggestion, '必要')) onCreateFixture(initial, context)
       } catch (reason) {
         setReviewError(reason instanceof Error ? reason.message : String(reason))
@@ -521,25 +583,32 @@ export default function RelatedSuggestions({
     const componentOrigin = showOrigins
       && !suggestion.originFixtureIds.includes(selected?.id ?? '')
       ? undefined : selected
-    const componentChoices = relatedCountComponentChoices(
-      suggestion, componentOrigin, fixtures, model,
+    const componentChoices = componentChoicesFor(
+      suggestion, componentOrigin, fixtures,
     )
     const choosingComponent = componentChoice?.key === suggestion.key
       && componentChoice.originId === componentOrigin?.id
     const applyOrigin = createOrigin
     const applyRouteId = applyOrigin?.id === selectedFixtureId ? routeId : undefined
     const routeFixtures = registeredRelatedFixtures(
-      suggestion, applyOrigin, fixtures, store, applyRouteId,
+      suggestion, applyOrigin, fixtures, store, applyRouteId, ruleScopes,
+      ruleContextFor(suggestion),
     )
     const routeChoiceKey = JSON.stringify([applyOrigin?.id, suggestion.key])
     const routeFixture = routeFixtures.find(fixture =>
       fixture.id === routeChoices[routeChoiceKey]) ?? routeFixtures[0]
     const routeFixtureId = routeFixture?.id
-    const applyLabel = applyOrigin && quantityMethod(applyOrigin) === 'polyline'
-      ? '経路に入れる'
-      : applyOrigin && routeFixture
-        && relatedAdditionKind(applyOrigin, routeFixture, applyRouteId) === 'component'
-        ? '構成要素に入れる' : '連動にする'
+    const applyPlan = applyOrigin && routeFixture
+      ? scopePlanForRules(
+        suggestion.ruleIds, ruleScopes, applyOrigin, routeFixture,
+        ruleContextFor(suggestion),
+      ) : undefined
+    const applyLabel = applyPlan?.kind === 'link' ? '連動にする'
+      : applyOrigin && quantityMethod(applyOrigin) === 'polyline'
+        ? '経路に入れる'
+        : applyOrigin && routeFixture
+          && relatedAdditionKind(applyOrigin, routeFixture, applyRouteId) === 'component'
+          ? '構成要素に入れる' : '連動にする'
     return <article key={suggestion.key}
       className={`related-card${registeredOnly ? ' related-registered' : ''}`}
       data-registered={suggestion.flags.registered ? 'true' : undefined}
@@ -570,6 +639,7 @@ export default function RelatedSuggestions({
         標準マスタ：{masterNames.slice(0, 3).join('、')}
         {masterNames.length > 3 && `、ほか ${masterNames.length - 3}件`}
       </p>}
+      <RuleScopeBlock ruleIds={suggestion.ruleIds} />
       {(suggestion.questions.length > 1 || suggestion.notes.length > 0 ||
         suggestion.refs.length > 0 || displayOriginIds.length > 0) && <details>
         <summary>詳しく</summary>
@@ -609,21 +679,22 @@ export default function RelatedSuggestions({
           aria-label={applyLabel}
           disabled={!canReview || !rulesVersion}
           onClick={() => {
-            if (!canReview || !rulesVersion || !applyOrigin) return
+            if (!canReview || !rulesVersion || !applyOrigin || !ruleScopes) return
             try {
               const current = store.getCountFixtures()
               const origin = current.find(fixture => fixture.id === applyOrigin.id)
               const match = registeredRelatedFixtures(
-                suggestion, origin, current, store, applyRouteId,
+                suggestion, origin, current, store, applyRouteId, ruleScopes,
+                ruleContextFor(suggestion),
               ).find(fixture => fixture.id === routeFixtureId)
               if (!origin || !match) {
                 setReviewError('反映する候補が変わりました。もう一度選んでください。')
                 return
               }
-              const context: RelatedAddContext = {
+              const context = withRelatedScopeContext({
                 originFixtureId: origin.id,
                 ...(applyRouteId ? { routeId: applyRouteId } : {}),
-              }
+              }, suggestion.ruleIds, ruleScopes, ruleContextFor(suggestion))
               if (decide(suggestion, '必要')) {
                 onApplyRelated([match.id], context)
               }

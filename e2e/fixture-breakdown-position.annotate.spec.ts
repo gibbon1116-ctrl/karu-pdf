@@ -26,9 +26,10 @@ async function open(page: Page) {
     .getByRole('button', { name: '項目を追加', exact: true })).toBeEnabled()
 }
 
-async function optionValues(select: Locator) {
-  return select.locator('option').evaluateAll(options =>
-    options.map(option => (option as HTMLOptionElement).value).filter(value => value !== ''))
+// 内訳書の位置は候補一覧（datalist）付きの入力欄。候補は入力欄の list から読む
+async function optionValues(input: Locator) {
+  return input.evaluate(element => [...((element as HTMLInputElement).list?.options ?? [])]
+    .map(option => option.value).filter(value => value !== ''))
 }
 
 test('項目の内訳書位置は候補選択と自由入力の両方を保存する', async ({ page }) => {
@@ -45,14 +46,14 @@ test('項目の内訳書位置は候補選択と自由入力の両方を保存�
   await dialog.locator('details.fixture-breakdown summary').click()
 
   await dialog.getByLabel('編', { exact: true }).selectOption('電気設備')
-  const sectionChoices = dialog.getByLabel('種目の候補', { exact: true })
+  const sectionChoices = dialog.getByLabel('種目', { exact: true })
   await expect(sectionChoices).toBeEnabled()
-  await expect(sectionChoices.locator('option').filter({ hasText: '庁舎' })).toHaveCount(1)
-  await sectionChoices.selectOption('庁舎')
+  expect(await optionValues(sectionChoices)).toContain('庁舎')
+  await sectionChoices.fill('庁舎')
 
-  const subjectChoices = dialog.getByLabel('科目の候補', { exact: true })
-  const middleChoices = dialog.getByLabel('中科目の候補', { exact: true })
-  const itemChoices = dialog.getByLabel('細目の候補', { exact: true })
+  const subjectChoices = dialog.getByLabel('科目', { exact: true })
+  const middleChoices = dialog.getByLabel('中科目', { exact: true })
+  const itemChoices = dialog.getByLabel('細目', { exact: true })
   await expect(subjectChoices).toBeEnabled()
 
   const subjectOptions = await optionValues(subjectChoices)
@@ -67,12 +68,12 @@ test('項目の内訳書位置は候補選択と自由入力の両方を保存�
   for (const subject of subjectOptions) {
     await dialog.getByLabel('中科目', { exact: true }).fill('')
     await dialog.getByLabel('細目', { exact: true }).fill('')
-    await subjectChoices.selectOption(subject)
+    await subjectChoices.fill(subject)
     const items = await optionValues(itemChoices)
     const middleOptions = await optionValues(middleChoices)
 
     for (const middle of middleOptions) {
-      await middleChoices.selectOption(middle)
+      await middleChoices.fill(middle)
       const filteredItems = await optionValues(itemChoices)
       if (items.length > 0 && filteredItems.length > 0 &&
           JSON.stringify(items) !== JSON.stringify(filteredItems) && !subjectWithMiddle) {
@@ -92,13 +93,13 @@ test('項目の内訳書位置は候補選択と自由入力の両方を保存�
   expect(alternateSubject).toBeDefined()
 
   await dialog.getByLabel('中科目', { exact: true }).fill('')
-  await subjectChoices.selectOption(alternateSubject!.subject)
+  await subjectChoices.fill(alternateSubject!.subject)
   const alternateItems = await optionValues(itemChoices)
   expect(alternateItems).toEqual(alternateSubject!.items)
   expect(alternateItems).not.toEqual(subjectWithMiddle!.items)
 
-  await subjectChoices.selectOption(subjectWithMiddle!.subject)
-  await middleChoices.selectOption(subjectWithMiddle!.middle)
+  await subjectChoices.fill(subjectWithMiddle!.subject)
+  await middleChoices.fill(subjectWithMiddle!.middle)
   const filteredItems = await optionValues(itemChoices)
   expect(filteredItems).toEqual(subjectWithMiddle!.filteredItems)
   expect(filteredItems).not.toEqual(subjectWithMiddle!.items)
