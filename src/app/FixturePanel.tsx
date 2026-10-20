@@ -318,6 +318,10 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     return () => { ui?.setBusy?.(false) }
   }, [session, busy])
   const canEdit = store.fixturesReady && !session.editRestriction && !busy
+  const editFixture = (fixture: CountFixture) => {
+    if (!canEdit) return
+    setDialog({ editing: true, initial: structuredClone(fixture) })
+  }
   const canReorder = canEdit && search.length === 0
   const reorderTitle = search.length ? '検索中は並べ替えできません' : 'ドラッグして並べ替え'
   const selectedItems = grouping && selected?.breakdown
@@ -621,7 +625,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       <span className="fixture-summary-totals"><span>表示中の図面（p.{session.view.page}）: <strong>{format(selected, pageTotal(selected.id))}</strong>{unit(selected)}</span>{' ／ '}<button disabled={!selected.link && total(selected.id) === 0} aria-label={`${fixtureCode(selected)} ${selected.name}の全図面の内訳`} onClick={() => setBreakdownId(selected.id)}>全図面: <strong>{format(selected, total(selected.id))}</strong>{unit(selected)}</button></span>
     </> : '数量拾いの一覧で項目を選んでください'}
       <div className="fixture-action-row">
-      <button disabled={!canEdit || !selected} onClick={() => selected && setDialog({ editing: true, initial: structuredClone(selected) })}>編集</button>
+      <button disabled={!canEdit || !selected} onClick={() => selected && editFixture(selected)}>編集</button>
       <button disabled={!canEdit || !selected || fixtures.length >= 1000} onClick={() => {
         if (!selected) return
         try {
@@ -874,6 +878,11 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
             event.currentTarget.querySelector<HTMLButtonElement>('.fixture-row')?.focus({ preventScroll: true })
           }
         }}
+        onDoubleClick={event => {
+          const button = (event.target as Element).closest('button')
+          if (button && !button.classList.contains('fixture-row')) return
+          editFixture(f)
+        }}
         onMouseEnter={event => {
           if (dragging.current) return
           const rect = event.currentTarget.getBoundingClientRect()
@@ -881,7 +890,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
         }} onMouseLeave={() => setSampleHover(null)}>
         <span className="fixture-grip" aria-hidden="true">⠿</span>
         <button aria-label={`${fixtureCode(f)} ${f.name}の表示切替`} aria-pressed={store.isFixtureVisible(f.id)} onClick={() => store.setFixtureVisible([f.id], !store.isFixtureVisible(f.id))}><Eye visible={store.isFixtureVisible(f.id)} /></button>
-        <button className="fixture-row" aria-label={`${fixtureCode(f)} ${f.name}`.trim()} aria-pressed={f.id === selected?.id} onClick={() => selectPanelFixture(f.id)}>
+        <button className="fixture-row" title="ダブルクリックで項目を編集" aria-label={`${fixtureCode(f)} ${f.name}`.trim()} aria-pressed={f.id === selected?.id} onClick={() => selectPanelFixture(f.id)}>
           {quantityKind(f) === 'count' ? <svg className="fixture-swatch" viewBox="-14 -14 28 28" aria-hidden="true"><CountMarker style={{ ...f.style, size: 24, opacity: 1 }} showCode={false} /></svg> : <QuantitySwatch fixture={f} />}
           <span className="fixture-sample-cell">{quantityKind(f) === 'count' && f.sample && <img className="fixture-sample-thumbnail" src={`data:image/png;base64,${f.sample.png}`} alt={`${f.name}の見本`} draggable={false} />}</span>
           <span className="fixture-row-code" title={fixtureCode(f)}>
