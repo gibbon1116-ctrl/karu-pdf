@@ -364,6 +364,10 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
       <p aria-live="polite">候補 {candidates.length} 件{confidenceSummary(candidates)}（拾い済み {counted} 件）{otherCandidates.length > 0 ? `（他の項目で拾い済み ${otherCandidates.length} 件）` : ''}</p>
       {templateSummary && <p>見本の線 {templateSummary.segments} 本（細い背景線・配線・文字とみて {templateSummary.removed} 本を除きました）</p>}
       <fieldset className="symbol-search-labels"><legend>添字で種類を分ける</legend>
+        <div className="symbol-search-actions">
+          <button type="button" onClick={() => store.setSymbolCandidateFilters(null)}>すべてにチェック</button>
+          <button type="button" onClick={() => store.setSymbolCandidateFilters([])}>すべてのチェックを外す</button>
+        </div>
         {labelGroups.map(([label, count]) => <label key={label}><input type="checkbox" checked={store.symbolLabelFilter === null || store.symbolLabelFilter.includes(label)}
           onChange={e => { const selected = store.symbolLabelFilter ?? labelGroups.map(([value]) => value)
             store.setSymbolCandidateFilters(e.target.checked ? [...selected, label] : selected.filter(value => value !== label))

@@ -169,6 +169,7 @@ export default function LinePicker({ store, annotation, onClose }: { store: Anno
     // Enter right after typing adds the first match, so the common case is type → Enter.
     if (e.key === 'Enter' && candidates[Math.max(0, active)]) { e.preventDefault(); add(candidates[Math.max(0, active)]) }
   }}>
+    <h3 className="window-drag-title" title="ドラッグして移動できます">線要素を追加</h3>
     <input ref={search} aria-label="線要素を検索" value={query} onChange={e => { hide(); setQuery(e.currentTarget.value) }} />
     {full && <p role="status">これ以上足せません（最大 11 項目）</p>}
     {error && <p role="alert">{error}</p>}

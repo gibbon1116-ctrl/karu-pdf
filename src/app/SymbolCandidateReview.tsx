@@ -235,6 +235,11 @@ export default function SymbolCandidateReview({ session, pool, open, onClose, on
     }
   }
   const locate = (candidate: SymbolSearchCandidate) => {
+    if (store.focusedSymbolCandidateId === candidate.id) {
+      if (candidate.state === 'chosen') store.toggleSymbolCandidate(candidate.id)
+      store.setFocusedSymbolCandidate(null)
+      return
+    }
     onLocate(candidate.pageIndex, candidate.rect)
     store.setFocusedSymbolCandidate(candidate.id)
   }
@@ -276,6 +281,8 @@ export default function SymbolCandidateReview({ session, pool, open, onClose, on
               checked={candidate.state === 'chosen'}
               onChange={() => store.toggleSymbolCandidate(candidate.id)} />
             <button type="button" className="symbol-candidate-review-locate"
+              aria-pressed={focusedId === candidate.id}
+              title={focusedId === candidate.id ? 'もう一度クリックすると選択と強調を外します' : 'クリックすると図面で強調します'}
               aria-label={`${name} を図面で確認`} onClick={() => locate(candidate)}>
               <Thumbnail canvas={images.current.get(candidate.id)} label={`${name} の画像`} />
               <span className="symbol-candidate-review-details">

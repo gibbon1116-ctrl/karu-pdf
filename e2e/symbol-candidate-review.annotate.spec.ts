@@ -115,6 +115,25 @@ test('画像一覧・選択解除・図面の強調・閉じて開き直す・�
   await expect(candidateById(page, id!)).toHaveAttribute('data-focused', 'true')
   await expect(row).toHaveClass(/focused/)
 
+  // A second image click releases the focus even for an unchecked candidate.
+  await row.getByRole('button', { name: /を図面で確認$/ }).click()
+  await expect(row).not.toHaveClass(/focused/)
+  await expect(candidateById(page, id!)).not.toHaveAttribute('data-focused', 'true')
+  await expect(row.getByRole('checkbox')).not.toBeChecked()
+
+  // A chosen candidate is first located, then excluded on the second click.
+  const chosenRow = rows(page).nth(1)
+  const chosenId = await chosenRow.getAttribute('data-candidate-id')
+  await chosenRow.getByRole('button', { name: /を図面で確認$/ }).click()
+  await expect(chosenRow.getByRole('checkbox')).toBeChecked()
+  await expect(candidateById(page, chosenId!)).toHaveAttribute('data-focused', 'true')
+  await chosenRow.getByRole('button', { name: /を図面で確認$/ }).click()
+  await expect(chosenRow.getByRole('checkbox')).not.toBeChecked()
+  await expect(candidateById(page, chosenId!)).toHaveAttribute('data-state', 'pending')
+  await expect(candidateById(page, chosenId!)).not.toHaveAttribute('data-focused', 'true')
+  await expect(rows(page)).toHaveCount(count)
+  await chosenRow.getByRole('checkbox').check()
+
   await review(page).getByRole('button', { name: '選んだ候補の確認を閉じる', exact: true }).click()
   await expect(review(page)).toHaveCount(0)
   await expect(candidateById(page, id!)).not.toHaveAttribute('data-focused', 'true')

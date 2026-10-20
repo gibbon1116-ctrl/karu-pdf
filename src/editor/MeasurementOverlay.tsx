@@ -142,6 +142,7 @@ function RoomPickupDialog({ region, count, complete }: {
   return createPortal(<dialog ref={dialog} className="room-region-dialog" aria-label="既存の拾いに部屋を入れる"
     onCancel={event => { event.preventDefault(); complete(false) }}
     onKeyDown={event => event.stopPropagation()}>
+    <h2>既存の拾いに部屋を入れる</h2>
     <p>この範囲の {count} 件の拾いの部屋を「{region.name}」にしますか（Ctrl+Z で戻せます）</p>
     <div className="room-region-dialog-actions">
       <button type="button" onClick={() => complete(true)}>部屋を入れる</button>
@@ -207,6 +208,7 @@ export function RoomSetPickupDialog({ count, complete }: {
   return createPortal(<dialog ref={dialog} className="room-region-dialog" aria-label="既存の拾いに部屋を入れる"
     onCancel={event => { event.preventDefault(); complete(false) }}
     onKeyDown={event => event.stopPropagation()}>
+    <h2>既存の拾いに部屋を入れる</h2>
     <p>この図面の {count} 件の拾いに部屋を入れますか（Ctrl+Z で戻せます）</p>
     <div className="room-region-dialog-actions">
       <button type="button" onClick={() => complete(true)}>部屋を入れる</button>

@@ -308,6 +308,7 @@ export default function ComponentPicker({ store, annotation, onClose, onAdded }:
         if (candidate) add(candidate)
       }
     }}>
+    <h3 className="window-drag-title" title="ドラッグして移動できます">構成要素を追加</h3>
     <input ref={search} aria-label="構成要素を検索" value={query}
       onChange={event => { hide(); setQuery(event.currentTarget.value); setActive(-1) }} />
     {full && <p role="status">これ以上足せません（最大 10 項目）</p>}

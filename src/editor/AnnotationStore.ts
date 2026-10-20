@@ -930,6 +930,27 @@ export class AnnotationStore {
   }
 
   async ensurePageLoaded(pageIndex: number, load: () => Promise<AnnotationInfo[]>): Promise<void> {
+    return this.loadPage(pageIndex, load, true)
+  }
+
+  /** Quantity initialization still reads every page, but publishes the batch once.
+   * Rebuilding dirty summaries and quantity views after each page is quadratic.
+   * Ordinary viewer page loads retain their immediate notification.
+   */
+  async ensurePagesLoaded(pageIndices: readonly number[], load: (pageIndex: number) => Promise<AnnotationInfo[]>): Promise<void> {
+    const generation = this.generation, before = this.loadedPages.size
+    try {
+      for (const pageIndex of pageIndices) {
+        if (generation !== this.generation) return
+        await this.loadPage(pageIndex, () => load(pageIndex), false)
+      }
+    } finally {
+      // Publish successful pages even after a partial failure, so retrying is safe.
+      if (generation === this.generation && this.loadedPages.size !== before) this.notify()
+    }
+  }
+
+  private async loadPage(pageIndex: number, load: () => Promise<AnnotationInfo[]>, notify: boolean): Promise<void> {
     if (this.loadedPages.has(pageIndex)) return
     const pending = this.loadingPages.get(pageIndex)
     if (pending) return pending
@@ -982,7 +1003,7 @@ export class AnnotationStore {
         this.baselines.set(id, cloneState(annotation))
       }
       this.loadedPages.add(pageIndex)
-      this.notify()
+      if (notify) this.notify()
     }).finally(() => {
       if (generation === this.generation) this.loadingPages.delete(pageIndex)
     })

@@ -25,7 +25,9 @@ export const FixtureUiContext = createContext<{
 } | null>(null)
 export async function ensureSessionFixtures(session: DocumentSession, pool: PdfWorkerPool): Promise<void> {
   await session.annotationStore.ensureCountFixtures(() => pool.getCountFixtures(session.docId), async () => {
-    for (let i = 0; i < session.pageSizes.length; i++) await session.annotationStore.ensurePageLoaded(i, () => pool.listAnnotations(session.docId, i))
+    await session.annotationStore.ensurePagesLoaded(
+      session.pageSizes.map((_, i) => i), i => pool.listAnnotations(session.docId, i),
+    )
   })
 }
 export async function ensureSessionQuantityChecks(session: DocumentSession, pool: PdfWorkerPool): Promise<void> {
