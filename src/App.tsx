@@ -244,6 +244,7 @@ export default function App() {
   const pool = appRuntime.pool
   const tabs = appRuntime.tabs
   const viewerRef = useRef<ViewerHandle>(null)
+  const toolChangeVersion = useRef(0)
   const rightViewsRef = useRef(new Map<string, DocumentViewState>())
   const rightPositionsRef = useRef(new Map<string, ViewPosition>())
   const swapPositionRef = useRef<{ docId: string; position: ViewPosition } | null>(null)
@@ -1162,18 +1163,23 @@ export default function App() {
   }
 
   const changeTool = useCallback(async (next: EditorTool) => {
+    const version = ++toolChangeVersion.current
     await viewerRef.current?.commitEditor()
+    if (version !== toolChangeVersion.current) return
     const session = activeRef.current
+    const current = () => version === toolChangeVersion.current && activeRef.current === session
     if (session?.editRestriction && next !== 'select') { showStatus(session.editRestriction); return }
     if (next === 'issue' && session) {
       try { await session.annotationStore.issueNumbers.initialize(() => pool.maxIssueNumber(session.docId)) } catch (reason) { showStatus(`番号を取得できませんでした: ${String(reason)}`); return }
-      if (activeRef.current !== session) return
+      if (!current()) return
     }
     if (next === 'count' && session) {
-      try { await ensureSessionFixtures(session, pool) } catch (reason) { showStatus(String(reason)); return }
-      if (activeRef.current !== session) return
-      session.annotationStore.prepareCountTool()
+      // Show the panel and its loading state before scanning the document.
+      // Editing stays disabled until every page (including legacy marks) is ready.
       window.dispatchEvent(new CustomEvent('karu-pdf:open-fixtures'))
+      try { await ensureSessionFixtures(session, pool) } catch (reason) { if (current()) showStatus(String(reason)); return }
+      if (!current()) return
+      session.annotationStore.prepareCountTool()
     }
     if (next !== 'select') session?.annotationStore.clearSelection()
     setTool(next)
