@@ -49,9 +49,10 @@ test('全ページの準備を待たずに枠を開き、準備後に拾い操�
   await expect(page.getByRole('button', { name: '数量拾い', exact: true })).toHaveAttribute('aria-pressed', 'true')
 })
 
-test('読込中に別の道具を選んだら、完了しても数量拾いに戻さない', async ({ page }) => {
+for (const cancel of ['選択ボタン', 'Escape'] as const) test(`読込中に${cancel}で選択へ戻ったら、完了しても数量拾いに戻さない`, async ({ page }) => {
   const panel = await holdQuantityLoad(page)
-  await page.getByRole('button', { name: '選択', exact: true }).click()
+  if (cancel === 'Escape') await page.keyboard.press('Escape')
+  else await page.getByRole('button', { name: '選択', exact: true }).click()
   await page.evaluate(() => window.releaseQuantityLoad())
   await expect(panel.getByRole('button', { name: '項目を追加', exact: true })).toBeEnabled()
   await expect(page.getByRole('button', { name: '選択', exact: true })).toHaveAttribute('aria-pressed', 'true')

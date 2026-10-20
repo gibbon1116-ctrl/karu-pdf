@@ -755,6 +755,7 @@ export default function App() {
     const current = activeRef.current
     if (current?.docId === docId) return
     if (!discardOrganize()) return
+    toolChangeVersion.current++
     closeSymbolSearch()
     await viewerRef.current?.commitEditor()
     persistView(current)
@@ -1601,6 +1602,7 @@ export default function App() {
         if (scaleRegionDrawing) { setScaleRegionDrawing(null); return }
         if (scaleTracing) { setScaleTracing(false); setScalePoints(null); return }
         const viewer = viewerRef.current
+        toolChangeVersion.current++
         target?.blur()
         void (async () => {
           await viewer?.commitEditor()
