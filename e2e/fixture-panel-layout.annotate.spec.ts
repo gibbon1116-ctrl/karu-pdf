@@ -138,6 +138,47 @@ test('quantity controls share one screen and retain their names and columns', as
   await expectLayout(page)
 })
 
+test('数量の項目をダブルクリックして編集し、閉じる・変更するを使える', async ({ page }) => {
+  await start(page, await drawingPdf())
+  const currentPanel = panel(page)
+  const led = currentPanel.getByRole('button', { name: 'LED LED', exact: true })
+  const cv = currentPanel.getByRole('button', { name: 'CV CV', exact: true })
+  const dialog = page.getByRole('dialog', { name: '項目を編集', exact: true })
+
+  await led.click()
+  await expect(led).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialog).toBeHidden()
+
+  // Double-click a different item: edit the clicked cable, not the former selection.
+  await cv.locator('.fixture-row-name').dblclick()
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByLabel('名称', { exact: true })).toHaveValue('CV')
+  await dialog.getByLabel('名称', { exact: true }).fill('保存しないケーブル')
+  await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await expect(cv).toHaveAttribute('aria-pressed', 'true')
+
+  // The marker is part of the same item row, including count fixtures.
+  await led.locator('.fixture-swatch').dblclick()
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByLabel('名称', { exact: true })).toHaveValue('LED')
+  await dialog.getByLabel('名称', { exact: true }).fill('照明器具')
+  await dialog.getByRole('button', { name: '変更する', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await expect(currentPanel.getByRole('button', { name: 'LED 照明器具', exact: true })).toHaveAttribute('aria-pressed', 'true')
+
+  // Visibility remains a separate action and must not open the editor.
+  const visibility = currentPanel.getByRole('button', { name: 'LED 照明器具の表示切替', exact: true })
+  await visibility.dblclick()
+  await expect(visibility).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialog).toBeHidden()
+
+  // Existing Edit button still opens the same saved item.
+  await currentPanel.getByRole('button', { name: '編集', exact: true }).click()
+  await expect(dialog.getByLabel('名称', { exact: true })).toHaveValue('照明器具')
+  await dialog.getByRole('button', { name: '閉じる', exact: true }).click()
+})
+
 test('settings start closed and remember both open and closed states across reloads', async ({ page }) => {
   const bytes = await drawingPdf()
   await start(page, bytes)
