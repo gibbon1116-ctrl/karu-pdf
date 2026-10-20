@@ -1,4 +1,5 @@
 import { QuantityNavigationContext } from './app/QuantityBreakdown'
+import { useDraggableWindows } from './ui/windowDragging'
 import { createFixturePreviews } from './app/fixturePreviews'
 import { DrawingInfoDialog } from './app/DrawingInfoDialog'
 import { DrawingUiContext } from './app/documentModel'
@@ -240,6 +241,7 @@ function loadPanels(): { thumbnails: boolean; format: boolean } {
 }
 
 export default function App() {
+  useDraggableWindows()
   const vectorExtractionRequests = useRef(0)
   const pool = appRuntime.pool
   const tabs = appRuntime.tabs

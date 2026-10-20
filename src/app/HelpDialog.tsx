@@ -19,10 +19,10 @@ export function HelpDialog({ open, onClose }: Props) {
 
   return (
     <dialog ref={dialogRef} className="help-dialog" aria-labelledby="help-title" onCancel={onClose} onClose={onClose}>
-      <div className="help-dialog-header">
+      <header className="help-dialog-header">
         <h1 id="help-title">かるPDFの使い方</h1>
         <button type="button" aria-label="使い方を閉じる" onClick={onClose}>×</button>
-      </div>
+      </header>
       <div className="help-dialog-body">
         <section>
           <h2>開く・保存・確定保存・印刷</h2>

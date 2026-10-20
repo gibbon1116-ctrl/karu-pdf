@@ -227,7 +227,7 @@ export default function FixturePresetDialog({ sources, fixtures = [], initialQue
     setCategory(next); setType(entries.find(f => f.field === masterField && f.category === next)?.type ?? '')
   }
   return <dialog ref={dialog} className={`fixture-dialog${sources ? '' : ' quantity-master-dialog'}`} aria-label={sources ? '他のPDFから読み込む' : '標準マスタから追加'} onCancel={onClose}>
-    <h2>{sources ? '他のPDFから読み込む' : '標準マスタから追加'}</h2>
+    <h2 title="ドラッグして移動できます">{sources ? '他のPDFから読み込む' : '標準マスタから追加'}</h2>
     {!sources && <div className="quantity-master-tabs" role="tablist" aria-label="標準マスタの選び方">
       <button role="tab" id="quantity-master-spec-tab" aria-selected={tab === 'spec'} aria-controls="quantity-master-spec-panel" onClick={() => { setTab('spec'); setError('') }}>規格から選ぶ</button>
       <button role="tab" id="quantity-master-breakdown-tab" aria-selected={tab === 'breakdown'} aria-controls="quantity-master-breakdown-panel" onClick={() => { setTab('breakdown'); setError('') }}>内訳書から選ぶ</button>

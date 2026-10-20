@@ -75,6 +75,7 @@ export default function FixtureQuickList({ fixtures, recentIds, onSelect, onClos
       event.preventDefault(); const row = visible[active]; if (row) { onSelect(row.fixture.id); onClose() }
     }
   }}>
+    <h3 className="window-drag-title" title="ドラッグして移動できます">項目を選ぶ</h3>
     <input ref={input} type="search" aria-label="項目を検索" value={search} onChange={event => { hide(); setSearch(event.currentTarget.value); setActive(0) }}
       aria-controls="pickup-quick-options" aria-activedescendant={visible[active] ? `pickup-option-${active}` : undefined} />
     <div className="fixture-quick-options" id="pickup-quick-options" role="listbox" aria-label="数量の項目">

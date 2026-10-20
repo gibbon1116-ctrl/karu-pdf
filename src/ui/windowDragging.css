@@ -1,0 +1,11 @@
+:where(dialog, [role="dialog"], [role="alertdialog"]) > :is(header, h1, h2, h3, h4),
+:where(dialog, [role="dialog"], [role="alertdialog"]) > form > :is(header, h1, h2) {
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+html[data-window-dragging], html[data-window-dragging] * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+.window-drag-title { margin: 2px 0 6px; font-size: 12px; }
