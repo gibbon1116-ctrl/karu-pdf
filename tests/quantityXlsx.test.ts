@@ -292,10 +292,10 @@ it('appends breakdown sheets without changing the existing sheets or applying ta
   expect(sheets.map(sheet => sheet.name)).toEqual(['集計表', '明細', '細目別内訳', '別紙明細'])
   expect(sheets.slice(0, 2)).toEqual(quantityWorkbookSheets(base))
   const item = sheets[2].cells.find(row => row[0]?.value === '電線')!
-  expect(item[2].value).toBe(1)
-  expect(item[3].value).toBe('式')
+  expect(item[3].value).toBe(1)
+  expect(item[4].value).toBe('式')
   const totalOffset = sheets[3].cells.findIndex(row => row[0]?.value === '計')
-  expect(item[5].formula).toBe(`'別紙明細'!F${totalOffset + 1}`)
+  expect(item[6].formula).toBe(`'別紙明細'!F${totalOffset + 1}`)
   const detail = sheets[3].cells.find(row => row[0]?.value === 'cvの名称')!
   expect(detail[2].value).toBe(12.3)
   expect(detail[3].value).toBe('m')
@@ -326,8 +326,8 @@ it('adds only the item sheet when all located fixtures are quantity items', () =
   const rows = sheets[2].cells.filter(row => row[0]?.value === '分電盤')
   expect(rows).toHaveLength(3)
   // Unset, then the candidates in the item's order (新設, 既設).
-  expect(rows.map(row => row[2].value)).toEqual([1, 2, 1])
-  expect(rows.every(row => row[3].value === '面')).toBe(true)
+  expect(rows.map(row => row[3].value)).toEqual([1, 2, 1])
+  expect(rows.every(row => row[4].value === '面')).toBe(true)
 })
 
 it('writes summary to G and starts drawing quantities at H without a location column', () => {

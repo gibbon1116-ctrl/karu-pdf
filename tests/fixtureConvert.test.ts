@@ -75,7 +75,8 @@ function pipePreset() {
 }
 
 function quantityRows(sheet: XlsxSheet, name: string) {
-  return sheet.cells.filter(row => row[0]?.value === name && typeof row[2]?.value === 'number')
+  const quantityColumn = sheet.cells[2].findIndex(cell => cell.value === '数量')
+  return sheet.cells.filter(row => row[0]?.value === name && typeof row[quantityColumn]?.value === 'number')
 }
 
 describe('fixture conversion persistence', () => {
@@ -339,10 +340,10 @@ describe('conversion CSV and workbook output', () => {
     ], [converted, normal])
     const [sheet] = breakdownSheets({ fixtures: [converted, normal], index, pdfName: '試験.pdf' })
     const rows = quantityRows(sheet, '独自数量')
-    expect(rows[0][2]).toEqual({ value: 0.32, style: 'borderedDecimal' })
-    expect(rows[0][3].value).toBe('㎡')
-    expect(rows[1][2]).toEqual({ value: 4, style: 'borderedInteger' })
-    expect(rows[1][3].value).toBe('m')
+    expect(rows[0][3]).toEqual({ value: 0.32, style: 'borderedDecimal' })
+    expect(rows[0][4].value).toBe('㎡')
+    expect(rows[1][3]).toEqual({ value: 4, style: 'borderedInteger' })
+    expect(rows[1][4].value).toBe('m')
     expect(roundBreakdownQuantity(1.235, 'mass', 'detail')).toBe(1.24)
   })
 })
