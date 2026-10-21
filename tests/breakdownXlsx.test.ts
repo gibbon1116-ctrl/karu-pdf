@@ -109,20 +109,21 @@ it('projects master order, board summaries, separate items, conditions and subto
   expect(details.cells[0][0].value).toBe('設備図 別紙明細')
 
   for (const sheet of [items, details]) {
+    const hasCode = sheet === items
     expect(sheet.cells[1]).toEqual([])
     expect(sheet.cells[2].map(cell => cell.value))
-      .toEqual(['名称', '摘要', '数量', '単位', '単価', '金額', '備考'])
+      .toEqual(['名称', ...(hasCode ? ['略号'] : []), '摘要', '数量', '単位', '単価', '金額', '備考'])
     expect(sheet.cells[2].every(cell => cell.style === 'header')).toBe(true)
-    expect(sheet.columnWidths).toEqual([28, 36, 10, 6, 12, 14, 20])
+    expect(sheet.columnWidths).toEqual([28, ...(hasCode ? [18] : []), 36, 10, 6, 12, 14, 20])
     expect(sheet.freeze).toEqual({ rows: 3, columns: 0 })
     expect(sheet.merges).toContainEqual({
-      firstRow: 0, firstColumn: 0, lastRow: 0, lastColumn: 6,
+      firstRow: 0, firstColumn: 0, lastRow: 0, lastColumn: hasCode ? 7 : 6,
     })
     sheet.cells.forEach((row, rowIndex) => {
       if (row[0]?.style === 'category') {
         expect(row.every(cell => cell.style === 'category')).toBe(true)
         expect(sheet.merges).toContainEqual({
-          firstRow: rowIndex, firstColumn: 0, lastRow: rowIndex, lastColumn: 6,
+          firstRow: rowIndex, firstColumn: 0, lastRow: rowIndex, lastColumn: hasCode ? 7 : 6,
         })
       }
     })
@@ -135,20 +136,21 @@ it('projects master order, board summaries, separate items, conditions and subto
 
   const boards = dataRows(items, '分電盤')
   expect(boards).toHaveLength(2)
-  expect(boards.map(row => [row[1].value, row[2].value, row[3].value]))
-    .toEqual([['L-1', 3, '面'], ['L-2', 1, '面']])
-  expect(boards.every(row => row[2].style === 'borderedInteger')).toBe(true)
+  expect(boards.map(row => row.slice(1, 5).map(cell => cell.value)))
+    .toEqual([['L-1', 'L-1', 3, '面'], ['L-2', 'L-2', 1, '面']])
+  expect(boards.every(row => row[3].style === 'borderedInteger')).toBe(true)
 
   for (const [offset, name] of ['電線', '電線管'].entries()) {
     const rows = dataRows(items, name)
     expect(rows).toHaveLength(1)
-    expect(rows[0][1].value).toBe('')
-    expect(rows[0][2].value).toBe(1)
-    expect(rows[0][3].value).toBe('式')
-    expect(rows[0][4].value).toBeNull()
-    expect(rows[0][5].formula).toBe(totalReference(details, name))
-    expect(rows[0][5].style).toBe('borderedMoney')
-    expect(rows[0][6].value).toBe(`別紙明細-${offset + 1}`)
+    expect(rows[0][1].value).toBe(offset === 0 ? 'IV' : 'E25')
+    expect(rows[0][2].value).toBe('')
+    expect(rows[0][3].value).toBe(1)
+    expect(rows[0][4].value).toBe('式')
+    expect(rows[0][5].value).toBeNull()
+    expect(rows[0][6].formula).toBe(totalReference(details, name))
+    expect(rows[0][6].style).toBe('borderedMoney')
+    expect(rows[0][7].value).toBe(`別紙明細-${offset + 1}`)
   }
 
   expect(details.cells.filter(row => row[0]?.style === 'category').map(row => row[0].value))
@@ -171,20 +173,25 @@ it('projects master order, board summaries, separate items, conditions and subto
   expect(conduits.every(row => row[2].style === 'borderedDecimal')).toBe(true)
 
   for (const sheet of [items, details]) {
+    const columnOffset = sheet === items ? 1 : 0
+    const amountColumn = sheet === items ? 'G' : 'F'
     let firstQuantityRow: number | undefined
     sheet.cells.forEach((row, offset) => {
       if (row[0]?.style !== 'borderedText') return
       const excelRow = offset + 1
-      expect(row[4]).toEqual({ value: null, style: 'borderedMoney' })
-      expect(row[5].style).toBe('borderedMoney')
+      expect(row[4 + columnOffset]).toEqual({ value: null, style: 'borderedMoney' })
+      expect(row[5 + columnOffset].style).toBe('borderedMoney')
       if (row[0].value === '計') {
         expect(firstQuantityRow).toBeDefined()
-        expect(row[5].formula).toBe(`SUM(F${firstQuantityRow}:F${excelRow - 1})`)
+        expect(row[5 + columnOffset].formula).toBe(`SUM(${amountColumn}${firstQuantityRow}:${amountColumn}${excelRow - 1})`)
+        if (sheet === items) expect(row[1].value).toBe('')
         firstQuantityRow = undefined
       } else {
         firstQuantityRow ??= excelRow
-        if (!row[5].formula?.startsWith("'別紙明細'!")) {
-          expect(row[5].formula).toBe(`IF(E${excelRow}="","",C${excelRow}*E${excelRow})`)
+        if (!row[5 + columnOffset].formula?.startsWith("'別紙明細'!")) {
+          expect(row[5 + columnOffset].formula).toBe(sheet === items
+            ? `IF(F${excelRow}="","",D${excelRow}*F${excelRow})`
+            : `IF(E${excelRow}="","",C${excelRow}*E${excelRow})`)
         }
       }
     })
@@ -202,7 +209,7 @@ it('uses fixture names for manual positions and lets the master override that fa
     pdfName: '手入力.pdf',
   })
   expect(sameSheets).toHaveLength(1)
-  expect(dataRows(sameSheets[0], '細目 B')[0][2].value).toBe(2)
+  expect(dataRows(sameSheets[0], '細目 B')[0][3].value).toBe(2)
 
   const different = [fixture('different', { name: '明細の名称', breakdown: manual })]
   const differentSheets = breakdownSheets({
@@ -211,7 +218,7 @@ it('uses fixture names for manual positions and lets the master override that fa
     pdfName: '手入力.pdf',
   })
   expect(differentSheets).toHaveLength(2)
-  expect(dataRows(differentSheets[0], '細目 B')[0][3].value).toBe('式')
+  expect(dataRows(differentSheets[0], '細目 B')[0][4].value).toBe('式')
   expect(differentSheets[1].cells[3][0].value).toBe('別紙明細-1　科目 A／細目 B')
   expect(dataRows(differentSheets[1], '明細の名称')[0][2].style).toBe('borderedInteger')
 
@@ -227,8 +234,8 @@ it('uses fixture names for manual positions and lets the master override that fa
     pdfName: '優先.pdf',
   })
   expect(masterSheets).toHaveLength(2)
-  expect(dataRows(masterSheets[0], '分電盤')[0][3].value).toBe('面')
-  expect(dataRows(masterSheets[0], '電線')[0][3].value).toBe('式')
+  expect(dataRows(masterSheets[0], '分電盤')[0][4].value).toBe('面')
+  expect(dataRows(masterSheets[0], '電線')[0][4].value).toBe('式')
 })
 
 it('classifies a manual position together while omitting its unused fixtures from detail rows', () => {
@@ -293,15 +300,16 @@ it('sorts conditions with unset first and joins item summaries, specifications a
   ], fixtures)
   const [sheet] = breakdownSheets({ fixtures, index, pdfName: '条件.pdf' })
   const rows = dataRows(sheet, '分電盤')
-  expect(rows.map(row => row[1].value))
+  expect(rows.map(row => row[2].value))
     .toEqual(['L-1、壁掛形', 'L-1、壁掛形、A', 'L-1、壁掛形、B'])
-  expect(rows.map(row => row[2].value)).toEqual([1, 1, 1])
-  expect(rows.every(row => row[6].value === '盤の備考')).toBe(true)
+  expect(rows.map(row => row[3].value)).toEqual([1, 1, 1])
+  expect(rows.map(row => row[1].value)).toEqual(['BOARD', 'BOARD', 'BOARD'])
+  expect(rows.every(row => row[7].value === '盤の備考')).toBe(true)
 
   const [single] = breakdownSheets({
     fixtures, index: QuantityIndex.build([count('a', 'board', 'A')], fixtures), pdfName: '条件.pdf',
   })
-  expect(dataRows(single, '分電盤')[0][1].value).toBe('L-1、壁掛形、A')
+  expect(dataRows(single, '分電盤')[0][2].value).toBe('L-1、壁掛形、A')
 })
 
 it('omits a code equal to the detail name while keeping the specification and summary', () => {
@@ -315,6 +323,39 @@ it('omits a code equal to the detail name while keeping the specification and su
     fixtures, index: QuantityIndex.build([route('r', 'detail', 2, '条件')], fixtures), pdfName: '略号.pdf',
   })
   expect(dataRows(details, '同名')[0][1].value).toBe('規格、摘要、条件')
+})
+
+it('distinguishes identical item names by code and preserves blank and same-name codes', () => {
+  const fixtures = ['AC-1', 'AC-2', '', '分電盤'].map((code, order) => fixture(`board-${order}`, {
+    name: '分電盤', code, order, unit: '面', spec: '壁掛形',
+    breakdown: position('分電盤', '電灯分岐'),
+  }))
+  const [items] = breakdownSheets({
+    fixtures, index: QuantityIndex.build(fixtures.map(f => count(`mark-${f.id}`, f.id)), fixtures),
+    pdfName: '同名機器.pdf',
+  })
+  expect(dataRows(items, '分電盤').map(row => row.slice(0, 5).map(cell => cell.value)))
+    .toEqual(fixtures.map(f => ['分電盤', f.code, '壁掛形', 1, '面']))
+})
+
+it('lists active separate-item codes in item order without duplicates or empty entries', () => {
+  const fixtures = [
+    fixture('late', { code: 'CV', order: 3, breakdown: position('電線') }),
+    fixture('first', { code: 'IV', order: 0, breakdown: position('電線') }),
+    fixture('duplicate', { code: 'IV', order: 1, breakdown: position('電線') }),
+    fixture('blank', { code: '', order: 2, breakdown: position('電線') }),
+    fixture('unused', { code: 'UNUSED', order: -1, breakdown: position('電線') }),
+  ]
+  const [items, details] = breakdownSheets({
+    fixtures,
+    index: QuantityIndex.build(fixtures.filter(f => f.id !== 'unused').map(f => count(`mark-${f.id}`, f.id)), fixtures),
+    pdfName: '一式.pdf',
+  })
+  const row = dataRows(items, '電線')[0]
+  expect(row[1].value).toBe('IV、CV')
+  expect(row[3].value).toBe(1)
+  expect(row[4].value).toBe('式')
+  expect(row[6].formula).toBe(totalReference(details, '電線'))
 })
 
 it('rounds decimal half values correctly for each quantity kind and level', () => {
@@ -339,7 +380,7 @@ it('marks renovation items on the item sheet and preserves detail remarks', () =
   const [items, details] = breakdownSheets({
     fixtures, index: QuantityIndex.build([count('r', 'remove')], fixtures), pdfName: '改修.pdf',
   })
-  expect(dataRows(items, '撤去')[0][6].value).toBe('別紙明細-1、※')
+  expect(dataRows(items, '撤去')[0][7].value).toBe('別紙明細-1、※')
   expect(dataRows(details, '撤去する器具')[0][6].value).toBe('既設を撤去')
 })
 
@@ -412,7 +453,7 @@ it('writes factor, spacing and mass link bases in detail summaries and retains o
   expect(override).toHaveLength(1)
   expect(override[0][1].value).toBe('OVR、連動: DL×1、SL×2')
   expect(override[0][2].value).toBe(10)
-  expect(dataRows(items, '分電盤')[0][2].value).toBe(6)
+  expect(dataRows(items, '分電盤')[0][3].value).toBe(6)
 })
 
 it('limits a linked detail basis to 60 characters including the ellipsis without splitting Unicode characters', () => {

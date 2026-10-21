@@ -37,6 +37,7 @@ interface SheetGroup {
 interface MutableSheet extends XlsxSheet {
   cells: XlsxCell[][]
   merges: XlsxMerge[]
+  includeCode: boolean
 }
 
 function groupKey(position: BreakdownPosition): string {
@@ -84,27 +85,29 @@ export function roundBreakdownQuantity(
   return rounded === 0 ? 0 : value < 0 ? -rounded : rounded
 }
 
-function createSheet(name: string, pdfName: string): MutableSheet {
+function createSheet(name: string, pdfName: string, includeCode = false): MutableSheet {
+  const headers = ['名称', ...(includeCode ? ['略号'] : []), '摘要', '数量', '単位', '単価', '金額', '備考']
   return {
     name,
+    includeCode,
     cells: [
-      Array.from({ length: 7 }, (_, column) =>
+      Array.from({ length: headers.length }, (_, column) =>
         cell(column === 0 ? `${pdfName.replace(/\.pdf$/i, '')} ${name}` : null, 'title')),
       [],
-      ['名称', '摘要', '数量', '単位', '単価', '金額', '備考']
-        .map(value => cell(value, 'header')),
+      headers.map(value => cell(value, 'header')),
     ],
-    merges: [{ firstRow: 0, firstColumn: 0, lastRow: 0, lastColumn: 6 }],
-    columnWidths: [28, 36, 10, 6, 12, 14, 20],
+    merges: [{ firstRow: 0, firstColumn: 0, lastRow: 0, lastColumn: headers.length - 1 }],
+    columnWidths: [28, ...(includeCode ? [18] : []), 36, 10, 6, 12, 14, 20],
     freeze: { rows: 3, columns: 0 },
   }
 }
 
 function addHeading(sheet: MutableSheet, text: string): void {
   const row = sheet.cells.length
-  sheet.cells.push(Array.from({ length: 7 }, (_, column) =>
+  const lastColumn = sheet.includeCode ? 7 : 6
+  sheet.cells.push(Array.from({ length: lastColumn + 1 }, (_, column) =>
     cell(column === 0 ? text : null, 'category')))
-  sheet.merges.push({ firstRow: row, firstColumn: 0, lastRow: row, lastColumn: 6 })
+  sheet.merges.push({ firstRow: row, firstColumn: 0, lastRow: row, lastColumn })
 }
 
 function addQuantityRow(
@@ -116,15 +119,19 @@ function addQuantityRow(
   remark: string,
   quantityStyle: XlsxStyle,
   amountFormula?: string,
+  code = '',
 ): void {
   const row = sheet.cells.length + 1
+  const quantityColumn = sheet.includeCode ? 'D' : 'C'
+  const priceColumn = sheet.includeCode ? 'F' : 'E'
   sheet.cells.push([
     cell(name, 'borderedText'),
+    ...(sheet.includeCode ? [cell(code, 'borderedText')] : []),
     cell(summary, 'borderedText'),
     cell(quantity, quantityStyle),
     cell(unit, 'borderedText'),
     cell(null, 'borderedMoney'),
-    formula(amountFormula ?? `IF(E${row}="","",C${row}*E${row})`),
+    formula(amountFormula ?? `IF(${priceColumn}${row}="","",${quantityColumn}${row}*${priceColumn}${row})`),
     cell(remark, 'borderedText'),
   ])
 }
@@ -132,13 +139,15 @@ function addQuantityRow(
 /** firstRow is one-based; only quantity rows precede this subtotal. */
 function addTotal(sheet: MutableSheet, firstRow: number): number {
   const row = sheet.cells.length + 1
+  const amountColumn = sheet.includeCode ? 'G' : 'F'
   sheet.cells.push([
     cell('計', 'borderedText'),
+    ...(sheet.includeCode ? [cell('', 'borderedText')] : []),
     cell('', 'borderedText'),
     cell(null, 'borderedInteger'),
     cell('', 'borderedText'),
     cell(null, 'borderedMoney'),
-    formula(`SUM(F${firstRow}:F${row - 1})`),
+    formula(`SUM(${amountColumn}${firstRow}:${amountColumn}${row - 1})`),
     cell('', 'borderedText'),
   ])
   return row
@@ -263,7 +272,7 @@ export function breakdownSheets(options: BreakdownSheetOptions): XlsxSheet[] {
 
   const orderedGroups = [...groups.values()].sort((a, b) =>
     a.masterOrder - b.masterOrder || a.minimumOrder - b.minimumOrder)
-  const itemsSheet = createSheet('細目別内訳', pdfName)
+  const itemsSheet = createSheet('細目別内訳', pdfName, true)
   const detailsSheet = createSheet('別紙明細', pdfName)
   let previous: BreakdownPosition | undefined
   let detailNumber = 0
@@ -328,6 +337,7 @@ export function breakdownSheets(options: BreakdownSheetOptions): XlsxSheet[] {
           joined(`別紙明細-${number}`, renovation),
           'borderedInteger',
           `'別紙明細'!F${totalRow}`,
+          [...new Set(orderedFixtures.map(fixture => fixture.code).filter(Boolean))].join('、'),
         )
       } else {
         for (const fixture of orderedFixtures) {
@@ -340,6 +350,8 @@ export function breakdownSheets(options: BreakdownSheetOptions): XlsxSheet[] {
               quantityUnit(fixture),
               joined(fixture.remark, renovation),
               fixture.convert && quantityOutputKind(fixture) !== 'count' ? 'borderedDecimal' : 'borderedInteger',
+              undefined,
+              fixture.code,
             )
           }
         }
