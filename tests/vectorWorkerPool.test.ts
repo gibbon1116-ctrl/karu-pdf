@@ -3,7 +3,7 @@ import { PdfWorkerPool } from '../src/client/PdfWorkerPool'
 import type { WorkerRequest, WorkerResponse } from '../src/worker/protocol'
 import type { VectorPage } from '../src/core/vectorPaths'
 
-vi.mock('../src/single/runtime', () => ({ createSingleWorker: () => undefined }))
+vi.mock('../src/client/createPdfWorker', () => ({ createPdfWorker: () => new Worker('test-worker') }))
 const workers: MockWorker[] = []
 class MockWorker {
   onmessage: ((event: { data: WorkerResponse }) => void) | null = null

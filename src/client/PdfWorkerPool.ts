@@ -1,8 +1,8 @@
 import type { DrawingInfo } from '../core/drawingInfo'
 import type { VectorPage } from '../core/vectorPaths'
 import { receiveWorkerSendNotice, type WorkerSendNotice } from '../security/externalSend'
-/* @single:start */import { createSingleWorker } from '../single/runtime'
-/* @single:end */import type { PageScale } from '../core/measure'
+import { createPdfWorker } from './createPdfWorker'
+import type { PageScale } from '../core/measure'
 import type { MaxIssueNumberResponse } from '../worker/protocol'
 import { parseCountFixtureSample } from '../core/countFixtures'
 import type { PageSize } from '../core/mupdfDoc'
@@ -267,7 +267,7 @@ export class PdfWorkerPool {
   constructor(count = 1) {
     this.workerCount = Math.max(1, Math.min(4, Math.trunc(count)))
     this.slots = Array.from({ length: this.workerCount }, (_, index) => {
-      const worker = /* @single:start */createSingleWorker('pdf') ?? /* @single:end */new Worker(new URL('../worker/pdf.worker.ts', import.meta.url), { type: 'module' })
+      const worker = createPdfWorker()
       let markReady: () => void = () => {}
       let markFailed: (error: Error) => void = () => {}
       const ready = new Promise<void>((resolve, reject) => { markReady = resolve; markFailed = reject })

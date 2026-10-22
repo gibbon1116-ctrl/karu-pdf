@@ -1,5 +1,41 @@
 [
   {
+    "file": "dist-fixed/assets/sharedPdfModule-*.js",
+    "string": "fetch(",
+    "reason": "共有エンジンの同梱WASM資産を同一originのGETで1回取得する。PDFや利用者データは送信しない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/sharedPdfModule-*.js",
+    "string": "XMLHttpRequest",
+    "reason": "既存の外部送信防止コードがエンジン起動と共有するチャンクへ移った。XHRの送信先を検査して止める処理。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/sharedPdfModule-*.js",
+    "string": "WebSocket",
+    "reason": "既存の外部送信防止コードが共有チャンクへ移った。接続先を検査して止める処理。",
+    "maxOccurrences": 4
+  },
+  {
+    "file": "dist-fixed/assets/sharedPdfModule-*.js",
+    "string": "EventSource",
+    "reason": "既存の外部送信防止コードが共有チャンクへ移った。接続先を検査して止める処理。",
+    "maxOccurrences": 4
+  },
+  {
+    "file": "dist-fixed/assets/sharedPdfModule-*.js",
+    "string": "sendBeacon",
+    "reason": "既存の外部送信防止コードが共有チャンクへ移った。送信先を検査して止める処理。",
+    "maxOccurrences": 3
+  },
+  {
+    "file": "src/client/sharedPdfModule.ts",
+    "string": "fetch(",
+    "reason": "同じ配信元の固定WASM資産を1回取得して描画Workerに共有する。PDFや利用者データは送信しない。",
+    "maxOccurrences": 1
+  },
+  {
     "file": "src/security/externalSend.ts",
     "string": "XMLHttpRequest",
     "reason": "外部への送信を止めるための見張り。送信はしない（型の参照4件・実行コード2件）。",
