@@ -6,6 +6,7 @@ import { extractTextLines } from '../core/textExtract'
 /* @fixed:start */import { fixedAssetUrl } from '../fixed/security'
 /* @fixed:end */import { DisplayListCache } from '../core/displayListCache'
 import { openDocument, type OpenedDocument } from '../core/mupdfDoc'
+import { readDocumentMetadata } from '../core/documentMetadata'
 import { renderRegion } from '../core/render'
 import mupdf, { type Pixmap, type DrawDevice } from 'mupdf'
 import { extractVectorPage } from './vectorExtract'
@@ -407,11 +408,22 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
     if (request.type === 'open') {
       disposeDocument(request.docId)
       const includeMetadata = request.includePageMetadata !== false
-      const opened = openDocument(new Uint8Array(request.bytes), includeMetadata)
+      const opened = openDocument(new Uint8Array(request.bytes), false)
       const pdf = opened.document.asPDF()
       if (!pdf) {
         opened.document.destroy()
         throw new Error('PDF 文書ではありません。')
+      }
+      let metadata: ReturnType<typeof readDocumentMetadata> | undefined
+      try {
+        if (includeMetadata) {
+          metadata = readDocumentMetadata(pdf)
+          opened.pageSizes = metadata.pageSizes
+          opened.sizesMs = metadata.sizesMs
+        }
+      } catch (error) {
+        opened.document.destroy()
+        throw error
       }
       documents.set(request.docId, { opened, displayLists: new DisplayListCache(opened.document), textSelections: new StructuredTextCache(pdf) })
       post({
@@ -420,9 +432,12 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         pageCount: opened.pageCount,
         editRestriction: opened.editRestriction,
         pageSizes: opened.pageSizes,
-        pageDrawingInfos: includeMetadata ? readDocumentDrawingInfos(pdf) : [],
-        ...(includeMetadata ? readDocumentScaleMetadata(pdf) : { pageScales: [], pageScaleRegions: [] }),
-        ...(includeMetadata ? readDocumentRoomMetadata(pdf) : { pageRoomRegions: [], roomSets: [], pageRoomSets: [] }),
+        pageDrawingInfos: metadata?.pageDrawingInfos ?? [],
+        pageScales: metadata?.pageScales ?? [],
+        pageScaleRegions: metadata?.pageScaleRegions ?? [],
+        pageRoomRegions: metadata?.pageRoomRegions ?? [],
+        roomSets: metadata?.roomSets ?? [],
+        pageRoomSets: metadata?.pageRoomSets ?? [],
         openMs: opened.openMs,
         sizesMs: opened.sizesMs,
       })
