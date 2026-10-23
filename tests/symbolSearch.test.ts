@@ -6,6 +6,8 @@ import type { SearchImage, WorkerRequest, WorkerResponse } from '../src/worker/p
 import type { ImageSearchMessage } from '../src/worker/symbolSearchMessages'
 import type { Rect } from '../src/core/annotations'
 
+vi.mock('../src/client/createPdfWorker', () => ({ createPdfWorker: () => new Worker('test-worker') }))
+
 const defaults: SymbolSearchOptions = { threshold: .8, rotations: true, maxResults: 500 }
 const blank = (width: number, height: number): GrayImage => ({ width, height, data: new Uint8Array(width * height) })
 function circle(size = 24): GrayImage {
