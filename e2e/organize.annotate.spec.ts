@@ -359,7 +359,7 @@ test('重い図面の描画中でも挿入ダイアログをすぐ表示して�
     window.Worker = class extends NativeWorker {
       constructor(url: string | URL, options?: WorkerOptions) {
         super(url, options)
-        if (String(url).includes('pdf.worker')) workers.push(this)
+        if (/pdf\.(?:worker|bootstrap)/.test(String(url))) workers.push(this)
       }
     }
   })
