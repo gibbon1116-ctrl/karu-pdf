@@ -1,0 +1,25 @@
+node_modules/
+dist/
+test-data/*.pdf
+bench-results/
+test-results/
+playwright-report/
+test-data/real/
+.claude/
+dist-fixed/
+release/
+dist-single/
+
+# Drawings and internal documents must not be published accidentally.
+*.pdf
+*.dwg
+*.dxf
+*.ifc
+*.rvt
+*.rfa
+*.docx
+*.xlsx
+*.pptx
+
+# Local analysis may contain supplied drawing text and rendered pages.
+work/vector-recognition/

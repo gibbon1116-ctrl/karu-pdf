@@ -1,0 +1,151 @@
+import mupdf, { type Font } from 'mupdf'
+
+export type FontName = 'BIZUDGothic' | 'BIZUDMincho'
+export type FallbackFontName = 'ZapfDingbats'
+export type FontResourceName = FontName | FallbackFontName
+
+export interface FontMetrics {
+  unitsPerEm: number
+  ascender: number
+  ascent: number
+}
+
+export interface FontResource extends FontMetrics {
+  name: FontResourceName
+  font: Font
+}
+
+export type FontResources = Partial<Record<FontResourceName, FontResource>>
+
+export interface EncodedCharacter {
+  character: string
+  font: Font
+  glyph: number
+  unicode: number
+  advance: number
+  replaced: boolean
+  usedFallback: boolean
+}
+
+export type CharacterFont = 'primary' | 'fallback' | 'missing'
+
+function tableOffset(bytes: Uint8Array, wanted: string): number {
+  if (bytes.byteLength < 12) throw new Error('TTF のオフセットテーブルが壊れています。')
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const tableCount = view.getUint16(4, false)
+  for (let index = 0; index < tableCount; index += 1) {
+    const record = 12 + index * 16
+    if (record + 16 > bytes.byteLength) break
+    const tag = String.fromCharCode(
+      bytes[record], bytes[record + 1], bytes[record + 2], bytes[record + 3],
+    )
+    if (tag === wanted) return view.getUint32(record + 8, false)
+  }
+  throw new Error(`TTF に ${wanted} 表がありません。`)
+}
+
+export function readFontMetrics(bytes: Uint8Array): FontMetrics {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const head = tableOffset(bytes, 'head')
+  const hhea = tableOffset(bytes, 'hhea')
+  if (head + 20 > bytes.byteLength || hhea + 6 > bytes.byteLength) {
+    throw new Error('TTF のメトリクス表が壊れています。')
+  }
+  const unitsPerEm = view.getUint16(head + 18, false)
+  const ascender = view.getInt16(hhea + 4, false)
+  if (unitsPerEm === 0) throw new Error('TTF の unitsPerEm が 0 です。')
+  return { unitsPerEm, ascender, ascent: ascender / unitsPerEm }
+}
+
+export function createFontResource(
+  bytes: Uint8Array,
+  name: FontName = 'BIZUDGothic',
+): FontResource {
+  return {
+    name,
+    font: new mupdf.Font(name, bytes),
+    ...readFontMetrics(bytes),
+  }
+}
+
+export function createDingbatsFontResource(): FontResource {
+  // 内蔵14書体には TTF の head/hhea 表がない。FreeText の行高と ascent は
+  // BIZ UD 側を使い、ZapfDingbats からは glyph と advance だけを使う。
+  return {
+    name: 'ZapfDingbats',
+    font: new mupdf.Font('ZapfDingbats'),
+    unitsPerEm: 1,
+    ascender: 0.8,
+    ascent: 0.8,
+  }
+}
+
+export function characterFont(
+  font: Font,
+  character: string,
+  fallbackFont?: Font,
+): CharacterFont {
+  if (font.encodeCharacter(character) !== 0) return 'primary'
+  if (fallbackFont && fallbackFont.encodeCharacter(character) !== 0) return 'fallback'
+  return 'missing'
+}
+
+export function encodeCharacter(
+  font: Font,
+  character: string,
+  fallbackFont?: Font,
+): EncodedCharacter {
+  let rendered = character
+  let glyph = font.encodeCharacter(rendered)
+  let renderedFont = font
+  let replaced = false
+  let usedFallback = false
+  if (glyph === 0 && fallbackFont) {
+    const fallbackGlyph = fallbackFont.encodeCharacter(rendered)
+    if (fallbackGlyph !== 0) {
+      renderedFont = fallbackFont
+      glyph = fallbackGlyph
+      usedFallback = true
+    }
+  }
+  if (glyph === 0) {
+    rendered = '〓'
+    glyph = font.encodeCharacter(rendered)
+    renderedFont = font
+    replaced = true
+  }
+  // MuPDF.js の advanceGlyph は実測でも型定義どおり em 単位
+  // （BIZ UDゴシックでは全角が 1、半角 A が 0.5）を返す。
+  return {
+    character: rendered,
+    font: renderedFont,
+    glyph,
+    unicode: rendered.codePointAt(0) ?? 0,
+    advance: renderedFont.advanceGlyph(glyph),
+    replaced,
+    usedFallback,
+  }
+}
+
+export function replaceMissingCharacters(font: Font, text: string, fallbackFont?: Font): {
+  text: string
+  replacedCharacters: number
+  unsupportedCharacters: string[]
+} {
+  let replacedCharacters = 0
+  let rendered = ''
+  const unsupportedCharacters = new Set<string>()
+  for (const character of [...text]) {
+    if (character === '\n' || character === '\r' || character === '\t') {
+      rendered += character
+      continue
+    }
+    const encoded = encodeCharacter(font, character, fallbackFont)
+    rendered += encoded.character
+    if (encoded.replaced) {
+      replacedCharacters += 1
+      unsupportedCharacters.add(character)
+    }
+  }
+  return { text: rendered, replacedCharacters, unsupportedCharacters: [...unsupportedCharacters] }
+}

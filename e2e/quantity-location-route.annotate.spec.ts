@@ -1,0 +1,156 @@
+import { expect, test, type Page } from '@playwright/test'
+import mupdf from 'mupdf'
+import { readCountFixtures } from '../src/core/countFixtures'
+import { listAnnotations } from '../src/core/annotations'
+
+// The display settings sit in a folded section of the quantity tab (SPEC-S14); these tests use them.
+test.beforeEach(async ({ page }) => { await page.addInitScript(() => localStorage.setItem('karu-pdf:fixture-panel-settings-open', 'true')) })
+function blankPdf() {
+ const doc=new mupdf.PDFDocument()
+ try {for(let i=0;i<2;i++){const p=doc.addPage([0,0,500,500],0,{},'');try{doc.insertPage(-1,p)}finally{p.destroy()}}const b=doc.saveToBuffer('compress');try{return [...b.asUint8Array()]}finally{b.destroy()}}finally{doc.destroy()}
+}
+async function click(page:Page,p:number,x:number,y:number,shift=false){
+ const layer=page.getByTestId('annotation-layer-'+p)
+ const position=await layer.evaluate((el,p)=>{const svg=el as SVGSVGElement,b=svg.getBoundingClientRect();return{x:p.x*b.width/svg.viewBox.baseVal.width,y:p.y*b.height/svg.viewBox.baseVal.height}},{x,y})
+ await layer.click({position,modifiers:shift?['Shift']:[]})
+}
+async function open(page:Page){
+ await page.goto('/karu-pdf/?test=1&workers=2&warm=0');await page.waitForFunction(()=>!!window.__karu)
+ await page.evaluate(b=>window.__karu!.openBytes(b,'場所経路.pdf'),blankPdf());await page.evaluate(()=>window.__karu!.setZoom(1))
+ await page.getByRole('tab',{name:'数量',exact:true}).click();await expect(page.getByRole('button',{name:'項目を追加',exact:true})).toBeEnabled()
+}
+async function add(page:Page,code:string,name:string,spec:string,length=false,scope?:'all'|'noSlack'|'rise'){
+ await page.getByTestId('fixture-panel').getByRole('button',{name:'項目を追加',exact:true}).click()
+ const d=page.getByRole('dialog',{name:'項目を追加',exact:true})
+ await d.getByLabel('名称',{exact:true}).fill(name);await d.getByLabel('略号',{exact:true}).fill(code);await d.getByLabel('規格',{exact:true}).fill(spec)
+ if(length)await d.getByRole('radio',{name:'長さ',exact:true}).check()
+ if(scope){if(scope === 'rise') await d.getByLabel('平面の既定',{exact:true}).selectOption('excluded'); if(scope !== 'all') await d.getByLabel('その他の加算の既定',{exact:true}).selectOption('excluded');await d.getByLabel('その他の加算（初期値）').fill('1')}
+ if (!await d.getByTestId('fixture-advanced').evaluate(element => (element as HTMLDetailsElement).open)) await d.getByTestId('fixture-advanced').locator(':scope > summary').click()
+ await expect(d.getByRole('radio',{name:length?'全図面の合計':'場所別（階・部屋ごと）',exact:true})).toBeChecked()
+ await d.getByRole('button',{name:'追加する',exact:true}).click()
+}
+const row=(page:Page,name:string)=>page.getByTestId('fixture-panel').getByRole('button',{name,exact:true})
+const marks=(page:Page,p:number)=>page.evaluate(p=>window.__karu!.getEditableAnnotations(p).filter(a=>a.count).map(a=>a.count),p)
+test('locations, drawing-name fallback, bulk Undo, shared route, spec duplication and saved metadata',async({page})=>{
+ await open(page);await add(page,'LED','照明器具','300W')
+ const panel=page.getByTestId('fixture-panel'),format=page.getByTestId('format-panel')
+ await panel.getByLabel('現在の階',{exact:true}).fill('1F');await panel.getByLabel('現在の階',{exact:true}).press('Enter')
+ await expect(panel.getByLabel('現在の階',{exact:true})).toHaveValue('1階')
+ await panel.getByLabel('現在の部屋',{exact:true}).fill('事務室');await panel.getByLabel('現在の部屋',{exact:true}).press('Enter')
+ await row(page,'LED 300W 照明器具').click();for(const x of [80,130,180])await click(page,0,x,180)
+ await expect.poll(()=>marks(page,0)).toHaveLength(3)
+ expect((await marks(page,0)).every(m=>m?.version===2&&m.floor==='1階'&&m.room==='事務室')).toBe(true)
+ await expect(panel.locator('#pickup-floors option')).toHaveAttribute('value','1階');await expect(panel.locator('#pickup-rooms option')).toHaveAttribute('value','事務室')
+ await page.getByRole('button',{name:'選択',exact:true}).click();await click(page,0,80,180);await click(page,0,130,180,true)
+ await expect.poll(()=>page.evaluate(()=>window.__karu!.getSelectedAnnotationIds().length)).toBe(2)
+ await format.getByLabel('拾いの部屋',{exact:true}).fill('会議室');await format.getByLabel('拾いの部屋',{exact:true}).press('Enter')
+ expect((await marks(page,0)).filter(m=>m?.version===2&&m.room==='会議室')).toHaveLength(2)
+ await page.keyboard.press('Control+z');expect((await marks(page,0)).every(m=>m?.version===2&&m.room==='事務室')).toBe(true)
+ // Mixed fields: Escape cancels the draft; explicitly committing blank clears both marks.
+ await click(page,0,80,180)
+ await format.getByLabel('拾いの部屋',{exact:true}).fill('会議室');await format.getByLabel('拾いの部屋',{exact:true}).press('Enter')
+ await click(page,0,130,180,true)
+ await expect(format.getByLabel('拾いの部屋',{exact:true})).toHaveValue('');await expect(format.getByText('（いろいろ）',{exact:true})).toBeVisible()
+ await format.getByLabel('拾いの部屋',{exact:true}).fill('取消');await format.getByLabel('拾いの部屋',{exact:true}).press('Escape');await format.getByLabel('拾いの階',{exact:true}).focus()
+ expect((await marks(page,0)).filter(m=>m?.version===2&&m.room==='会議室')).toHaveLength(1)
+ await format.getByLabel('拾いの部屋',{exact:true}).press('Enter')
+ expect((await marks(page,0)).filter(m=>m?.version===2&&!m.room)).toHaveLength(2)
+ await page.keyboard.press('Control+z');await page.keyboard.press('Control+z')
+ expect((await marks(page,0)).every(m=>m?.version===2&&m.room==='事務室')).toBe(true)
+ await page.evaluate(()=>window.__karu!.setDrawingInfo(1,{name:'2階 電灯設備平面図',nameManual:true,scanned:true}))
+ await panel.getByLabel('現在の階',{exact:true}).fill('');await panel.getByLabel('現在の階',{exact:true}).press('Enter')
+ await page.evaluate(()=>window.__karu!.scrollToPage(1));await expect(panel.getByText('（図面名から: 2階）',{exact:true})).toBeVisible()
+ await row(page,'LED 300W 照明器具').click();await click(page,1,80,180)
+ expect((await marks(page,1))[0]).toMatchObject({floor:'2階',room:'事務室'})
+ await page.evaluate(()=>window.__karu!.scrollToPage(0))
+ await add(page,'CV','幹線ケーブル','38sq-3C',true);await add(page,'EM-CE','ケーブル','5.5sq-3C',true)
+ await row(page,'CV 38sq-3C 幹線ケーブル').click();await click(page,0,100,300)
+ const scale=page.getByRole('dialog',{name:'縮尺の設定（1 ページ）'})
+ await scale.getByLabel('縮尺の分母').fill('100');await scale.getByRole('button',{name:'決定',exact:true}).click()
+ await click(page,0,100,300);await click(page,0,172,300);await page.keyboard.press('Enter')
+ await format.getByLabel('CV 38sq-3Cの条数',{exact:true}).fill('2');await format.getByLabel('CV 38sq-3Cの条数',{exact:true}).press('Enter')
+ await format.getByRole('button',{name:'線要素を追加',exact:true}).click()
+ await format.getByLabel('線要素を検索',{exact:true}).fill('EM-CE 5.5sq-3C')
+ await format.getByRole('dialog',{name:'線要素を追加',exact:true}).getByRole('button',{name:'EM-CE 5.5sq-3C',exact:true}).first().click()
+ await expect(page.locator('.measurement-label')).toHaveText('CV 38sq-3C×2, EM-CE 5.5sq-3C  2.54 m')
+ await expect(row(page,'CV 38sq-3C 幹線ケーブル').locator('..').locator('.fixture-row-count').last()).toHaveText('5.08')
+ await expect(row(page,'EM-CE 5.5sq-3C ケーブル').locator('..').locator('.fixture-row-count').last()).toHaveText('2.54')
+ // The route remains visible through its extra item and in selected-item-only mode.
+ await panel.getByRole('button',{name:'CV 38sq-3C 幹線ケーブルの表示切替',exact:true}).click();await expect(page.locator('.measurement-label')).toBeVisible()
+ await row(page,'EM-CE 5.5sq-3C ケーブル').click();await panel.getByLabel('選択中の項目だけ表示',{exact:true}).check();await expect(page.locator('.measurement-label')).toBeVisible();await panel.getByLabel('選択中の項目だけ表示',{exact:true}).uncheck()
+ await panel.getByRole('button',{name:'すべて表示',exact:true}).click()
+ await panel.getByRole('button',{name:'複製',exact:true}).click();const d=page.getByRole('dialog',{name:'項目を追加',exact:true})
+ await expect(d.getByLabel('規格',{exact:true})).toBeFocused()
+ expect(await d.getByLabel('規格',{exact:true}).evaluate(el=>{const i=el as HTMLInputElement;return i.selectionEnd!-i.selectionStart!})).toBe('5.5sq-3C'.length)
+ await d.getByRole('radio',{name:'個数',exact:true}).check();if (!await d.getByTestId('fixture-advanced').evaluate(element => (element as HTMLDetailsElement).open)) await d.getByTestId('fixture-advanced').locator(':scope > summary').click();await expect(d.getByRole('radio',{name:'場所別（階・部屋ごと）',exact:true})).toBeChecked()
+ await d.getByRole('radio',{name:'長さ',exact:true}).check();await expect(d.getByRole('radio',{name:'全図面の合計',exact:true})).toBeChecked()
+ await d.getByRole('radio',{name:'場所別（階・部屋ごと）',exact:true}).check();await d.getByRole('radio',{name:'体積',exact:true}).check();await expect(d.getByRole('radio',{name:'場所別（階・部屋ごと）',exact:true})).toBeChecked()
+ await d.getByRole('radio',{name:'長さ',exact:true}).check();await d.getByRole('radio',{name:'全図面の合計',exact:true}).check()
+ await expect(d.getByLabel('名称',{exact:true})).toHaveValue('ケーブル');await d.getByLabel('規格',{exact:true}).fill('14sq-3C');await d.getByRole('button',{name:'追加する',exact:true}).click()
+ await expect(row(page,'EM-CE 14sq-3C ケーブル').locator('.fixture-row-spec')).toHaveText(' 14sq-3C')
+ const saved=await page.evaluate(async()=>[...(await window.__karu!.saveToBytes())!])
+ const doc=new mupdf.PDFDocument(new Uint8Array(saved))
+ try {
+  expect(readCountFixtures(doc).map(f=>[f.code,f.spec,f.aggregation])).toEqual([['LED','300W','location'],['CV','38sq-3C','document'],['EM-CE','5.5sq-3C','document'],['EM-CE','14sq-3C','document']])
+  expect(listAnnotations(doc,0).find(a=>a.quantity)?.quantity).toMatchObject({count:2,extra:[{count:1}],room:'事務室'})
+ }finally{doc.destroy()}
+ await page.evaluate(b=>window.__karu!.openBytes(b,'再読込.pdf'),saved);await page.getByRole('tab',{name:'数量',exact:true}).click();
+ await expect(row(page,'CV 38sq-3C 幹線ケーブル').locator('..').locator('.fixture-row-count').last()).toHaveText('5.08')
+ expect((await marks(page,0)).every(m=>m?.version===2&&m.floor==='1階'&&m.room==='事務室')).toBe(true)
+ expect((await marks(page,1))[0]).toMatchObject({floor:'2階',room:'事務室'})
+ await expect(page.locator('.measurement-label')).toHaveText('CV 38sq-3C×2, EM-CE 5.5sq-3C  2.54 m')
+ await expect(panel.getByLabel('現在の階',{exact:true})).toHaveValue('')
+})
+
+test('route scopes, separate rise/slack, defaults, Undo and saved quantities', async ({page}) => {
+ await open(page)
+ await add(page,'CV','幹線ケーブル','38sq-3C',true)
+ await add(page,'PF28','立上り電線管','',true,'rise')
+ const panel=page.getByTestId('fixture-panel'), format=page.getByTestId('format-panel')
+ const total=(name:string)=>row(page,name).locator('..').locator('.fixture-row-count').last()
+ const selectRoute=async()=>{await page.getByRole('button',{name:'選択',exact:true}).click();await click(page,0,136,300);await expect(format.locator('.route-item-main').getByLabel('平面',{exact:true})).toBeVisible()}
+ await row(page,'CV 38sq-3C 幹線ケーブル').click();await click(page,0,100,300)
+ const scale=page.getByRole('dialog',{name:'縮尺の設定（1 ページ）'})
+ await scale.getByLabel('縮尺の分母').fill('100');await scale.getByRole('button',{name:'決定',exact:true}).click()
+ await click(page,0,100,300);await click(page,0,172,300);await page.keyboard.press('Enter')
+ await format.getByRole('button',{name:'＋ 立上り・立下りを足す',exact:true}).click()
+ for(const [label,value] of [['立上り・立下り1','3'],['その他の加算','1']]) {
+  await format.getByLabel(label,{exact:true}).fill(value);await format.getByLabel(label,{exact:true}).press('Enter')
+ }
+ await format.getByRole('button',{name:'線要素を追加',exact:true}).click()
+ await format.getByLabel('線要素を検索',{exact:true}).fill('PF28')
+ await format.getByRole('dialog',{name:'線要素を追加',exact:true}).getByRole('button',{name:'PF28',exact:true}).first().click()
+ await expect(format.locator('.route-item').filter({hasText:'PF28'}).getByLabel('平面',{exact:true})).toHaveValue('exclude')
+ await expect(format.locator('.route-item').filter({hasText:'PF28'})).toContainText('立上り 3.00 ＝ 3.00 m')
+ await expect(format.locator('.route-item').filter({hasText:'PF28'}).locator('.route-item-length')).toHaveAttribute('title','立上り 3.00 ＝ 3.00 m')
+ await expect(total('PF28 立上り電線管')).toHaveText('3.00');await expect(total('CV 38sq-3C 幹線ケーブル')).toHaveText('6.54')
+ await expect(page.locator('.measurement-label')).toHaveText('CV 38sq-3C, PF28（立上り）  2.54+3.00+余1.00=6.54 m')
+ await format.locator('.route-item').filter({hasText:'PF28'}).getByLabel('平面',{exact:true}).selectOption('unset');await expect(total('PF28 立上り電線管')).toHaveText('5.54')
+ await expect(page.locator('.measurement-label')).toHaveText('CV 38sq-3C, PF28  2.54+3.00+余1.00=6.54 m')
+ await page.keyboard.press('Control+z');await expect(total('PF28 立上り電線管')).toHaveText('3.00')
+ await selectRoute()
+ await format.locator('.route-item-main').getByLabel('平面',{exact:true}).selectOption('exclude');await format.locator('.route-item-main').getByLabel('その他',{exact:true}).selectOption('exclude');await expect(total('CV 38sq-3C 幹線ケーブル')).toHaveText('3.00')
+ await page.keyboard.press('Control+z');await page.keyboard.press('Control+z');await expect(total('CV 38sq-3C 幹線ケーブル')).toHaveText('6.54')
+ await selectRoute()
+ await format.getByLabel('その他の加算',{exact:true}).fill('2');await format.getByLabel('その他の加算',{exact:true}).press('Enter')
+ await expect(total('CV 38sq-3C 幹線ケーブル')).toHaveText('7.54');await expect(total('PF28 立上り電線管')).toHaveText('3.00')
+ await page.keyboard.press('Control+z');await selectRoute();await expect(format.getByLabel('その他の加算',{exact:true})).toHaveValue('1.00')
+ const saved=await page.evaluate(async()=>[...(await window.__karu!.saveToBytes())!])
+ const doc=new mupdf.PDFDocument(new Uint8Array(saved))
+ try {
+  expect(readCountFixtures(doc).find(f=>f.code==='PF28')?.routeDefaults).toEqual({plan:null,slack:null})
+  expect(listAnnotations(doc,0).find(a=>a.quantity)?.quantity).toMatchObject({addM:3,slackM:1,extra:[{count:1,cond:{plan:null,slack:null}}]})
+  expect(listAnnotations(doc,0).find(a=>a.quantity)?.contents).toBe('CV 38sq-3C, PF28（立上り）  2.54+3.00+余1.00=6.54 m')
+ } finally {doc.destroy()}
+ await page.evaluate(b=>window.__karu!.openBytes(b,'範囲再読込.pdf'),saved);await page.getByRole('tab',{name:'数量',exact:true}).click();
+ await expect(total('CV 38sq-3C 幹線ケーブル')).toHaveText('6.54');await expect(total('PF28 立上り電線管')).toHaveText('3.00')
+ // The same PF fixture defaults to rise when used as the main item on a new route.
+ await row(page,'PF28 立上り電線管').click();await click(page,0,100,380);await click(page,0,172,380);await page.keyboard.press('Enter')
+ await expect(format.locator('.route-item').filter({hasText:'PF28'}).getByLabel('平面',{exact:true})).toHaveValue('exclude')
+ expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.quantity).at(-1)?.quantity)).toMatchObject({cond:{plan:null,slack:null},slackM:1})
+ await expect(total('PF28 立上り電線管')).toHaveText('3.00')
+ await format.getByRole('button',{name:'＋ 立上り・立下りを足す',exact:true}).click()
+ await format.getByLabel('立上り・立下り1',{exact:true}).fill('2');await format.getByLabel('立上り・立下り1',{exact:true}).press('Enter')
+ await expect(total('PF28 立上り電線管')).toHaveText('5.00')
+ await expect(panel.getByRole('button',{name:'編集',exact:true})).toBeEnabled()
+})

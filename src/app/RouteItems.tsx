@@ -1,0 +1,491 @@
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { countHex, fixtureChoiceLabel, fixtureLabelCode, quantityMethod, quantityUnit, type CountFixture } from '../core/countFixtures'
+import { routeMemberLength, routeRises, routePortions, riseCondition, validCondition, validRoutePerM, routePerMSuffix, type PartCondition, type RoutePart, type RoutePoint } from '../core/quantity'
+import { polylineLength } from '../core/measure'
+import { backfillDetail, calculateBackfillVolume } from '../core/backfill'
+import { isRouteSurfaceFixture, surfacePerimeterM } from '../core/routeSurface'
+import type { AnnotationStore, EditableAnnotation } from '../editor/AnnotationStore'
+import { QuantitySwatch } from '../editor/countMarkers'
+import { QuantityValueInput } from '../editor/QuantityValueInput'
+import LinePicker, { announceRoute, changeRouteCount, routeEntries, routeHighlighted, useRouteFeedback } from './LinePicker'
+import { loadRouteSets, resolveRouteSet, routeSetSummary, routeSetsSnapshot, saveRouteSets, subscribeRouteSets, type RouteSet } from './routeSets'
+import { nextRoutePointAt } from '../core/routePointAdd'
+import { useRelatedCountItems } from './relatedRouteItems'
+
+export function useRouteSets() { useSyncExternalStore(subscribeRouteSets, routeSetsSnapshot); return loadRouteSets() }
+
+export function ConditionSelect({ fixture, label, value, commit, add, allowExclude = false, mixed = false, emptyCandidatesOnly = false }: {
+  fixture: CountFixture; label: string; value: PartCondition; commit(value: PartCondition): void; add(value: string): string | undefined
+  allowExclude?: boolean; mixed?: boolean; emptyCandidatesOnly?: boolean
+}) {
+  const [adding, setAdding] = useState(false), [draft, setDraft] = useState(''), [error, setError] = useState('')
+  const candidates = fixture.conditions ?? [], names = [...candidates]
+  if (typeof value === 'string' && !names.includes(value)) names.push(value)
+  const encoded = mixed ? 'mixed' : value === undefined ? 'unset' : value === null ? 'exclude' : 'value:' + value
+  const onlyAdd = emptyCandidatesOnly && !names.length
+  return <div className="route-condition-field">
+    <label className="route-condition-row"><span>{label}</span><select aria-label={label} title={mixed ? '複数の条件' : value ?? (value === null ? '数えない' : '未設定')} value={onlyAdd ? 'prompt' : encoded} onChange={e => {
+      const v = e.currentTarget.value
+      if (v === 'add') { setAdding(true); setDraft(''); setError('') }
+      else { setAdding(false); commit(v === 'unset' ? undefined : v === 'exclude' ? null : v.slice(6)) }
+    }}>
+      {onlyAdd ? <option value="prompt" hidden>＋ 条件を追加…</option> : <option value="unset">未設定</option>}
+      {mixed && <option value="mixed" disabled>複数の条件</option>}
+      {names.map(name => <option key={name} value={'value:' + name}>{name}</option>)}
+      {allowExclude && <option value="exclude">数えない</option>}
+      <option value="add">＋ 条件を追加…</option>
+    </select></label>
+    {adding && <form className="route-condition-add" onSubmit={e => {
+      e.preventDefault(); e.stopPropagation()
+      const name = draft.trim()
+      if (!validCondition(name)) { setError('条件は1〜30文字で、改行を入れずに入力してください。'); return }
+      if (!candidates.includes(name) && candidates.length >= 30) { setError('施工条件の候補は30件までです。'); return }
+      try { const reason = add(name); if (reason) setError(reason); else setAdding(false) } catch (reason) { setError(String(reason)) }
+    }}>
+      <input autoFocus aria-label={label + 'の新しい条件'} maxLength={30} value={draft} onChange={e => setDraft(e.currentTarget.value)} onKeyDown={e => {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setAdding(false) }
+        if (e.key === 'Enter') e.stopPropagation()
+      }} /><button type="submit">追加</button><button type="button" aria-label="条件追加をやめる" onClick={() => setAdding(false)}>×</button>
+      {error && <small role="alert">{error}</small>}
+    </form>}
+  </div>
+}
+
+export function RouteItems({ annotation: a, store }: { annotation: EditableAnnotation; store: AnnotationStore }) {
+  const q = a.quantity!, routes = routeEntries(a), rises = routeRises(q), feedback = useRouteFeedback(store)
+  const [picker, setPicker] = useState(false), [sets, setSets] = useState(false), [splitting, setSplitting] = useState(false), [vertex, setVertex] = useState(1)
+  const [individual, setIndividual] = useState<Set<string>>(() => new Set())
+  const closePicker = useCallback(() => setPicker(false), [])
+  useEffect(() => {
+    setPicker(false); setSets(false); setSplitting(false); setVertex(1); setIndividual(new Set())
+    return () => { store.setHighlightedRise(null); store.setHighlightedVertex(null) }
+  }, [a.id, store])
+  const planM = polylineLength(a.vertices!) * a.measure!.mmPerPoint / 1000
+  return <section className="route-items" aria-label="経路構成">
+    <div className="route-heading"><strong>経路構成</strong><span>{routes.length}種類・{routes.reduce((n, e) => n + e.count, 0)}条</span><button type="button" onClick={() => { setPicker(false); setSets(v => !v) }} aria-expanded={sets}>よく使う構成</button></div>
+    {sets && <RouteSetsDialog annotation={a} store={store} onClose={() => setSets(false)} />}
+    <div className="route-lengths"><span>平面 {planM.toFixed(2)} m</span>
+      {rises.map((r, i) => <div className="route-rise-row" key={a.id + ':' + i} onMouseEnter={() => store.setHighlightedRise({ annotationId: a.id, riseIndex: i })}
+        onMouseLeave={e => { if (!e.currentTarget.contains(document.activeElement)) store.setHighlightedRise(null) }}
+        onFocus={() => store.setHighlightedRise({ annotationId: a.id, riseIndex: i })}
+        onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null) && !e.currentTarget.matches(':hover')) store.setHighlightedRise(null) }}>
+        <QuantityValueInput label={'立上り・立下り' + (i + 1)} value={r.m} commit={m => store.setRouteRises(a.id, rises.map((r, j) => j === i ? { ...r, m } : r))} />
+        <select aria-label={'立上り' + (i + 1) + 'の位置'} value={r.at ?? ''} onChange={e => store.setRouteRises(a.id, rises.map((r, j) => {
+          if (j !== i) return r
+          return { m: r.m, ...(e.currentTarget.value === '' ? {} : { at: Number(e.currentTarget.value) }) }
+        }))}><option value="">なし</option>{a.vertices!.map((_, v) => <option key={v} value={v}>{v === 0 ? '始点' : v === a.vertices!.length - 1 ? '終点' : '頂点' + (v + 1)}</option>)}</select>
+        <button type="button" aria-label={'立上り' + (i + 1) + 'を削除'} title="削除" onClick={() => {
+          store.removeRouteRise(a.id, i)
+          store.setHighlightedRise(null)
+        }}>×</button>
+      </div>)}
+      <button type="button" disabled={rises.length >= 20} onClick={() => store.setRouteRises(a.id, [...rises, { m: 0 }])}>＋ 立上り・立下りを足す</button>
+      <div className="route-slack" title="図示されない付加長を、設計図書に指示がある場合だけ入れる。切り無駄・割増は入れない（単価に含まれる）"><QuantityValueInput label="その他の加算" value={q.slackM ?? 0} commit={n => store.updateQuantityValues(a.id, { slackM: n })} /></div>
+    </div>
+    <RoutePointItems annotation={a} store={store} />
+    {routes.map((e, i) => {
+      const f = store.getCountFixture(e.itemId), code = f ? fixtureLabelCode(f) : e.itemId
+      const identity = `${code} ${f?.name ?? ''}`.trim()
+      const surface = i > 0 && !!f && isRouteSurfaceFixture(f)
+      const trench = i > 0 && !!f && quantityMethod(f) === 'lengthWidthDepth'
+      const length = routeMemberLength(planM, trench ? {} : q, e.cond)
+      const portions = routePortions(planM, trench ? {} : q, e.cond)
+      const perRise = Array.isArray(e.cond.rise) || individual.has(e.itemId)
+      const dimension = (value: number | undefined) =>
+        value !== undefined && Number.isFinite(value) && value > 0 ? value : 0
+      const widthM = dimension(f?.defaults?.widthM)
+      const depthM = dimension(f?.defaults?.depthM)
+      const perM = e.perM ?? (surface ? 0 : 1)
+      const backfill = trench && f?.backfill?.deductPipes
+        ? calculateBackfillVolume(planM, q, e, f, id => store.getCountFixture(id))
+        : undefined
+      const rawQuantity = backfill?.valueM3
+        ?? length * e.count * perM * (trench ? widthM * depthM : 1)
+      const detail = (backfill ? backfillDetail(backfill) : (['plan', 'rise', 'slack'] as const).flatMap(part => {
+        const values = portions.filter(p => p.part === part)
+        return values.length ? [(part === 'plan' ? '平面 ' : part === 'rise' ? '立上り ' : 'その他 ') + values.reduce((n, p) => n + p.lengthM, 0).toFixed(2)] : []
+      }).join(' ＋ ') + ' ＝ ' + length.toFixed(2) + ' m'
+        + (e.count > 1 ? '（×' + e.count + '条 ' + (length * e.count).toFixed(2) + ' m）' : '')
+        + (!surface && perM !== 1
+          ? `；${code}${routePerMSuffix(perM)} → ${(length * e.count * perM).toFixed(3)} m` : '')
+        + (surface
+          ? ` × 周長 ${perM.toFixed(3)} m ＝ ${rawQuantity.toFixed(2)} ㎡` : '')
+        + (trench
+          ? ` × 幅 ${widthM.toFixed(2)}m × 深さ ${depthM.toFixed(2)}m ＝ ${rawQuantity.toFixed(2)} ㎥` : ''))
+        + (f?.convert ? `（≒ ${(rawQuantity * f.convert.factor).toFixed(2)} ${f.convert.unit}）` : '')
+      const commitPerM = (value: number | undefined) => {
+        const current = store.get(a.id)
+        if (!current?.quantity) return
+        store.setRouteMembers(a.id, routeEntries(current).map(member => {
+          if (member.itemId !== e.itemId) return member
+          const next = { ...member }
+          if (value === undefined) delete next.perM
+          else next.perM = value
+          return next
+        }))
+      }
+      const condition = (part: 'plan' | 'rise' | 'slack', label: string, riseIndex?: number) => f && <ConditionSelect key={label} fixture={f} label={label} value={part === 'rise' ? riseCondition(e.cond, riseIndex ?? 0) : e.cond[part]} allowExclude
+        commit={value => store.setRouteCondition([a.id], e.itemId, part, value, riseIndex)} add={value => addRouteCandidate(store, [a.id], e.itemId, part, value, riseIndex)} />
+      return <div className={'route-item' + (i === 0 ? ' route-item-main' : '') + (routeHighlighted(feedback, a.id, e.itemId) ? ' route-item-added' : '')} key={a.id + e.itemId} style={i === 0 && f ? { borderLeftColor: countHex(f.style.color) } : undefined}>
+        <div className="route-item-heading"><span className="route-role" style={i === 0 && f ? { background: countHex(f.style.color), color: 'white' } : undefined}>{i === 0 ? '主' : '追加'}</span>
+          {f && <QuantitySwatch fixture={f} />}<span className="route-item-identity" title={code + ' ' + (f?.name ?? '')}><strong>{code}</strong><small title={f?.name}>{f?.name}</small></span>
+          {i > 0 && <><button type="button" aria-label={code + 'を主にする'}
+            disabled={surface || trench || perM !== 1}
+            title={surface ? '面積の線要素は主にできません'
+              : trench || perM !== 1 ? '体積・1m あたりの係数がある項目は追加の線要素として使います' : '主にする'}
+            onClick={() => { store.setRouteMembers(a.id, [e, ...routes.filter(x => x.itemId !== e.itemId)]); announceRoute(store, a.id, null, code + ' を主にしました') }}>主</button><button type="button" aria-label={code + 'を外す'} title="外す" onClick={() => { store.setRouteMembers(a.id, routes.filter(x => x.itemId !== e.itemId)); announceRoute(store, a.id, null, code + ' を外しました（Ctrl+Z で戻せます）') }}>×</button></>}
+        </div>
+        <div className="route-item-values"><RouteCount value={e.count} code={code} commit={n => changeRouteCount(store, a, e.itemId, n)} /><span>条</span></div>
+        {i > 0 && <RoutePerM identity={identity} value={e.perM} surface={surface}
+          spiral={!surface && (f?.name.includes('スパイラル') ?? false)}
+          commit={commitPerM} />}
+        {surface && <button type="button" onClick={() => {
+          const current = store.get(a.id)
+          const main = current?.quantity
+            ? store.getCountFixture(current.quantity.itemId) : undefined
+          commitPerM(main ? surfacePerimeterM(main) : undefined)
+        }}>主の寸法から入れ直す</button>}
+        {surface && e.perM === undefined &&
+          <small role="status">周長（m）を入れてください</small>}
+        {trench && (!widthM || !depthM) &&
+          <small role="status">幅・深さを項目に入れてください</small>}
+        {trench && <small>平面の長さだけで計算します。</small>}
+        {condition('plan', '平面')}
+        {!trench && rises.length >= 2 && <label className="route-individual"><input type="checkbox" aria-label={code + 'の立上りごとに選ぶ'} checked={perRise} onChange={event => {
+          const checked = event.currentTarget.checked
+          setIndividual(old => { const next = new Set(old); if (checked) next.add(e.itemId); else next.delete(e.itemId); return next })
+          if (!checked) store.setRouteCondition([a.id], e.itemId, 'rise', riseCondition(e.cond, 0))
+        }} />立上りごとに選ぶ</label>}
+        {!trench && rises.length > 0 && (perRise ? rises.map((r, j) => condition('rise', '立上り' + (j + 1) + '（' + r.m.toFixed(2) + ' m）', j)) : condition('rise', '立上り'))}
+        {!trench && (q.slackM ?? 0) > 0 && condition('slack', 'その他')}
+        <div className="route-item-length" title={detail}>{detail}</div>
+        {backfill?.warnings.map((warning, index) =>
+          <small role="status" key={index}>{warning}</small>)}
+        {!!f?.conditions?.length && portions.some(p => p.condition === undefined) && <small className="route-unset">施工条件が未設定</small>}
+      </div>
+    })}
+    <button type="button" className="route-add" aria-label="線要素を追加" onClick={() => { setSets(false); setPicker(v => !v) }} aria-expanded={picker}>＋ 線要素を追加</button>
+    {picker && <LinePicker store={store} annotation={a} onClose={closePicker} />}
+    {a.vertices!.length >= 3 && <div className="route-split">
+      {!splitting ? <button type="button" onClick={() => { setSplitting(true); store.setHighlightedVertex({ annotationId: a.id, vertexIndex: vertex }) }}>経路を分ける</button> : <>
+        <label>分ける頂点<select aria-label="分ける頂点" value={vertex} onChange={event => { const v = Number(event.currentTarget.value); setVertex(v); store.setHighlightedVertex({ annotationId: a.id, vertexIndex: v }) }}>{a.vertices!.slice(1, -1).map((_, i) => <option key={i + 1} value={i + 1}>頂点{i + 2}</option>)}</select></label>
+        <button type="button" onClick={() => { store.splitRoute(a.id, vertex); setSplitting(false) }}>分ける</button><button type="button" onClick={() => { setSplitting(false); store.setHighlightedVertex(null) }}>やめる</button>
+      </>}
+    </div>}
+    <div className="route-status" role="status">{feedback.routeId === a.id ? feedback.message : ''}</div>
+  </section>
+}
+
+
+export function addRouteCandidate(store: AnnotationStore, ids: readonly string[], itemId: string, part: RoutePart, value: string, riseIndex?: number): string | undefined {
+  return store.addConditionAndSetRoute(itemId, value, ids, itemId, part, riseIndex)
+}
+export function addQuantityCandidate(store: AnnotationStore, ids: readonly string[], itemId: string, value: string): string | undefined {
+  return store.addConditionAndSetQuantity(itemId, value, ids)
+}
+
+function RoutePointItems({ annotation: a, store }: {
+  annotation: EditableAnnotation; store: AnnotationStore
+}) {
+  const points = a.quantity?.points ?? [], vertices = a.vertices ?? []
+  const [error, setError] = useState('')
+  useEffect(() => { setError('') }, [a.id])
+  const fixtures = store.getCountFixtures()
+    .filter(fixture => fixture.link === undefined && quantityMethod(fixture) === 'click')
+  const preferred = fixtures.find(fixture =>
+    fixture.name.includes('防火区画貫通') || fixture.category?.includes('防火区画貫通'))
+  const ordinaryChoices = preferred
+    ? [preferred, ...fixtures.filter(fixture => fixture.id !== preferred.id)] : fixtures
+  const relatedChoices = useRelatedCountItems(store, a.quantity?.itemId)
+  const relatedIds = new Set(relatedChoices.map(fixture => fixture.id))
+  const otherChoices = ordinaryChoices.filter(fixture => !relatedIds.has(fixture.id))
+  const choices = relatedChoices.length
+    ? [...relatedChoices, ...otherChoices] : ordinaryChoices
+  const commit = (next: readonly RoutePoint[]) => {
+    const reason = store.setRoutePoints(a.id, next)
+    setError(reason ?? '')
+    return reason
+  }
+  const update = (index: number, change: (point: RoutePoint) => RoutePoint) => {
+    const current = store.get(a.id)?.quantity
+    if (current?.method !== 'polyline') return
+    commit((current.points ?? []).map((point, i) => i === index ? change(point) : point))
+  }
+  const remove = (index: number) => {
+    const current = store.get(a.id)?.quantity
+    if (current?.method !== 'polyline') return
+    if (!commit((current.points ?? []).filter((_, i) => i !== index))) {
+      store.setHighlightedVertex(null)
+    }
+  }
+  const disabled = points.length >= 50 || choices.length === 0
+  const title = choices.length === 0 ? '個数の項目を先に追加してください'
+    : points.length >= 50 ? '頂点の個数は50件までです' : undefined
+  return <section className="route-points" aria-label="頂点の個数">
+    <h4>頂点の個数</h4>
+    {relatedChoices.length > 0 && <div role="group" aria-label="関連の項目">
+      {relatedChoices.map(fixture => {
+        const at = nextRoutePointAt(points, vertices.length, fixture.id)
+        const reason = points.length >= 50 ? '頂点の個数は50件までです'
+          : at === undefined ? '使っていない中間の頂点がなく、この項目は終点にもあります'
+            : undefined
+        return <button type="button" key={fixture.id}
+          aria-label={`頂点に ${fixture.name} を足す`}
+          disabled={reason !== undefined} title={reason}
+          onClick={() => {
+            const current = store.get(a.id)
+            if (current?.quantity?.method !== 'polyline') return
+            const existing = current.quantity.points ?? []
+            const nextAt = nextRoutePointAt(
+              existing, current.vertices?.length ?? 0, fixture.id,
+            )
+            if (existing.length >= 50 || nextAt === undefined) return
+            commit([...existing, { itemId: fixture.id, at: nextAt, count: 1 }])
+          }}>＋ {fixtureChoiceLabel(fixture).text}</button>
+      })}
+    </div>}
+    {points.map((point, index) => {
+      const fixture = store.getCountFixture(point.itemId)
+      const code = fixture ? fixtureLabelCode(fixture) : point.itemId
+      const choiceText = fixture
+        ? fixtureChoiceLabel(fixture).text : code + ' 項目が見つかりません'
+      const label = '頂点の個数' + (index + 1)
+      const at = Math.min(point.at, Math.max(0, vertices.length - 1))
+      const conditions = [...(fixture?.conditions ?? [])]
+      if (point.condition !== undefined && !conditions.includes(point.condition)) {
+        conditions.push(point.condition)
+      }
+      const highlight = () => store.setHighlightedVertex({
+        annotationId: a.id, vertexIndex: at,
+      })
+      return <div className="route-point-row" key={a.id + ':point:' + index}
+        onMouseEnter={highlight}
+        onMouseLeave={event => {
+          if (!event.currentTarget.contains(document.activeElement)) {
+            store.setHighlightedVertex(null)
+          }
+        }}
+        onFocus={highlight}
+        onBlur={event => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)
+            && !event.currentTarget.matches(':hover')) store.setHighlightedVertex(null)
+        }}>
+        <div className="route-point-controls">
+          <select aria-label={label + 'の項目'} value={point.itemId}
+            onChange={event => {
+              const itemId = event.currentTarget.value
+              update(index, old => ({ itemId, at: old.at, count: old.count }))
+            }}>
+            {!choices.some(choice => choice.id === point.itemId) &&
+              <option value={point.itemId}>{choiceText}</option>}
+            {relatedChoices.length ? <>
+              <optgroup label="関連の項目">
+                {relatedChoices.map(choice => <option key={choice.id} value={choice.id}>
+                  {fixtureChoiceLabel(choice).text}
+                </option>)}
+              </optgroup>
+              <optgroup label="そのほかの個数の項目">
+                {otherChoices.map(choice => <option key={choice.id} value={choice.id}>
+                  {fixtureChoiceLabel(choice).text}
+                </option>)}
+              </optgroup>
+            </> : choices.map(choice => <option key={choice.id} value={choice.id}>
+              {fixtureChoiceLabel(choice).text}
+            </option>)}
+          </select>
+          <select aria-label={label + 'の位置'} value={at}
+            onChange={event => {
+              const nextAt = Number(event.currentTarget.value)
+              update(index, old => ({ ...old, at: nextAt }))
+            }}>
+            {vertices.map((_, vertexIndex) => <option key={vertexIndex} value={vertexIndex}>
+              {vertexIndex === 0 ? '始点'
+                : vertexIndex === vertices.length - 1 ? '終点' : '頂点' + (vertexIndex + 1)}
+            </option>)}
+          </select>
+          <RouteCount value={point.count} code={code} label={label + 'の数'}
+            commit={count => update(index, old => ({ ...old, count }))} />
+          {!!fixture && conditions.length > 0 &&
+            <label className="route-condition-row">
+              <span>施工条件</span>
+              <select aria-label={label + 'の施工条件'}
+                value={point.condition === undefined ? 'unset' : 'value:' + point.condition}
+                onChange={event => {
+                  const value = event.currentTarget.value
+                  update(index, old => {
+                    const next = { ...old }
+                    if (value === 'unset') delete next.condition
+                    else next.condition = value.slice(6)
+                    return next
+                  })
+                }}>
+                <option value="unset">未設定</option>
+                {conditions.map(condition => <option key={condition} value={'value:' + condition}>
+                  {condition}
+                </option>)}
+              </select>
+            </label>}
+          <button type="button" aria-label={label + 'を削除'} title="削除"
+            onClick={() => remove(index)}>×</button>
+        </div>
+        <small>{choiceText} {point.count}{fixture ? quantityUnit(fixture) : ''}</small>
+      </div>
+    })}
+    <button type="button" disabled={disabled} title={title} onClick={() => {
+      const current = store.get(a.id)
+      if (current?.quantity?.method !== 'polyline' || !current.vertices?.length
+        || !choices.length) return
+      const existing = current.quantity.points ?? []
+      const last = current.vertices.length - 1
+      const used = new Set(existing.map(point => point.at))
+      let at = last
+      for (let vertexIndex = 1; vertexIndex < last; vertexIndex++) {
+        if (!used.has(vertexIndex)) { at = vertexIndex; break }
+      }
+      commit([...existing, { itemId: choices[0].id, at, count: 1 }])
+    }}>＋ 頂点に個数の項目を足す</button>
+    {error && <small className="route-point-error" role="alert">{error}</small>}
+  </section>
+}
+
+function RoutePerM({ identity, value, spiral, surface = false, commit }: {
+  identity: string
+  value?: number
+  spiral: boolean
+  surface?: boolean
+  commit(value: number | undefined): void
+}) {
+  const display = (number: number | undefined) =>
+    number === undefined ? '' : number.toFixed(3)
+  const [draft, setDraft] = useState(() => display(value))
+  const [calculating, setCalculating] = useState(false)
+  const [diameter, setDiameter] = useState('')
+  const [pitch, setPitch] = useState('')
+  const [error, setError] = useState('')
+  useEffect(() => {
+    setDraft(display(value))
+    setError('')
+  }, [value])
+  const applyDraft = () => {
+    const text = draft.trim()
+    const next = text === '' ? undefined : Number(text)
+    if (next !== undefined && !validRoutePerM(next)) {
+      setError(`${surface ? '周長（m）' : '1m あたり'}は0より大きく10000以下、小数3桁までで入れてください。`)
+      setDraft(display(value))
+      return
+    }
+    setError('')
+    setDraft(display(next))
+    if (next !== value) commit(next)
+  }
+  return <div className="route-per-m">
+    <label>{surface ? '周長' : '1m あたり'}<input type="number" min="0.001" max="10000" step="0.001"
+      aria-label={`${identity}の${surface ? '周長' : '1mあたり'}`} placeholder={surface ? undefined : '1'}
+      value={draft}
+      onChange={event => { setDraft(event.currentTarget.value); setError('') }}
+      onBlur={applyDraft}
+      onWheel={event => event.currentTarget.blur()}
+      onKeyDown={event => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          event.stopPropagation()
+          event.currentTarget.blur()
+        }
+      }} />{surface && ' m'}</label>
+    {spiral && <button type="button" aria-expanded={calculating}
+      onClick={() => { setCalculating(previous => !previous); setError('') }}>
+      径とピッチから
+    </button>}
+    {spiral && calculating && <div className="route-spiral-calculator">
+      <label>径（m）<input inputMode="decimal" aria-label={`${identity}の径（m）`}
+        value={diameter} onChange={event => { setDiameter(event.currentTarget.value); setError('') }} /></label>
+      <label>ピッチ（m）<input inputMode="decimal" aria-label={`${identity}のピッチ（m）`}
+        value={pitch} onChange={event => { setPitch(event.currentTarget.value); setError('') }} /></label>
+      <button type="button" onClick={() => {
+        const d = Number(diameter.trim())
+        const p = Number(pitch.trim())
+        if (!Number.isFinite(d) || d <= 0 || !Number.isFinite(p) || p <= 0) {
+          setError('径とピッチは0より大きい有限の数で入れてください。')
+          return
+        }
+        const calculated = Math.PI * d / p
+        if (!Number.isFinite(calculated) || calculated > 10000) {
+          setError('計算した1m あたりが10000を超えています。')
+          return
+        }
+        const next = Number(calculated.toFixed(3))
+        if (!validRoutePerM(next)) {
+          setError('計算した1m あたりは0.001以上にしてください。')
+          return
+        }
+        commit(next)
+        setDraft(display(next))
+        setError('')
+        setCalculating(false)
+      }}>1m あたりに入れる</button>
+    </div>}
+    {error && <small role="alert">{error}</small>}
+  </div>
+}
+
+function RouteCount({ value, code, commit, label = code + 'の条数' }: {
+  value: number; code: string; commit(n: number): void; label?: string
+}) {
+  const input = useRef<HTMLInputElement>(null)
+  useEffect(() => { if (input.current) input.current.value = String(value) }, [value])
+  useEffect(() => {
+    const element = input.current, prevent = (e: WheelEvent) => e.preventDefault()
+    element?.addEventListener('wheel', prevent, { passive: false })
+    return () => element?.removeEventListener('wheel', prevent)
+  }, [])
+  return <span className="route-count"><button type="button" aria-label={label + 'を減らす'} disabled={value <= 1} onClick={() => commit(value - 1)}>−</button>
+    <input ref={input} aria-label={label} type="number" min="1" max="99" step="1" defaultValue={value} onBlur={e => {
+      const n = Number(e.currentTarget.value)
+      if (e.currentTarget.value !== '' && Number.isInteger(n) && n >= 1 && n <= 99) commit(n)
+      else e.currentTarget.value = String(value)
+    }} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() } }} />
+    <button type="button" aria-label={label + 'を増やす'} disabled={value >= 99} onClick={() => commit(value + 1)}>+</button></span>
+}
+function RouteSetsDialog({ store, annotation: a, onClose }: { store: AnnotationStore; annotation: EditableAnnotation; onClose(): void }) {
+  const sets = useRouteSets(), root = useRef<HTMLDivElement>(null)
+  const currentItems = routeEntries(a).flatMap(e => {
+    const f = store.getCountFixture(e.itemId)
+    if (!f) return []
+    const trench = quantityMethod(f) === 'lengthWidthDepth'
+    return [{
+      code: f.code, spec: f.spec, name: f.name, category: f.category,
+      count: e.count, cond: e.cond,
+      ...(e.perM !== undefined ? { perM: e.perM } : {}),
+      ...(trench ? {
+        method: 'lengthWidthDepth' as const,
+        defaults: {
+          ...(f.defaults?.widthM !== undefined ? { widthM: f.defaults.widthM } : {}),
+          ...(f.defaults?.depthM !== undefined ? { depthM: f.defaults.depthM } : {}),
+        },
+      } : {}),
+      ...(f.convert !== undefined ? { convert: { ...f.convert } } : {}),
+      ...(f.breakdown !== undefined ? { breakdown: { ...f.breakdown } } : {}),
+      ...(f.summary !== undefined ? { summary: f.summary.map(field => ({ ...field })) } : {}),
+    }]
+  })
+  const [name, setName] = useState(() => routeSetSummary({ items: currentItems }).slice(0, 40)), [renaming, setRenaming] = useState<string | null>(null), [rename, setRename] = useState(''), [error, setError] = useState('')
+  useEffect(() => {
+    const outside = (e: PointerEvent) => { if (!root.current?.contains(e.target as Node)) onClose() }
+    const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose() } }
+    document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', escape, true)
+    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape, true) }
+  }, [onClose])
+  const write = (next: RouteSet[]) => { saveRouteSets(next); if (JSON.stringify(loadRouteSets()) !== JSON.stringify(next)) setError('ブラウザーに保存できませんでした。') }
+  return <div ref={root} className="route-sets-dialog" role="dialog" aria-label="よく使う構成">
+    <h4>よく使う構成</h4>
+    {sets.map(set => <div className="route-set" key={set.id}>
+      <button type="button" aria-label={set.name} title={routeSetSummary(set)} onClick={() => { try { const result = resolveRouteSet(set, store.getCountFixtures()); store.addFixturesAndSetRouteItems(result.newFixtures, a.id, result.items); announceRoute(store, a.id, null, '構成「' + set.name + '」にしました'); onClose() } catch (reason) { setError(String(reason)) } }}><strong>{set.name}</strong><small>{routeSetSummary(set)}</small></button>
+      {renaming === set.id ? <form onSubmit={e => { e.preventDefault(); if (rename.trim()) { write(sets.map(s => s.id === set.id ? { ...s, name: rename.trim() } : s)); setRenaming(null) } }}><input aria-label="構成の新しい名前" maxLength={40} value={rename} onChange={e => setRename(e.currentTarget.value)} /><button disabled={!rename.trim()}>保存</button></form> : <button type="button" aria-label={set.name + 'の名前を変える'} onClick={() => { setRenaming(set.id); setRename(set.name) }}>名前を変える</button>}
+      <button type="button" aria-label={set.name + 'を削除'} onClick={() => write(sets.filter(s => s.id !== set.id))}>削除</button>
+    </div>)}
+    <form onSubmit={e => { e.preventDefault(); if (sets.length < 50 && name.trim()) { write([...sets, { id: crypto.randomUUID(), name: name.trim(), items: currentItems }]) } }}>
+      <label>この経路の構成を登録<input aria-label="構成の名前" value={name} maxLength={40} onChange={e => setName(e.currentTarget.value)} /></label><button disabled={sets.length >= 50 || !name.trim()}>登録</button>
+      {sets.length >= 50 && <small>これ以上登録できません（最大 50 件）</small>}
+    </form>{error && <p role="alert">{error}</p>}
+  </div>
+}

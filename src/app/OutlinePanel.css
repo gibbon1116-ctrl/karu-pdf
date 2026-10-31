@@ -1,0 +1,62 @@
+.outline-panel { display: grid; grid-template-rows: auto minmax(60px, 1fr) auto auto; height: 100%; min-width: 0; min-height: 0; font-size: 12px; color: #292929; background: #f4f4f4; }
+.outline-panel button, .outline-panel input, .outline-panel summary { font-size: 12px; }
+.outline-panel button { min-height: 26px; padding: 3px 6px; }
+.outline-panel button:disabled { opacity: .5; }
+.outline-toolbar, .outline-target-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.outline-toolbar { position: relative; padding: 6px; border-bottom: 1px solid #bbb; }
+.outline-add-menu { position: static; }
+.outline-add-menu summary { cursor: pointer; padding: 4px 2px; }
+.outline-add-menu > div { position: absolute; z-index: 10; top: 100%; left: 6px; display: grid; box-sizing: border-box; gap: 4px; width: min(200px, calc(100% - 12px)); padding: 6px; border: 1px solid #999; background: #fff; box-shadow: 0 3px 8px #0003; }
+.outline-tree { min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; background: #fff; }
+.outline-row { position: relative; display: flex; align-items: center; gap: 3px; box-sizing: border-box; height: 26px; padding-right: 5px; cursor: pointer; user-select: none; }
+.outline-row:hover { background: #edf4fa; }
+.outline-row.selected { background: #dcecff; box-shadow: inset 0 0 0 1px #6b9bc7; }
+.outline-row .outline-toggle { flex: 0 0 18px; width: 18px; min-height: 22px; padding: 0; border: 0; background: transparent; }
+.outline-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.outline-page-label { flex-shrink: 0; color: #555; font-size: 11px; }
+.outline-drop-line { position: absolute; z-index: 2; right: 0; height: 2px; background: #1769aa; pointer-events: none; }
+.outline-drop-line.before { top: 0; }
+.outline-drop-line.after, .outline-drop-line.child { bottom: 0; }
+.outline-row.drop-invalid { cursor: not-allowed; background: #fbe7e7; }
+.outline-editor { min-width: 0; max-height: 45vh; overflow-y: auto; padding: 6px; border-top: 1px solid #bbb; }
+.outline-editor:empty, .outline-footer:empty { display: none; }
+.outline-editor label, .outline-add-menu label { display: grid; gap: 3px; }
+.outline-panel input:not([type="checkbox"]) { box-sizing: border-box; min-width: 0; width: 100%; }
+.outline-editor .outline-open-setting { display: flex; align-items: flex-start; gap: 4px; margin-top: 6px; }
+.outline-target-description { overflow-wrap: anywhere; margin: 5px 0; }
+.outline-footer { padding: 6px; border-top: 1px solid #bbb; }
+.outline-footer p { margin: 0 0 5px; }
+.outline-footer button { margin: 0 4px 4px 0; }
+/* O2 disables import for read-only outlines; keep that unavailable action hidden. */
+.outline-footer > button[aria-label="図面情報から目次を作成"]:disabled { display: none; }
+.outline-primary { background: #1769aa; border: 1px solid #12548a; color: white; }
+.outline-empty { padding: 10px; }
+.outline-panel [role="alert"] { color: #9c2020; overflow-wrap: anywhere; }
+.outline-delete-dialog { max-width: min(420px, 85vw); }
+.outline-delete-dialog button { display: block; margin: 6px 0; }
+.outline-dialog { box-sizing: border-box; width: min(680px, 94vw); max-height: 90vh; overflow: auto; font-size: 13px; }
+.outline-dialog h2 { font-size: 18px; }
+.outline-dialog fieldset { margin: 10px 0; }
+.outline-dialog label { display: block; margin: 7px 0; }
+.outline-dialog input:not([type="radio"]):not([type="checkbox"]) { box-sizing: border-box; max-width: 100%; }
+.outline-dialog-scroll { max-height: 28vh; overflow: auto; overflow-wrap: anywhere; }
+.outline-dialog-scroll li { margin: 5px 0; }
+.outline-dialog table { width: 100%; border-collapse: collapse; }
+.outline-dialog th, .outline-dialog td { padding: 4px; text-align: left; }
+.outline-dialog td:nth-child(3) { width: 50%; }
+.outline-dialog td input:not([type="checkbox"]) { width: 100%; min-width: 120px; }
+.outline-dialog [aria-invalid="true"] { outline: 1px solid #9c2020; }
+.outline-dialog [role="alert"] { color: #9c2020; }
+.outline-dialog .dialog-actions { position: sticky; bottom: -1em; display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; padding: 8px 0 1em; background: #fff; border-top: 1px solid #ddd; }
+
+.outline-toc-dialog { width: min(860px, 96vw); }
+.outline-toc-dialog .toc-inline { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.outline-toc-dialog input[type="number"] { width: 80px; }
+.toc-candidate-scroll { height: 312px; overflow: auto; }
+.toc-candidate-row { display: grid; grid-template-columns: 54px 32px minmax(100px, 1fr) 80px 80px 110px; height: 26px; align-items: center; box-sizing: border-box; border-bottom: 1px solid #eee; }
+.toc-candidate-head { font-weight: bold; height: auto; min-height: 26px; }
+.toc-candidate-row > span { padding: 0 3px; min-width: 0; }
+.toc-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: text; }
+.toc-title input { width: 100%; height: 24px; }
+.outline-toc-dialog .toc-candidate-row input[type="number"] { width: 100%; height: 24px; }
+.toc-page-value { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

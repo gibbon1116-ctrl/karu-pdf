@@ -1,0 +1,603 @@
+import { LocationInput } from './LocationInput'
+import { RouteItems, ConditionSelect, addRouteCandidate, addQuantityCandidate } from './RouteItems'
+import { CountItems } from './CountItems'
+import { routeMembers, type PartCondition, type RoutePart, type QuantityOpening, quantityLabel, quantityPoints, quantityDimensions, QUANTITY_DIMENSIONS } from '../core/quantity'
+import { polygonArea, polylineLength } from '../core/measure'
+import { fixtureCode, fixtureDrawingCode, quantityKind, quantityMethod, QUANTITY_METHODS } from '../core/countFixtures'
+import { lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { PdfWorkerPool } from '../client/PdfWorkerPool'
+import { SYMBOL_OPTIONS, type RGB, type SymbolName } from '../core/annotations'
+import { ISSUE_STATUS_CHOICES, issueStatusChoice, issueStatusLabel, type IssueStatusChoice } from '../core/issues'
+import type { CloudIntensity } from '../core/cloud'
+import type { FontName } from '../core/fontMetrics'
+import type { EditorTool } from '../editor/AnnotationLayer'
+import type { AnnotationStore, EditableAnnotation, Kind } from '../editor/AnnotationStore'
+import { updateToolFormat, type FormatDefaults, type FormatTool, type ToolFormat } from '../editor/formatDefaults'
+import { getActiveTextEditorSnapshot, insertIntoActiveTextEditor, subscribeActiveTextEditor } from '../editor/TextEditor'
+import { SnippetPanel } from './SnippetPanel'
+import { FixtureUiContext } from './documentModel'
+import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
+import { QuantityValueInput } from '../editor/QuantityValueInput'
+import { groupFixtures } from './fixtureOrder'
+import { relatedSessionMemory } from './relatedState'
+import { scopePlanForContext } from './relatedLinkRules'
+
+const RelatedSuggestions = lazy(() => import('./RelatedSuggestions'))
+
+const COLORS: Array<{ name: string; value: RGB; css: string }> = [
+  { name: '赤', value: [1, 0, 0], css: '#e00000' },
+  { name: '青', value: [0, 0.25, 1], css: '#064fe6' },
+  { name: '黒', value: [0, 0, 0], css: '#111' },
+  { name: '緑', value: [0, 0.55, 0.1], css: '#008c1a' },
+  { name: '橙', value: [1, 0.45, 0], css: '#ff7300' },
+  { name: '紫', value: [0.55, 0.1, 0.7], css: '#8c1ab3' },
+  { name: '黄', value: [1, 0.9, 0], css: '#ffe600' },
+  { name: '白', value: [1, 1, 1], css: '#fff' },
+]
+const HIGHLIGHT_COLORS = [
+  { name: '黄', value: [1, 0.9, 0] as RGB, css: '#ffe600' },
+  { name: '緑', value: [0.35, 0.9, 0.3] as RGB, css: '#59e64d' },
+  { name: '水色', value: [0.25, 0.8, 1] as RGB, css: '#40ccff' },
+  { name: '桃', value: [1, 0.45, 0.65] as RGB, css: '#ff73a6' },
+]
+const WIDTHS = [0.5, 1, 1.5, 2, 3, 5]
+const TEXT_BORDER_WIDTHS = [0.5, 1, 1.5, 2]
+const HIGHLIGHT_WIDTHS = [6, 9, 12, 18]
+const FONT_SIZES = [8, 9, 10.5, 12, 14, 18, 24, 36]
+const SYMBOL_SIZES = [8, 12, 16, 24, 32, 48, 72]
+const TEXT_INSERT_SYMBOLS = [...'✓✔○◎×△□☆★※→←↑↓⇒①②③〒℃±']
+
+function sameColor(left: readonly number[] | null, right: readonly number[] | null): boolean {
+  if (left === null || right === null) return left === right
+  return left.every((value, index) => Math.abs(value - right[index]) < 0.001)
+}
+
+function ColorField({ label, value, allowNone, choices = COLORS, onChange }: {
+  label: string
+  value: RGB | null
+  allowNone?: boolean
+  choices?: typeof COLORS
+  onChange(value: RGB | null): void
+}) {
+  return <fieldset>
+    <legend>{label}</legend>
+    <div className="color-grid">
+      {allowNone && <button type="button" title="なし" aria-label={`${label} なし`} aria-pressed={value === null} className={`color-none${value === null ? ' selected' : ''}`} onClick={() => onChange(null)}>なし</button>}
+      {choices.map((item) => <button key={item.name} type="button" title={item.name} aria-label={`${label} ${item.name}`} aria-pressed={sameColor(value, item.value)} className={sameColor(value, item.value) ? 'selected' : ''} onClick={() => onChange(item.value)}><span style={{ background: item.css }} /></button>)}
+    </div>
+  </fieldset>
+}
+
+interface Props {
+  selected: EditableAnnotation | null
+  tool: EditorTool
+  store: AnnotationStore
+  pool: PdfWorkerPool
+  defaults: FormatDefaults
+  onDefaultsChange(value: FormatDefaults): void
+}
+
+function formatTool(kind: Kind | EditorTool): FormatTool | null {
+  if (kind === 'select' || kind === 'textSelect') return null
+  return kind === 'freetext' ? 'text' : kind
+}
+
+function formatToolLabel(tool: FormatTool): string {
+  const labels: Record<FormatTool, string> = {
+    count: '数量拾い', cloudSquare: '雲（四角）', cloudPolygon: '雲（多角形）', issue: '指摘', distance: '距離', perimeter: '連続した長さ', area: '面積', text: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角', circle: '丸',
+    highlight: '蛍光ペン', ink: '手書き', symbol: '記号', textHighlight: '文字ハイライト',
+    underline: '文字に下線', strikeout: '文字に取り消し線',
+  }
+  return labels[tool]
+}
+
+import { relatedAdditionStatus } from './fixtureAdd'
+
+export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsChange }: Props) {
+  useSyncExternalStore(store.subscribe, store.getSnapshot)
+  const [pickupError, setPickupError] = useState('')
+  const [routeApplyStatus, setRouteApplyStatus] = useState('')
+  const fixtureUi = useContext(FixtureUiContext)
+  const relatedMemory = useMemo(() => relatedSessionMemory(store), [store])
+  const relatedState = useSyncExternalStore(
+    relatedMemory.subscribe, relatedMemory.getSnapshot, relatedMemory.getSnapshot,
+  )
+  const requestedRelatedStore = useRef<AnnotationStore | null>(null)
+  const textEditorOpen = useSyncExternalStore(
+    subscribeActiveTextEditor,
+    getActiveTextEditorSnapshot,
+    getActiveTextEditorSnapshot,
+  )
+  const activeSelection = selected ?? (store.selectedPickupsOnly() ? store.get(store.primarySelection()!) ?? null : null)
+  useEffect(() => {
+    setRouteApplyStatus('')
+  }, [store, activeSelection?.id, store.selectedFixtureId])
+  const target = activeSelection?.legacyChange ? null : activeSelection?.count || activeSelection?.quantity ? 'count' : formatTool(activeSelection?.kind ?? (tool === 'select' ? 'text' : tool))
+  const requestedCountStore = useRef<AnnotationStore | null>(null)
+  useEffect(() => {
+    // A page operation reloads the fixture list itself; do not pull the panel to the fixtures tab meanwhile.
+    if (target === 'count' && !store.fixturesReady && !store.fixturesLoading && requestedCountStore.current !== store) {
+      requestedCountStore.current = store
+      fixtureUi?.open()
+    }
+  }, [target, store, fixtureUi])
+  useEffect(() => {
+    if (target !== 'count' || store.relatedReviewsReady
+      || requestedRelatedStore.current === store || !fixtureUi?.retryRelatedReviews) return
+    requestedRelatedStore.current = store
+    fixtureUi.retryRelatedReviews()
+  }, [target, store, fixtureUi])
+  const values: EditableAnnotation | ToolFormat | null = activeSelection ?? (target ? defaults[target] : null)
+  const textTarget = target === 'text' || target === 'callout'
+  const cloudTarget = target === 'cloudSquare' || target === 'cloudPolygon'
+  const shapeTarget = target === 'square' || target === 'circle' || cloudTarget
+  const measureTarget = target === 'distance' || target === 'perimeter' || target === 'area'
+  const simpleColorTarget = cloudTarget || target === 'count' || measureTarget || target === 'line' || target === 'arrow' || target === 'highlight' || target === 'ink' || target === 'textHighlight' || target === 'underline' || target === 'strikeout' || target === 'symbol'
+  const opacityTarget = !cloudTarget && target !== 'issue' && simpleColorTarget && target !== 'underline' && target !== 'strikeout'
+
+  const changeDefault = (changes: Partial<ToolFormat>) => {
+    if (target) onDefaultsChange(updateToolFormat(defaults, target, changes))
+  }
+  const fillColor = activeSelection ? activeSelection.interiorColor : target ? defaults[target].fillColor : null
+  const borderColor = activeSelection ? activeSelection.borderColor : target ? defaults[target].borderColor : null
+
+  const changeColor = (next: RGB) => {
+    if (activeSelection) store.update(activeSelection.id, { color: next })
+    else changeDefault({ color: next })
+  }
+  const changeFill = (next: RGB | null) => {
+    if (activeSelection) store.update(activeSelection.id, { interiorColor: next })
+    else changeDefault({ fillColor: next })
+  }
+  const changeBorder = (next: RGB | null) => {
+    if (activeSelection) store.update(activeSelection.id, { borderColor: next })
+    else changeDefault({ borderColor: next })
+  }
+  const changeBorderWidth = (next: number) => {
+    if (activeSelection) store.update(activeSelection.id, { borderWidth: next })
+    else changeDefault({ borderWidth: next })
+  }
+  const changeOpacity = (next: number) => {
+    if (activeSelection) store.update(activeSelection.id, { opacity: next })
+    else changeDefault({ opacity: next })
+  }
+  const changeTextOpacity = (next: number) => {
+    if (activeSelection) store.update(activeSelection.id, { textOpacity: next })
+    else changeDefault({ textOpacity: next })
+  }
+  const changeBoxOpacity = (next: number) => {
+    if (activeSelection) store.update(activeSelection.id, { boxOpacity: next })
+    else changeDefault({ boxOpacity: next })
+  }
+  const changeSymbolSize = (next: number) => {
+    if (activeSelection?.kind === 'symbol' || activeSelection?.kind === 'issue') {
+      const centerX = (activeSelection.rect[0] + activeSelection.rect[2]) / 2
+      const centerY = (activeSelection.rect[1] + activeSelection.rect[3]) / 2
+      store.resize(activeSelection.id, [centerX - next / 2, centerY - next / 2, centerX + next / 2, centerY + next / 2])
+    } else changeDefault({ symbolSize: next })
+  }
+  const changeSymbol = (next: SymbolName) => {
+    if (activeSelection?.kind === 'symbol') store.update(activeSelection.id, { symbol: next })
+    else changeDefault({ symbol: next })
+  }
+  const makeWhiteout = () => {
+    if (activeSelection) store.update(activeSelection.id, { interiorColor: [1, 1, 1], borderColor: null, opacity: 1 })
+    else changeDefault({ fillColor: [1, 1, 1], borderColor: null, opacity: 1 })
+  }
+
+  const changeText = async (changes: { fontSize?: number; font?: FontName }) => {
+    if (activeSelection?.measure) { store.update(activeSelection.id, changes); return }
+    if (!activeSelection || (activeSelection.kind !== 'freetext' && activeSelection.kind !== 'callout')) {
+      changeDefault(changes)
+      return
+    }
+    const fontSize = changes.fontSize ?? activeSelection.fontSize
+    const font = changes.font ?? activeSelection.font
+    const width = activeSelection.rect[2] - activeSelection.rect[0]
+    const layout = await pool.layoutText(activeSelection.text, fontSize, width, font)
+    store.update(activeSelection.id, {
+      ...changes,
+      layout,
+      rect: [activeSelection.rect[0], activeSelection.rect[1], activeSelection.rect[2], activeSelection.rect[1] + layout.height],
+    })
+  }
+
+  if (target === 'count') {
+    const quantity = activeSelection?.quantity
+    const fixture = quantity ? store.getCountFixture(quantity.itemId) : activeSelection?.count ? store.fixtureForCount(activeSelection.count) : store.getCountFixture(store.selectedFixtureId)
+    return <aside className="format-panel" aria-label="書式" data-testid="format-panel">
+      <h2>数量拾い</h2>{pickupError && <p role="alert">{pickupError}</p>}
+      {routeApplyStatus && <p role="status"><small>{routeApplyStatus}</small></p>}
+      {/* What is loaded on the route comes first; item details and location follow. */}
+      {quantity?.method === 'polyline' && activeSelection?.measure && activeSelection.vertices && store.selectedIds().length === 1 && <RouteItems annotation={activeSelection} store={store} />}
+      {store.selectedIds().length >= 2 && store.selectedIds().every(id => store.get(id)?.quantity?.method === 'polyline') && <BulkRouteConditions key={store.selectedIds().join(',')} store={store} />}
+      {store.selectedPickupsOnly() && fixture && quantity?.method !== 'polyline' && store.selectedIds().every(id => { const a = store.get(id); return a?.quantity ? a.quantity.method !== 'polyline' && a.quantity.itemId === fixture.id : !!a?.count && store.fixtureForCount(a.count)?.id === fixture.id }) && <PickupCondition key={fixture.id + store.selectedIds().join(',')} store={store} fixture={fixture} />}
+      {store.selectedIds().length === 1 && activeSelection?.count && !activeSelection.quantity && fixture && <CountItems key={activeSelection.id + ':' + fixture.id} annotation={activeSelection} store={store} />}
+      {fixture ? <><p>{fixtureCode(fixture)} {fixture.name}</p>{quantityMethod(fixture) === 'click' ? <svg className="fixture-preview" viewBox={`-18 -24 ${Math.max(80, 40 + fixture.style.size * (1 + .7 * fixtureDrawingCode(fixture).length))} 50`} aria-label="印の見本"><CountMarker style={fixture.style} code={fixtureDrawingCode(fixture)} /></svg> : <QuantitySwatch fixture={fixture} />}
+        <button onClick={() => fixtureUi?.edit(fixture.id)}>項目を編集…</button>
+        <Suspense fallback={<p>関連の候補を読み込んでいます…</p>}>
+          <RelatedSuggestions
+            store={store}
+            fixtures={store.getCountFixturesSnapshot()}
+            selectedFixtureId={fixture.id}
+            routeId={quantity?.method === 'polyline'
+              && store.selectedIds().length === 1
+              && store.selectedIds()[0] === activeSelection?.id
+              ? activeSelection?.id : undefined}
+            state={relatedState}
+            onStateChange={relatedMemory.update}
+            onOpenMaster={(query, context) => fixtureUi?.addFromMaster(query, context)}
+            onCreateFixture={(initial, context) => fixtureUi?.createFixture(initial, context)}
+            onApplyRelated={(fixtureIds, context) => {
+              if (fixtureUi?.canEdit !== true) return
+              setPickupError('')
+              setRouteApplyStatus('')
+              try {
+                const origin = store.getCountFixture(context.originFixtureId)
+                if (!origin) {
+                  throw new Error('起点の項目が見つかりません。')
+                }
+                const ids = [...new Set(fixtureIds)]
+                const current = store.getCountFixtures()
+                const matches = ids.map(id => current.find(fixture => fixture.id === id))
+                if (!matches.length || matches.some(fixture => !fixture)) {
+                  throw new Error('反映する項目が見つかりません。')
+                }
+                const fixtures = matches.filter(
+                  (fixture): fixture is NonNullable<typeof fixture> => fixture !== undefined,
+                )
+                const result = store.applyRelatedAdditions(
+                  origin.id, fixtures, context.routeId, scopePlanForContext(context),
+                )
+                if (result.error) throw new Error(result.error)
+                setRouteApplyStatus(relatedAdditionStatus(origin, result))
+              } catch (reason) {
+                setPickupError(reason instanceof Error ? reason.message : String(reason))
+              }
+            }}
+            onSelectFixture={id => {
+              store.selectFixture(id)
+              if (store.getCountFixture(id)?.link) store.setRouteTemplate(null)
+              else fixtureUi?.select()
+            }}
+            canAddFixtures={fixtureUi?.canEdit === true
+              && store.getCountFixturesSnapshot().length < 1000}
+            canEditReviews={fixtureUi?.canEdit === true}
+            onRetryReviews={() => fixtureUi?.retryRelatedReviews?.()}
+          />
+        </Suspense>
+      </> : <button onClick={() => fixtureUi?.open()}>数量拾いの一覧で項目を選んでください</button>}
+      {store.selectedPickupsOnly() && <PickupLocation key={store.selectedIds().join(',') + ':' + store.getSnapshot()} store={store} />}
+      {(activeSelection?.count || quantity) && <label>項目を変更<select aria-label="項目を変更" value={fixture?.id ?? ''} onChange={e => setPickupError(store.reassignCounts(store.selectedIds(), e.currentTarget.value) ?? '')}>
+        {!fixture && <option value="">項目を選んでください</option>}{store.getCountFixtures().filter(f => quantity && (quantity.method === 'polygon' || quantity.method === 'lengthHeight' || quantity.method === 'polygonDepth' || quantity.method === 'lengthWidthDepth')
+          ? store.selectedIds().every(id => { const a = store.get(id); return !!a?.quantity && QUANTITY_METHODS[quantityKind(f)].includes(a.quantity.method) })
+          : quantityMethod(f) === (quantity?.method ?? 'click')).map(f => <option key={f.id} value={f.id}>{fixtureCode(f)} {f.name}</option>)}
+      </select></label>}
+      {quantity && activeSelection?.measure && activeSelection.vertices && store.selectedIds().length === 1 && <>
+        {quantity.method !== 'polyline' && <p>{quantityPoints(quantity.method) === 'polygon' ? '面積' : '長さ'}　{(quantityPoints(quantity.method) === 'polygon' ? polygonArea(activeSelection.vertices) * activeSelection.measure.mmPerPoint ** 2 / 1e6 : polylineLength(activeSelection.vertices) * activeSelection.measure.mmPerPoint / 1000).toFixed(2)} {quantityPoints(quantity.method) === 'polygon' ? 'm²' : 'm'}</p>}
+        {quantityDimensions(quantity.method).map(key => <QuantityValueInput key={activeSelection.id + key} label={QUANTITY_DIMENSIONS[key]} value={quantity[key] ?? 0} commit={n => store.updateQuantityValues(activeSelection.id, { [key]: n })} />)}
+        {quantity.method !== 'polyline' && <p>この拾い　{quantityLabel(activeSelection.vertices, activeSelection.measure.mmPerPoint, quantity, '', false, undefined, id => store.openingSize(id))}</p>}
+        {(quantity.method === 'polygon' || quantity.method === 'polygonDepth') && <AreaHoles key={'holes:' + activeSelection.id} annotation={activeSelection} store={store} />}
+        {(quantity.method === 'polygon' || quantity.method === 'lengthHeight') && <QuantityOpenings key={'openings:' + activeSelection.id} annotation={activeSelection} store={store} />}
+      </>}
+    </aside>
+  }
+  return <aside className="format-panel" aria-label="書式" data-testid="format-panel">
+    <h2>{target ? `${formatToolLabel(target)}の書式` : '書式'}</h2>
+    {!target && <p>道具または書き込みを選んでください。</p>}
+    {simpleColorTarget && values && <ColorField label="色" value={values.color} choices={target === 'highlight' || target === 'textHighlight' ? HIGHLIGHT_COLORS : COLORS} onChange={(next) => next && changeColor(next)} />}
+    {target === 'issue' && <p>色は状態で決まります（未回答 赤・回答済み 青・修正確認 灰）</p>}
+    {target === 'symbol' && values && <fieldset>
+      <legend>記号の種類</legend>
+      <div className="symbol-grid">
+        {SYMBOL_OPTIONS.map((item) => <button
+          key={item.name}
+          type="button"
+          title={item.label}
+          aria-label={`記号 ${item.glyph}（${item.label}）`}
+          aria-pressed={values.symbol === item.name}
+          className={values.symbol === item.name ? 'selected' : ''}
+          onClick={() => changeSymbol(item.name)}
+        >{item.glyph}</button>)}
+      </div>
+    </fieldset>}
+    {target === 'symbol' && values && <label>
+      大きさ
+      <select aria-label="記号の大きさ" value={activeSelection?.kind === 'symbol' ? Math.round(activeSelection.rect[2] - activeSelection.rect[0]) : (values as ToolFormat).symbolSize} onChange={(event) => changeSymbolSize(Number(event.currentTarget.value))}>
+        {SYMBOL_SIZES.map((value) => <option key={value} value={value}>{value} pt</option>)}
+      </select>
+    </label>}
+    {target === 'issue' && values && <>
+      <label>大きさ<select aria-label="指摘の大きさ" value={activeSelection ? Math.round(activeSelection.rect[2] - activeSelection.rect[0]) : (values as ToolFormat).symbolSize} onChange={event => changeSymbolSize(Number(event.currentTarget.value))}>
+        <option value="12">小（12 pt）</option><option value="16">中（16 pt）</option><option value="24">大（24 pt）</option>
+      </select></label>
+      {activeSelection?.issue && <label>状態<select className="issue-status" data-status={issueStatusChoice(activeSelection.issue.status)} aria-label="指摘の状態" value={issueStatusChoice(activeSelection.issue.status)} onChange={event => store.update(activeSelection.id, { issueStatus: event.currentTarget.value as IssueStatusChoice })}>
+        {ISSUE_STATUS_CHOICES.map(status => <option key={status} value={status}>{issueStatusLabel(status)}</option>)}
+      </select></label>}
+    </>}
+    {cloudTarget && values && <label>雲の大きさ<select aria-label="雲の大きさ" value={values.cloudIntensity ?? 1} onChange={event => {
+      const cloudIntensity = Number(event.currentTarget.value) as CloudIntensity
+      if (activeSelection) store.update(activeSelection.id, { cloudIntensity }); else changeDefault({ cloudIntensity })
+    }}><option value="0">小</option><option value="1">中</option><option value="2">大</option></select></label>}
+    {textTarget && values && <ColorField label="文字の色" value={values.color} onChange={(next) => next && changeColor(next)} />}
+    {(shapeTarget || textTarget) && <ColorField label={textTarget ? '背景色' : '塗り'} value={fillColor} allowNone onChange={changeFill} />}
+    {((shapeTarget && !cloudTarget) || textTarget) && <ColorField label="枠線の色" value={borderColor} allowNone onChange={changeBorder} />}
+    {target && values && ((simpleColorTarget && target !== 'symbol' && target !== 'textHighlight' && target !== 'underline' && target !== 'strikeout') || shapeTarget || textTarget) && <label>
+      {textTarget ? '枠線の太さ' : '線の太さ'}
+      <select aria-label={textTarget ? '枠線の太さ' : '線の太さ'} value={values.borderWidth} onChange={(event) => changeBorderWidth(Number(event.currentTarget.value))}>
+        {(target === 'highlight' ? HIGHLIGHT_WIDTHS : textTarget ? TEXT_BORDER_WIDTHS : WIDTHS).map((value) => <option key={value} value={value}>{value} pt</option>)}
+      </select>
+    </label>}
+    {(target === 'arrow' || target === 'callout') && values && <label>
+      矢印先端の大きさ
+      <select aria-label="矢印先端の大きさ" value={values.arrowHeadSize ?? 'auto'} onChange={event => {
+        const next = event.target.value === 'auto' ? null : Number(event.target.value)
+        if (activeSelection) store.update(activeSelection.id, { arrowHeadSize: next })
+        else changeDefault({ arrowHeadSize: next })
+      }}>
+        <option value="auto">線幅に合わせる（既定）</option>
+        {[...new Set([4, 6, 8, 12, 16, 24, 32, ...(values.arrowHeadSize ? [values.arrowHeadSize] : [])])].sort((a, b) => a - b).map(size => <option key={size} value={size}>{size} pt</option>)}
+      </select>
+    </label>}
+    {shapeTarget && values && <label>
+      透明度
+      <select aria-label="透明度" value={values.opacity} onChange={(event) => changeOpacity(Number(event.currentTarget.value))}>
+        <option value="1">100%</option><option value="0.5">50%</option><option value="0.25">25%</option>
+      </select>
+    </label>}
+    {opacityTarget && values && <label>
+      透明度
+      <select aria-label="透明度" value={values.opacity} onChange={(event) => changeOpacity(Number(event.currentTarget.value))}>
+        <option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option>{target === 'highlight' && <option value="0.35">35%（既定）</option>}{target === 'textHighlight' && <option value="0.4">40%（既定）</option>}<option value="0.25">25%</option>
+      </select>
+    </label>}
+    {target === 'square' && <button type="button" className="whiteout-button" title="上に白い四角を重ねて見えなくします。下の文字やデータはファイルに残ります" onClick={makeWhiteout}>白塗りにする</button>}
+    {measureTarget && values && <label>文字の大きさ<select aria-label="文字の大きさ" value={values.fontSize} onChange={event => void changeText({ fontSize: Number(event.currentTarget.value) })}>{FONT_SIZES.map(v => <option key={v} value={v}>{v} pt</option>)}</select></label>}
+    {activeSelection?.measure?.kind === 'area' && !activeSelection.quantity && !activeSelection.count && !activeSelection.legacyChange && activeSelection.vertices && store.selectedIds().length === 1 && <AreaHoles key={'holes:' + activeSelection.id} annotation={activeSelection} store={store} />}
+    {textTarget && values && <>
+      <label>
+        文字の透明度
+        <select aria-label="文字の透明度" value={values.textOpacity} onChange={(event) => changeTextOpacity(Number(event.currentTarget.value))}>
+          <option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option><option value="0.25">25%</option>
+        </select>
+      </label>
+      <label>
+        背景と枠の透明度
+        <select aria-label="背景と枠の透明度" value={values.boxOpacity} onChange={(event) => changeBoxOpacity(Number(event.currentTarget.value))}>
+          <option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option><option value="0.25">25%</option>
+        </select>
+      </label>
+      <label>
+        文字の大きさ
+        <select aria-label="文字の大きさ" value={values.fontSize} onChange={(event) => void changeText({ fontSize: Number(event.currentTarget.value) })}>
+          {FONT_SIZES.map((value) => <option key={value} value={value}>{value} pt</option>)}
+        </select>
+      </label>
+      <label>
+        書体
+        <select aria-label="書体" value={values.font} onChange={(event) => void changeText({ font: event.currentTarget.value as FontName })}>
+          <option value="BIZUDGothic">ゴシック</option>
+          <option value="BIZUDMincho">明朝</option>
+        </select>
+      </label>
+    </>}
+    {textEditorOpen && <SnippetPanel />}
+    {textEditorOpen && <fieldset>
+      <legend>記号を挿入</legend>
+      <div className="text-symbol-grid">
+        {TEXT_INSERT_SYMBOLS.map((item) => <button
+          key={item}
+          type="button"
+          data-text-symbol={item}
+          aria-label={`記号を挿入 ${item}`}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => insertIntoActiveTextEditor(item)}
+        >{item}</button>)}
+      </div>
+    </fieldset>}
+    {target && <p className="format-target">{activeSelection ? '選択中の書き込み' : '次に作る書き込み'}</p>}
+  </aside>
+}
+
+function AreaHoles({ annotation, store }: { annotation: EditableAnnotation; store: AnnotationStore }) {
+  const [error, setError] = useState('')
+  const holes = annotation.quantity?.holes ?? annotation.measure?.holes ?? []
+  const drawing = store.areaHoleTarget === annotation.id
+  return <fieldset className="area-holes">
+    <legend>除外範囲</legend>
+    <ol style={{ paddingLeft: 20, maxHeight: 280, overflowY: 'auto' }}>
+      {holes.map((hole, index) => <li key={index}>
+        <div className="area-hole-row">
+          <span>除外 {index + 1}　{(polygonArea(hole) * annotation.measure!.mmPerPoint ** 2 / 1e6).toFixed(2)} m²</span>
+          <button type="button" aria-label={'除外' + (index + 1) + 'を削除'} onClick={() => setError(store.setAreaHoles(annotation.id, holes.filter((_, i) => i !== index)) ?? '')}>削除</button>
+        </div>
+      </li>)}
+    </ol>
+    <button type="button" disabled={!drawing && holes.length >= 50} onClick={() => {
+      setError('')
+      if (drawing) store.endAreaHoles()
+      else if (!store.startAreaHoles(annotation.id)) setError('除外する拾いまたは計測の面積を1つ選んでください。')
+    }}>{drawing ? '囲み終える' : '除外範囲を囲む'}</button>
+    {holes.length >= 50 && <p>除外範囲は50個までです。</p>}
+    {error && <p role="alert">{error}</p>}
+  </fieldset>
+}
+
+interface OpeningDraft {
+  key: number
+  value: QuantityOpening
+  saved?: QuantityOpening
+}
+
+function QuantityOpenings({ annotation, store }: { annotation: EditableAnnotation; store: AnnotationStore }) {
+  const sequence = useRef(0)
+  const makeRows = (openings: readonly QuantityOpening[]): OpeningDraft[] => openings.map(opening => ({
+    key: ++sequence.current, value: { ...opening }, saved: { ...opening },
+  }))
+  const [rows, setRows] = useState<OpeningDraft[]>(() => makeRows(annotation.quantity?.openings ?? []))
+  const [error, setError] = useState('')
+  const serialized = JSON.stringify(annotation.quantity?.openings ?? [])
+  const lastSaved = useRef(serialized)
+  useEffect(() => {
+    // Preserve unfinished rows across our own commits and fixture updates.
+    // Undo/Redo or an external opening edit replaces the local draft.
+    if (serialized === lastSaved.current) return
+    lastSaved.current = serialized
+    setRows(makeRows(annotation.quantity?.openings ?? []))
+    setError('')
+  }, [serialized])
+
+  const groups = groupFixtures(store.getCountFixtures().filter(f => !!store.openingSize(f.id))).sort((a, b) =>
+    a.category === '建具' && b.category !== '建具' ? -1 : b.category === '建具' && a.category !== '建具' ? 1 : 0)
+  const selectable = new Set(groups.flatMap(group => group.items.map(f => f.id)))
+  const validDimension = (value: number | undefined): value is number => value !== undefined && Number.isFinite(value) && value > 0 && value <= 100
+  const complete = (opening: QuantityOpening) => Number.isInteger(opening.count) && opening.count >= 1 && opening.count <= 999
+    && (!!opening.itemId || validDimension(opening.widthM) && validDimension(opening.heightM))
+  const size = (opening: QuantityOpening) => {
+    const current = opening.itemId ? store.openingSize(opening.itemId) : undefined
+    const widthM = current?.widthM ?? opening.widthM, heightM = current?.heightM ?? opening.heightM
+    return validDimension(widthM) && validDimension(heightM) ? { widthM, heightM } : undefined
+  }
+  const area = (opening: QuantityOpening) => {
+    const dimensions = size(opening)
+    return dimensions ? dimensions.widthM * dimensions.heightM * opening.count : undefined
+  }
+  const persist = (next: OpeningDraft[]) => {
+    const openings = next.flatMap(row => row.saved ? [{ ...row.saved }] : [])
+    const previous = lastSaved.current
+    lastSaved.current = JSON.stringify(openings)
+    const reason = store.setQuantityOpenings(annotation.id, openings)
+    if (reason) { lastSaved.current = previous; setError(reason); return false }
+    setRows(next)
+    setError('')
+    return true
+  }
+  const change = (key: number, value: QuantityOpening) => {
+    const next = rows.map(row => row.key === key ? { ...row, value, saved: complete(value) ? { ...value } : row.saved } : row)
+    persist(next)
+  }
+  const areas = rows.map(row => area(row.value))
+  const total = areas.every(value => value !== undefined) ? areas.reduce<number>((sum, value) => sum + value!, 0).toFixed(2) : '?'
+
+  return <fieldset className="quantity-openings">
+    <legend>開口部（差し引く）</legend>
+    {!groups.length && <p>開口寸法のある建具がありません。項目の編集で個数の項目に開口寸法を入れると選べます</p>}
+    <ol className="quantity-opening-list">
+      {rows.map((row, index) => {
+        const opening = row.value, label = '開口部' + (index + 1)
+        const missingFixture = opening.itemId && !selectable.has(opening.itemId) ? store.getCountFixture(opening.itemId) : undefined
+        const rowArea = area(opening)
+        return <li key={row.key} className="quantity-opening-row">
+          <label>種類<select aria-label={label + 'の種類'} value={opening.itemId ?? ''} onChange={event => {
+            const itemId = event.currentTarget.value
+            if (!itemId) { change(row.key, { count: opening.count }); return }
+            const dimensions = store.openingSize(itemId)
+            if (dimensions) change(row.key, { itemId, ...dimensions, count: opening.count })
+          }}>
+            <option value="">寸法を入力</option>
+            {opening.itemId && !selectable.has(opening.itemId) && <option value={opening.itemId}>{missingFixture ? `${fixtureCode(missingFixture)} ${missingFixture.name}` : opening.itemId}（開口寸法不明）</option>}
+            {groups.map(group => <optgroup key={group.category} label={group.category}>
+              {group.items.map(fixture => {
+                const dimensions = store.openingSize(fixture.id)!
+                return <option key={fixture.id} value={fixture.id}>{fixtureCode(fixture)} {fixture.name}（{dimensions.widthM.toFixed(2)}×{dimensions.heightM.toFixed(2)}）</option>
+              })}
+            </optgroup>)}
+          </select></label>
+          {!opening.itemId && <div className="quantity-opening-size">
+            <OpeningValueInput label="幅（m）" ariaLabel={label + 'の幅（m）'} value={opening.widthM} commit={widthM => change(row.key, { ...opening, widthM })} />
+            <OpeningValueInput label="高さ（m）" ariaLabel={label + 'の高さ（m）'} value={opening.heightM} commit={heightM => change(row.key, { ...opening, heightM })} />
+          </div>}
+          <OpeningValueInput label="箇所数" ariaLabel={label + 'の箇所数'} value={opening.count} integer commit={count => {
+            if (count !== undefined) change(row.key, { ...opening, count })
+          }} />
+          <div className="quantity-opening-summary">
+            <span>{rowArea === undefined ? '?' : rowArea.toFixed(2)} m²</span>
+            <button type="button" aria-label={label + 'を削除'} onClick={() => persist(rows.filter(candidate => candidate.key !== row.key))}>削除</button>
+          </div>
+          {!complete(opening) && <p role="status">幅と高さを入力すると確定します。</p>}
+        </li>
+      })}
+    </ol>
+    <button type="button" disabled={rows.length >= 50} onClick={() => {
+      setRows(previous => [...previous, { key: ++sequence.current, value: { count: 1 } }])
+      setError('')
+    }}>開口部を追加</button>
+    {rows.length >= 50 && <p>開口部は50件までです。</p>}
+    <p>合計　{total} m²</p>
+    {error && <p role="alert">{error}</p>}
+  </fieldset>
+}
+
+function OpeningValueInput({ label, ariaLabel, value, integer = false, commit }: {
+  label: string
+  ariaLabel: string
+  value: number | undefined
+  integer?: boolean
+  commit(value: number | undefined): void
+}) {
+  const display = (number: number | undefined) => number === undefined ? '' : integer ? String(number) : number.toFixed(2)
+  const [text, setText] = useState(() => display(value))
+  const [error, setError] = useState('')
+  useEffect(() => { setText(display(value)); setError('') }, [value, integer])
+  const finish = () => {
+    if (!text.trim()) {
+      if (integer) { setError('箇所数は1〜999の整数で入力してください。'); return }
+      setError(''); commit(undefined); return
+    }
+    const number = Number(text)
+    if (!Number.isFinite(number) || (integer ? !Number.isInteger(number) || number < 1 || number > 999 : number <= 0 || number > 100)) {
+      setError(integer ? '箇所数は1〜999の整数で入力してください。' : '寸法は0より大きく100以下で入力してください。')
+      return
+    }
+    setError('')
+    setText(display(number))
+    commit(number)
+  }
+  return <label className="quantity-opening-value">
+    {label}
+    <input aria-label={ariaLabel} type="number" min={integer ? 1 : 0} max={integer ? 999 : 100} step={integer ? 1 : 'any'} value={text}
+      onChange={event => { setText(event.currentTarget.value); setError('') }} onBlur={finish}
+      onKeyDown={event => {
+        if (event.key !== 'Enter') return
+        event.preventDefault()
+        event.stopPropagation()
+        event.currentTarget.blur()
+      }} />
+    {error && <span role="alert">{error}</span>}
+  </label>
+}
+
+function PickupLocation({ store }: { store: AnnotationStore }) {
+  const marks = store.selectedIds().map(id => { const a = store.get(id)!; return (a.quantity ?? (a.count?.version === 2 ? a.count : {})) as { floor?: string; room?: string } })
+  return <fieldset><legend>拾いの場所</legend>{(['floor', 'room'] as const).map(key => {
+    const values = marks.map(m => m[key] ?? ''), mixed = values.some(v => v !== values[0])
+    return <label key={key}>{key === 'floor' ? '階' : '部屋'}<LocationInput label={key === 'floor' ? '拾いの階' : '拾いの部屋'} value={mixed ? '' : values[0]} mixed={mixed} commit={v => store.updatePickupLocation(store.selectedIds(), key, v)} /></label>
+  })}</fieldset>
+}
+
+function PickupCondition({ store, fixture }: { store: AnnotationStore; fixture: NonNullable<ReturnType<AnnotationStore['getCountFixture']>> }) {
+  const ids = store.selectedIds(), values = ids.map(id => { const a = store.get(id)!; return a.quantity?.condition ?? (a.count?.version === 2 ? a.count.condition : undefined) })
+  return <ConditionSelect fixture={fixture} label="施工条件" value={values[0]} mixed={values.some(v => v !== values[0])} emptyCandidatesOnly
+    commit={value => store.setQuantityCondition(ids, value ?? undefined)} add={value => addQuantityCandidate(store, ids, fixture.id, value)} />
+}
+function BulkRouteConditions({ store }: { store: AnnotationStore }) {
+  const ids = store.selectedIds(), itemIds = [...new Set(ids.flatMap(id => routeMembers(store.get(id)!.quantity!).map(e => e.itemId)))]
+  const [chosen, setChosen] = useState(itemIds[0]), [part, setPart] = useState<RoutePart>('plan'), [condition, setCondition] = useState<PartCondition>(), [status, setStatus] = useState('')
+  const itemId = itemIds.includes(chosen) ? chosen : itemIds[0], fixture = store.getCountFixture(itemId)
+  if (!fixture) return null
+  const apply = () => {
+    const count = ids.filter(id => routeMembers(store.get(id)!.quantity!).some(e => e.itemId === itemId)).length
+    store.setRouteCondition(ids, itemId, part, condition)
+    setStatus(count + ' 本の ' + fixtureCode(fixture) + ' の' + (part === 'plan' ? '平面' : part === 'rise' ? '立上り' : 'その他') + 'を' + (condition === undefined ? '未設定' : condition === null ? '数えない' : condition) + 'にしました（Ctrl+Z で戻せます）')
+  }
+  return <fieldset className="route-bulk"><legend>施工条件をまとめて変える</legend>
+    <label className="route-condition-row"><span>部材</span><select aria-label="まとめて変える部材" value={itemId} onChange={e => { setChosen(e.currentTarget.value); setCondition(undefined) }}>{itemIds.map(id => { const f = store.getCountFixture(id); return <option key={id} value={id}>{f ? fixtureCode(f) : id}</option> })}</select></label>
+    <label className="route-condition-row"><span>部分</span><select aria-label="まとめて変える部分" value={part} onChange={e => setPart(e.currentTarget.value as RoutePart)}><option value="plan">平面</option><option value="rise">立上り（すべて）</option><option value="slack">その他</option></select></label>
+    <ConditionSelect key={itemId} fixture={fixture} label="まとめて変える条件" value={condition} allowExclude commit={setCondition} add={value => {
+      const reason = addRouteCandidate(store, ids, itemId, part, value)
+      if (reason) return reason
+      setCondition(value); setStatus('条件を追加して適用しました（Ctrl+Z で戻せます）')
+    }} />
+    <button type="button" onClick={apply}>適用</button><p role="status">{status}</p>
+  </fieldset>
+}

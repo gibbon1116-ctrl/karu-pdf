@@ -1,0 +1,132 @@
+.quantity-checks {
+  padding: 12px;
+}
+
+.quantity-checks-panel {
+  box-sizing: border-box;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border-bottom: 1px solid #c8cdd3;
+}
+
+.quantity-table td.quantity-table-check-cell {
+  padding: 0 6px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.quantity-table-check-lines {
+  /* Keep the existing 32px virtual row height even with multiple verdicts. */
+  height: 28px;
+  overflow: auto;
+}
+
+.quantity-table-check-line {
+  display: block;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 14px;
+}
+
+.quantity-table-check-line.quantity-check-out {
+  color: #821b16;
+  background: #fff0ee;
+  font-weight: 700;
+}
+
+.quantity-checks h3 {
+  margin: 12px 0 8px;
+}
+
+.quantity-check-basics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px 16px;
+}
+
+.quantity-check-basic {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quantity-check-basic-value {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.quantity-checks .quantity-check-basic-value input {
+  box-sizing: border-box;
+  width: 110px;
+  min-width: 0;
+}
+
+.quantity-check-basic input[aria-invalid="true"] {
+  border-color: #b42318;
+}
+
+.quantity-check-basic small[role="alert"] {
+  color: #b42318;
+}
+
+.quantity-check-summary {
+  font-weight: 600;
+}
+
+.quantity-checks table {
+  width: 100%;
+  min-width: 960px;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.quantity-checks table th,
+.quantity-checks table td {
+  position: static;
+  height: auto;
+  padding: 7px 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  vertical-align: top;
+  border: 1px solid #c8cdd3;
+}
+
+.quantity-checks table th:nth-child(1) {
+  width: 18%;
+}
+
+.quantity-checks table th:nth-child(2) {
+  width: 11%;
+}
+
+.quantity-checks table th:nth-child(3) {
+  width: 25%;
+}
+
+.quantity-checks table th:nth-child(4) {
+  width: 16%;
+}
+
+.quantity-checks table th:nth-child(5) {
+  width: 9%;
+}
+
+.quantity-checks table td:nth-child(2),
+.quantity-checks table td:nth-child(4) {
+  font-variant-numeric: tabular-nums;
+}
+
+.quantity-checks .quantity-check-out > th,
+.quantity-checks .quantity-check-out > td {
+  color: #821b16;
+  background: #fff0ee;
+}
+
+.quantity-checks .quantity-check-out > td:nth-child(5) {
+  font-weight: 700;
+  border-left: 3px solid #b42318;
+}

@@ -1,0 +1,5428 @@
+{
+ "format": "karu-takeoff-acceptance-1",
+ "masterVersion": "v25-791152305c67",
+ "note": "原本の受入仕様から抽出した試験用の入力と期待。値は架空の TEST 値で、実規格・採用値ではない。原本の実施状態は NOT_RUN。",
+ "detailExamples": [
+  {
+   "caseId": "DX103:REBAR:kg:N",
+   "format": "REBAR",
+   "kind": "正常",
+   "unit": "kg",
+   "variables": {
+    "count": 10,
+    "length_m": 2,
+    "unit_mass_kg_per_m": 1
+   },
+   "expectedQuantity": 20,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I8*J8*K8",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:REBAR:kg:MISS",
+   "format": "REBAR",
+   "kind": "入力不足",
+   "unit": "kg",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "unit_mass_evidence_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:REBAR:t:N",
+   "format": "REBAR",
+   "kind": "正常",
+   "unit": "t",
+   "variables": {
+    "count": 10,
+    "length_m": 2,
+    "unit_mass_kg_per_m": 1
+   },
+   "expectedQuantity": 0.02,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I10*J10*K10/1000",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:REBAR:t:MISS",
+   "format": "REBAR",
+   "kind": "入力不足",
+   "unit": "t",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "unit_mass_evidence_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:STEEL:kg:N",
+   "format": "STEEL",
+   "kind": "正常",
+   "unit": "kg",
+   "variables": {
+    "count": 2,
+    "length_m": 3,
+    "unit_mass_kg_per_m": 4
+   },
+   "expectedQuantity": 24,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I12*J12*K12",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:STEEL:kg:MISS",
+   "format": "STEEL",
+   "kind": "入力不足",
+   "unit": "kg",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "mass_evidence_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:CONCRETE:m3:N",
+   "format": "CONCRETE",
+   "kind": "正常",
+   "unit": "m3",
+   "variables": {
+    "count": 2,
+    "plan_area_m2": 1.2,
+    "height_m": 0.2
+   },
+   "expectedQuantity": 0.48,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I14*J14*K14",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:CONCRETE:m3:MISS",
+   "format": "CONCRETE",
+   "kind": "入力不足",
+   "unit": "m3",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "concrete_spec",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:ANCHOR:個:N",
+   "format": "ANCHOR",
+   "kind": "正常",
+   "unit": "個",
+   "variables": {
+    "unique_anchor_count": 4
+   },
+   "expectedQuantity": 4,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I16",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:ANCHOR:個:MISS",
+   "format": "ANCHOR",
+   "kind": "入力不足",
+   "unit": "個",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "installation_detail_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:SWITCH:台:N",
+   "format": "SWITCH",
+   "kind": "正常",
+   "unit": "台",
+   "variables": {
+    "specified_equipment_count": 1
+   },
+   "expectedQuantity": 1,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I18",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:SWITCH:台:MISS",
+   "format": "SWITCH",
+   "kind": "入力不足",
+   "unit": "台",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "equipment_schedule_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:VENT:個:N",
+   "format": "VENT",
+   "kind": "正常",
+   "unit": "個",
+   "variables": {
+    "specified_device_count": 4
+   },
+   "expectedQuantity": 4,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I20",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:VENT:個:MISS",
+   "format": "VENT",
+   "kind": "入力不足",
+   "unit": "個",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "layout_evidence_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:GLASS:m2:N",
+   "format": "GLASS",
+   "kind": "正常",
+   "unit": "m2",
+   "variables": {
+    "count": 2,
+    "design_width_m": 1.2,
+    "design_height_m": 0.8
+   },
+   "expectedQuantity": 1.92,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I22*J22*K22",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:GLASS:m2:MISS",
+   "format": "GLASS",
+   "kind": "入力不足",
+   "unit": "m2",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "dimension_basis_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:FORM:m2:N",
+   "format": "FORM",
+   "kind": "正常",
+   "unit": "m2",
+   "variables": {
+    "count_of_selected_faces": 2,
+    "face_width_m": 2,
+    "face_height_m": 3
+   },
+   "expectedQuantity": 12,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I24*J24*K24",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:FORM:m2:MISS",
+   "format": "FORM",
+   "kind": "入力不足",
+   "unit": "m2",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "deduction_schedule_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:STEEL_PAINT:m2:N",
+   "format": "STEEL_PAINT",
+   "kind": "正常",
+   "unit": "m2",
+   "variables": {
+    "selected_developed_perimeter_m": 2,
+    "length_m": 3
+   },
+   "expectedQuantity": 6,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I26*J26",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:STEEL_PAINT:m2:MISS",
+   "format": "STEEL_PAINT",
+   "kind": "入力不足",
+   "unit": "m2",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "surface_basis_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:FIRE:m2:N",
+   "format": "FIRE",
+   "kind": "正常",
+   "unit": "m2",
+   "variables": {
+    "member_count": 2,
+    "area_per_member_m2": 6
+   },
+   "expectedQuantity": 12,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I28*J28",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:FIRE:m2:MISS",
+   "format": "FIRE",
+   "kind": "入力不足",
+   "unit": "m2",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "surface_schedule_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:JOINT:個:N",
+   "format": "JOINT",
+   "kind": "正常",
+   "unit": "個",
+   "variables": {
+    "unique_joint_count": 6
+   },
+   "expectedQuantity": 6,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I30",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:JOINT:個:MISS",
+   "format": "JOINT",
+   "kind": "入力不足",
+   "unit": "個",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "connection_detail_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:BOLT:個:N",
+   "format": "BOLT",
+   "kind": "正常",
+   "unit": "個",
+   "variables": {
+    "unique_bolt_count": 8
+   },
+   "expectedQuantity": 8,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I32",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:BOLT:個:MISS",
+   "format": "BOLT",
+   "kind": "入力不足",
+   "unit": "個",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "bolt_detail_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:WASTE_MASS:kg:N",
+   "format": "WASTE_MASS",
+   "kind": "正常",
+   "unit": "kg",
+   "variables": {
+    "count": 2,
+    "component_mass_kg": 12
+   },
+   "expectedQuantity": 24,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I34*J34",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:WASTE_MASS:kg:MISS",
+   "format": "WASTE_MASS",
+   "kind": "入力不足",
+   "unit": "kg",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "disposal_scope_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:OIL_BUND:m3:N",
+   "format": "OIL_BUND",
+   "kind": "正常",
+   "unit": "m3",
+   "variables": {
+    "outer_plan_area_m2": 6,
+    "inner_plan_area_m2": 4,
+    "height_m": 0.2
+   },
+   "expectedQuantity": 0.4,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "(I36-J36)*K36",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:OIL_BUND:m3:MISS",
+   "format": "OIL_BUND",
+   "kind": "入力不足",
+   "unit": "m3",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "detail_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:EARTH_HAUL:m3:N",
+   "format": "EARTH_HAUL",
+   "kind": "正常",
+   "unit": "m3",
+   "variables": {
+    "excavation_volume_m3": 10,
+    "reuse_volume_m3": 3
+   },
+   "expectedQuantity": 7,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I38-J38",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:EARTH_HAUL:m3:MISS",
+   "format": "EARTH_HAUL",
+   "kind": "入力不足",
+   "unit": "m3",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "haul_distance_basis_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:EARTH_DISPOSE:m3:N",
+   "format": "EARTH_DISPOSE",
+   "kind": "正常",
+   "unit": "m3",
+   "variables": {
+    "disposal_volume_m3": 7
+   },
+   "expectedQuantity": 7,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I40",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:EARTH_DISPOSE:m3:MISS",
+   "format": "EARTH_DISPOSE",
+   "kind": "入力不足",
+   "unit": "m3",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "disposal_evidence_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:BEDDING:m3:N",
+   "format": "BEDDING",
+   "kind": "正常",
+   "unit": "m3",
+   "variables": {
+    "plan_area_m2": 10,
+    "thickness_m": 0.1
+   },
+   "expectedQuantity": 1,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I42*J42",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:BEDDING:m3:MISS",
+   "format": "BEDDING",
+   "kind": "入力不足",
+   "unit": "m3",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "dimension_basis_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:LABOR:工数:N",
+   "format": "LABOR",
+   "kind": "正常",
+   "unit": "工数",
+   "variables": {
+    "base_work_value": 2,
+    "correction_value_dimensionless": 0.5
+   },
+   "expectedQuantity": 1,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I44*J44",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:LABOR:工数:MISS",
+   "format": "LABOR",
+   "kind": "入力不足",
+   "unit": "工数",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "area_schedule_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:DEMO:m3:N",
+   "format": "DEMO",
+   "kind": "正常",
+   "unit": "m3",
+   "variables": {
+    "plan_area_m2": 4,
+    "thickness_m": 0.2,
+    "void_volume_m3": 0.1
+   },
+   "expectedQuantity": 0.7,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I46*J46-K46",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:DEMO:m3:MISS",
+   "format": "DEMO",
+   "kind": "入力不足",
+   "unit": "m3",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "deduction_basis_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:GROUT:m3:N",
+   "format": "GROUT",
+   "kind": "正常",
+   "unit": "m3",
+   "variables": {
+    "fill_area_m2": 0.5,
+    "gap_m": 0.03,
+    "deduction_volume_m3": 0.0015
+   },
+   "expectedQuantity": 0.0135,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I48*J48-K48",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:GROUT:m3:MISS",
+   "format": "GROUT",
+   "kind": "入力不足",
+   "unit": "m3",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "detail_basis_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:STRIP:m3:N",
+   "format": "STRIP",
+   "kind": "正常",
+   "unit": "m3",
+   "variables": {
+    "area_m2": 10,
+    "depth_m": 0.2
+   },
+   "expectedQuantity": 2,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I50*J50",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:STRIP:m3:MISS",
+   "format": "STRIP",
+   "kind": "入力不足",
+   "unit": "m3",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "scope_evidence_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:COEFF:m2:N",
+   "format": "COEFF",
+   "kind": "正常",
+   "unit": "m2",
+   "variables": {
+    "base_quantity_m2": 10,
+    "coefficient_dimensionless": 1.2
+   },
+   "expectedQuantity": 12,
+   "expectedState": "REFERENCE_ONLY",
+   "missing": null,
+   "calculation": "I52*J52",
+   "sourceStatus": "NOT_RUN"
+  },
+  {
+   "caseId": "DX103:COEFF:m2:MISS",
+   "format": "COEFF",
+   "kind": "入力不足",
+   "unit": "m2",
+   "variables": {},
+   "expectedQuantity": null,
+   "expectedState": "UNMEASURED",
+   "missing": "applicability_evidence_id",
+   "calculation": "入力不足で未算定",
+   "sourceStatus": "NOT_RUN"
+  }
+ ],
+ "methodCases": [
+  {
+   "caseId": "UAT-01-N",
+   "methodId": "U19:POWER_EQUIP",
+   "definitionIds": [
+    "REL-039"
+   ],
+   "kind": "正常・算定",
+   "goal": "仮設電源機器の設置の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "capacity": "各50kVA",
+    "equipment_ids": [
+     "TEST-GEN-1",
+     "TEST-GEN-2"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "installation_scope": "発電機設置のみ。賃貸・燃料・配線を除外",
+    "location_ids": [
+     "TEST-Z1",
+     "TEST-Z2"
+    ],
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:POWER_EQUIP",
+    "object_or_surface_ids": [
+     "TEST-GEN-1",
+     "TEST-GEN-2"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "現物台数[台]"
+   ],
+   "values": [
+    2
+   ],
+   "calc": "I",
+   "expectedQuantity": 2,
+   "expectedUnit": "台",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-01-E",
+   "methodId": "U19:POWER_EQUIP",
+   "definitionIds": [
+    "REL-039"
+   ],
+   "kind": "異常・停止",
+   "goal": "仮設電源機器の設置の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "capacity": "各50kVA",
+    "equipment_ids": [
+     "TEST-GEN-1",
+     "TEST-GEN-1"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "installation_scope": "発電機設置のみ。賃貸・燃料・配線を除外",
+    "location_ids": [
+     "TEST-Z1",
+     "TEST-Z2"
+    ],
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:POWER_EQUIP",
+    "object_or_surface_ids": [
+     "TEST-GEN-1",
+     "TEST-GEN-2"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "同一現物IDを重複登録。2台として採用せず訂正を要求",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-02-N",
+   "methodId": "U19:POWER_PANEL",
+   "definitionIds": [
+    "REL-039"
+   ],
+   "kind": "正常・算定",
+   "goal": "仮設盤の設置の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "installation_scope": "盤据付のみ",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:POWER_PANEL",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "panel_configuration": "独立仮設盤3面",
+    "panel_ids": [
+     "TEST-P1",
+     "TEST-P2",
+     "TEST-P3"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "面",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "対象盤面数[面]"
+   ],
+   "values": [
+    3
+   ],
+   "calc": "I",
+   "expectedQuantity": 3,
+   "expectedUnit": "面",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-02-E",
+   "methodId": "U19:POWER_PANEL",
+   "definitionIds": [
+    "REL-039"
+   ],
+   "kind": "異常・停止",
+   "goal": "仮設盤の設置の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "installation_scope": "盤据付のみ",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:POWER_PANEL",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "panel_configuration": null,
+    "panel_ids": [
+     "TEST-P1",
+     "TEST-P2",
+     "TEST-P3"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "面",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "盤の面構成が不明。回路数を面数へ置換しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-03-N",
+   "methodId": "U19:POWER_CABLE",
+   "definitionIds": [
+    "REL-039"
+   ],
+   "kind": "正常・算定",
+   "goal": "仮設配線の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "cable_spec": "TEST-同一仕様・1条",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "length_basis_id": "TEST-LENGTH-1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:POWER_CABLE",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_or_quote_id": "TEST-QUOTE1",
+    "riser_lengths": [
+     3
+    ],
+    "route_lengths": [
+     18
+    ],
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "segment_ids": [
+     "TEST-H1",
+     "TEST-V1",
+     "TEST-A1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "approved_extra_length_m": 2,
+    "price_unit": "m",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "平面[m]",
+    "立上り[m]",
+    "根拠付余長[m]"
+   ],
+   "values": [
+    18,
+    3,
+    2
+   ],
+   "calc": "I+J+K",
+   "expectedQuantity": 23,
+   "expectedUnit": "m",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-03-E",
+   "methodId": "U19:POWER_CABLE",
+   "definitionIds": [
+    "REL-039"
+   ],
+   "kind": "異常・停止",
+   "goal": "仮設配線の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "cable_spec": "TEST-同一仕様・1条",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "length_basis_id": "TEST-LENGTH-1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:POWER_CABLE",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_or_quote_id": "TEST-QUOTE1",
+    "riser_lengths": null,
+    "route_lengths": [
+     18
+    ],
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "segment_ids": [
+     "TEST-H1",
+     "TEST-V1",
+     "TEST-A1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "approved_extra_length_m": 2,
+    "price_unit": "m",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "立上り未入力。未入力を0にして18+2mとしない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-04-N",
+   "methodId": "U19:POWER_HIRE",
+   "definitionIds": [
+    "REL-039"
+   ],
+   "kind": "正常・算定",
+   "goal": "仮設機器賃貸の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "charge_calendar": "TEST契約:[開始,終了)の暦日。3日",
+    "equipment_ids": [
+     "TEST-G1",
+     "TEST-G2"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:POWER_HIRE",
+    "minimum_term": "1日",
+    "object_or_surface_ids": [
+     "TEST-G1",
+     "TEST-G2"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "rental_start_end": [
+     "2026-10-17T00:00:00+09:00",
+     "2026-10-20T00:00:00+09:00"
+    ],
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台・日",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "機器数[台]",
+    "契約課金日数[日]"
+   ],
+   "values": [
+    2,
+    3
+   ],
+   "calc": "I*J",
+   "expectedQuantity": 6,
+   "expectedUnit": "台・日",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-04-E",
+   "methodId": "U19:POWER_HIRE",
+   "definitionIds": [
+    "REL-039"
+   ],
+   "kind": "異常・停止",
+   "goal": "仮設機器賃貸の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "charge_calendar": null,
+    "equipment_ids": [
+     "TEST-G1",
+     "TEST-G2"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:POWER_HIRE",
+    "minimum_term": "1日",
+    "object_or_surface_ids": [
+     "TEST-G1",
+     "TEST-G2"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "rental_start_end": [
+     "2026-10-17T00:00:00+09:00",
+     "2026-10-20T00:00:00+09:00"
+    ],
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台・日",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "両端算入・休日・最低日数の契約条件不明。日数を推定しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-05-N",
+   "methodId": "U19:POWER_ENERGY",
+   "definitionIds": [
+    "REL-039"
+   ],
+   "kind": "正常・算定",
+   "goal": "仮設電源使用電力量の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "load_factor_basis": "TEST負荷計画で0.6",
+    "load_schedule": [
+     {
+      "load_id": "TEST-L1",
+      "active_kw": 20
+     }
+    ],
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "meter_or_design_evidence": "TEST-LOAD-1",
+    "method_option_id": "U19:POWER_ENERGY",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "operating_hours": 8,
+    "price_or_quote_id": "TEST-QUOTE1",
+    "quantity_state": "PLAN",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "kWh",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "有効負荷[kW]",
+    "運転[h]",
+    "根拠付負荷率[-]"
+   ],
+   "values": [
+    20,
+    8,
+    0.6
+   ],
+   "calc": "I*J*K",
+   "expectedQuantity": 96,
+   "expectedUnit": "kWh",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-05-E",
+   "methodId": "U19:POWER_ENERGY",
+   "definitionIds": [
+    "REL-039"
+   ],
+   "kind": "異常・停止",
+   "goal": "仮設電源使用電力量の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "load_factor_basis": null,
+    "load_schedule": [
+     {
+      "load_id": "TEST-L1",
+      "active_kw": 20
+     }
+    ],
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "meter_or_design_evidence": "TEST-LOAD-1",
+    "method_option_id": "U19:POWER_ENERGY",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "operating_hours": 8,
+    "price_or_quote_id": "TEST-QUOTE1",
+    "quantity_state": "PLAN",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "kWh",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "負荷率の根拠なし。既定1で160kWhとしない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-06-N",
+   "methodId": "U19:SCAFF_FULL",
+   "definitionIds": [
+    "REL-102"
+   ],
+   "kind": "正常・算定",
+   "goal": "外部本足場の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "centerline_segments": "TEST図の足場中心線水平長100m（壁からの離れを反映済）",
+    "construction_type": "新築・外部本足場",
+    "height_zones": "採用基準による高さ10m",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_id": "TEST-採用:国R5第2編仮設",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:SCAFF_FULL",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scaffold_plan_id": "TEST-SCF-1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "㎡",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "中心線水平長[m]",
+    "採用高さ[m]"
+   ],
+   "values": [
+    100,
+    10
+   ],
+   "calc": "I*J",
+   "expectedQuantity": 1000,
+   "expectedUnit": "㎡",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-06-E",
+   "methodId": "U19:SCAFF_FULL",
+   "definitionIds": [
+    "REL-102"
+   ],
+   "kind": "異常・停止",
+   "goal": "外部本足場の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "centerline_segments": null,
+    "construction_type": "新築・外部本足場",
+    "height_zones": "採用基準による高さ10m",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_id": "TEST-採用:国R5第2編仮設",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:SCAFF_FULL",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scaffold_plan_id": "TEST-SCF-1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "㎡",
+    "auto_enable": false,
+    "export_enabled": false,
+    "finish_area_m2": 800
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "仕上げ面積800㎡しかない。足場面へ転記しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-07-N",
+   "methodId": "U19:SCAFF_SINGLE",
+   "definitionIds": [
+    "REL-102"
+   ],
+   "kind": "正常・算定",
+   "goal": "外部一側足場の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "centerline_segments": "TEST図で一側足場中心線80m",
+    "construction_type": "新築・外部一側足場",
+    "height_zones": "構造体上部まで10m＋基準手摺分1m＝11m",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_id": "TEST-採用:国R5第2編仮設",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:SCAFF_SINGLE",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scaffold_plan_id": "TEST-SCF-2",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "㎡",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "中心線水平長[m]",
+    "基準反映後高さ[m]"
+   ],
+   "values": [
+    80,
+    11
+   ],
+   "calc": "I*J",
+   "expectedQuantity": 880,
+   "expectedUnit": "㎡",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-07-E",
+   "methodId": "U19:SCAFF_SINGLE",
+   "definitionIds": [
+    "REL-102"
+   ],
+   "kind": "異常・停止",
+   "goal": "外部一側足場の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "centerline_segments": "TEST図で一側足場中心線80m",
+    "construction_type": "新築・外部一側足場",
+    "height_zones": null,
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_id": "TEST-採用:国R5第2編仮設",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:SCAFF_SINGLE",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scaffold_plan_id": "TEST-SCF-2",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "㎡",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "一側足場の基準高さ未確定。本足場の高さをそのまま流用しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-08-N",
+   "methodId": "U19:SCAFF_MACHINE",
+   "definitionIds": [
+    "REL-102"
+   ],
+   "kind": "正常・算定",
+   "goal": "ゴンドラ等の台数の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "equipment_type": "高所作業車",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "location_plan": "TEST区画Z1/Z2各1台",
+    "machine_ids": [
+     "TEST-AW1",
+     "TEST-AW2"
+    ],
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:SCAFF_MACHINE",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "use_period": "3日（台数へ乗算しない）",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "計画台数[台]"
+   ],
+   "values": [
+    2
+   ],
+   "calc": "I",
+   "expectedQuantity": 2,
+   "expectedUnit": "台",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-08-E",
+   "methodId": "U19:SCAFF_MACHINE",
+   "definitionIds": [
+    "REL-102"
+   ],
+   "kind": "異常・停止",
+   "goal": "ゴンドラ等の台数の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "equipment_type": "高所作業車",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "location_plan": "TEST区画Z1/Z2各1台",
+    "machine_ids": [
+     "TEST-AW1",
+     "TEST-AW2"
+    ],
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:SCAFF_MACHINE",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "use_period": "3日（台数へ乗算しない）",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台・日",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "方式の台と単価の台日が不一致。台数×日数へ暗黙変更しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-09-N",
+   "methodId": "U19:SCAFF_LOCATION",
+   "definitionIds": [
+    "REL-102"
+   ],
+   "kind": "正常・算定",
+   "goal": "ゴンドラ等の箇所数の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "equipment_type": "仮設ゴンドラ",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "location_count_rule": "TEST見積の指定設置点3か所。移設分は包含",
+    "location_ids": [
+     "TEST-G1",
+     "TEST-G2",
+     "TEST-G3"
+    ],
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:SCAFF_LOCATION",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "use_period": "3日",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "か所",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "採用設置点[か所]"
+   ],
+   "values": [
+    3
+   ],
+   "calc": "I",
+   "expectedQuantity": 3,
+   "expectedUnit": "か所",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-09-E",
+   "methodId": "U19:SCAFF_LOCATION",
+   "definitionIds": [
+    "REL-102"
+   ],
+   "kind": "異常・停止",
+   "goal": "ゴンドラ等の箇所数の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "equipment_type": "仮設ゴンドラ",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "location_count_rule": null,
+    "location_ids": [
+     "TEST-G1",
+     "TEST-G2",
+     "TEST-G3"
+    ],
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:SCAFF_LOCATION",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "use_period": "3日",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "か所",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "箇所の定義不明。移設回数・機械台数から推測しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-10-N",
+   "methodId": "U19:MOVE_MASS",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02"
+   ],
+   "kind": "正常・算定",
+   "goal": "機器搬入出・質量区分の対象/単位/範囲を確認",
+   "input": {
+    "actual_mass_and_unit": "1000kg",
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "correction_evidence": "TEST採用表照合記録。係数はこの例の対象に限定",
+    "correction_table_version": "国R8第4編 表M1-1-68",
+    "equipment_ids": [
+     "TEST-EQ1"
+    ],
+    "equipment_volume": "1m³",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:MOVE_MASS",
+    "move_event_id": "TEST-MOVE-IN1",
+    "object_or_surface_ids": [
+     "TEST-EQ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "quantity_state": "PLAN",
+    "route_start_end": [
+     "TEST場内仮置場",
+     "TEST設置基礎上仮据付"
+    ],
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "single_or_simultaneous_group": "単独搬入",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "density_kg_m3": 1000,
+    "mass_coefficient": 1,
+    "single_factor": 1.3,
+    "price_unit": "t",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "実質量[kg]",
+    "質量区分補正[-]",
+    "単独係数[-]",
+    "kg/t"
+   ],
+   "values": [
+    1000,
+    1,
+    1.3,
+    1000
+   ],
+   "calc": "I/L*J*K",
+   "expectedQuantity": 1.3,
+   "expectedUnit": "t",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-10-E",
+   "methodId": "U19:MOVE_MASS",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02"
+   ],
+   "kind": "異常・停止",
+   "goal": "機器搬入出・質量区分の不足/不正/包含時に停止",
+   "input": {
+    "actual_mass_and_unit": "1000kg",
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "correction_evidence": null,
+    "correction_table_version": "国R8第4編 表M1-1-68",
+    "equipment_ids": [
+     "TEST-EQ1"
+    ],
+    "equipment_volume": "1m³",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:MOVE_MASS",
+    "move_event_id": "TEST-MOVE-IN1",
+    "object_or_surface_ids": [
+     "TEST-EQ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "quantity_state": "PLAN",
+    "route_start_end": [
+     "TEST場内仮置場",
+     "TEST設置基礎上仮据付"
+    ],
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "single_or_simultaneous_group": "単独搬入",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "density_kg_m3": 1000,
+    "mass_coefficient": 1,
+    "single_factor": 1.3,
+    "price_unit": "t",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "補正根拠なし。実質量1tを正式数量へ直送しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-11-N",
+   "methodId": "U19:MOVE_VOLUME",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02"
+   ],
+   "kind": "正常・算定",
+   "goal": "機器搬入出・容積区分の対象/単位/範囲を確認",
+   "input": {
+    "actual_mass_and_unit": "600kg",
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "correction_evidence": "TEST採用表照合記録。係数はこの例の対象に限定",
+    "correction_table_version": "国R8第4編 表M1-1-68",
+    "equipment_ids": [
+     "TEST-EQ1"
+    ],
+    "equipment_volume": "2m³",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:MOVE_VOLUME",
+    "move_event_id": "TEST-MOVE-IN1",
+    "object_or_surface_ids": [
+     "TEST-EQ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "quantity_state": "PLAN",
+    "route_start_end": [
+     "TEST場内仮置場",
+     "TEST設置基礎上仮据付"
+    ],
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "single_or_simultaneous_group": "単独搬入",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "density_kg_m3": 300,
+    "density_coefficient": 1.4,
+    "single_factor": 1.3,
+    "price_unit": "t",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "実質量[kg]",
+    "密度区分補正[-]",
+    "単独係数[-]",
+    "kg/t"
+   ],
+   "values": [
+    600,
+    1.4,
+    1.3,
+    1000
+   ],
+   "calc": "I/L*J*K",
+   "expectedQuantity": 1.092,
+   "expectedUnit": "t",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-11-E",
+   "methodId": "U19:MOVE_VOLUME",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02"
+   ],
+   "kind": "異常・停止",
+   "goal": "機器搬入出・容積区分の不足/不正/包含時に停止",
+   "input": {
+    "actual_mass_and_unit": "600kg",
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "correction_evidence": "TEST採用表照合記録。係数はこの例の対象に限定",
+    "correction_table_version": "国R8第4編 表M1-1-68",
+    "equipment_ids": [
+     "TEST-EQ1"
+    ],
+    "equipment_volume": 0,
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:MOVE_VOLUME",
+    "move_event_id": "TEST-MOVE-IN1",
+    "object_or_surface_ids": [
+     "TEST-EQ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "quantity_state": "PLAN",
+    "route_start_end": [
+     "TEST場内仮置場",
+     "TEST設置基礎上仮据付"
+    ],
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "single_or_simultaneous_group": "単独搬入",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "density_kg_m3": 300,
+    "density_coefficient": 1.4,
+    "single_factor": 1.3,
+    "price_unit": "t",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "容積0は不正。密度区分不能なので除算せず算定停止",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-12-N",
+   "methodId": "U19:CRANE_DAY",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02",
+    "BR-B-053-02",
+    "BR-B-194-03"
+   ],
+   "kind": "正常・算定",
+   "goal": "揚重機械の台日の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "capacity": "25tクラス",
+    "crane_plan_id": "TEST-CRANE-1",
+    "event_ids": [
+     "TEST-LIFT1"
+    ],
+    "inclusion_resolution": "TEST見積で対象揚重機械は別途と確認",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:CRANE_DAY",
+    "minimum_term": "1日",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "operating_calendar": "TEST契約2課金日",
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台・日",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "機械数[台]",
+    "契約日数[日]"
+   ],
+   "values": [
+    1,
+    2
+   ],
+   "calc": "I*J",
+   "expectedQuantity": 2,
+   "expectedUnit": "台・日",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-12-E",
+   "methodId": "U19:CRANE_DAY",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02",
+    "BR-B-053-02",
+    "BR-B-194-03"
+   ],
+   "kind": "異常・停止",
+   "goal": "揚重機械の台日の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "capacity": "25tクラス",
+    "crane_plan_id": "TEST-CRANE-1",
+    "event_ids": [
+     "TEST-LIFT1"
+    ],
+    "inclusion_resolution": "標準機器搬入費に包含済",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:CRANE_DAY",
+    "minimum_term": "1日",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "operating_calendar": "TEST契約2課金日",
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台・日",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "標準搬入費に含まれる揚重機械を別加算しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-13-N",
+   "methodId": "U19:LABOUR_DAY",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02"
+   ],
+   "kind": "正常・算定",
+   "goal": "運搬・揚重作業員の工数の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "crew_schedule": "3人×2日",
+    "day_definition": "TEST見積の1人日定義",
+    "inclusion_resolution": "TEST資源積上げ見積で労務分を独立",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:LABOUR_DAY",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "trade": "とび工",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "人・日",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "人数[人]",
+    "日数[日]"
+   ],
+   "values": [
+    3,
+    2
+   ],
+   "calc": "I*J",
+   "expectedQuantity": 6,
+   "expectedUnit": "人・日",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-13-E",
+   "methodId": "U19:LABOUR_DAY",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02"
+   ],
+   "kind": "異常・停止",
+   "goal": "運搬・揚重作業員の工数の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "crew_schedule": "3人×2日",
+    "day_definition": "TEST見積の1人日定義",
+    "inclusion_resolution": "同範囲の一括見積に労務包含",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:LABOUR_DAY",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "trade": "とび工",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "人・日",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "一括見積と同じ労務を別加算しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-14-N",
+   "methodId": "U19:INSTALL_PANEL",
+   "definitionIds": [
+    "BR-E-050-02"
+   ],
+   "kind": "正常・算定",
+   "goal": "受配電盤据付の対象/単位/範囲を確認",
+   "input": {
+    "adopted_table": "TEST国R8電気 受配電盤該当行",
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "assembly_configuration": "4対象面。見積基数ではない",
+    "capacity": "TEST採用表の対象容量",
+    "inclusion_resolution": "TEST搬入/取付/試験の表注記を照合",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:INSTALL_PANEL",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "panel_ids": [
+     "TEST-P1",
+     "TEST-P2",
+     "TEST-P3",
+     "TEST-P4"
+    ],
+    "panel_width": "各800mm",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "voltage": "TEST高圧",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "面",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "対象盤面数[面]"
+   ],
+   "values": [
+    4
+   ],
+   "calc": "I",
+   "expectedQuantity": 4,
+   "expectedUnit": "面",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-14-E",
+   "methodId": "U19:INSTALL_PANEL",
+   "definitionIds": [
+    "BR-E-050-02"
+   ],
+   "kind": "異常・停止",
+   "goal": "受配電盤据付の不足/不正/包含時に停止",
+   "input": {
+    "adopted_table": "TEST国R8電気 受配電盤該当行",
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "assembly_configuration": null,
+    "capacity": "TEST採用表の対象容量",
+    "inclusion_resolution": "TEST搬入/取付/試験の表注記を照合",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:INSTALL_PANEL",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "panel_ids": [
+     "TEST-P1",
+     "TEST-P2",
+     "TEST-P3",
+     "TEST-P4"
+    ],
+    "panel_width": "各800mm",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "voltage": "TEST高圧",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "面",
+    "auto_enable": false,
+    "export_enabled": false,
+    "cubicle_count": 1
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "一基の情報だけでは盤面数は不明。1面に置換しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-15-N",
+   "methodId": "U19:INSTALL_CUBICLE",
+   "definitionIds": [
+    "BR-E-050-02"
+   ],
+   "kind": "正常・算定",
+   "goal": "キュービクル等の一体据付の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "equipment_assembly_ids": [
+     "TEST-CUB1"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "installation_scope": "一基据付。盤個別据付は包含",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:INSTALL_CUBICLE",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "unit_composition": "TEST図で盤4面を含むキュービクル一基",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "基",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "対象基数[基]"
+   ],
+   "values": [
+    1
+   ],
+   "calc": "I",
+   "expectedQuantity": 1,
+   "expectedUnit": "基",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-15-E",
+   "methodId": "U19:INSTALL_CUBICLE",
+   "definitionIds": [
+    "BR-E-050-02"
+   ],
+   "kind": "異常・停止",
+   "goal": "キュービクル等の一体据付の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "equipment_assembly_ids": [
+     "TEST-CUB1"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "installation_scope": "一基据付。盤個別据付は包含",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:INSTALL_CUBICLE",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "unit_composition": null,
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "基",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "基の構成未確認。盤4面と一基の同時計上を許可しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-16-N",
+   "methodId": "U19:STORE_AREA",
+   "definitionIds": [
+    "BR-E-100-02",
+    "BR-E-124-02",
+    "BR-M-180-02"
+   ],
+   "kind": "正常・算定",
+   "goal": "面積期間建て保管の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "charge_calendar": "TEST契約:[開始,終了)の暦日3日",
+    "equipment_ids": [
+     "TEST-STORE1",
+     "TEST-STORE2"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:STORE_AREA",
+    "object_or_surface_ids": [
+     "TEST-STORE1",
+     "TEST-STORE2"
+    ],
+    "occupied_area": "契約占用面積12㎡。本体投影8㎡と区別",
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "protection_spec": "TEST見積の防水養生条件",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "storage_location": "TEST場内仮置区画",
+    "storage_start_end": [
+     "2026-10-17T00:00:00+09:00",
+     "2026-10-20T00:00:00+09:00"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "㎡・日",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "課金占用面積[㎡]",
+    "課金日数[日]"
+   ],
+   "values": [
+    12,
+    3
+   ],
+   "calc": "I*J",
+   "expectedQuantity": 36,
+   "expectedUnit": "㎡・日",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-16-E",
+   "methodId": "U19:STORE_AREA",
+   "definitionIds": [
+    "BR-E-100-02",
+    "BR-E-124-02",
+    "BR-M-180-02"
+   ],
+   "kind": "異常・停止",
+   "goal": "面積期間建て保管の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "charge_calendar": "TEST契約:[開始,終了)の暦日3日",
+    "equipment_ids": [
+     "TEST-STORE1",
+     "TEST-STORE2"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:STORE_AREA",
+    "object_or_surface_ids": [
+     "TEST-STORE1",
+     "TEST-STORE2"
+    ],
+    "occupied_area": null,
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "protection_spec": "TEST見積の防水養生条件",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "storage_location": "TEST場内仮置区画",
+    "storage_start_end": [
+     "2026-10-17T00:00:00+09:00",
+     "2026-10-20T00:00:00+09:00"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "㎡・日",
+    "auto_enable": false,
+    "export_enabled": false,
+    "equipment_projection_m2": 8
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "占用面積不明。本体投影面積8㎡を課金面積へ等置しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-17-N",
+   "methodId": "U19:STORE_VOLUME",
+   "definitionIds": [
+    "BR-E-100-02",
+    "BR-E-124-02",
+    "BR-M-180-02"
+   ],
+   "kind": "正常・算定",
+   "goal": "容積期間建て保管の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "charge_calendar": "TEST契約:[開始,終了)の暦日3日",
+    "charge_volume": "契約課金容積5m³",
+    "equipment_ids": [
+     "TEST-STORE1",
+     "TEST-STORE2"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:STORE_VOLUME",
+    "object_or_surface_ids": [
+     "TEST-STORE1",
+     "TEST-STORE2"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "stacking_rule": "TEST契約の梱包・段積み条件",
+    "storage_location": "TEST場内仮置区画",
+    "storage_start_end": [
+     "2026-10-17T00:00:00+09:00",
+     "2026-10-20T00:00:00+09:00"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "protection_spec": "TEST見積の防水養生条件",
+    "price_unit": "m³・日",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "課金容積[m³]",
+    "課金日数[日]"
+   ],
+   "values": [
+    5,
+    3
+   ],
+   "calc": "I*J",
+   "expectedQuantity": 15,
+   "expectedUnit": "m³・日",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-17-E",
+   "methodId": "U19:STORE_VOLUME",
+   "definitionIds": [
+    "BR-E-100-02",
+    "BR-E-124-02",
+    "BR-M-180-02"
+   ],
+   "kind": "異常・停止",
+   "goal": "容積期間建て保管の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "charge_calendar": null,
+    "charge_volume": "契約課金容積5m³",
+    "equipment_ids": [
+     "TEST-STORE1",
+     "TEST-STORE2"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:STORE_VOLUME",
+    "object_or_surface_ids": [
+     "TEST-STORE1",
+     "TEST-STORE2"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "stacking_rule": "TEST契約の梱包・段積み条件",
+    "storage_location": "TEST場内仮置区画",
+    "storage_start_end": [
+     "2026-10-17T00:00:00+09:00",
+     "2026-10-20T00:00:00+09:00"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "protection_spec": "TEST見積の防水養生条件",
+    "price_unit": "m³・日",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "容積日契約と期間が未確認。月額料金を日数へ単純換算しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-18-N",
+   "methodId": "U19:STORE_UNIT",
+   "definitionIds": [
+    "BR-E-100-02",
+    "BR-E-124-02",
+    "BR-M-180-02"
+   ],
+   "kind": "正常・算定",
+   "goal": "台数期間建て保管の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "charge_calendar": "TEST契約:[開始,終了)の暦日3日",
+    "equipment_ids": [
+     "TEST-STORE1",
+     "TEST-STORE2"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:STORE_UNIT",
+    "object_or_surface_ids": [
+     "TEST-STORE1",
+     "TEST-STORE2"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "protection_spec": "TEST見積の防水養生条件",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "storage_location": "TEST場内仮置区画",
+    "storage_start_end": [
+     "2026-10-17T00:00:00+09:00",
+     "2026-10-20T00:00:00+09:00"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台・日",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "保管対象台数[台]",
+    "課金日数[日]"
+   ],
+   "values": [
+    2,
+    3
+   ],
+   "calc": "I*J",
+   "expectedQuantity": 6,
+   "expectedUnit": "台・日",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-18-E",
+   "methodId": "U19:STORE_UNIT",
+   "definitionIds": [
+    "BR-E-100-02",
+    "BR-E-124-02",
+    "BR-M-180-02"
+   ],
+   "kind": "異常・停止",
+   "goal": "台数期間建て保管の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "charge_calendar": "TEST契約:[開始,終了)の暦日3日",
+    "equipment_ids": [
+     "TEST-STORE1",
+     "TEST-STORE2"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:STORE_UNIT",
+    "object_or_surface_ids": [
+     "TEST-STORE1",
+     "TEST-STORE2"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "protection_spec": "TEST見積の防水養生条件",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "storage_location": "TEST場内仮置区画",
+    "storage_start_end": [
+     "2026-10-20",
+     "2026-10-17"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台・日",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "保管終了が開始より前。負の日数・絶対値で算定しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-19-N",
+   "methodId": "U19:RELOCATE_UNIT",
+   "definitionIds": [
+    "BR-E-109-02"
+   ],
+   "kind": "正常・算定",
+   "goal": "機器移設の台建ての対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "equipment_ids": [
+     "TEST-RE1",
+     "TEST-RE2"
+    ],
+    "included_event_list": [
+     "取外し",
+     "搬出",
+     "保管",
+     "再搬入",
+     "据付"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:RELOCATE_UNIT",
+    "object_or_surface_ids": [
+     "TEST-RE1",
+     "TEST-RE2"
+    ],
+    "old_new_locations": [
+     "TEST旧室",
+     "TEST新室"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "reuse_condition": "TEST現況で再使用",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "移設対象[台]"
+   ],
+   "values": [
+    2
+   ],
+   "calc": "I",
+   "expectedQuantity": 2,
+   "expectedUnit": "台",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-19-E",
+   "methodId": "U19:RELOCATE_UNIT",
+   "definitionIds": [
+    "BR-E-109-02"
+   ],
+   "kind": "異常・停止",
+   "goal": "機器移設の台建ての不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "equipment_ids": [
+     "TEST-RE1",
+     "TEST-RE2"
+    ],
+    "included_event_list": [
+     "取外し",
+     "搬出",
+     "保管",
+     "再搬入",
+     "据付"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:RELOCATE_UNIT",
+    "object_or_surface_ids": [
+     "TEST-RE1",
+     "TEST-RE2"
+    ],
+    "old_new_locations": null,
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "reuse_condition": "TEST現況で再使用",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "移設先不明。新設台数の複写や一連範囲の推定をしない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-20-N",
+   "methodId": "U19:RELOCATE_PANEL",
+   "definitionIds": [
+    "BR-E-109-02"
+   ],
+   "kind": "正常・算定",
+   "goal": "盤移設の面建ての対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "assembly_configuration": "2面の盤を移設",
+    "included_event_list": [
+     "取外し",
+     "移動",
+     "再据付"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:RELOCATE_PANEL",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "old_new_locations": [
+     "TEST旧盤室",
+     "TEST新盤室"
+    ],
+    "panel_ids": [
+     "TEST-RP1",
+     "TEST-RP2"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "面",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "対象盤[面]"
+   ],
+   "values": [
+    2
+   ],
+   "calc": "I",
+   "expectedQuantity": 2,
+   "expectedUnit": "面",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-20-E",
+   "methodId": "U19:RELOCATE_PANEL",
+   "definitionIds": [
+    "BR-E-109-02"
+   ],
+   "kind": "異常・停止",
+   "goal": "盤移設の面建ての不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "assembly_configuration": null,
+    "included_event_list": [
+     "取外し",
+     "移動",
+     "再据付"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:RELOCATE_PANEL",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "old_new_locations": [
+     "TEST旧盤室",
+     "TEST新盤室"
+    ],
+    "panel_ids": [
+     "TEST-RP1",
+     "TEST-RP2"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "面",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "移設盤の面構成未確定。台と面を読み替えない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-21-N",
+   "methodId": "U19:AHU_INSTALL",
+   "definitionIds": [
+    "BR-M-034-06"
+   ],
+   "kind": "正常・参照",
+   "goal": "AHU据付台数の対象/単位/範囲を確認",
+   "input": {
+    "adopted_table": "TEST国R8機械 表M1-2-17",
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "ahu_ids": [
+     "TEST-AHU1"
+    ],
+    "airflow": "10000m³/h",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "assembly_form": "TEST採用表適合形式",
+    "inclusion_resolution": "TEST吊込みは採用据付範囲に包含",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "installation_scope": "TEST-AHU据付定義で台建て計上済",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:AHU_INSTALL",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台",
+    "auto_enable": false,
+    "export_enabled": false,
+    "adoptable_on_lifting_definition": false,
+    "quantity": null
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "REFERENCE_ONLY_NO_QUANTITY",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-21-E",
+   "methodId": "U19:AHU_INSTALL",
+   "definitionIds": [
+    "BR-M-034-06"
+   ],
+   "kind": "異常・停止",
+   "goal": "AHU据付台数の不足/不正/包含時に停止",
+   "input": {
+    "adopted_table": "TEST国R8機械 表M1-2-17",
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "ahu_ids": [
+     "TEST-AHU1"
+    ],
+    "airflow": "10000m³/h",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "assembly_form": "TEST採用表適合形式",
+    "inclusion_resolution": "TEST吊込みは採用据付範囲に包含",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "installation_scope": "TEST-AHU据付定義で台建て計上済",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:AHU_INSTALL",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台",
+    "auto_enable": false,
+    "export_enabled": false,
+    "adoptable_on_lifting_definition": false,
+    "quantity": null,
+    "attempt_select_on_definition": "BR-M-034-06"
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "AHU_INSTALLを吊込み定義の採用方式として選択不可",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-22-N",
+   "methodId": "U19:LIFT_UNIT",
+   "definitionIds": [
+    "BR-M-034-06"
+   ],
+   "kind": "正常・算定",
+   "goal": "個別機器吊込みの対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "equipment_ids": [
+     "TEST-AHU1"
+    ],
+    "inclusion_resolution": "TEST独立吊込み見積と据付/搬入の境界を解決",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "lift_position": "TEST屋上指定点",
+    "lifting_event_ids": [
+     "TEST-LIFT1"
+    ],
+    "lifting_method": "TEST揚重計画",
+    "mass": "1200kg",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:LIFT_UNIT",
+    "object_or_surface_ids": [
+     "TEST-AHU1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "route": "TEST場内仮置→屋上仮据付",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "吊込み対象[台]"
+   ],
+   "values": [
+    1
+   ],
+   "calc": "I",
+   "expectedQuantity": 1,
+   "expectedUnit": "台",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-22-E",
+   "methodId": "U19:LIFT_UNIT",
+   "definitionIds": [
+    "BR-M-034-06"
+   ],
+   "kind": "異常・停止",
+   "goal": "個別機器吊込みの不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "equipment_ids": [
+     "TEST-AHU1"
+    ],
+    "inclusion_resolution": null,
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "lift_position": "TEST屋上指定点",
+    "lifting_event_ids": [
+     "TEST-LIFT1"
+    ],
+    "lifting_method": "TEST揚重計画",
+    "mass": "1200kg",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:LIFT_UNIT",
+    "object_or_surface_ids": [
+     "TEST-AHU1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "route": "TEST場内仮置→屋上仮据付",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "据付・搬入に含む揚重との境界不明。独立計上を保留",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-23-N",
+   "methodId": "U19:BASE_CONCRETE",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "正常・算定",
+   "goal": "ボンベ置場基礎コンクリートの対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "concrete_spec": "TEST設計仕様",
+    "deduction_basis": "TEST無開口。鉄筋等を控除しない",
+    "dimensions": "3m×2m×0.3m",
+    "drawing_id": "TEST-BASE-1",
+    "foundation_ids": [
+     "TEST-F1"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "levels": "TEST設計天端/底部",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:BASE_CONCRETE",
+    "object_or_surface_ids": [
+     "TEST-F1"
+    ],
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "m³",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "長さ[m]",
+    "幅[m]",
+    "厚さ[m]",
+    "基数[基]"
+   ],
+   "values": [
+    3,
+    2,
+    0.3,
+    1
+   ],
+   "calc": "I*J*K*L",
+   "expectedQuantity": 1.8,
+   "expectedUnit": "m³",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-23-E",
+   "methodId": "U19:BASE_CONCRETE",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "異常・停止",
+   "goal": "ボンベ置場基礎コンクリートの不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "concrete_spec": "TEST設計仕様",
+    "deduction_basis": "TEST無開口。鉄筋等を控除しない",
+    "dimensions": "3m×2m、厚さ未入力",
+    "drawing_id": "TEST-BASE-1",
+    "foundation_ids": [
+     "TEST-F1"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "levels": "TEST設計天端/底部",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:BASE_CONCRETE",
+    "object_or_surface_ids": [
+     "TEST-F1"
+    ],
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "m³",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "厚さ不明。固定厚や0で埋めて体積を出さない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-24-N",
+   "methodId": "U19:BASE_FORM",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "正常・算定",
+   "goal": "ボンベ置場基礎型枠の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "construction_method": "4側面に型枠。底面・上面は対象外",
+    "drawing_id": "TEST-BASE-1",
+    "form_contact_surfaces": "TEST長方形基礎4側面だけ。3m×2m×h0.3m",
+    "form_type": "TEST普通型枠",
+    "foundation_ids": [
+     "TEST-F1"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:BASE_FORM",
+    "object_or_surface_ids": [
+     "TEST-F1"
+    ],
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "㎡",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "長さ[m]",
+    "幅[m]",
+    "高さ[m]",
+    "基数[基]"
+   ],
+   "values": [
+    3,
+    2,
+    0.3,
+    1
+   ],
+   "calc": "2*(I+J)*K*L",
+   "expectedQuantity": 3,
+   "expectedUnit": "㎡",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-24-E",
+   "methodId": "U19:BASE_FORM",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "異常・停止",
+   "goal": "ボンベ置場基礎型枠の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "construction_method": "4側面に型枠。底面・上面は対象外",
+    "drawing_id": "TEST-BASE-1",
+    "form_contact_surfaces": null,
+    "form_type": "TEST普通型枠",
+    "foundation_ids": [
+     "TEST-F1"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:BASE_FORM",
+    "object_or_surface_ids": [
+     "TEST-F1"
+    ],
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "㎡",
+    "auto_enable": false,
+    "export_enabled": false,
+    "bottom_area_m2": 6
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "型枠対象面不明。基礎底面6㎡を型枠面に流用しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-25-N",
+   "methodId": "U19:BASE_REBAR_T",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "正常・算定",
+   "goal": "基礎鉄筋・t建ての対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "allocation_id": "TEST建築分担",
+    "bar_schedule": "TEST-BAR1:100m",
+    "bar_spec": "TEST鉄筋規格",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "lap_hook_basis": "TEST配筋表内に反映済",
+    "lengths": "採用基準反映後100m",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:BASE_REBAR_T",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "unit_mass_kg_m": 0.56,
+    "price_unit": "t",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "計上対象長[m]",
+    "試験用単位質量[kg/m]",
+    "kg/t"
+   ],
+   "values": [
+    100,
+    0.56,
+    1000
+   ],
+   "calc": "I*J/K",
+   "expectedQuantity": 0.056,
+   "expectedUnit": "t",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-25-E",
+   "methodId": "U19:BASE_REBAR_T",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "異常・停止",
+   "goal": "基礎鉄筋・t建ての不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "allocation_id": null,
+    "bar_schedule": "TEST-BAR1:100m",
+    "bar_spec": "TEST鉄筋規格",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "lap_hook_basis": "TEST配筋表内に反映済",
+    "lengths": "採用基準反映後100m",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:BASE_REBAR_T",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "unit_mass_kg_m": 0.56,
+    "price_unit": "t",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "同一鉄筋が設備kg建てにも存在する可能性。分担未解決で二重計上を許可しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-26-N",
+   "methodId": "U19:BASE_REBAR_KG",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "正常・算定",
+   "goal": "基礎鉄筋・kg建ての対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "allocation_id": "TEST設備分担",
+    "bar_schedule": "TEST-BAR1:100m",
+    "bar_spec": "TEST鉄筋規格",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "lap_hook_basis": "TEST配筋表内に反映済",
+    "lengths": "採用基準反映後100m",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:BASE_REBAR_KG",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "unit_mass_kg_m": 0.56,
+    "price_unit": "kg",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "計上対象長[m]",
+    "試験用単位質量[kg/m]"
+   ],
+   "values": [
+    100,
+    0.56
+   ],
+   "calc": "I*J",
+   "expectedQuantity": 56,
+   "expectedUnit": "kg",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-26-E",
+   "methodId": "U19:BASE_REBAR_KG",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "異常・停止",
+   "goal": "基礎鉄筋・kg建ての不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "allocation_id": "TEST設備分担",
+    "bar_schedule": "TEST-BAR1:100m",
+    "bar_spec": "TEST鉄筋規格",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "lap_hook_basis": null,
+    "lengths": "採用基準反映後100m",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:BASE_REBAR_KG",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "unit_mass_kg_m": 0.56,
+    "price_unit": "kg",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "定着/継手等の範囲未確認。固定の割増を設定しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-27-N",
+   "methodId": "U19:BASE_MORTAR",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "正常・算定",
+   "goal": "基礎モルタル仕上の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "finish_surfaces": "TEST天端3m×2mだけ。側面なし",
+    "foundation_ids": [
+     "TEST-F1"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:BASE_MORTAR",
+    "mortar_spec": "TEST仕様",
+    "object_or_surface_ids": [
+     "TEST-F1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "thickness": "TEST設計指定",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "㎡",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "対象長[m]",
+    "対象幅[m]"
+   ],
+   "values": [
+    3,
+    2
+   ],
+   "calc": "I*J",
+   "expectedQuantity": 6,
+   "expectedUnit": "㎡",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-27-E",
+   "methodId": "U19:BASE_MORTAR",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "異常・停止",
+   "goal": "基礎モルタル仕上の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "finish_surfaces": null,
+    "foundation_ids": [
+     "TEST-F1"
+    ],
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:BASE_MORTAR",
+    "mortar_spec": "TEST仕様",
+    "object_or_surface_ids": [
+     "TEST-F1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "thickness": "TEST設計指定",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "㎡",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "仕上面指定なし。基礎の全面積を自動採用しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-28-N",
+   "methodId": "U19:FENCE_LENGTH",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "正常・算定",
+   "goal": "置場区画柵・長さ建ての対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "alignment": "施工計画延長20m",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "fence_ids": [
+     "TEST-FENCE1"
+    ],
+    "gate_scope": "TEST柵本体から扉開口を除く",
+    "height": "1.8m",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:FENCE_LENGTH",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "openings": "扉2mは別項目",
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "m",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "計画延長[m]",
+    "除外扉幅[m]"
+   ],
+   "values": [
+    20,
+    2
+   ],
+   "calc": "I-J",
+   "expectedQuantity": 18,
+   "expectedUnit": "m",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-28-E",
+   "methodId": "U19:FENCE_LENGTH",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "異常・停止",
+   "goal": "置場区画柵・長さ建ての不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "alignment": "施工計画延長20m",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "fence_ids": [
+     "TEST-FENCE1"
+    ],
+    "gate_scope": "TEST柵本体から扉開口を除く",
+    "height": "1.8m",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:FENCE_LENGTH",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "openings": "除外幅22m（全長20m）",
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "m",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "控除が全長超過。負数量又は0に丸めず入力エラー",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-29-N",
+   "methodId": "U19:FENCE_AREA",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "正常・算定",
+   "goal": "置場区画柵・面積建ての対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "alignment": "20m",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "area_count_rule": "TEST見積で(延長-扉幅)×高さ",
+    "fence_ids": [
+     "TEST-FENCE1"
+    ],
+    "height": "1.8m",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:FENCE_AREA",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "openings": "扉2m除外",
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "㎡",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "計画延長[m]",
+    "除外幅[m]",
+    "高さ[m]"
+   ],
+   "values": [
+    20,
+    2,
+    1.8
+   ],
+   "calc": "(I-J)*K",
+   "expectedQuantity": 32.4,
+   "expectedUnit": "㎡",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-29-E",
+   "methodId": "U19:FENCE_AREA",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "異常・停止",
+   "goal": "置場区画柵・面積建ての不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "alignment": "20m",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "area_count_rule": null,
+    "fence_ids": [
+     "TEST-FENCE1"
+    ],
+    "height": "1.8m",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:FENCE_AREA",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "openings": "扉2m除外",
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "㎡",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "面積の見積規則未確認。長さ建てから単位だけ変更しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-30-N",
+   "methodId": "U19:BASE_PREFAB",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "正常・算定",
+   "goal": "既製基礎一体品の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "included_parts": "TEST製品内のコンクリート/配筋を包含",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "installation_scope": "2基設置のみ",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:BASE_PREFAB",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "prefab_ids": [
+     "TEST-PB1",
+     "TEST-PB2"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "product_spec": "TEST既製品規格",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "基",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "既製基礎数[基]"
+   ],
+   "values": [
+    2
+   ],
+   "calc": "I",
+   "expectedQuantity": 2,
+   "expectedUnit": "基",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-30-E",
+   "methodId": "U19:BASE_PREFAB",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "異常・停止",
+   "goal": "既製基礎一体品の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "included_parts": null,
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "installation_scope": "2基設置のみ",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:BASE_PREFAB",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "prefab_ids": [
+     "TEST-PB1",
+     "TEST-PB2"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "product_spec": "TEST既製品規格",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "基",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "製品構成不明。現場打ち構成との重複確認ができず保留",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-31-N",
+   "methodId": "U19:STEEL_TRANSPORT",
+   "definitionIds": [
+    "BR-B-053-01"
+   ],
+   "kind": "正常・算定",
+   "goal": "鉄骨運搬の質量建ての対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "distance": "50km（数量tへ乗算しない）",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "member_ids": [
+     "TEST-ST1",
+     "TEST-ST2"
+    ],
+    "method_option_id": "U19:STEEL_TRANSPORT",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "origin_destination": [
+     "TEST加工工場",
+     "TEST現場指定場所"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "shipment_ids": [
+     "TEST-SHIP1"
+    ],
+    "steel_mass_schedule": "TEST配送対象実鋼材12.5t",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "t",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "見積対象質量[t]"
+   ],
+   "values": [
+    12.5
+   ],
+   "calc": "I",
+   "expectedQuantity": 12.5,
+   "expectedUnit": "t",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-31-E",
+   "methodId": "U19:STEEL_TRANSPORT",
+   "definitionIds": [
+    "BR-B-053-01"
+   ],
+   "kind": "異常・停止",
+   "goal": "鉄骨運搬の質量建ての不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "distance": "50km（数量tへ乗算しない）",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "member_ids": [
+     "TEST-ST1",
+     "TEST-ST2"
+    ],
+    "method_option_id": "U19:STEEL_TRANSPORT",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "origin_destination": [
+     "TEST加工工場",
+     "TEST現場指定場所"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "shipment_ids": [
+     "TEST-SHIP1"
+    ],
+    "steel_mass_schedule": "TEST配送対象実鋼材12.5t",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "t・km",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "t方式とt・km単価は不一致。50kmを暗黙に乗じない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-32-N",
+   "methodId": "U19:STEEL_TRIP",
+   "definitionIds": [
+    "BR-B-053-01"
+   ],
+   "kind": "正常・算定",
+   "goal": "鉄骨運搬の車両回数建ての対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "load_plan": "便別積載明細",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:STEEL_TRIP",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "origin_destination": [
+     "TEST加工工場",
+     "TEST現場"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "shipment_ids": [
+     "TEST-SHIP1",
+     "TEST-SHIP2",
+     "TEST-SHIP3"
+    ],
+    "trip_ids": [
+     "TEST-TRIP1",
+     "TEST-TRIP2",
+     "TEST-TRIP3"
+    ],
+    "vehicle_type": "TEST指定車両",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台・回",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "対象車両数[台]",
+    "契約便数[回/台]"
+   ],
+   "values": [
+    1,
+    3
+   ],
+   "calc": "I*J",
+   "expectedQuantity": 3,
+   "expectedUnit": "台・回",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-32-E",
+   "methodId": "U19:STEEL_TRIP",
+   "definitionIds": [
+    "BR-B-053-01"
+   ],
+   "kind": "異常・停止",
+   "goal": "鉄骨運搬の車両回数建ての不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "load_plan": "便別積載明細",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:STEEL_TRIP",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "origin_destination": [
+     "TEST加工工場",
+     "TEST現場"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "shipment_ids": [
+     "TEST-SHIP1",
+     "TEST-SHIP2",
+     "TEST-SHIP3"
+    ],
+    "trip_ids": [
+     "TEST-TRIP1",
+     "TEST-TRIP1",
+     "TEST-TRIP3"
+    ],
+    "vehicle_type": "TEST指定車両",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "台・回",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "同一便を重複登録。便ID別に照合して訂正を要求",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-33-N",
+   "methodId": "U19:STEEL_ERECT",
+   "definitionIds": [
+    "BR-B-053-02",
+    "BR-B-194-03"
+   ],
+   "kind": "正常・算定",
+   "goal": "鉄骨建方の質量建ての対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "connection_scope": "TESTボルト/溶接の包含を見積で区分",
+    "erected_member_ids": [
+     "TEST-BR1",
+     "TEST-BR2"
+    ],
+    "erection_zones": "TEST補強工区Z1",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:STEEL_ERECT",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_basis_id": "TEST-price_basis_id",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "steel_mass_schedule": "TEST対象建方質量7.2t",
+    "temporary_support_scope": "TEST仮支持別途範囲を区分",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "t",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "建方対象質量[t]"
+   ],
+   "values": [
+    7.2
+   ],
+   "calc": "I",
+   "expectedQuantity": 7.2,
+   "expectedUnit": "t",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-33-E",
+   "methodId": "U19:STEEL_ERECT",
+   "definitionIds": [
+    "BR-B-053-02",
+    "BR-B-194-03"
+   ],
+   "kind": "異常・停止",
+   "goal": "鉄骨建方の質量建ての不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "connection_scope": "TESTボルト/溶接の包含を見積で区分",
+    "erected_member_ids": [
+     "TEST-BR1",
+     "TEST-BR2"
+    ],
+    "erection_zones": "TEST補強工区Z1",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:STEEL_ERECT",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_basis_id": null,
+    "price_or_quote_id": "TEST-QUOTE1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "steel_mass_schedule": "TEST対象建方質量7.2t",
+    "temporary_support_scope": "TEST仮支持別途範囲を区分",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "t",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "採用専門見積不明。建方全般をtの一律標準としない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-34-N",
+   "methodId": "U19:PACKAGE",
+   "definitionIds": [
+    "REL-039",
+    "REL-102",
+    "BR-E-050-01",
+    "BR-E-050-02",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-100-02",
+    "BR-E-109-02",
+    "BR-E-124-01",
+    "BR-E-124-02",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-144-03",
+    "BR-M-155-02",
+    "BR-M-180-02",
+    "BR-B-053-01",
+    "BR-B-053-02",
+    "BR-B-194-03"
+   ],
+   "kind": "正常・算定",
+   "goal": "対象範囲限定の一括見積の対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "allocation_id": "TEST設備分担",
+    "inclusion_resolution": "TEST同じ範囲の個別工程を別計上しない",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:PACKAGE",
+    "object_ids": [
+     "TEST-RE1",
+     "TEST-RE2"
+    ],
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "period": "TEST指定工程",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "quantity_breakdown": "TEST明細:2台、指定工区、合意された1式",
+    "quote_id": "TEST-QUOTE-PKG1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "scope_schedule": "TEST移設2台の限定範囲",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "work_event_list": [
+     "取外し",
+     "移動",
+     "再据付"
+    ],
+    "agreed_package_quantity": 1,
+    "price_unit": "式",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [
+    "根拠付き一式数量[式]"
+   ],
+   "values": [
+    1
+   ],
+   "calc": "I",
+   "expectedQuantity": 1,
+   "expectedUnit": "式",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-34-E",
+   "methodId": "U19:PACKAGE",
+   "definitionIds": [
+    "REL-039",
+    "REL-102",
+    "BR-E-050-01",
+    "BR-E-050-02",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-100-02",
+    "BR-E-109-02",
+    "BR-E-124-01",
+    "BR-E-124-02",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-144-03",
+    "BR-M-155-02",
+    "BR-M-180-02",
+    "BR-B-053-01",
+    "BR-B-053-02",
+    "BR-B-194-03"
+   ],
+   "kind": "異常・停止",
+   "goal": "対象範囲限定の一括見積の不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "allocation_id": "TEST設備分担",
+    "inclusion_resolution": "TEST同じ範囲の個別工程を別計上しない",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:PACKAGE",
+    "object_ids": [
+     "TEST-RE1",
+     "TEST-RE2"
+    ],
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "period": "TEST指定工程",
+    "price_or_quote_id": "TEST-QUOTE1",
+    "quantity_breakdown": null,
+    "quote_id": "TEST-QUOTE-PKG1",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "scope_schedule": "TEST移設2台の限定範囲",
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "work_event_list": [
+     "取外し",
+     "移動",
+     "再据付"
+    ],
+    "agreed_package_quantity": null,
+    "price_unit": "式",
+    "auto_enable": false,
+    "export_enabled": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "見積明細・合意数量なし。方式を選んだだけで式1を設定しない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-35-N",
+   "methodId": "U19:NO_SEPARATE",
+   "definitionIds": [
+    "REL-039",
+    "REL-102",
+    "BR-E-050-01",
+    "BR-E-050-02",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-100-02",
+    "BR-E-109-02",
+    "BR-E-124-01",
+    "BR-E-124-02",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-144-03",
+    "BR-M-155-02",
+    "BR-M-180-02",
+    "BR-B-053-01",
+    "BR-B-053-02",
+    "BR-B-194-03"
+   ],
+   "kind": "正常・参照",
+   "goal": "別計上しないの対象/単位/範囲を確認",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "counterpart_definition_or_trade": "TEST-AHU据付明細",
+    "inclusion_or_allocation_evidence": "TEST対象吊込み包含記録",
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:NO_SEPARATE",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_or_quote_id": "TEST-QUOTE1",
+    "reason_code": "INCLUDED",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "—",
+    "auto_enable": false,
+    "export_enabled": false,
+    "quantity": null
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "NO_SEPARATE_NO_QUANTITY",
+   "stopReason": "—",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-35-E",
+   "methodId": "U19:NO_SEPARATE",
+   "definitionIds": [
+    "REL-039",
+    "REL-102",
+    "BR-E-050-01",
+    "BR-E-050-02",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-100-02",
+    "BR-E-109-02",
+    "BR-E-124-01",
+    "BR-E-124-02",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-144-03",
+    "BR-M-155-02",
+    "BR-M-180-02",
+    "BR-B-053-01",
+    "BR-B-053-02",
+    "BR-B-194-03"
+   ],
+   "kind": "異常・停止",
+   "goal": "別計上しないの不足/不正/包含時に停止",
+   "input": {
+    "adoption_evidence_id": "TEST-ADOPT1",
+    "allocation_evidence_id": "TEST-ALLOC1",
+    "counterpart_definition_or_trade": "TEST-AHU据付明細",
+    "inclusion_or_allocation_evidence": null,
+    "inclusion_resolution_evidence_id": "TEST-INCL1",
+    "measurement_basis_version": "TEST-採用版。国基準例は根拠欄に限定",
+    "measurement_evidence_id": "TEST-DRAWING1",
+    "method_option_id": "U19:NO_SEPARATE",
+    "object_or_surface_ids": [
+     "TEST-OBJ1"
+    ],
+    "price_or_quote_id": "TEST-QUOTE1",
+    "reason_code": "INCLUDED",
+    "scope_partition_ids": [
+     "TEST-Z1"
+    ],
+    "work_event_ids": [
+     "TEST-EVENT1"
+    ],
+    "price_unit": "—",
+    "auto_enable": false,
+    "export_enabled": false,
+    "quantity": null
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "包含の根拠なし。判断未了を数量0や不要に置き換えない",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-01",
+   "methodId": "U19:MOVE_MASS",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02"
+   ],
+   "kind": "横断・境界",
+   "goal": "単体99.9kgは国基準の搬入標準方式の対象外",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "mass_kg": 99.9,
+    "volume_m3": 0.1,
+    "adopted_basis": "国R7機器搬入・搬出",
+    "attempted_method": "標準搬入t"
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-02",
+   "methodId": "U19:MOVE_MASS",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02"
+   ],
+   "kind": "横断・境界",
+   "goal": "単体100kgは適用質量境界を満たし機器ごとに判定",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "mass_kg": 100,
+    "volume_m3": 0.1,
+    "density_kg_m3": 1000,
+    "coefficient": 1.3,
+    "single_factor": 1.3,
+    "source": "国R8表M1-1-68の重量品250kg以下、単独"
+   },
+   "variables": [
+    "実質量[kg]",
+    "質量補正[-]",
+    "単独係数[-]",
+    "kg/t"
+   ],
+   "values": [
+    100,
+    1.3,
+    1.3,
+    1000
+   ],
+   "calc": "I/L*J*K",
+   "expectedQuantity": 0.169,
+   "expectedUnit": "t",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-03",
+   "methodId": "U19:MOVE_MASS",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02"
+   ],
+   "kind": "横断・境界",
+   "goal": "密度600kg/m³ちょうどは重量品側",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "mass_kg": 600,
+    "volume_m3": 1,
+    "density_kg_m3": 600,
+    "coefficient": 1.1,
+    "single_factor": 1.3,
+    "source": "国R8表M1-1-68の重量品800kg以下、単独"
+   },
+   "variables": [
+    "実質量[kg]",
+    "質量補正[-]",
+    "単独係数[-]",
+    "kg/t"
+   ],
+   "values": [
+    600,
+    1.1,
+    1.3,
+    1000
+   ],
+   "calc": "I/L*J*K",
+   "expectedQuantity": 0.858,
+   "expectedUnit": "t",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-04",
+   "methodId": "U19:MOVE_VOLUME",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02"
+   ],
+   "kind": "横断・境界",
+   "goal": "密度599.9kg/m³は容積品側",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "mass_kg": 599.9,
+    "volume_m3": 1,
+    "density_kg_m3": 599.9,
+    "coefficient": 1,
+    "single_factor": 1.3,
+    "source": "国R8表M1-1-68の容積品600kg/m³未満、単独"
+   },
+   "variables": [
+    "実質量[kg]",
+    "密度補正[-]",
+    "単独係数[-]",
+    "kg/t"
+   ],
+   "values": [
+    599.9,
+    1,
+    1.3,
+    1000
+   ],
+   "calc": "I/L*J*K",
+   "expectedQuantity": 0.77987,
+   "expectedUnit": "t",
+   "expectedState": "CALCULABLE_REVIEW_REQUIRED",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-05",
+   "methodId": "U19:MOVE_MASS / U19:MOVE_VOLUME",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02"
+   ],
+   "kind": "横断・境界",
+   "goal": "搬入と搬出は同じ機器でも別工程。逆方向の起終点・状態を照合",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "equipment": "TEST-EQ1",
+    "inbound_event": "TEST-IN1",
+    "outbound_event": "TEST-OUT1",
+    "invalid": "搬入の補正数量を工程なしに搬出へ複写"
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-06",
+   "methodId": "U19:SCAFF_FULL",
+   "definitionIds": [
+    "REL-102"
+   ],
+   "kind": "横断・境界",
+   "goal": "共用足場を仕上げ起点の回数だけ増量しない",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "physical_scope": "TEST-SCF1",
+    "source_items": [
+     "TEST塗装",
+     "TEST防水"
+    ],
+    "event": "TEST-同一期間",
+    "expected_unique_scaffold_records": 1
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "DEDUPLICATE_REUSE_EXISTING",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-07",
+   "methodId": "U19:BASE_REBAR_T / U19:BASE_REBAR_KG",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "横断・境界",
+   "goal": "同一配筋を0.056tと56kgの両方で計上しない",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "physical_bar_schedule": "TEST-BAR1",
+    "building_t": 0.056,
+    "equipment_kg": 56,
+    "allocation_resolution": null
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-08",
+   "methodId": "U19:BASE_PREFAB / U19:BASE_CONCRETE / U19:BASE_FORM",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "横断・境界",
+   "goal": "同じ既製基礎の包含部分を現場打ち構成でも重複計上しない",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "physical_foundation": "TEST-F1",
+    "prefab_includes": [
+     "concrete",
+     "rebar"
+    ],
+    "attempted_components": [
+     "concrete",
+     "formwork"
+    ]
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-09",
+   "methodId": "U19:RELOCATE_UNIT / U19:STORE_UNIT / U19:MOVE_MASS",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-100-02",
+    "BR-E-109-02",
+    "BR-E-124-01",
+    "BR-E-124-02",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02",
+    "BR-M-180-02"
+   ],
+   "kind": "横断・境界",
+   "goal": "移設一連に含む搬出・保管・再搬入を別工程で二重計上しない",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "equipment": "TEST-RE1",
+    "package_includes": [
+     "取外し",
+     "搬出",
+     "保管",
+     "再搬入",
+     "据付"
+    ],
+    "attempted_storage": "同一場所/期間"
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-10",
+   "methodId": "U19:STORE_UNIT / U19:POWER_HIRE",
+   "definitionIds": [
+    "REL-039",
+    "BR-E-100-02",
+    "BR-E-124-02",
+    "BR-M-180-02"
+   ],
+   "kind": "横断・境界",
+   "goal": "同じ台日単位でも保管と発電機賃貸の数量を一行へ合計しない",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "storage_qty": 6,
+    "storage_unit": "台・日",
+    "rental_qty": 6,
+    "rental_unit": "台・日",
+    "attempted_total": 12
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-11",
+   "methodId": "U19:BASE_CONCRETE / U19:BASE_FORM / U19:BASE_REBAR_KG / U19:BASE_MORTAR",
+   "definitionIds": [
+    "BR-M-144-03"
+   ],
+   "kind": "横断・境界",
+   "goal": "基礎親には数量を置かず必要な構成明細4行を保持",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "foundation": "TEST-F1",
+    "dimensions": "3m×2m×0.3m",
+    "formwork": "4側面",
+    "rebar": "100m×0.56kg/m",
+    "mortar": "天端のみ",
+    "parent_quantity": null
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "COMPONENTS_SEPARATE_REVIEW",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-12",
+   "methodId": "U19:POWER_EQUIP / U19:POWER_HIRE / U19:POWER_ENERGY",
+   "definitionIds": [
+    "REL-039"
+   ],
+   "kind": "横断・境界",
+   "goal": "仮設機器・賃貸・電力量を異なる工程の明細として保持",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "equipment_count": 2,
+    "hire_days": 3,
+    "active_kw": 20,
+    "hours": 8,
+    "load_factor": 0.6,
+    "inclusion_evidence": "TEST各工程別途の限定見積",
+    "parent_quantity": null
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "COMPONENTS_SEPARATE_REVIEW",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-13",
+   "methodId": "U19:PACKAGE",
+   "definitionIds": [
+    "REL-039",
+    "REL-102",
+    "BR-E-050-01",
+    "BR-E-050-02",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-100-02",
+    "BR-E-109-02",
+    "BR-E-124-01",
+    "BR-E-124-02",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-144-03",
+    "BR-M-155-02",
+    "BR-M-180-02",
+    "BR-B-053-01",
+    "BR-B-053-02",
+    "BR-B-194-03"
+   ],
+   "kind": "横断・境界",
+   "goal": "方式選択後も根拠なしの式1を保存しない",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "selected": true,
+    "quote": null,
+    "scope_schedule": null,
+    "attempted_quantity": 1
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-14",
+   "methodId": "U19:STEEL_ERECT / U19:CRANE_DAY",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02",
+    "BR-B-053-02",
+    "BR-B-194-03"
+   ],
+   "kind": "横断・境界",
+   "goal": "耐震補強の建方・機械・既存取合いを包含解決前に一律生成しない",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "definition": "BR-B-194-03",
+    "steel_mass_t": 7.2,
+    "crane_days": 2,
+    "connection_scope": null,
+    "temporary_support_scope": null
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-15",
+   "methodId": "U19:STORE_AREA",
+   "definitionIds": [
+    "BR-E-100-02",
+    "BR-E-124-02",
+    "BR-M-180-02"
+   ],
+   "kind": "横断・境界",
+   "goal": "保管場所/期間が変更されたら旧数量を履歴保持し再確認",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "old_area_m2": 12,
+    "old_days": 3,
+    "new_location": "TEST-STORE2",
+    "new_area_m2": null
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STALE_RECONFIRM_NO_EXPORT",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-16",
+   "methodId": "U19:NO_SEPARATE",
+   "definitionIds": [
+    "REL-039",
+    "REL-102",
+    "BR-E-050-01",
+    "BR-E-050-02",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-100-02",
+    "BR-E-109-02",
+    "BR-E-124-01",
+    "BR-E-124-02",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-144-03",
+    "BR-M-155-02",
+    "BR-M-180-02",
+    "BR-B-053-01",
+    "BR-B-053-02",
+    "BR-B-194-03"
+   ],
+   "kind": "横断・境界",
+   "goal": "確認済み0と未入力は別状態。包含済は数量nullで記録",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "reason": "INCLUDED",
+    "counterpart": "TEST明細",
+    "evidence": "TEST包含根拠",
+    "quantity": null,
+    "raw_observations": [
+     {
+      "raw_measure": 0,
+      "measurement_complete": true,
+      "evidence": "TEST実査完了",
+      "state": "VERIFIED_ZERO"
+     },
+     {
+      "raw_measure": null,
+      "measurement_complete": false,
+      "evidence": null,
+      "state": "UNMEASURED"
+     }
+    ]
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "NO_SEPARATE_NO_QUANTITY",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-17",
+   "methodId": "U19:MOVE_VOLUME",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02"
+   ],
+   "kind": "横断・境界",
+   "goal": "補正の適用箇所は一か所だけ。補正数量と補正単価へ二重適用しない",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "raw_mass_t": 0.6,
+    "density_coefficient": 1.4,
+    "single_factor": 1.3,
+    "corrected_quantity_t": 1.092,
+    "price_also_corrected": true
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-18",
+   "methodId": "U19:MOVE_VOLUME",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02"
+   ],
+   "kind": "横断・境界",
+   "goal": "未丸め1.092tと整数内訳数量1tを別保持。出力基準の丸めは明示選択",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "raw_calculation_t": 1.092,
+    "adopted_profile": "TEST国R7総則2(7):整数",
+    "estimate_quantity_t": 1,
+    "auto_export": false
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "ROUNDING_PROFILE_REVIEW",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  },
+  {
+   "caseId": "UAT-X-19",
+   "methodId": "U19:MOVE_MASS / U19:MOVE_VOLUME",
+   "definitionIds": [
+    "BR-E-050-01",
+    "BR-E-053-01",
+    "BR-E-060-06",
+    "BR-E-098-02",
+    "BR-E-124-01",
+    "BR-M-034-06",
+    "BR-M-084-06",
+    "BR-M-155-02"
+   ],
+   "kind": "横断・境界",
+   "goal": "分割搬入を完成品の質量で判定せず、個別計画・適用基準を確認",
+   "input": {
+    "fixture_type": "SYNTHETIC_ONLY",
+    "definition": "BR-M-084-06",
+    "assembled_mass_kg": 1000,
+    "parts_kg": [
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50,
+     50
+    ],
+    "transport_form": "パネル分割",
+    "attempted_method": "完成機器の1000kgで標準搬入t"
+   },
+   "variables": [],
+   "values": [],
+   "calc": null,
+   "expectedQuantity": null,
+   "expectedUnit": "",
+   "expectedState": "STOP_INPUT_OR_SCOPE_REVIEW",
+   "stopReason": "違反時は数量なし・再確認。正常な別範囲は元量を保持。",
+   "sourceStatus": "未実施"
+  }
+ ],
+ "additionalCases": [
+  {
+   "case_id": "CC26-01",
+   "topic": "下地から墨出し",
+   "input_scenario": "壁下地20m2を拾い、床面積方式の墨出しを選択",
+   "expected_assertions": [
+    "墨出し20m2を自動保存しない",
+    "床の対象選択と基準確認を要求",
+    "下地20m2は保持"
+   ],
+   "phase": "P3",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-02",
+   "topic": "同じ単位の別範囲",
+   "input_scenario": "壁面と床面がともにm2",
+   "expected_assertions": [
+    "単位一致だけでは同一数量としない"
+   ],
+   "phase": "P2",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-03",
+   "topic": "面側・層",
+   "input_scenario": "同じ壁で両面仕上げと下地が存在",
+   "expected_assertions": [
+    "面側/層ごとに数量を保持",
+    "同じ位置だけで重複削除しない"
+   ],
+   "phase": "P2",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-04",
+   "topic": "施工不明",
+   "input_scenario": "既設管流用の有無がunknown",
+   "expected_assertions": [
+    "必要な事実を質問",
+    "数量生成しない",
+    "不要と確定しない"
+   ],
+   "phase": "P3",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-05",
+   "topic": "一段確認",
+   "input_scenario": "提案AからB候補、BからC関係がある",
+   "expected_assertions": [
+    "B未確認でCを自動生成しない",
+    "B確認後だけ次段を再評価"
+   ],
+   "phase": "P3",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-06",
+   "topic": "逆方向",
+   "input_scenario": "A→Bの提案・数量関係からBを起点にする",
+   "expected_assertions": [
+    "逆方向の照会候補は出せる",
+    "数量式を自動反転しない"
+   ],
+   "phase": "P3",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-07",
+   "topic": "循環",
+   "input_scenario": "A→B→Aと同じ対象・工程・版",
+   "expected_assertions": [
+    "訪問/重複キーで止まる",
+    "別対象の正当な候補は失わない"
+   ],
+   "phase": "P3",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-08",
+   "topic": "親/記録",
+   "input_scenario": "親31又は記録10の入力欄を満たす",
+   "expected_assertions": [
+    "親/記録のquantity=null",
+    "正式物量へ出力しない"
+   ],
+   "phase": "P1",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-09",
+   "topic": "補助量",
+   "input_scenario": "m2の幾何補助量が存在",
+   "expected_assertions": [
+    "補助として保存",
+    "同単位の正式面積へ直接転記しない"
+   ],
+   "phase": "P4",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-10",
+   "topic": "19未確定",
+   "input_scenario": "方式/単位がまだ選択されていない",
+   "expected_assertions": [
+    "単位・方式選択を要求",
+    "元単位を勝手に変更しない"
+   ],
+   "phase": "P4",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-11",
+   "topic": "鋼材条件",
+   "input_scenario": "PLATE選択で密度・根拠が欠ける",
+   "expected_assertions": [
+    "当該必須不足を表示",
+    "kg/mや既定密度で補わない"
+   ],
+   "phase": "P4",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-12",
+   "topic": "鋼材正常",
+   "input_scenario": "LINEAR:2本×3m×4kg/m、TEST質量根拠を持つ",
+   "expected_assertions": [
+    "数値参照24kg",
+    "案件採用/正式出力は別確認"
+   ],
+   "phase": "P4",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-13",
+   "topic": "鉄筋換算",
+   "input_scenario": "10本×2m×1kg/mのTEST明細",
+   "expected_assertions": [
+    "kg定義は20kg",
+    "t定義は0.02t",
+    "定義別const単位を守る"
+   ],
+   "phase": "P4",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-14",
+   "topic": "控除超過",
+   "input_scenario": "対象体積より控除体積が大きい",
+   "expected_assertions": [
+    "負数量を採用しない",
+    "入力矛盾を表示、0へ丸めない"
+   ],
+   "phase": "P4",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-15",
+   "topic": "明細重複",
+   "input_scenario": "同じ部材IDが同一明細に重複",
+   "expected_assertions": [
+    "自動二重加算しない",
+    "別工程か誤入力かを照査"
+   ],
+   "phase": "P4",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-16",
+   "topic": "価格未確定",
+   "input_scenario": "範囲と計測が確定、価格資料は未選択",
+   "expected_assertions": [
+    "物理数量の計測/参考検算は可能",
+    "正式な価格内訳は未採用"
+   ],
+   "phase": "P6",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-17",
+   "topic": "全欄記入",
+   "input_scenario": "単価分担の全欄に文字を記入したが内容未照査",
+   "expected_assertions": [
+    "REVIEW_PENDING",
+    "欄埋めだけで正式出力許可にしない"
+   ],
+   "phase": "P6",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-18",
+   "topic": "単価単位",
+   "input_scenario": "数量kg・価格tで換算根拠なし",
+   "expected_assertions": [
+    "価格接続を保留",
+    "kg元値保持"
+   ],
+   "phase": "P6",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-19",
+   "topic": "包含/他工事",
+   "input_scenario": "実物数量はあり、費用は単価包含又は他工事",
+   "expected_assertions": [
+    "物理対象・数量を保持",
+    "費用の別計上は採用条件に従い抑制"
+   ],
+   "phase": "P6",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-20",
+   "topic": "分担競合",
+   "input_scenario": "同じ対象/工程を建築と設備が計上",
+   "expected_assertions": [
+    "ALLOCATION_CONFLICT",
+    "一方を勝手に削除しない"
+   ],
+   "phase": "P6",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-21",
+   "topic": "二重操作",
+   "input_scenario": "同operation_idで同payloadを再送",
+   "expected_assertions": [
+    "追加/加算を一度だけ行う",
+    "前回結果を返す"
+   ],
+   "phase": "P5",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-22",
+   "topic": "操作競合",
+   "input_scenario": "同operation_idに異なるpayload",
+   "expected_assertions": [
+    "競合として停止",
+    "元の操作結果を上書きしない"
+   ],
+   "phase": "P5",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-23",
+   "topic": "共用削除",
+   "input_scenario": "複数起点が共有する対象で一つの起点を削除",
+   "expected_assertions": [
+    "残る参照・手動編集を確認",
+    "共用現物を誤削除しない"
+   ],
+   "phase": "P5",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-24",
+   "topic": "変更後の採用",
+   "input_scenario": "採用済み数量の図面/明細/基準版が変わる",
+   "expected_assertions": [
+    "依存先をSTALE",
+    "旧値・根拠を履歴保持",
+    "確認済みを自動維持しない"
+   ],
+   "phase": "P5",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-25",
+   "topic": "旧ファイル",
+   "input_scenario": "新機能を持たない旧保存データを開いて再保存",
+   "expected_assertions": [
+    "既存数量/図形/順序を維持",
+    "新しい採用根拠を捏造しない"
+   ],
+   "phase": "P5",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-26",
+   "topic": "Undo/Redo",
+   "input_scenario": "候補採用と別拾い、関連付けを戻してやり直す",
+   "expected_assertions": [
+    "計測・判断・関連の整合を往復復元"
+   ],
+   "phase": "P5",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-27",
+   "topic": "通常閲覧",
+   "input_scenario": "新機能を開かずPDF閲覧/ズーム/スナップを使う",
+   "expected_assertions": [
+    "全949schema/全137tableを起動時検証しない",
+    "全ページ解析を追加しない",
+    "基準と実測性能差を記録"
+   ],
+   "phase": "P7",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-28",
+   "topic": "保存直後",
+   "input_scenario": "新数量を保存し直ちに終了",
+   "expected_assertions": [
+    "成功した保存内容を失わない",
+    "未変更なら不正な未保存警告を出さない"
+   ],
+   "phase": "P5",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-29",
+   "topic": "参考矩形",
+   "input_scenario": "実図面で14.7m×2.2mを参考計算",
+   "expected_assertions": [
+    "32.34m2は補助幾何値",
+    "基礎m3・型枠m2・防水m2へ転記しない"
+   ],
+   "phase": "P7",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-30",
+   "topic": "不明な演算",
+   "input_scenario": "未対応AST又は算式IDを変換時に検出",
+   "expected_assertions": [
+    "UNSUPPORTEDと該当箇所を出す",
+    "eval/Functionで実行しない",
+    "他定義の独立作業は継続"
+   ],
+   "phase": "P1",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-31",
+   "topic": "必須キーの整理",
+   "input_scenario": "整理後163対応に廃止対象の旧必須キーがある",
+   "expected_assertions": [
+    "明示された置換/廃止だけ適用",
+    "旧一律キーをANDで復活させない",
+    "無関係な必須条件は保持"
+   ],
+   "phase": "P1",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  },
+  {
+   "case_id": "CC26-32",
+   "topic": "既存手動出力",
+   "input_scenario": "新機能未使用の既存手動数量を従来の参考Excelへ出力",
+   "expected_assertions": [
+    "新規の正式採用ゲートで全既存出力を停止しない",
+    "新関連の未採用参考値は正式数量に混入しない"
+   ],
+   "phase": "P6",
+   "fixture_kind": "DESIGN_SPEC_NOT_COMPLETE_API_INPUT",
+   "application_test_status": "NOT_RUN"
+  }
+ ]
+}

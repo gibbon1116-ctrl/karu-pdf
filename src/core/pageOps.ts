@@ -1,0 +1,379 @@
+import { readDrawingInfo, writeDrawingInfo } from './drawingInfo'
+import { readCountFixtures, writeCountFixtures } from './countFixtures'
+import { readDocumentRoomRegions, readPageRoomSet, readRoomRegions, readRoomSets, translateRoomRegion, writeRoomRegions } from './rooms'
+import mupdf, { type PDFDocument, type PDFObject } from 'mupdf'
+import type { PageSize } from './mupdfDoc'
+import { hasOutline, readOutline, prepareOutlineForLayout, verifyOutlineAfterLayout } from './outline'
+import type { OutlineLayoutPlan } from './outlineModel'
+
+export type PageRotation = 0 | 90 | 180 | 270
+
+export type PageLayoutSource =
+  | { kind: 'page'; docId: string; pageIndex: number }
+  | { kind: 'blank'; width: number; height: number }
+
+export interface PageLayoutCard {
+  id: string
+  source: PageLayoutSource
+  rotation: PageRotation
+}
+
+export interface PageInfo extends PageSize {
+  rotation: PageRotation
+  text: string
+}
+
+function normalizedRotation(value: number): PageRotation {
+  return ((Math.round(value / 90) * 90 % 360 + 360) % 360) as PageRotation
+}
+
+function readRotation(pageObject: PDFObject): PageRotation {
+  const rotate = pageObject.getInheritable('Rotate')
+  try {
+    return rotate.isNumber() ? normalizedRotation(rotate.asNumber()) : 0
+  } finally {
+    rotate.destroy()
+  }
+}
+
+function rotatePage(document: PDFDocument, pageIndex: number, additional: PageRotation): void {
+  if (additional === 0) return
+  const pageObject = document.findPage(pageIndex)
+  try {
+    pageObject.put('Rotate', normalizedRotation(readRotation(pageObject) + additional))
+  } finally {
+    pageObject.destroy()
+  }
+}
+
+function sourceDocument(
+  targetDocId: string,
+  target: PDFDocument,
+  sourceDocId: string,
+  sources: ReadonlyMap<string, PDFDocument>,
+): PDFDocument {
+  if (sourceDocId === targetDocId) return target
+  const source = sources.get(sourceDocId)
+  if (!source) throw new Error(`追加元の PDF が見つかりません: ${sourceDocId}`)
+  return source
+}
+
+function addBlank(document: PDFDocument, width: number, height: number): number {
+  if (!(width > 0) || !(height > 0)) throw new Error('白紙の大きさが正しくありません。')
+  const page = document.addPage([0, 0, width, height], 0, {}, '')
+  try {
+    document.insertPage(-1, page)
+  } finally {
+    page.destroy()
+  }
+  return document.countPages() - 1
+}
+
+function existingAcroForm(document: PDFDocument): PDFObject | null {
+  const root = document.getTrailer().get('Root')
+  try {
+    const acroForm = root.get('AcroForm')
+    if (!acroForm.isNull()) return acroForm
+    acroForm.destroy()
+    return null
+  } finally {
+    root.destroy()
+  }
+}
+
+const PRESERVED_CATALOG_KEYS = new Set([
+  'Lang', 'ViewerPreferences', 'PageLayout', 'PageMode', 'MarkInfo',
+  'Metadata', 'OutputIntents', 'Extensions', 'Version',
+])
+
+function preserveCatalog(document: PDFDocument): Map<string, PDFObject> {
+  const root = document.getTrailer().get('Root')
+  const values = new Map<string, PDFObject>()
+  try {
+    root.forEach((value, key) => {
+      if (typeof key === 'string' && (key.startsWith('Karu') || PRESERVED_CATALOG_KEYS.has(key))) values.set(key, value)
+      else value.destroy()
+    })
+    return values
+  } catch (error) {
+    values.forEach(value => value.destroy())
+    throw error
+  } finally {
+    root.destroy()
+  }
+}
+
+function topLevelField(widgetObject: PDFObject): PDFObject {
+  let current = widgetObject
+  for (;;) {
+    const parent = current.get('Parent')
+    if (parent.isNull()) {
+      parent.destroy()
+      return current
+    }
+    current.destroy()
+    current = parent
+  }
+}
+
+function rebuildAcroFormFields(document: PDFDocument, preservedAcroForm: PDFObject | null): void {
+  const fields = document.newArray()
+  const seen = new Set<string>()
+  let fieldCount = 0
+  try {
+    for (let pageIndex = 0; pageIndex < document.countPages(); pageIndex += 1) {
+      const page = document.loadPage(pageIndex)
+      try {
+        const widgets = page.getWidgets()
+        try {
+          for (const widget of widgets) {
+            const field = topLevelField(widget.getObject())
+            try {
+              const key = field.isIndirect()
+                ? `indirect:${field.asIndirect()}`
+                : `direct:${field.toString(true, true)}`
+              if (seen.has(key)) continue
+              seen.add(key)
+              fields.push(field)
+              fieldCount += 1
+            } finally {
+              field.destroy()
+            }
+          }
+        } finally {
+          widgets.forEach((widget) => widget.destroy())
+        }
+      } finally {
+        page.destroy()
+      }
+    }
+
+    if (!preservedAcroForm && fieldCount === 0) return
+    const acroForm = preservedAcroForm ?? document.newDictionary()
+    const root = document.getTrailer().get('Root')
+    try {
+      acroForm.put('Fields', fields)
+      root.put('AcroForm', acroForm)
+    } finally {
+      root.destroy()
+      if (!preservedAcroForm) acroForm.destroy()
+    }
+  } finally {
+    fields.destroy()
+    preservedAcroForm?.destroy()
+  }
+}
+
+// MuPDF graftPage copies a fixed whitelist of page keys, so KaruDrawing, KaruRooms and KaruRoomSet are dropped.
+// A page that used a room set in its PDF takes the set's ranges along as its own ranges.
+function graftDrawingPage(target: PDFDocument, source: PDFDocument, pageIndex: number): void {
+  const original = source.loadPage(pageIndex)
+  try {
+    const info = readDrawingInfo(original)
+    const link = readPageRoomSet(original)
+    const shared = link
+      ? (readRoomSets(source).find(set => set.id === link.id)?.regions ?? [])
+        .map(region => translateRoomRegion(region, link.dx, link.dy))
+      : []
+    const rooms = [...readRoomRegions(original), ...shared].slice(0, 200)
+    if (rooms.length > 0) {
+      // Only pages that carry ranges pay for the scan of the target's range ids.
+      const usedIds = new Set<string>()
+      for (const [, regions] of readDocumentRoomRegions(target)) for (const region of regions) usedIds.add(region.id)
+      for (const set of readRoomSets(target)) for (const region of set.regions) usedIds.add(region.id)
+      for (const region of rooms) {
+        if (!region.id.length || usedIds.has(region.id)) {
+          do { region.id = crypto.randomUUID() } while (usedIds.has(region.id))
+        }
+        usedIds.add(region.id)
+      }
+    }
+    const appended = target.countPages()
+    target.graftPage(-1, source, pageIndex)
+    if (info || rooms.length > 0) {
+      const page = target.loadPage(appended)
+      try {
+        if (info) writeDrawingInfo(target, page, info)
+        if (rooms.length > 0) writeRoomRegions(target, page, rooms)
+      } finally { page.destroy() }
+    }
+  } finally { original.destroy() }
+}
+function remapCountFixtureSamples(
+  targetDocId: string,
+  target: PDFDocument,
+  cards: readonly PageLayoutCard[],
+): void {
+  let fixtures: ReturnType<typeof readCountFixtures>
+  try {
+    fixtures = readCountFixtures(target)
+  } catch {
+    return
+  }
+  if (fixtures.length === 0) return
+
+  const pages = new Map<number, { pageIndex: number; rotation: PageRotation }>()
+  cards.forEach((card, pageIndex) => {
+    if (card.source.kind !== 'page' || card.source.docId !== targetDocId) return
+    if (!pages.has(card.source.pageIndex)) {
+      pages.set(card.source.pageIndex, { pageIndex, rotation: card.rotation })
+    }
+  })
+
+  let changed = false
+  for (const fixture of fixtures) {
+    const sample = fixture.sample
+    if (!sample) continue
+    const page = pages.get(sample.pageIndex)
+    if (page && sample.pageIndex !== page.pageIndex) {
+      sample.pageIndex = page.pageIndex
+      changed = true
+    }
+    // rotatePage adds card.rotation to the original rotation.
+    if ((!page || page.rotation !== 0)
+      && (sample.rect !== undefined || sample.lines !== undefined)) {
+      delete sample.rect
+      delete sample.lines
+      changed = true
+    }
+  }
+  if (changed) writeCountFixtures(target, fixtures)
+}
+
+export function applyPageLayout(
+  targetDocId: string,
+  target: PDFDocument,
+  cards: readonly PageLayoutCard[],
+  sources: ReadonlyMap<string, PDFDocument>,
+  outlinePlan?: OutlineLayoutPlan,
+): void {
+  if (cards.length === 0) throw new Error('PDF には1ページ以上必要です。')
+  const withOutline = hasOutline(target)
+  // Validate the caller's revision before appended pages change the page count.
+  if (withOutline && outlinePlan && readOutline(target).revision !== outlinePlan.baseRevision) throw new Error('目次がほかの操作で変わりました。目次を読み込み直してください。')
+  const originalPageCount = target.countPages()
+  const order: number[] = []
+
+  for (const card of cards) {
+    if (card.source.kind === 'blank') {
+      order.push(addBlank(target, card.source.width, card.source.height))
+      continue
+    }
+    if (card.source.docId === targetDocId) {
+      if (card.source.pageIndex < 0 || card.source.pageIndex >= originalPageCount) {
+        throw new Error(`元のページ番号が範囲外です: ${card.source.pageIndex + 1}`)
+      }
+      order.push(card.source.pageIndex)
+      continue
+    }
+    const source = sourceDocument(targetDocId, target, card.source.docId, sources)
+    if (card.source.pageIndex < 0 || card.source.pageIndex >= source.countPages()) {
+      throw new Error(`追加元のページ番号が範囲外です: ${card.source.pageIndex + 1}`)
+    }
+    const appended = target.countPages()
+    graftDrawingPage(target, source, card.source.pageIndex)
+    order.push(appended)
+  }
+
+  // MuPDF's rearrangePages rebuilds the catalog with only Type, Pages, Outlines,
+  // OCProperties and Dests. Put back our own data (the fixture list, header/footer
+  // settings) and the entries that do not refer to pages.
+  const prepared = withOutline ? prepareOutlineForLayout(target, cards, order, outlinePlan ? { ...outlinePlan, baseRevision: readOutline(target).revision } : undefined, targetDocId) : null
+  const catalog = preserveCatalog(target)
+  try {
+    const acroForm = existingAcroForm(target)
+    try {
+      target.rearrangePages(order)
+      verifyOutlineAfterLayout(target, prepared)
+    } catch (error) {
+      acroForm?.destroy()
+      throw error
+    }
+    const root = target.getTrailer().get('Root')
+    try { catalog.forEach((value, key) => root.put(key, value)) }
+    catch (error) { acroForm?.destroy(); throw error }
+    finally { root.destroy() }
+    rebuildAcroFormFields(target, acroForm)
+    remapCountFixtureSamples(targetDocId, target, cards)
+    cards.forEach((card, index) => rotatePage(target, index, card.rotation))
+  } finally {
+    catalog.forEach(value => value.destroy())
+  }
+}
+
+export function extractPages(
+  targetDocId: string,
+  target: PDFDocument,
+  cards: readonly PageLayoutCard[],
+  sources: ReadonlyMap<string, PDFDocument>,
+): Uint8Array {
+  if (cards.length === 0) throw new Error('抽出するページを選んでください。')
+  const output = new mupdf.PDFDocument()
+  try {
+    cards.forEach((card, index) => {
+      if (card.source.kind === 'blank') addBlank(output, card.source.width, card.source.height)
+      else graftDrawingPage(output, sourceDocument(targetDocId, target, card.source.docId, sources), card.source.pageIndex)
+      rotatePage(output, index, card.rotation)
+    })
+    const buffer = output.saveToBuffer('garbage=4,compress,compress-images')
+    try {
+      return new Uint8Array(buffer.asUint8Array())
+    } finally {
+      buffer.destroy()
+    }
+  } finally {
+    output.destroy()
+  }
+}
+
+export function splitPages(
+  targetDocId: string,
+  target: PDFDocument,
+  groups: readonly (readonly PageLayoutCard[])[],
+  sources: ReadonlyMap<string, PDFDocument>,
+): Uint8Array[] {
+  if (groups.length === 0 || groups.some((group) => group.length === 0)) {
+    throw new Error('分割するページの区切りが正しくありません。')
+  }
+  return groups.map((group) => extractPages(targetDocId, target, group, sources))
+}
+
+export function getPageInfo(document: PDFDocument): PageInfo[] {
+  const result: PageInfo[] = []
+  for (let pageIndex = 0; pageIndex < document.countPages(); pageIndex += 1) {
+    const pageObject = document.findPage(pageIndex)
+    const page = document.loadPage(pageIndex)
+    try {
+      const [x0, y0, x1, y1] = page.getBounds()
+      const structured = page.toStructuredText('preserve-whitespace')
+      try {
+        result.push({
+          width: x1 - x0,
+          height: y1 - y0,
+          rotation: readRotation(pageObject),
+          text: structured.asText().replace(/\s+/g, ' ').trim().slice(0, 30),
+        })
+      } finally {
+        structured.destroy()
+      }
+    } finally {
+      page.destroy()
+      pageObject.destroy()
+    }
+  }
+  return result
+}
+
+export function getPageSizes(document: PDFDocument): PageSize[] {
+  const result: PageSize[] = []
+  for (let pageIndex = 0; pageIndex < document.countPages(); pageIndex += 1) {
+    const page = document.loadPage(pageIndex)
+    try {
+      const [x0, y0, x1, y1] = page.getBounds()
+      result.push({ width: x1 - x0, height: y1 - y0 })
+    } finally {
+      page.destroy()
+    }
+  }
+  return result
+}

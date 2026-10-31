@@ -1,0 +1,81 @@
+import { describe, expect, it } from 'vitest'
+import { DEFAULT_FORMAT, FORMAT_STORAGE_KEY, loadFormatDefaults, saveFormatDefaults, updateToolFormat } from '../src/editor/formatDefaults'
+
+class MemoryStorage implements Storage {
+  private readonly values = new Map<string, string>()
+  get length(): number { return this.values.size }
+  clear(): void { this.values.clear() }
+  getItem(key: string): string | null { return this.values.get(key) ?? null }
+  key(index: number): string | null { return [...this.values.keys()][index] ?? null }
+  removeItem(key: string): void { this.values.delete(key) }
+  setItem(key: string, value: string): void { this.values.set(key, value) }
+}
+
+describe('formatDefaults', () => {
+  it('ツールごとの値を独立して保存して読み出す', () => {
+    const storage = new MemoryStorage()
+    const value = updateToolFormat(updateToolFormat(DEFAULT_FORMAT, 'line', { borderWidth: 3 }), 'text', { font: 'BIZUDMincho', fontSize: 14 })
+    saveFormatDefaults(value, storage)
+    expect(loadFormatDefaults(storage)).toEqual(value)
+    expect(value.highlight.borderWidth).toBe(12)
+    expect(value.highlight.opacity).toBe(0.35)
+    expect(value.callout).toMatchObject({ fillColor: [1, 1, 1], borderColor: [1, 0, 0], opacity: 1, textOpacity: 1, boxOpacity: 1 })
+    expect(value.symbol.symbolSize).toBe(16)
+  })
+
+  it('透明度と記号の大きさをツールごとに保存する', () => {
+    const storage = new MemoryStorage()
+    const value = updateToolFormat(
+      updateToolFormat(DEFAULT_FORMAT, 'text', { textOpacity: 0.5, boxOpacity: 0.25 }),
+      'symbol',
+      { opacity: 0.75, symbolSize: 32 },
+    )
+    saveFormatDefaults(value, storage)
+    const loaded = loadFormatDefaults(storage)
+    expect(loaded.text).toMatchObject({ textOpacity: 0.5, boxOpacity: 0.25 })
+    expect(loaded.symbol).toMatchObject({ opacity: 0.75, symbolSize: 32 })
+  })
+
+  it('旧版の値を全ツールへ引き継ぐ', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(FORMAT_STORAGE_KEY, JSON.stringify({ color: [0, 0.25, 1], borderWidth: 2, fontSize: 12 }))
+    const loaded = loadFormatDefaults(storage)
+    expect(loaded.text).toMatchObject({ color: [0, 0.25, 1], fontSize: 12 })
+    expect(loaded.line).toMatchObject({ color: [0, 0.25, 1], borderWidth: 2 })
+  })
+
+  it('壊れた値では項目ごとに既定値へ戻す', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(FORMAT_STORAGE_KEY, JSON.stringify({ text: { color: 'red', fontSize: null }, line: { borderWidth: 2 } }))
+    const loaded = loadFormatDefaults(storage)
+    expect(loaded.text.color).toEqual(DEFAULT_FORMAT.text.color)
+    expect(loaded.text.fontSize).toBe(DEFAULT_FORMAT.text.fontSize)
+    expect(loaded.line.borderWidth).toBe(2)
+  })
+
+  it('旧whiteoutの値が残っていても四角と吹き出しの既定値を移行する', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(FORMAT_STORAGE_KEY, JSON.stringify({
+      whiteout: { color: [1, 1, 1], borderWidth: 0 },
+      square: { color: [0, 0.25, 1], borderWidth: 2 },
+    }))
+    const loaded = loadFormatDefaults(storage)
+    expect(loaded.square).toMatchObject({ color: [0, 0.25, 1], borderColor: [0, 0.25, 1], borderWidth: 2, fillColor: null })
+    expect(loaded.callout).toEqual(DEFAULT_FORMAT.callout)
+    expect('whiteout' in loaded).toBe(false)
+  })
+
+  it('Storageが例外を投げても落ちない', () => {
+    const storage = { getItem: () => { throw new Error('read') }, setItem: () => { throw new Error('write') } } as unknown as Storage
+    expect(loadFormatDefaults(storage)).toEqual(DEFAULT_FORMAT)
+    expect(() => saveFormatDefaults(DEFAULT_FORMAT, storage)).not.toThrow()
+  })
+
+  it('保存済みのchangeを無視し、指摘の既定値は維持する', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(FORMAT_STORAGE_KEY, JSON.stringify({ change: { color: [0.55,0.1,0.7] }, issue: { ...DEFAULT_FORMAT.issue, symbolSize: 24 } }))
+    const loaded = loadFormatDefaults(storage)
+    expect('change' in loaded).toBe(false)
+    expect(loaded.issue).toEqual({ ...DEFAULT_FORMAT.issue, symbolSize: 24 })
+  })
+})

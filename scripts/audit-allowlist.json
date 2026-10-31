@@ -1,0 +1,578 @@
+[
+  {
+    "file": "dist-fixed/assets/sharedPdfModule-*.js",
+    "string": "fetch(",
+    "reason": "共有エンジンの同梱WASM資産を同一originのGETで1回取得する。PDFや利用者データは送信しない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/sharedPdfModule-*.js",
+    "string": "XMLHttpRequest",
+    "reason": "既存の外部送信防止コードがエンジン起動と共有するチャンクへ移った。XHRの送信先を検査して止める処理。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/sharedPdfModule-*.js",
+    "string": "WebSocket",
+    "reason": "既存の外部送信防止コードが共有チャンクへ移った。接続先を検査して止める処理。",
+    "maxOccurrences": 4
+  },
+  {
+    "file": "dist-fixed/assets/sharedPdfModule-*.js",
+    "string": "EventSource",
+    "reason": "既存の外部送信防止コードが共有チャンクへ移った。接続先を検査して止める処理。",
+    "maxOccurrences": 4
+  },
+  {
+    "file": "dist-fixed/assets/sharedPdfModule-*.js",
+    "string": "sendBeacon",
+    "reason": "既存の外部送信防止コードが共有チャンクへ移った。送信先を検査して止める処理。",
+    "maxOccurrences": 3
+  },
+  {
+    "file": "src/client/sharedPdfModule.ts",
+    "string": "fetch(",
+    "reason": "同じ配信元の固定WASM資産を1回取得して描画Workerに共有する。PDFや利用者データは送信しない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/security/externalSend.ts",
+    "string": "XMLHttpRequest",
+    "reason": "外部への送信を止めるための見張り。送信はしない（型の参照4件・実行コード2件）。",
+    "maxOccurrences": 6
+  },
+  {
+    "file": "src/security/externalSend.ts",
+    "string": "WebSocket",
+    "reason": "外部への送信を止めるための見張り。送信はしない（型の参照2件・実行コード5件）。",
+    "maxOccurrences": 7
+  },
+  {
+    "file": "src/security/externalSend.ts",
+    "string": "EventSource",
+    "reason": "外部への送信を止めるための見張り。送信はしない（型の参照2件・実行コード5件）。",
+    "maxOccurrences": 7
+  },
+  {
+    "file": "src/security/externalSend.ts",
+    "string": "sendBeacon",
+    "reason": "外部への送信を止めるための見張り。送信はしない。",
+    "maxOccurrences": 3
+  },
+  {
+    "file": "dist-fixed/assets/externalSend-*.js",
+    "string": "XMLHttpRequest",
+    "reason": "外部への送信を止めるための見張り。送信はしない。型を除いた実行コード2件。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/externalSend-*.js",
+    "string": "WebSocket",
+    "reason": "外部への送信を止めるための見張り。送信はしない。型を除いた実行コード5件。",
+    "maxOccurrences": 5
+  },
+  {
+    "file": "dist-fixed/assets/externalSend-*.js",
+    "string": "EventSource",
+    "reason": "外部への送信を止めるための見張り。送信はしない。型を除いた実行コード5件。",
+    "maxOccurrences": 5
+  },
+  {
+    "file": "dist-fixed/assets/externalSend-*.js",
+    "string": "sendBeacon",
+    "reason": "外部への送信を止めるための見張り。送信はしない。",
+    "maxOccurrences": 3
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "WebSocket",
+    "reason": "外部への送信を止めるための見張り。送信はしない。主画面の見張りと通知の判定5件。Worker は fetch と CSP だけを見張る。",
+    "maxOccurrences": 5
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "EventSource",
+    "reason": "外部への送信を止めるための見張り。送信はしない。主画面の見張りと通知の判定5件。Worker は fetch と CSP だけを見張る。",
+    "maxOccurrences": 5
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "sendBeacon",
+    "reason": "外部への送信を止めるための見張り。送信はしない。主画面の見張り3件。",
+    "maxOccurrences": 3
+  },
+  {
+    "file": "src/editor/AnnotationLayer.tsx",
+    "string": "http://www.w3.org/2000/svg",
+    "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/editor/MeasurementOverlay.tsx",
+    "string": "http://www.w3.org/2000/svg",
+    "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/fixed/security.ts",
+    "string": "github.io",
+    "reason": "固定版の起動禁止ホストとの文字列比較。URL や通信先として使わない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "src/worker/pdf.worker.ts",
+    "string": "fetch(",
+    "reason": "アプリのフォント取得 1 か所。固定版では fixedAssetUrl が origin と base の境界を検査する。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "vite.config.ts",
+    "string": "https://base.invalid",
+    "reason": "Vite の配布パス正規化を検査するための架空の基準 URL。通信しない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/annotations-*.js",
+    "string": "XMLHttpRequest",
+    "reason": "数量拾いの画面と共有するチャンク（1.4 の改修で Rollup が名前を fixtureOrder から annotations に戻した）にある既存 MuPDF/Emscripten 標準ローダー（1.1.0 の annotationCsv、1.3.4 の annotations チャンクと同じ4か所）。従来の App チャンクと同じ file: 読み取り分岐。固定版では内部 HTTP(S) を使う。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/annotations-*.js",
+    "string": "fetch(",
+    "reason": "共有チャンク（1.4 の改修で Rollup が名前を fixtureOrder から annotations に戻した）にある MuPDF/Emscripten 標準ローダー（1.1.0 の annotationCsv、1.3.4 の annotations チャンクと同じコード）。同梱 WASM の同一 origin GET だけで、PDF の送信先ではない。配布版の通信試験で確認する。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/AnnotationLayer-*.js",
+    "string": "http://www.w3.org/2000/svg",
+    "reason": "SVG/XML/MathML の名前空間識別子（注釈レイヤーと計測の重ね描き）。器具リストの遅延読込画面と共有するチャンクへ移った。取得先ではない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/MeasurementOverlay-*.js",
+    "string": "http://www.w3.org/2000/svg",
+    "reason": "SVG の名前空間識別子（計測・部屋の範囲の重ね描き）。数量タブが部屋の範囲の画面を読み込むため、計測の重ね描きが別のチャンクになった。取得先ではない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/App-*.js",
+    "string": "XMLHttpRequest",
+    "reason": "MuPDF/Emscripten の file: 読み取り用フォールバック。固定版は内部サーバーの HTTP(S) を使用する。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/App-*.js",
+    "string": "fetch(",
+    "reason": "MuPDF/Emscripten の同梱 WASM の GET（Worker の追加 1 件は検査済みフォント URL）。PDF は送信しない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/App-*.js",
+    "string": "http://www.w3.org/2000/svg",
+    "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/client-*.js",
+    "string": "https://react.dev/errors/",
+    "reason": "React / React DOM の例外メッセージ用 URL。ライブラリは取得しない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/client-*.js",
+    "string": "http://www.w3.org/2000/svg",
+    "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
+    "maxOccurrences": 5
+  },
+  {
+    "file": "dist-fixed/assets/client-*.js",
+    "string": "http://www.w3.org/1998/Math/MathML",
+    "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
+    "maxOccurrences": 3
+  },
+  {
+    "file": "dist-fixed/assets/client-*.js",
+    "string": "http://www.w3.org/1999/xlink",
+    "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
+    "maxOccurrences": 7
+  },
+  {
+    "file": "dist-fixed/assets/client-*.js",
+    "string": "http://www.w3.org/XML/1998/namespace",
+    "reason": "SVG/XML/MathML の名前空間識別子。取得先ではない。",
+    "maxOccurrences": 3
+  },
+  {
+    "file": "dist-fixed/assets/index-*.js",
+    "string": "fetch(",
+    "reason": "Vite の modulepreload ポリフィル。ビルドが生成した同一配布パス内の JS リンクだけを取得。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/index-*.js",
+    "string": "github.io",
+    "reason": "固定版の起動禁止ホストとの文字列比較。URL や通信先として使わない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/pdf.worker-*.js",
+    "string": "XMLHttpRequest",
+    "reason": "MuPDF/Emscripten の file: 読み取り用フォールバック。固定版は内部サーバーの HTTP(S) を使用する。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/pdf.worker-*.js",
+    "string": "fetch(",
+    "reason": "MuPDF/Emscripten の同梱 WASM の GET（Worker の追加 1 件は検査済みフォント URL）。PDF は送信しない。",
+    "maxOccurrences": 3
+  },
+  {
+    "file": "dist-fixed/assets/react-dom-*.js",
+    "string": "https://react.dev/errors/",
+    "reason": "React / React DOM の例外メッセージ用 URL。ライブラリは取得しない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/sw.js",
+    "string": "importScripts(",
+    "reason": "Workbox の AMD ローダーが sw.js と同じディレクトリの workbox-*.js を取得。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/workbox-*.js",
+    "string": "fetch(",
+    "reason": "Workbox の Strategy/StrategyHandler。静的 precache の GET のみ（5 出現、メソッド宣言も含む）。外部ルートや runtimeCaching は登録しない。",
+    "maxOccurrences": 5
+  },
+  {
+    "file": "dist-fixed/workbox-*.js",
+    "string": "https://bit.ly/wb-precache",
+    "reason": "Workbox の precache 警告メッセージに含む説明 URL。取得しない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "XMLHttpRequest",
+    "maxOccurrences": 6,
+    "reason": "MuPDF/Emscripten の未使用の file 読み取り分岐。ページと PDF Worker は先に注入した instantiateWasm のみを使う。connect-src none が取得も遮断する。 加えて、外部への送信を止めるための見張り2件（送信はしない）。"
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "fetch(",
+    "maxOccurrences": 4,
+    "reason": "MuPDF/Emscripten の未使用の WASM 取得分岐（ページと PDF Worker 各2出現）。注入済み Module を使い、フォントはメッセージで受け取る。connect-src none で実行も禁止。"
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "https://react.dev/errors/",
+    "maxOccurrences": 2,
+    "reason": "React のエラー説明用の文字列（React と React DOM）。通信には使わない。"
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://www.w3.org/2000/svg",
+    "maxOccurrences": 7,
+    "reason": "SVG の名前空間識別子。取得先ではない。"
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://www.w3.org/1998/Math/MathML",
+    "maxOccurrences": 3,
+    "reason": "MathML の名前空間識別子。取得先ではない。"
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://www.w3.org/1999/xlink",
+    "maxOccurrences": 7,
+    "reason": "XLink の名前空間識別子。取得先ではない。"
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://www.w3.org/XML/1998/namespace",
+    "maxOccurrences": 3,
+    "reason": "XML の名前空間識別子。取得先ではない。"
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/package/2006/relationships",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://purl.org/dc/elements/1.1/",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://purl.org/dc/terms/",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://www.w3.org/2001/XMLSchema-instance",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/xlsxWriter.ts",
+    "string": "http://schemas.openxmlformats.org/package/2006/content-types",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/package/2006/relationships",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://purl.org/dc/elements/1.1/",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://purl.org/dc/terms/",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://www.w3.org/2001/XMLSchema-instance",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/quantityXlsx-*.js",
+    "string": "http://schemas.openxmlformats.org/package/2006/content-types",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/package/2006/relationships",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://purl.org/dc/elements/1.1/",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://purl.org/dc/terms/",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://www.w3.org/2001/XMLSchema-instance",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "http://schemas.openxmlformats.org/package/2006/content-types",
+    "reason": "Excel（.xlsx）の形式が要求する XML の名前空間・関係の種類の識別子。ファイルの中に書く文字列で、通信はしない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "src/core/crossings.ts",
+    "string": "Segment",
+    "reason": "交差の計算の線分（幾何の segment）の型名・変数名。分析サービス Segment ではなく、通信はしない。",
+    "maxOccurrences": 6
+  },
+  {
+    "file": "src/core/crossings.ts",
+    "string": "segment",
+    "reason": "交差の計算の線分（幾何の segment）の型名・変数名。分析サービス Segment ではなく、通信はしない。",
+    "maxOccurrences": 11
+  },
+  {
+    "file": "src/core/takeoff/master.data.ts",
+    "string": "segment",
+    "reason": "数量方式の入力形状の説明文（route/segment/level）の語。分析サービス Segment ではなく、通信はしない。",
+    "maxOccurrences": 40
+  },
+  {
+    "file": "dist-fixed/assets/master.data-*.js",
+    "string": "segment",
+    "reason": "数量方式の入力形状の説明文（route/segment/level）の語。分析サービス Segment ではなく、通信はしない。",
+    "maxOccurrences": 40
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "segment",
+    "reason": "数量方式の入力形状の説明文（route/segment/level）の語。分析サービス Segment ではなく、通信はしない。",
+    "maxOccurrences": 40
+  },
+  {
+    "file": "src/core/takeoff/master.ts",
+    "string": "https://json-schema.org/draft/2020-12/schema",
+    "reason": "JSON Schema の方言を示す識別子（$schema）。検証器は読むだけで、通信はしない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/master-*.js",
+    "string": "https://json-schema.org/draft/2020-12/schema",
+    "reason": "JSON Schema の方言を示す識別子（$schema）。検証器は読むだけで、通信はしない。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-single/karu-pdf-v*.html",
+    "string": "https://json-schema.org/draft/2020-12/schema",
+    "reason": "JSON Schema の方言を示す識別子（$schema）。検証器は読むだけで、通信はしない。",
+    "maxOccurrences": 2
+  }
+]
