@@ -3,7 +3,7 @@ import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { SECURITY_HEADERS } from './fixed-policy.mjs'
-const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.wasm': 'application/wasm', '.webmanifest': 'application/manifest+json', '.ttf': 'font/ttf', '.png': 'image/png', '.json': 'application/json' }
+const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.wasm': 'application/wasm', '.webmanifest': 'application/manifest+json', '.ttf': 'font/ttf', '.png': 'image/png', '.json': 'application/json' }
 export function createFixedServer(root = path.resolve('dist-fixed'), base = '/karu-pdf/') {
   return createServer(async (req, res) => {
     for (const [key, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(key, value)

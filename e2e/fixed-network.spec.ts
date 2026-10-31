@@ -228,9 +228,12 @@ test('見張りが fetch・WebSocket・Beacon を止め、CSP が画像・任意
   await testInfo.attach('fixed-csp-negative.json', { path: artifact, contentType: 'application/json' })
 })
 
-test('版・日付・コミット・配布形態を表示する', async ({ page }) => {
+test('版・日付・コミット・配布形態を表示する', async ({ page, context }) => {
   const build = JSON.parse(fs.readFileSync('dist-fixed/build-info.json', 'utf8'))
-  await page.goto(base + '?test=1'); await open(page)
+  await page.goto(base + '?test=1')
+  await page.evaluate(() => navigator.serviceWorker.ready.then(() => true))
+  await page.reload(); await page.waitForFunction(() => Boolean(window.__karu && navigator.serviceWorker.controller))
+  await open(page)
   await expect(page.locator('.status-bar')).toContainText('固定・閉域版')
   await page.getByRole('button', { name: 'ヘルプ▼', exact: true }).click()
   await page.getByRole('menuitem', { name: 'このアプリについて', exact: true }).click()
@@ -246,5 +249,14 @@ test('版・日付・コミット・配布形態を表示する', async ({ page 
   const response = await page.request.get(target.href)
   expect(response.status()).toBe(200)
   expect(await response.text()).toContain('MuPDF bundled third-party components')
+  const [licensePage] = await Promise.all([
+    context.waitForEvent('page'),
+    about.getByRole('link', { name: '第三者ライセンス', exact: true }).click(),
+  ])
+  await licensePage.waitForLoadState('domcontentloaded')
+  await expect(licensePage).toHaveURL(origin + base + 'licenses/THIRD_PARTY_LICENSES.txt')
+  await expect(licensePage.locator('body')).toContainText('MuPDF bundled third-party components')
+  await expect(licensePage.getByRole('button', { name: 'ファイル▼', exact: true })).toHaveCount(0)
+  await licensePage.close()
   for (const text of [build.version, build.buildDate, build.gitShort, build.gitCommit, '固定・閉域版', '外部通信: 使用しない', '管理者による手動更新']) await expect(about).toContainText(text)
 })

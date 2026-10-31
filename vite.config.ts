@@ -3,7 +3,7 @@ import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { META_CSP } from './scripts/fixed-policy.mjs'
 import { sourceSnapshot } from './scripts/source-snapshot.mjs'
 import { thirdPartyNotices } from './scripts/third-party-notices.mjs'
@@ -86,6 +86,7 @@ export default defineConfig(({ mode }) => {
           file_handlers: [{ action: base, accept: { 'application/pdf': ['.pdf'] } }],
         },
         workbox: {
+          navigateFallbackDenylist: [new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}licenses/`)],
           globPatterns: [fixed ? '**/*.{html,js,css,wasm,ttf,png,webmanifest}' : '**/*.{html,js,css,wasm,ttf,png}'],
           maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
           cleanupOutdatedCaches: true,
@@ -108,9 +109,9 @@ export default defineConfig(({ mode }) => {
           for (const name of ['workbox-core', 'workbox-precaching', 'workbox-routing', 'workbox-strategies']) runtimePackages.add(name)
           const directory = `${fixed ? 'dist-fixed' : 'dist'}/licenses`
           mkdirSync(directory, { recursive: true })
-          copyFileSync('LICENSE', `${directory}/LICENSE.txt`)
-          writeFileSync(`${directory}/THIRD_PARTY_LICENSES.txt`, thirdPartyNotices({ runtimePackages: [...runtimePackages] }))
-          copyFileSync('licenses/data-sources.txt', `${directory}/DATA_SOURCES.txt`)
+          writeFileSync(`${directory}/LICENSE.txt`, '\uFEFF' + readFileSync('LICENSE', 'utf8'))
+          writeFileSync(`${directory}/THIRD_PARTY_LICENSES.txt`, '\uFEFF' + thirdPartyNotices({ runtimePackages: [...runtimePackages] }))
+          writeFileSync(`${directory}/DATA_SOURCES.txt`, '\uFEFF' + readFileSync('licenses/data-sources.txt', 'utf8'))
         },
       } satisfies Plugin] : []),
     ],
