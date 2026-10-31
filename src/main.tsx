@@ -4,17 +4,30 @@ import './security/installPageGuard'
 /* @server:end */
 /* @pages:start */import { createRoot } from 'react-dom/client'
 import { ErrorBoundary } from './app/ErrorBoundary'
+import { PublicationStopped } from './app/PublicationStopped'
+import { checkPublication, readPublicationStopped, writePublicationStatus } from './app/publicationStatus'
 
-void preparePdfEngine().then(() => import('./App')).then(({ default: App }) => createRoot(document.getElementById('root')!).render(
-  <ErrorBoundary fallback={(_error, reset) => (
-    <main className="app-error" role="alert">
-      <p>アプリの表示で問題が起きました。開いている文書と書き込みは保持されています。</p>
-      <button type="button" onClick={reset}>表示し直す</button>
-    </main>
-  )}>
-    <App />
-  </ErrorBoundary>,
-)).catch(showStartupError)
+const publicationStoppedAtStartup = readPublicationStopped()
+const pagesRoot = createRoot(document.getElementById('root')!)
+const showPublicationStopped = () => pagesRoot.render(<PublicationStopped />)
+if (publicationStoppedAtStartup) {
+  showPublicationStopped()
+  void checkPublication().then(status => {
+    writePublicationStatus(status)
+    if (status === 'active') location.reload()
+  })
+} else {
+  void preparePdfEngine().then(() => import('./App')).then(({ default: App }) => pagesRoot.render(
+    <ErrorBoundary fallback={(_error, reset) => (
+      <main className="app-error" role="alert">
+        <p>アプリの表示で問題が起きました。開いている文書と書き込みは保持されています。</p>
+        <button type="button" onClick={reset}>表示し直す</button>
+      </main>
+    )}>
+      <App onPublicationStopped={showPublicationStopped} />
+    </ErrorBoundary>,
+  )).catch(showStartupError)
+}
 /* @pages:end *//* @fixed:start */
 import { blocksFixedStartup } from './fixed/security'
 const root = document.getElementById('root')!

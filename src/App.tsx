@@ -7,6 +7,9 @@ import { DrawingInfoDialog } from './app/DrawingInfoDialog'
 import { DrawingUiContext } from './app/documentModel'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { DocumentTabs } from './app/DocumentTabs'
+/* @pages:start */import { checkPublication, writePublicationStatus } from './app/publicationStatus'
+let publicationCheck: ReturnType<typeof checkPublication> | undefined
+/* @pages:end */
 import { commitFocusedField } from './app/pendingInput'
 import { DocumentWorkspace } from './app/DocumentWorkspace'
 import type { OutlineDraft } from './app/OutlineDraft'
@@ -250,7 +253,7 @@ function loadPanels(): { thumbnails: boolean; format: boolean } {
   }
 }
 
-export default function App() {
+export default function App(/* @pages:start */{ onPublicationStopped }: { onPublicationStopped?: () => void } = {}/* @pages:end */) {
   useDraggableWindows()
   const vectorExtractionRequests = useRef(0)
   const pool = appRuntime.pool
@@ -354,6 +357,40 @@ export default function App() {
   const [imageFiles, setImageFiles] = useState<File[] | null>(null)
   const [headerFooterOpen, setHeaderFooterOpen] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
+  /* @pages:start */
+  const [publicationStopped, setPublicationStopped] = useState(false)
+  useEffect(() => {
+    let disposed = false
+    const check = () => {
+      publicationCheck ??= checkPublication()
+      void publicationCheck.then(status => {
+        writePublicationStatus(status)
+        if (!disposed && status === 'stopped') setPublicationStopped(true)
+      })
+    }
+    // Schedule after the first frame; the initial screen never waits for this request.
+    let cancelScheduled = () => {}
+    const frame = requestAnimationFrame(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        const idle = window.requestIdleCallback(check, { timeout: 5000 })
+        cancelScheduled = () => window.cancelIdleCallback(idle)
+      } else {
+        const timer = window.setTimeout(check, 3000)
+        cancelScheduled = () => window.clearTimeout(timer)
+      }
+    })
+    return () => { disposed = true; cancelAnimationFrame(frame); cancelScheduled() }
+  }, [])
+  // Keep an in-flight PDF open operation mounted until it has finished as well.
+  useEffect(() => {
+    if (!publicationStopped) return
+    const stopWhenClosed = () => {
+      if (tabs.list().length === 0 && !openingStore.snapshot()) onPublicationStopped?.()
+    }
+    stopWhenClosed()
+    return openingStore.subscribe(stopWhenClosed)
+  }, [publicationStopped, tabs, tabs.list().length, openingStore, onPublicationStopped])
+  /* @pages:end */
   const [debug, setDebug] = useState(() => new URLSearchParams(location.search).get('debug') === '1')
   const [workspaceFailure, setWorkspaceFailure] = useState(false)
   const [focusSearchVersion, setFocusSearchVersion] = useState(0)
@@ -2163,9 +2200,14 @@ export default function App() {
     <SymbolSearchContext.Provider value={{ start: startSymbolSearch }}>
     <FixtureSampleContext.Provider value={fixtureSampleInteraction}>
     <SnapUiContext.Provider value={{ enabled: snapEnabled, toggle: toggleSnap, drawingEndpoints: snapDrawingEndpoints, toggleDrawingEndpoints: toggleSnapDrawingEndpoints }}>
-    <main className={`app${comparison ? ' comparing' : ''}${updateReady ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { if (!comparison) void handleDrop(event).catch(reason => setError(`PDFを開けませんでした: ${String(reason)}`)) }}>
+    <main className={`app${comparison ? ' comparing' : ''}${(updateReady /* @pages:start */|| publicationStopped/* @pages:end */) ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { if (!comparison) void handleDrop(event).catch(reason => setError(`PDFを開けませんでした: ${String(reason)}`)) }}>
       {sampleCapture && <div className="fixture-sample-instruction" role="status">{sampleMessage}<button type="button" onClick={() => finishSampleCapture(null)}>中止</button></div>}
-      {updateReady && (
+      {/* @pages:start */}{publicationStopped && (
+        <div className="update-banner" role="status">
+          <span>公開を終了しました。開いているPDFを保存して閉じてください。次回から起動しません。</span>
+        </div>
+      )}{/* @pages:end */}
+      {updateReady && /* @pages:start */!publicationStopped && /* @pages:end */(
         <div className="update-banner" role="status">
           {/* @pages:start */}<span>新しい版があります。</span>{/* @pages:end */}{/* @fixed:start */}<span>管理者が配布物を更新しました。再読み込みすると新しい版に切り替わります</span>{/* @fixed:end */}
           <button type="button" onClick={() => void applyUpdate()}>更新する</button>

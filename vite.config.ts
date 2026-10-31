@@ -16,6 +16,8 @@ export default defineConfig(({ mode }) => {
   const single = mode === 'single'
   // The default production build also uses the Pages version unless explicitly overridden.
   if (!fixed && !single && !env.VITE_APP_VERSION) env.VITE_APP_VERSION = loadEnv('pages', process.cwd(), 'VITE_').VITE_APP_VERSION
+  const publicationStatus = !fixed && !single ? loadEnv('pages', process.cwd(), 'VITE_').VITE_PUBLICATION_STATUS ?? 'active' : undefined
+  if (!fixed && !single && publicationStatus !== 'active' && publicationStatus !== 'stopped') throw new Error('VITE_PUBLICATION_STATUS must be active or stopped')
   const base = fixed ? env.VITE_BASE_PATH : '/karu-pdf/'
   if (!base || !base.startsWith('/') || !base.endsWith('/') || base.includes('//') || /[?#\\%]/.test(base)
     || new URL(base, 'https://base.invalid').pathname !== base) throw new Error('VITE_BASE_PATH must start and end with / and be a normalised local path')
@@ -58,6 +60,19 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       distributionPlugin(),
+      ...(!fixed && !single ? [{
+        name: 'pages-publication-status',
+        // The dev server has no bundle; without this, two 404s would stop the dev app.
+        configureServer(server) {
+          server.middlewares.use(base + 'app-status.json', (_request, response) => {
+            response.setHeader('Content-Type', 'application/json')
+            response.end(JSON.stringify({ status: publicationStatus }))
+          })
+        },
+        generateBundle() {
+          this.emitFile({ type: 'asset', fileName: 'app-status.json', source: JSON.stringify({ status: publicationStatus }) })
+        },
+      } satisfies Plugin] : []),
       react(),
       ...(!single ? [VitePWA({
         registerType: 'prompt',
