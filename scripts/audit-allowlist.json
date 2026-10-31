@@ -598,5 +598,17 @@
     "string": "https://github.com/gibbon1116-ctrl/karu-pdf",
     "reason": "ソースコードの入手先を表示する文字列。通信には使わない。",
     "maxOccurrences": 8
+  },
+  {
+    "file": "dist-fixed/assets/mupdfDoc-*.js",
+    "string": "XMLHttpRequest",
+    "reason": "MuPDF/Emscripten の標準ローダーが mupdfDoc チャンクへ移った（App・annotations チャンクの既存の許可と同じコード）。file: 読み取り用のフォールバックで、固定版は内部サーバーの HTTP(S) を使う。",
+    "maxOccurrences": 2
+  },
+  {
+    "file": "dist-fixed/assets/mupdfDoc-*.js",
+    "string": "fetch(",
+    "reason": "MuPDF/Emscripten の標準ローダーが mupdfDoc チャンクへ移った（App・annotations チャンクの既存の許可と同じコード）。同梱 WASM の同一 origin GET だけで、PDF は送信しない。",
+    "maxOccurrences": 2
   }
 ]
