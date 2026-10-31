@@ -3,6 +3,7 @@ declare const __FIXED_BUILD__: {
   buildDate: string
   gitCommit: string
   gitShort: string
+  sourceRepository: string
   sourceHash: string
   sourceDirty: boolean
   base: string

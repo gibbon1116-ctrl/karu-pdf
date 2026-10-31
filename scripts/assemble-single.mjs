@@ -3,6 +3,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { bundleWorker } from './single-worker.mjs'
 import { walk } from './audit-network.mjs'
+import { thirdPartyNotices } from './third-party-notices.mjs'
 
 const root = 'dist-single', files = walk(root)
 const build = JSON.parse(fs.readFileSync(`${root}/build-info.json`, 'utf8'))
@@ -35,6 +36,9 @@ document.addEventListener('securitypolicyviolation',e=>__singleDiagnostics.viola
 const hash = createHash('sha256').update(script).digest('base64')
 const csp = `default-src 'none'; script-src 'sha256-${hash}' 'wasm-unsafe-eval'; worker-src blob:; connect-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; object-src 'none'; base-uri 'none'; form-action 'none'`
 const sections = [
+  `<script type="text/plain" id="single-license">${escapeScript(fs.readFileSync('LICENSE', 'utf8'))}</script>`,
+  `<script type="text/plain" id="single-third-party-licenses">${escapeScript(thirdPartyNotices({ runtimePackages: build.runtimePackages }))}</script>`,
+  `<script type="text/plain" id="single-data-sources">${escapeScript(fs.readFileSync('licenses/data-sources.txt', 'utf8'))}</script>`,
   ...Object.entries(binary).map(([id, bytes]) => `<script type="text/plain" id="single-${id}" data-encoding="base64">${bytes.toString('base64')}</script>`),
   ...Object.entries(workers).map(([id, code]) => `<script type="text/plain" id="single-worker-${id}">${escapeScript(code)}</script>`),
   `<script type="application/json" id="single-build-info">${escapeScript(JSON.stringify({ ...build, csp }))}</script>`,

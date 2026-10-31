@@ -574,5 +574,29 @@
     "string": "https://json-schema.org/draft/2020-12/schema",
     "reason": "JSON Schema の方言を示す識別子（$schema）。検証器は読むだけで、通信はしない。",
     "maxOccurrences": 2
+  },
+  {
+    "file": "vite.config.ts",
+    "string": "https://github.com/gibbon1116-ctrl/karu-pdf",
+    "reason": "ソースコードの入手先を表示する文字列。通信には使わない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-fixed/assets/App-*.js",
+    "string": "https://github.com/gibbon1116-ctrl/karu-pdf",
+    "reason": "ソースコードの入手先を表示する文字列。通信には使わない。",
+    "maxOccurrences": 8
+  },
+  {
+    "file": "dist-fixed/build-info.json",
+    "string": "https://github.com/gibbon1116-ctrl/karu-pdf",
+    "reason": "ソースコードの入手先を表示する文字列。通信には使わない。",
+    "maxOccurrences": 1
+  },
+  {
+    "file": "dist-single/*.html",
+    "string": "https://github.com/gibbon1116-ctrl/karu-pdf",
+    "reason": "ソースコードの入手先を表示する文字列。通信には使わない。",
+    "maxOccurrences": 8
   }
 ]

@@ -1,4 +1,4 @@
-declare const __SINGLE_BUILD__: { version: string; buildDate: string; gitCommit: string; gitShort: string; sourceHash: string; sourceDirty: boolean }
+declare global { const __SINGLE_BUILD__: { version: string; buildDate: string; gitCommit: string; gitShort: string; sourceRepository: string; sourceHash: string; sourceDirty: boolean } }
 export function SingleAbout() {
   return <>
     <p>版 {__SINGLE_BUILD__.version}</p>

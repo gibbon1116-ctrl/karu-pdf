@@ -26,3 +26,20 @@ it('配布領域は入れ子でも版ごとに除去し、通常版・固定版�
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', source], { encoding: 'utf8' })
   expect(result.status).toBe(0); expect(JSON.parse(result.stdout)).toEqual(['SERVERPAGES', 'SERVERFIXED', 'SINGLE'])
 })
+
+it('単一 HTML の法的文書だけを監査から除き、実行コードの通信は検出する', () => {
+  const dir = fs.mkdtempSync('scripts/.single-legal-audit-'), file = dir + '/payload.html', allow = dir + '/allow.json'
+  try {
+    fs.writeFileSync(allow, '[]')
+    const run = () => spawnSync(process.execPath, ['scripts/audit-network.mjs', '--single', '--file=' + file, '--allowlist=' + allow], { encoding: 'utf8' })
+    const legal = ['license', 'third-party-licenses', 'data-sources'].map(id =>
+      '<script type="text/plain" id="single-' + id + '">https://example.com/license\nfetch( XMLHttpRequest</script>').join('\n')
+    fs.writeFileSync(file, legal)
+    expect(run().status).toBe(0)
+    fs.appendFileSync(file, '<script>fetch("https://example.com/runtime")</script>')
+    expect(run().status).toBe(1)
+    expect(run().stderr).toContain('https://example.com/runtime')
+    fs.writeFileSync(file, '<script type="text/plain" id="single-other">https://example.com/unapproved</script>')
+    expect(run().status).toBe(1)
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})

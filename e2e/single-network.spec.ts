@@ -241,3 +241,27 @@ test('起動と heavy-300p.pdf の最初の表示を1回計測する', async ({ 
   await evidence(testInfo, 'single-performance', { uiReadyMs: uiMs, firstPageMs, htmlBytes: fs.statSync(path.join('dist-single', htmlFile)).size, diagnostics: await page.evaluate(() => __singleDiagnostics) })
   expect(uiMs).toBeLessThanOrEqual(2000); expect(firstPageMs).toBeLessThanOrEqual(3000)
 })
+
+test('埋め込んだライセンスを通信せずに表示する', async ({ page, context }, testInfo) => {
+  const requests = await record(context)
+  await page.goto(url)
+  await page.getByRole('button', { name: 'ヘルプ▼', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'このアプリについて', exact: true }).click()
+  const about = page.getByRole('dialog', { name: 'かるPDFについて' })
+  await expect(about).toContainText('Copyright (C) 2026 gibbon1116-ctrl')
+  await expect(about).toContainText('AGPL-3.0-or-later・無保証')
+  await expect(about).toContainText(/ソースコード: https:\/\/github\.com\/gibbon1116-ctrl\/karu-pdf/)
+  await expect(about.locator('a')).toHaveCount(0)
+  for (const [name, text] of [
+    ['第三者ライセンス', 'MuPDF bundled third-party components'],
+    ['ライセンス', 'GNU AFFERO GENERAL PUBLIC LICENSE'],
+    ['データ出典', '国土交通省'],
+  ]) {
+    await about.getByRole('button', { name, exact: true }).click()
+    const license = page.getByRole('dialog', { name, exact: true })
+    await expect(license.locator('pre')).toContainText(text)
+    if (name === '第三者ライセンス') await expect(license.locator('pre')).toContainText('react')
+    await license.getByRole('button', { name: '閉じる', exact: true }).click()
+  }
+  await verifyTraffic(page, requests, testInfo)
+})

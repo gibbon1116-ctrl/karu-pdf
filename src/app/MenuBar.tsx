@@ -1,3 +1,5 @@
+/* @pages:start */import { PagesAbout } from './PagesAbout'
+/* @pages:end */import { AboutLicenses } from './AboutLicenses'
 /* @single:start */import { SingleAbout } from '../single/About'
 /* @single:end *//* @fixed:start */import { FixedAbout } from '../fixed/About'
 /* @fixed:end */import { useEffect, useRef, useState } from 'react'
@@ -150,8 +152,8 @@ export function MenuBar(props: Props) {
     </header>
     <dialog ref={aboutRef} className="about-dialog" aria-labelledby="about-title" onCancel={() => setAboutOpen(false)} onClose={() => setAboutOpen(false)}>
       <h1 id="about-title">かるPDFについて</h1>
-      {/* @pages:start */}<p>版 1.0</p>{/* @pages:end */}{/* @fixed:start */}<FixedAbout />{/* @fixed:end */}{/* @single:start */}<SingleAbout />{/* @single:end */}
-      <p>ライセンス: AGPL-3.0-or-later</p>
+      {/* @pages:start */}<PagesAbout />{/* @pages:end */}{/* @fixed:start */}<FixedAbout />{/* @fixed:end */}{/* @single:start */}<SingleAbout />{/* @single:end */}
+      <AboutLicenses />
       <p>PDFはパソコンの外へ送信しません。</p>
       <div><button type="button" onClick={() => setAboutOpen(false)}>閉じる</button></div>
     </dialog>

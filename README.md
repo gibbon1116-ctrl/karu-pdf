@@ -53,9 +53,9 @@ npm run build      # 公開用のビルド（dist/）
 
 ## ライセンス
 
-- このアプリ: [GNU Affero General Public License v3.0 以降](LICENSE)（AGPL-3.0-or-later）
-- PDF エンジン: [MuPDF.js](https://github.com/ArtifexSoftware/mupdf.js)（Artifex Software、AGPL-3.0）
-- フォント: [BIZ UDゴシック](https://github.com/googlefonts/morisawa-biz-ud-gothic)・[BIZ UD明朝](https://github.com/googlefonts/morisawa-biz-ud-mincho)（Morisawa、SIL Open Font License 1.1。ライセンス文は `public/fonts/` にあります）
+Copyright (C) 2026 gibbon1116-ctrl
+
+AGPL-3.0-or-later（`LICENSE`）。無保証です。第三者のライセンスとデータの出典は、配布物の `licenses/` にあります。
 
 ## 3つの配布版
 
@@ -68,7 +68,7 @@ npm run build      # 公開用のビルド（dist/）
 | PDF の扱い | PC のブラウザ内で処理 | PC のブラウザ内で処理 |
 | 出力 | dist/ | dist-fixed/ と release/ |
 
-3つ目は **HTML ファイル1つの版（固定・閉域）** です。サーバー、インストール、管理者権限は不要で、Edge・Chrome から `file://` で開きます。版は **1.0.0-single**、実行中の取得は CSP の `connect-src 'none'` で禁止し、Service Worker と更新の案内は使いません。すべての編集機能は同じソースから作ります。
+3つ目は **HTML ファイル1つの版（固定・閉域）** です。サーバー、インストール、管理者権限は不要で、Edge・Chrome から `file://` で開きます。版は **1.11.0-single**、実行中の取得は CSP の `connect-src 'none'` で禁止し、Service Worker と更新の案内は使いません。すべての編集機能は同じソースから作ります。
 
 ### HTML ファイル1つの版
 
@@ -84,8 +84,8 @@ npm run build      # 公開用のビルド（dist/）
 受け取ったファイルを PowerShell で検査し、信頼できる経路で受け取った `.html.sha256` の値と比較してください。ZIP は同じ方法で `.zip.sha256` と比較します。ハッシュの一致だけで配布者の真正性を保証するものではありません。
 
 ```powershell
-Get-FileHash -LiteralPath .\karu-pdf-v1.0.0.html -Algorithm SHA256
-Get-FileHash -LiteralPath .\karu-pdf-v1.0.0-single.zip -Algorithm SHA256
+Get-FileHash -LiteralPath .\karu-pdf-v1.11.0.html -Algorithm SHA256
+Get-FileHash -LiteralPath .\karu-pdf-v1.11.0-single.zip -Algorithm SHA256
 ```
 
 開発用の作成・検証コマンド（既存の依存を使用）:
@@ -95,13 +95,13 @@ npm run release:single
 npm run e2e:single
 ```
 
-`release:single` はソース監査 → 単体・結合テスト → 単一 HTML ビルド → HTML の通信監査 → 配布 ZIP を順に作ります。`dist-single/` には HTML だけを出力します。`release/karu-pdf-v1.0.0-single.zip` は HTML、LICENSE、THIRD_PARTY_LICENSES、VERSION.txt、SHA256SUMS.txt、SBOM.cdx.json、使い方.txt、2つの起動用 cmd、karu-pdf.ico を含みます。ZIP と HTML の SHA-256 は ZIP の外にも出力します。`build:single`、`audit:network -- --single`、`package:single` で各段階を実行できます。固定版の手動 GitHub Actions は両方の ZIP を Artifact に入れます。
+`release:single` はソース監査 → 単体・結合テスト → 単一 HTML ビルド → HTML の通信監査 → 配布 ZIP を順に作ります。`dist-single/` には HTML だけを出力します。`release/karu-pdf-v1.11.0-single.zip` は HTML、LICENSE、THIRD_PARTY_LICENSES、VERSION.txt、SHA256SUMS.txt、SBOM.cdx.json、使い方.txt、2つの起動用 cmd、karu-pdf.ico を含みます。ZIP と HTML の SHA-256 は ZIP の外にも出力します。`build:single`、`audit:network -- --single`、`package:single` で各段階を実行できます。固定版の手動 GitHub Actions は両方の ZIP を Artifact に入れます。
 
 印刷用の PDF は新しい Blob タブで開きます。ポップアップを許可してください。ブラウザの設定で表示できない場合は、PDF を保存し、Edge で開いて印刷してください。最近使ったファイルにはハンドルと名前だけを保存し、PDF の本体は保存しません。
 
 保証の範囲はアプリの実行コードによる取得・送信です。ブラウザ自体の通信、拡張機能、PC・OS の管理は対象外です。組織のブラウザのポリシーで `file://`、Blob Worker、WASM、ファイル選択が禁止されている場合は使えません。`file://` の IndexedDB は別のローカル HTML と保存場所を共有しうるため、信頼できない HTML を同じブラウザで実行しないでください。設計の詳細は [セキュリティ設計](docs/固定版/セキュリティ設計.md) を参照してください。
 
-固定版の最初の版は **1.0.0-fixed**。通常版のビルド、GitHub Pages 公開ワークフロー、編集機能は維持する。固定版を GitHub Pages で開くと、アプリを起動せずに内部サーバーからの起動を案内する。
+固定版の最初の版は **1.11.0-fixed**。通常版のビルド、GitHub Pages 公開ワークフロー、編集機能は維持する。固定版を GitHub Pages で開くと、アプリを起動せずに内部サーバーからの起動を案内する。
 
 ### 固定版の作成と検証
 
@@ -115,11 +115,11 @@ npm run e2e:fixed
 
 release:fixed は、ソース通信監査 → 単体テスト → 固定版ビルド → 生成物通信監査 → ZIP 作成を順に行い、失敗時は停止する。新しい依存を追加せず、lockfile が HEAD と一致することも確認する。独立した作成・監査は build:fixed、audit:network、audit:network -- --dist、package:fixed を使う。
 
-生成する ZIP は release/karu-pdf-fixed-v1.0.0.zip。ZIP の外に .zip.sha256、ZIP の中に VERSION.txt、SHA256SUMS.txt、SBOM.cdx.json、LICENSE、THIRD_PARTY_LICENSES と固定版の全ファイルを含む。SHA256SUMS は自分自身を除く全ファイルを検査し、ZIP 全体のハッシュがその checksum ファイルも保護する。
+生成する ZIP は release/karu-pdf-fixed-v1.11.0.zip。ZIP の外に .zip.sha256、ZIP の中に VERSION.txt、SHA256SUMS.txt、SBOM.cdx.json、LICENSE、THIRD_PARTY_LICENSES と固定版の全ファイルを含む。SHA256SUMS は自分自身を除く全ファイルを検査し、ZIP 全体のハッシュがその checksum ファイルも保護する。
 
 ```bash
 # ZIP があるディレクトリで確認し、展開後は展開先で確認する
-sha256sum -c karu-pdf-fixed-v1.0.0.zip.sha256
+sha256sum -c karu-pdf-fixed-v1.11.0.zip.sha256
 sha256sum -c SHA256SUMS.txt
 ```
 

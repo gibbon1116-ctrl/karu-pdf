@@ -7,6 +7,7 @@ import { createZip, extractZip, sha256, verifySums } from './fixed-zip.mjs'
 import { verifySingle } from './verify-single.mjs'
 import { makeIco } from './make-ico.mjs'
 import { verifyBuildSource } from './source-snapshot.mjs'
+import { thirdPartyNotices } from './third-party-notices.mjs'
 
 // Verify both working copy and HEAD; never change Git or the lockfile.
 execFileSync('git', ['diff', '--quiet', '--', 'package-lock.json'], { stdio: ['ignore', 'pipe', 'pipe'] })
@@ -21,6 +22,8 @@ if (single) console.log('SINGLE_VERIFIED', JSON.stringify(verifySingle(singleFil
 const build = JSON.parse(single ? singleHtml.match(/<script type="application\/json" id="single-build-info">([\s\S]*?)<\/script>/)?.[1] || 'null' : fs.readFileSync('dist-fixed/build-info.json', 'utf8'))
 if (!build || build.mode !== (single ? 'single' : 'fixed') || !(single ? /^\d+\.\d+\.\d+-single$/ : /^\d+\.\d+\.\d+-fixed$/).test(build.version)) throw new Error('Invalid build metadata')
 verifyBuildSource(build, process.cwd(), process.argv.includes('--allow-dirty'))
+// The bundled SOURCE/ archive is taken from the build commit, so it must match the build exactly.
+if (build.gitCommit === 'unknown' || build.sourceDirty) throw new Error('Cannot archive source without a clean build commit')
 const runtime = new Set(build.runtimePackages)
 // Resolve each edge using the lockfile's actual node_modules hierarchy.
 function resolveDependency(from, name) {
@@ -41,7 +44,7 @@ while (queue.length) {
     const target = resolveDependency(key, name); if (target) queue.push(target)
   }
 }
-const components = [], dependencies = [], texts = []
+const components = [], dependencies = []
 for (const [key, entry] of Object.entries(lock.packages).sort(([a], [b]) => a.localeCompare(b))) {
   if (!key) continue
   const name = entry.name || key.split('node_modules/').at(-1)
@@ -57,11 +60,6 @@ for (const [key, entry] of Object.entries(lock.packages).sort(([a], [b]) => a.lo
     properties: [{ name: 'karu:dependency', value: key === `node_modules/${name}` && (pkg.dependencies?.[name] || pkg.devDependencies?.[name]) ? 'direct' : 'indirect' }, { name: 'karu:bundled-runtime', value: String(bundled) }, { name: 'karu:lockfile-path', value: key }] })
   const dependsOn = Object.keys({ ...entry.dependencies, ...entry.optionalDependencies }).map(n => resolveDependency(key, n)).filter(Boolean).map(p => `npm:${p}@${lock.packages[p].version}`)
   dependencies.push({ ref, dependsOn })
-  if (bundled) {
-    const licenses = fs.readdirSync(key).filter(n => /^(?:licen[sc]e|copying)(?:\.|$)/i.test(n) && fs.statSync(path.join(key, n)).isFile())
-    if (!licenses.length) throw new Error('Missing license text for ' + name)
-    texts.push(`${name} ${entry.version}\nLicense: ${typeof license === 'string' ? license : JSON.stringify(license)}\n${licenses.map(n => fs.readFileSync(path.join(key, n), 'utf8')).join('\n')}\n`)
-  }
 }
 for (const [name, fontFile, licenseFile] of [
   ['BIZ UD Gothic', 'BIZUDGothic-Regular.ttf', 'OFL-BIZUDGothic.txt'], ['BIZ UD Mincho', 'BIZUDMincho-Regular.ttf', 'OFL-BIZUDMincho.txt'],
@@ -70,7 +68,6 @@ for (const [name, fontFile, licenseFile] of [
   // Font distribution has no npm version. Its exact bytes are its fixed version.
   components.push({ type: 'file', 'bom-ref': ref, name, version: `sha256:${hash}`, scope: 'required', licenses: [{ license: { id: 'OFL-1.1' } }], hashes: [{ alg: 'SHA-256', content: hash }], properties: [{ name: 'karu:bundled-runtime', value: 'true' }, { name: 'karu:dependency', value: 'direct' }] })
   dependencies.push({ ref, dependsOn: [] })
-  texts.push(`${name}\nVersion: sha256:${hash}\nLicense: OFL-1.1\n${fs.readFileSync(`public/fonts/${licenseFile}`, 'utf8')}\n`)
 }
 const application = single ? 'karu-pdf-single' : 'karu-pdf-fixed', rootRef = `application:${build.version}`
 dependencies.unshift({ ref: rootRef, dependsOn: components.filter(c => c.properties.some(p => p.name === 'karu:bundled-runtime' && p.value === 'true')).map(c => c['bom-ref']) })
@@ -90,8 +87,9 @@ if (single) {
   entries.set('karu-pdf.ico', makeIco())
 }
 entries.set('LICENSE', fs.readFileSync('LICENSE'))
-entries.set('THIRD_PARTY_LICENSES', Buffer.from(texts.join('\n' + '='.repeat(72) + '\n\n')))
-entries.set('VERSION.txt', Buffer.from(versionText)); entries.set('SBOM.cdx.json', Buffer.from(JSON.stringify(sbom, null, 2) + '\n'))
+entries.set('THIRD_PARTY_LICENSES', Buffer.from(thirdPartyNotices({ runtimePackages: build.runtimePackages })))
+entries.set(`SOURCE/karu-pdf-source-${build.gitShort}.zip`, execFileSync('git', ['archive', '--format=zip', build.gitCommit], { maxBuffer: 64 * 1024 * 1024 }))
+entries.set('VERSION.txt', Buffer.from(versionText + `ソースコード: 同梱の SOURCE/ と ${build.sourceRepository}/tree/${build.gitCommit}\n`)); entries.set('SBOM.cdx.json', Buffer.from(JSON.stringify(sbom, null, 2) + '\n'))
 entries.set('SHA256SUMS.txt', Buffer.from([...entries].sort(([a], [b]) => a.localeCompare(b)).map(([name, bytes]) => `${sha256(bytes)}  ${name}`).join('\n') + '\n'))
 fs.mkdirSync('release', { recursive: true })
 const filename = single ? `karu-pdf-v${build.version}.zip` : `karu-pdf-fixed-v${build.version.replace(/-fixed$/, '')}.zip`, zipPath = path.join('release', filename)

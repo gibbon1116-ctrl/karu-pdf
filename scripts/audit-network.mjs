@@ -17,6 +17,8 @@ export function stripEmbeddedBase64(source) {
   return source.replace(/<script type="text\/plain" id="single-(wasm|font-BIZUDGothic|font-BIZUDMincho)" data-encoding="base64">([A-Za-z0-9+/]+={0,2})<\/script>/g,
     (all, _id, bytes) => all.replace(bytes, ' '.repeat(bytes.length)))
     .replace(/href="data:image\/png;base64,([A-Za-z0-9+/]+={0,2})"/g, (all, bytes) => all.replace(bytes, ' '.repeat(bytes.length)))
+    .replace(/(<script type="text\/plain" id="single-(?:license|third-party-licenses|data-sources)">)([\s\S]*?)(<\/script>)/g,
+      (_all, start, text, end) => start + text.replace(/[^\r\n]/g, ' ') + end)
 }
 export function auditFiles(files, allowlist = [], single = false) {
   const violations = [], inventory = [], counts = new Map()

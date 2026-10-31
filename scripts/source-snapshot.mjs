@@ -3,7 +3,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 
-const roots = ['src', 'scripts', 'public', 'launchers', '.github/workflows', 'index.html', 'vite.config.ts', 'tsconfig.json', 'package.json', 'package-lock.json', '.env.fixed', '.env.single']
+const roots = ['src', 'scripts', 'public', 'licenses', 'LICENSE', 'launchers', '.github/workflows', 'index.html', 'vite.config.ts', 'tsconfig.json', 'package.json', 'package-lock.json', '.env.fixed', '.env.single']
 export function sourceSnapshot(root = process.cwd()) {
   const files = []
   const visit = relative => {

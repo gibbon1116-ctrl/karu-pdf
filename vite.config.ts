@@ -3,27 +3,32 @@ import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import { execFileSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { META_CSP } from './scripts/fixed-policy.mjs'
 import { sourceSnapshot } from './scripts/source-snapshot.mjs'
+import { thirdPartyNotices } from './scripts/third-party-notices.mjs'
+
+const SOURCE_REPOSITORY = 'https://github.com/gibbon1116-ctrl/karu-pdf'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_')
   const fixed = mode === 'fixed'
   const single = mode === 'single'
+  // The default production build also uses the Pages version unless explicitly overridden.
+  if (!fixed && !single && !env.VITE_APP_VERSION) env.VITE_APP_VERSION = loadEnv('pages', process.cwd(), 'VITE_').VITE_APP_VERSION
   const base = fixed ? env.VITE_BASE_PATH : '/karu-pdf/'
   if (!base || !base.startsWith('/') || !base.endsWith('/') || base.includes('//') || /[?#\\%]/.test(base)
     || new URL(base, 'https://base.invalid').pathname !== base) throw new Error('VITE_BASE_PATH must start and end with / and be a normalised local path')
   let gitCommit = 'unknown'
   try { gitCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { /* Git is optional. */ }
   const snapshot = fixed || single ? sourceSnapshot() : null
-  const build = { version: env.VITE_APP_VERSION || '1.0.0-fixed', buildDate: new Date().toISOString(), gitCommit, gitShort: gitCommit.slice(0, 12), base, mode, sourceHash: snapshot?.sourceHash, sourceDirty: snapshot?.sourceDirty }
+  const build = { version: env.VITE_APP_VERSION || '1.0.0-fixed', buildDate: new Date().toISOString(), gitCommit, gitShort: gitCommit.slice(0, 12), sourceRepository: SOURCE_REPOSITORY, base, mode, sourceHash: snapshot?.sourceHash, sourceDirty: snapshot?.sourceDirty }
   const runtimePackages = new Set<string>()
   function distributionPlugin(): Plugin {
     return {
       name: 'distribution-regions', enforce: 'pre',
       transform(code, id) {
-        if ((fixed || single) && id.includes('/node_modules/')) {
+        if (id.replaceAll('\\', '/').includes('/node_modules/')) {
           const match = id.replaceAll('\\', '/').match(/\/node_modules\/((?:@[^/]+\/)?[^/]+)\//)
           if (match) runtimePackages.add(match[1])
         }
@@ -47,8 +52,10 @@ export default defineConfig(({ mode }) => {
   }
   return {
     base,
-    // Pages receives no new definitions or emitted metadata.
-    define: fixed ? { __FIXED_BUILD__: JSON.stringify(build) } : single ? { __SINGLE_BUILD__: JSON.stringify(build) } : {},
+    // Pages exposes only the version and source reference; distribution metadata stays in fixed/single builds.
+    define: fixed ? { __FIXED_BUILD__: JSON.stringify(build) } : single ? { __SINGLE_BUILD__: JSON.stringify(build) } : {
+      __PAGES_BUILD__: JSON.stringify({ version: env.VITE_APP_VERSION, gitCommit, gitShort: build.gitShort, sourceRepository: SOURCE_REPOSITORY }),
+    },
     plugins: [
       distributionPlugin(),
       react(),
@@ -78,6 +85,17 @@ export default defineConfig(({ mode }) => {
           // Workbox's generated runtime imports these modules (not its build tools).
           for (const name of ['workbox-core', 'workbox-precaching', 'workbox-routing', 'workbox-strategies']) runtimePackages.add(name)
           writeFileSync('dist-fixed/build-info.json', JSON.stringify({ ...build, sourceFiles: snapshot?.sourceFiles, runtimePackages: [...runtimePackages].sort() }, null, 2) + '\n')
+        },
+      } satisfies Plugin] : []),
+      ...(!single ? [{
+        name: 'distribution-licenses',
+        closeBundle() {
+          for (const name of ['workbox-core', 'workbox-precaching', 'workbox-routing', 'workbox-strategies']) runtimePackages.add(name)
+          const directory = `${fixed ? 'dist-fixed' : 'dist'}/licenses`
+          mkdirSync(directory, { recursive: true })
+          copyFileSync('LICENSE', `${directory}/LICENSE.txt`)
+          writeFileSync(`${directory}/THIRD_PARTY_LICENSES.txt`, thirdPartyNotices({ runtimePackages: [...runtimePackages] }))
+          copyFileSync('licenses/data-sources.txt', `${directory}/DATA_SOURCES.txt`)
         },
       } satisfies Plugin] : []),
     ],
