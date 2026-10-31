@@ -1,5 +1,5 @@
 /* @pages:start */import { PagesAbout } from './PagesAbout'
-/* @pages:end */import { AboutLicenses } from './AboutLicenses'
+/* @pages:end */import { AboutLicenses, AboutSource } from './AboutLicenses'
 /* @single:start */import { SingleAbout } from '../single/About'
 /* @single:end *//* @fixed:start */import { FixedAbout } from '../fixed/About'
 /* @fixed:end */import { useEffect, useRef, useState } from 'react'
@@ -155,6 +155,7 @@ export function MenuBar(props: Props) {
       {/* @pages:start */}<PagesAbout />{/* @pages:end */}{/* @fixed:start */}<FixedAbout />{/* @fixed:end */}{/* @single:start */}<SingleAbout />{/* @single:end */}
       <AboutLicenses />
       <p>PDFはパソコンの外へ送信しません。</p>
+      <AboutSource />
       <div><button type="button" onClick={() => setAboutOpen(false)}>閉じる</button></div>
     </dialog>
   </>

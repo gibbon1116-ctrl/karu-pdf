@@ -250,7 +250,8 @@ test('埋め込んだライセンスを通信せずに表示する', async ({ pa
   const about = page.getByRole('dialog', { name: 'かるPDFについて' })
   await expect(about).toContainText('Copyright (C) 2026 gibbon1116-ctrl')
   await expect(about).toContainText('AGPL-3.0-or-later・無保証')
-  await expect(about).toContainText(/ソースコード: https:\/\/github\.com\/gibbon1116-ctrl\/karu-pdf/)
+  await about.getByText('ソースコード', { exact: true }).click()
+  await expect(about.locator('details.about-source')).toContainText('https://github.com/gibbon1116-ctrl/karu-pdf')
   await expect(about.locator('a')).toHaveCount(0)
   for (const [name, text] of [
     ['第三者ライセンス', 'MuPDF bundled third-party components'],
