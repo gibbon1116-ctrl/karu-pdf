@@ -135,6 +135,7 @@ export function detectDrawingInfo(lines: readonly ExtractedTextLine[], bounds: R
     return result
   }
   for (const first of ordered) {
+    if (/^[:：]+$/.test(first.text)) continue
     for (const second of neighbours(first)) {
       const chains = [[first, second], ...neighbours(second).filter(third => {
         const fh = first.rect[3] - first.rect[1], th = third.rect[3] - third.rect[1]
@@ -245,6 +246,7 @@ export function detectDrawingInfo(lines: readonly ExtractedTextLine[], bounds: R
     const headingNearby = Boolean(labelled || nearHeading(row, numberHeading))
     if (!headingNearby && !unlabelledNumber.test(text)) continue
     const value = text.toUpperCase()
+    if (!headingNearby && /^(?:VU|VP|VE|PF|CD|FEP|HIVE|HIVP|GP|PE|CP)\d{2,3}$/.test(value)) continue
     if (/^[A-Z]?[XY]-?\d{1,2}$/.test(value)) continue
     const rh = Math.max(4, row.rect[3] - row.rect[1])
     // A stacked choice may be partly merged into the number's text line
@@ -298,11 +300,14 @@ export function detectDrawingInfo(lines: readonly ExtractedTextLine[], bounds: R
     const lower = below.length ? Math.min(...below.map(other => other.rect[1])) : label.rect[3] + lh * 3
     const rightFields = fields.filter(other => other !== label && other.rect[0] >= label.rect[2]
       && other.rect[3] >= label.rect[1] - lh * 3 && other.rect[1] <= label.rect[3] + lh * 3)
-    const upperRight = rightFields.length ? Math.min(...rightFields.map(other => other.rect[0])) : label.rect[0] + width * .25
+    const upperRight = (row: TitleRow) => {
+      const rowFields = rightFields.filter(other => other.rect[1] < row.rect[3])
+      return rowFields.length ? Math.min(...rowFields.map(other => other.rect[0])) : label.rect[0] + width * .25
+    }
     const selected = cellRows.filter(row => (
       row.rect[0] >= left && row.rect[2] <= right && row.rect[1] >= label.rect[3]
         && row.rect[3] <= bottom && row.rect[1] - label.rect[3] <= Math.max(lh, row.rect[3] - row.rect[1]) * 4
-      || row.rect[0] >= label.rect[2] && row.rect[2] <= upperRight && row.rect[1] >= top && row.rect[3] <= lower
+      || row.rect[0] >= label.rect[2] && row.rect[2] <= upperRight(row) && row.rect[1] >= top && row.rect[3] <= lower
     ) && !otherValues.has(row) && isNameText(row.text) && !parts.get(row)?.some(part => isField(part.text)))
       .sort((a, b) => a.rect[1] - b.rect[1] || a.rect[0] - b.rect[0])
     // Preserve physical lines for document-wide common-line removal.
@@ -312,6 +317,10 @@ export function detectDrawingInfo(lines: readonly ExtractedTextLine[], bounds: R
       if (last && Math.min(last.rect[3], row.rect[3]) - Math.max(last.rect[1], row.rect[1]) >= Math.min(last.rect[3] - last.rect[1], row.rect[3] - row.rect[1]) * .7) {
         last.text += ' ' + row.text; last.rect = unionRect([last, row])
       } else physical.push({ text: row.text, rect: [...row.rect] })
+    }
+    for (let i = physical.length - 1; i >= 0; i--) {
+      physical[i].text = physical[i].text.replace(/^[\s:：]+/, '')
+      if (!physical[i].text) physical.splice(i, 1)
     }
     const value = physical.map(row => row.text).join(' ')
     // Even an overlong cell must not fall back to choosing just one of its rows.

@@ -221,6 +221,67 @@ describe('上下に広がる名称欄と均等割りの文字 (SPEC-O5b)', () =>
   })
 })
 
+describe('1.11の退行 (SPEC-Q1)', () => {
+  const box = (text: string, rect: ExtractedTextLine['rect']): ExtractedTextLine => ({ ...row(text), rect })
+  const read = (...lines: ExtractedTextLine[]) => detectDrawingInfo(lines, [0, 0, 1191, 842])
+  const stacked = (withDate = true, upper = '架空誘導・呼出・緊急呼出設備　', lower = '１階平面図') => [
+    box('工事名称', [942, 785, 955, 789]), box('架空新庁舎建設工事', [962, 787, 1021, 793]),
+    box('図面名', [942, 798, 952, 801.5]), box(upper, [969, 797, 1102, 802]), box(lower, [969, 803, 995, 808]),
+    box('設計番号', [942, 811, 955, 814]), ...(withDate ? [box('作成日', [1007, 811, 1017, 814])] : []),
+    box('縮尺', [1072, 811, 1079, 814]), box('種別', [1126, 786, 1133, 789]),
+    box('通し番号', [1126, 804, 1139, 808]), box('086', [1141, 809, 1151, 815]),
+  ]
+
+  it('下の作成日で上段を切らず、名称の二段と通し番号を読む', () => {
+    const result = read(...stacked())
+    expect(result).toMatchObject({ number: '086', name: '架空誘導・呼出・緊急呼出設備 1階平面図' })
+    expect(result.names[0].rows).toHaveLength(2)
+    expect(result.names[0].rows?.map(r => r.text)).toEqual(['架空誘導・呼出・緊急呼出設備', '1階平面図'])
+  })
+  it('下の作成日が無い場合も、名称の二段と通し番号を読む', () => {
+    const result = read(...stacked(false))
+    expect(result).toMatchObject({ number: '086', name: '架空誘導・呼出・緊急呼出設備 1階平面図' })
+    expect(result.names[0].rows).toHaveLength(2)
+  })
+  it('5ページ中2ページだけ同じ上段は、文書単位の補正後も二段のまま残す', () => {
+    const uppers = ['架空誘導・呼出・緊急呼出設備', '架空誘導・呼出・緊急呼出設備', '架空照明設備', '架空放送設備', '架空通信設備']
+    const pages = uppers.map((upper, i) => read(...stacked(true, upper + '　', `${i + 1}階平面図`)))
+    const expected = uppers.map((upper, i) => `${upper} ${i + 1}階平面図`)
+    expect(pages.map(p => p.name)).toEqual(expected)
+    const reconciled = reconcileDrawingInfos(pages)
+    expect(reconciled.map(p => p.name)).toEqual(expected)
+    reconciled.forEach(p => expect(p.names[0].rows).toHaveLength(2))
+  })
+  it('別の断片にあるコロンを名称と候補の物理行の先頭から除く', () => {
+    const result = read(
+      box('工事名称', [792, 803, 808, 807]), box(':', [834, 803, 835, 807]), box('架空中学校校舎改築工事', [838, 803, 919, 807]),
+      box('所在地', [792, 812, 804, 816]), box(':', [834, 811, 835, 816]), box('架空町1-1', [838, 812, 884, 816]),
+      box('図面名称', [792, 820, 808, 824]), box(':', [834, 820, 835, 824]), box('平面詳細図4(1階、棟4)', [838, 820, 880, 824]),
+      box('縮尺', [920, 803, 928, 807]), box(':', [962, 803, 963, 807]),
+      box('日付', [920, 820, 928, 824]), box(':', [962, 820, 963, 824]), box('2013/3/31', [965, 820, 983, 824]),
+      box('図面\t\r No.', [1047, 803, 1063, 807]), box(':', [1089, 802, 1090, 807]), box('1116', [1093, 803, 1103, 807]),
+    )
+    expect(result).toMatchObject({ number: '1116', name: '平面詳細図4(1階、棟4)' })
+    expect(result.names.every(n => !/^[:：]/.test(n.value))).toBe(true)
+    expect(result.names[0].rows?.map(r => r.text)).toEqual(['平面詳細図4(1階、棟4)'])
+  })
+  it('見出し・コロン・値の3断片が隣接していても名称を読む', () => {
+    const result = read(
+      box('図面名称', [792, 820, 808, 824]), box(':', [810, 820, 811, 824]), box('架空配置図', [813, 820, 860, 824]),
+    )
+    expect(result.name).toBe('架空配置図')
+    expect(result.names.every(n => !/^[:：]/.test(n.value))).toBe(true)
+  })
+  it('見出しの無い管の呼び径を番号にせず、見出し付きのVP100は読む', () => {
+    const result = read(
+      box('VU250', [1020, 760, 1040, 765]), box('E-41', [1090, 760, 1110, 765]), box('架空配置図', [969, 780, 1020, 785]),
+    )
+    expect(result.number).toBe('E-41')
+    expect(result.numbers.some(n => n.value === 'VU250')).toBe(false)
+    expect(read(box('図面番号', [1047, 803, 1063, 807]), box('VP100', [1093, 803, 1113, 807])).number).toBe('VP100')
+  })
+})
+
 describe('数量タブから始める文書単位の読取', () => {
   const session = (count = 2) => new DocumentSession({ docId: 'test', name: 'test.pdf', byteLength: 100, handle: null, pageSizes: Array.from({ length: count }, () => ({ width: 1000, height: 1000, rotation: 0 })) })
   const result = (i: number) => ({ type: 'drawingPageResult' as const, requestId: i, detection: detect(row('図面番号 E-' + (101 + i)), row('図面名称 設備平面図', 600, 930)), elapsedMs: 1 })
