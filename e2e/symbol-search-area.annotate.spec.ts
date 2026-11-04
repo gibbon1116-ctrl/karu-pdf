@@ -41,16 +41,10 @@ async function openPanel(page: Page) {
   if (await panel(page).isVisible()) await panel(page).getByRole('button', { name: '見本を囲み直す', exact: true }).click()
   await draw(page, symbolShapeSampleRect)
   await expect(panel(page)).toBeVisible()
-  await panel(page).getByRole('checkbox', { name: '形の細部（円弧・枠・斜線・塗り）も見本と比べる', exact: true }).uncheck()
-  await panel(page).getByRole('checkbox', { name: '画像でも確認する', exact: true }).uncheck()
 }
 
 async function setup(page: Page) {
   await page.setViewportSize({ width: 1600, height: 1000 })
-  await page.addInitScript(() => {
-    localStorage.removeItem('karu-pdf:symbol-search-shape')
-    localStorage.removeItem('karu-pdf:symbol-search-verify')
-  })
   await page.goto('/karu-pdf/?test=1&workers=3&warm=0')
   await page.waitForFunction(() => !!window.__karu)
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, 'symbol-search-area.pdf'), symbolShapePdf())

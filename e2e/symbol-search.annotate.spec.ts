@@ -111,6 +111,16 @@ async function waitForHeldSearch(page: Page) {
   await page.waitForFunction(() => !!(window as unknown as ProbeWindow).__visualSearchProbe.release, undefined, { timeout: 60_000 })
 }
 
+test('検索の4つの設定チェック欄を表示しない', async ({ page }) => {
+  await open(page); await capture(page)
+  for (const name of [
+    '回転した記号も探す',
+    '末尾の G を GC 回路の印として分ける',
+    '画像でも確認する',
+    '形の細部（円弧・枠・斜線・塗り）も見本と比べる',
+  ]) await expect(panel(page).getByRole('checkbox', { name, exact: true })).toHaveCount(0)
+})
+
 test('actual matching, candidate choice, one-step undo/redo, counted candidates and remaining quantity', async ({ page }) => {
   await open(page); await capture(page); await search(page)
   await expect(candidates(page)).toHaveCount(6)
@@ -194,7 +204,6 @@ test('controls, recapture and item/side-tab/document/organize lifecycle clear ca
   await open(page); await capture(page); await search(page)
   await panel(page).getByRole('slider', { name: '似ている度合い' }).press('ArrowRight')
   await expect(candidates(page)).toHaveCount(0); await expect(panel(page)).toContainText('0.86')
-  await panel(page).getByRole('checkbox', { name: '回転した記号も探す' }).check()
   await panel(page).getByRole('radio', { name: 'ページを指定', exact: true }).check()
   await panel(page).getByRole('textbox', { name: '探すページ' }).fill('1-2')
   await panel(page).getByRole('button', { name: '探す', exact: true }).click()
@@ -254,28 +263,5 @@ test('ordinary viewing, zoom, scrolling and manual pickup never create the match
 })
 
 
-test('形の比較がオフなら、局所画像で明らかに違う斜線入りは候補から除く', async ({ page }) => {
-  await open(page, 1, true); await capture(page)
-  await panel(page).getByRole('checkbox', { name: '画像でも確認する', exact: true }).uncheck()
-  // With shape comparison off, the local image comparison removes the visibly hatched bodies.
-  await panel(page).getByRole('checkbox', { name: '形の細部（円弧・枠・斜線・塗り）も見本と比べる', exact: true }).uncheck()
-  await search(page, 3)
-  const high = page.locator('[data-testid="symbol-search-candidate"][data-confidence="high"]')
-  const check = page.locator('[data-testid="symbol-search-candidate"][data-confidence="check"]')
-  await expect(high).toHaveCount(3); await expect(check).toHaveCount(0)
-  // The first three centers are the plain bodies; the hatched three are removed.
-  const found = await candidates(page).locator('rect').evaluateAll(rects => rects.map(el => {
-    const r = el as SVGRectElement; return [Math.round(r.x.baseVal.value + r.width.baseVal.value / 2), Math.round(r.y.baseVal.value + r.height.baseVal.value / 2)]
-  }))
-  expect(found.sort((a, b) => a[1] - b[1] || a[0] - b[0])).toEqual(centers.slice(0, 3).map(([x, y]) => [x, y]))
-  for (const candidate of await candidates(page).all()) {
-    await expect(candidate.locator('title')).toContainText(/線 [0-9.]+・余分な線 [0-9]+%/)
-    await expect(candidate.locator('title')).not.toContainText('画像')
-  }
-  await panel(page).getByRole('button', { name: '確度の高い候補を選ぶ', exact: true }).click()
-  await expect(candidates(page, 'chosen')).toHaveCount(3)
-  for (const candidate of await high.all()) await expect(candidate).toHaveAttribute('data-state', 'chosen')
-  for (const candidate of await check.all()) await expect(candidate).toHaveAttribute('data-state', 'pending')
-  expect(await marks(page)).toBe(0)
-})
+
 

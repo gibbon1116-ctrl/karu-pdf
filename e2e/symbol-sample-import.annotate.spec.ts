@@ -28,10 +28,6 @@ async function capture(page: Page, offsetY = 0) {
 
 test('他のPDFの見本を囲まずに検索し、見本元を閉じると囲み直す（SPEC-S23）', async ({ page }) => {
   test.setTimeout(180_000)
-  await page.addInitScript(() => {
-    localStorage.removeItem('karu-pdf:symbol-search-shape')
-    localStorage.removeItem('karu-pdf:symbol-search-verify')
-  })
   await page.goto('/karu-pdf/?test=1&workers=3&warm=0')
   await page.waitForFunction(() => !!window.__karu)
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '見本元.pdf'), symbolShapePdf())
@@ -70,9 +66,7 @@ test('他のPDFの見本を囲まずに検索し、見本元を閉じると囲�
   await expect(panel(page)).toContainText('見本: 見本元.pdf（他のPDF）')
   expect(await page.evaluate(() => window.__karu!.getCountFixtures())).toEqual(imported)
 
-  await panel(page).getByRole('checkbox', { name: '形の細部（円弧・枠・斜線・塗り）も見本と比べる', exact: true }).uncheck()
-  // Keep image verification enabled to cover rendering the template from the source document.
-  await panel(page).getByRole('checkbox', { name: '画像でも確認する', exact: true }).check()
+  // Image verification covers rendering the template from the source document.
   await panel(page).getByRole('button', { name: '探す', exact: true }).click()
   await expect(panel(page)).toContainText('検索が終わりました', { timeout: 60_000 })
   await expect(page.getByTestId('symbol-search-candidate')).toHaveCount(8)

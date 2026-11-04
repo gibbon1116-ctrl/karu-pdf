@@ -39,6 +39,7 @@ export type DrawingFilterReleaseReason = '数量拾いの印を数えるため' 
 
 export interface SymbolSearchCandidate {
   id: string; pageIndex: number; rect: Rect; center: Point; score: number
+  sampleBox?: Rect
   state: 'pending' | 'chosen' | 'counted'
   confidence?: 'high' | 'check'; imageScore?: number; extra?: number
   label: string; gc: boolean; around?: number; aroundCheck?: boolean
@@ -414,7 +415,7 @@ export class AnnotationStore {
   symbolSearchArea: { pageIndex: number; rect: Rect } | null = null
   symbolLabelFilter: string[] | null = null
   symbolGcFilter: 'all' | 'with' | 'without' = 'all'
-  symbolShapeFilter: 'same' | 'all' = 'same'
+  symbolShapeFilter: 'same' | 'all' = 'all'
   symbolOtherFilter: 'hide' | 'show' = 'hide'
   setSymbolSearchArea(area: { pageIndex: number; rect: Rect } | null): void {
     const current = this.symbolSearchArea
@@ -452,23 +453,24 @@ export class AnnotationStore {
   private symbolCandidateRadius = 0
 
   clearSymbolCandidates(): void {
-    if (this.symbolCandidates === null && this.symbolSearchArea === null && this.symbolShapeFilter === 'same' && this.symbolOtherFilter === 'hide'
+    if (this.symbolCandidates === null && this.symbolSearchArea === null && this.symbolShapeFilter === 'all' && this.symbolOtherFilter === 'hide'
       && this.symbolCandidateFocus === null) return
     this.symbolCandidates = null; this.symbolSearchArea = null; this.symbolCandidateFixture = null; this.symbolCandidateRadius = 0
     this.symbolCandidateFocus = null
-    this.symbolLabelFilter = null; this.symbolGcFilter = 'all'; this.symbolShapeFilter = 'same'; this.symbolOtherFilter = 'hide'
+    this.symbolLabelFilter = null; this.symbolGcFilter = 'all'; this.symbolShapeFilter = 'all'; this.symbolOtherFilter = 'hide'
     this.notifyUi()
   }
   beginSymbolCandidates(fixtureId: string, sampleRect: Rect): void {
     this.symbolCandidateFocus = null
     this.symbolCandidateFixture = fixtureId
     this.symbolCandidateRadius = Math.min(sampleRect[2] - sampleRect[0], sampleRect[3] - sampleRect[1]) / 2
-    this.symbolLabelFilter = null; this.symbolGcFilter = 'all'; this.symbolShapeFilter = 'same'; this.symbolOtherFilter = 'hide'
+    this.symbolLabelFilter = null; this.symbolGcFilter = 'all'; this.symbolShapeFilter = 'all'; this.symbolOtherFilter = 'hide'
     this.symbolCandidates = []; this.notifyUi()
   }
-  appendSymbolCandidates(candidates: Array<{ pageIndex: number; rect: Rect; center: Point; score: number; confidence?: 'high' | 'check'; imageScore?: number; extra?: number; label?: string; gc?: boolean; around?: number; aroundCheck?: boolean; shape?: SymbolShapeDecision }>): void {
+  appendSymbolCandidates(candidates: Array<{ pageIndex: number; rect: Rect; sampleBox?: Rect; center: Point; score: number; confidence?: 'high' | 'check'; imageScore?: number; extra?: number; label?: string; gc?: boolean; around?: number; aroundCheck?: boolean; shape?: SymbolShapeDecision }>): void {
     if (!this.symbolCandidates || this.symbolCandidateFixture !== this.selectedFixtureId) return
     for (const c of candidates) this.symbolCandidates.push({ ...c, label: c.label ?? '', gc: c.gc ?? false, rect: [...c.rect], center: [...c.center],
+      ...(c.sampleBox ? { sampleBox: [...c.sampleBox] as Rect } : {}),
       shape: c.shape ? { decision: c.shape.decision, differences: [...c.shape.differences], unknown: [...c.shape.unknown] } : undefined,
       id: crypto.randomUUID(), state: 'pending' })
     this.refreshSymbolCandidates(); this.notifyUi()

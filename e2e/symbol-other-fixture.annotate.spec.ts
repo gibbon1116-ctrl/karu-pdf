@@ -24,18 +24,12 @@ async function search(page:Page) {
   const b=await point(page,symbolShapeSampleRect[2],symbolShapeSampleRect[3])
   await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y);await page.mouse.up()
   await expect(panel(page)).toBeVisible()
-  await panel(page).getByRole('checkbox',{name:'形の細部（円弧・枠・斜線・塗り）も見本と比べる',exact:true}).uncheck()
-  await panel(page).getByRole('checkbox',{name:'画像でも確認する',exact:true}).uncheck()
   await panel(page).getByRole('button',{name:'探す',exact:true}).click()
   await expect(panel(page)).toContainText('検索が終わりました',{timeout:60_000})
 }
 
 test('他の項目で拾い済みの候補は初めは隠し、表示すると選択して現在の項目の数量へ追加できる',async({page})=>{
   test.setTimeout(180_000)
-  await page.addInitScript(()=>{
-    localStorage.removeItem('karu-pdf:symbol-search-shape')
-    localStorage.removeItem('karu-pdf:symbol-search-verify')
-  })
   await page.goto('/karu-pdf/?test=1&workers=3&warm=0')
   await page.waitForFunction(()=>!!window.__karu)
   await page.evaluate(bytes=>window.__karu!.openBytes(bytes,'symbol-other-fixture.pdf'),symbolShapePdf())
@@ -47,7 +41,8 @@ test('他の項目で拾い済みの候補は初めは隠し、表示すると�
   await search(page)
   const candidates=page.getByTestId('symbol-search-candidate')
   await expect(candidates).toHaveCount(8)
-  await expect(page.locator('[data-testid="symbol-search-candidate"][data-shape="none"]')).toHaveCount(8)
+  await expect(page.locator('[data-testid="symbol-search-candidate"][data-shape="same"]')).toHaveCount(4)
+  await expect(page.locator('[data-testid="symbol-search-candidate"][data-shape="different"]')).toHaveCount(4)
   await expect(page.locator('[data-testid="symbol-search-candidate"][data-other="true"]')).toHaveCount(0)
 
   const positions=await candidates.evaluateAll(elements=>elements.map(el=>({

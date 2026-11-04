@@ -517,6 +517,30 @@ export class PdfWorkerPool {
     } }
   }
 
+  /** Draw one contents-only tile for several symbol candidate thumbnails. The caller closes the bitmap. */
+  renderRegionTile(docId: string, pageIndex: number, renderScale: number, deviceRect: DeviceRect): {
+    promise: Promise<ImageBitmap>; cancel(): void
+  } {
+    const width = deviceRect[2] - deviceRect[0], height = deviceRect[3] - deviceRect[1]
+    if (!Number.isFinite(renderScale) || renderScale <= 0 || !deviceRect.every(Number.isSafeInteger)
+      || width <= 0 || height <= 0 || width > 4096 || height > 4096
+      || width * height > 4_194_304) throw new Error('画像の範囲が不正です')
+    const task = this.render({ docId, pageIndex, priority: 3, renderScale, deviceRect, contentsOnly: true })
+    let cancelled = false
+    const promise = task.promise.then(result => {
+      if (!result.bitmap || cancelled) {
+        result.bitmap?.close()
+        throw new Error('候補の描画を中止しました。')
+      }
+      return result.bitmap
+    })
+    return { promise, cancel: () => {
+      if (cancelled) return
+      cancelled = true
+      this.cancelJobs(docId, [task.jobId])
+    } }
+  }
+
   async renderFixtureSample(docId: string, pageIndex: number, rect: import('../core/annotations').Rect): Promise<import('../core/countFixtures').CountFixtureSample> {
     const widthPt = rect[2] - rect[0], heightPt = rect[3] - rect[1]
     if (!rect.every(Number.isFinite) || Math.min(widthPt, heightPt) < 2 * 72 / 25.4) throw new Error('範囲が小さすぎます')

@@ -6,10 +6,6 @@ const eraser = (page: Page) => page.getByRole('dialog', { name: '見本の線を
 const selection = (page: Page) => page.getByTestId('fixture-sample-selection-0')
 
 async function prepare(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem('karu-pdf:symbol-search-shape', 'false')
-    localStorage.setItem('karu-pdf:symbol-search-verify', 'false')
-  })
   await page.goto('/karu-pdf/?test=1&workers=3&warm=0')
   await page.waitForFunction(() => !!window.__karu)
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, 'symbol-sample-eraser.pdf'), symbolSampleEraserPdf())
@@ -46,8 +42,6 @@ async function capture(page: Page) {
 }
 
 async function search(page: Page): Promise<number> {
-  await panel(page).getByRole('checkbox', { name: '画像でも確認する', exact: true }).uncheck()
-  await panel(page).getByRole('checkbox', { name: '形の細部（円弧・枠・斜線・塗り）も見本と比べる', exact: true }).uncheck()
   await panel(page).getByRole('button', { name: '探す', exact: true }).click()
   await expect(panel(page)).toContainText('検索が終わりました', { timeout: 60_000 })
   return page.getByTestId('symbol-search-candidate').count()

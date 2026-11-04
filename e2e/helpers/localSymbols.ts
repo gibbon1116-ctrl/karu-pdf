@@ -40,7 +40,6 @@ export async function localGlyphWorkerChecks(page:Page,url:string){
  })
  await page.mouse.move(points[0].x,points[0].y);await page.mouse.down();await page.mouse.move(points[1].x,points[1].y);await page.mouse.up()
  const search=page.getByRole('dialog',{name:'同じ記号を探す',exact:true})
- await search.getByRole('checkbox',{name:'画像でも確認する',exact:true}).uncheck()
  await search.getByRole('button',{name:'探す',exact:true}).click();await expect(search).toContainText('検索が終わりました',{timeout:60000})
  await expect(search).toContainText('候補 1 件')
  await expect(search.getByRole('checkbox',{name:'C 1',exact:true})).toBeChecked()

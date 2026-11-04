@@ -28,7 +28,7 @@ async function measurement(page:Page) {
   await page.getByLabel('縮尺の分母').fill('100');await page.getByRole('button',{name:'決定',exact:true}).click()
   await page.keyboard.press('k')
 }
-async function search(page:Page, verify=true) {
+async function search(page:Page) {
   const quantity=page.getByTestId('fixture-panel')
   await page.getByRole('tab',{name:'数量',exact:true}).click()
   await quantity.getByRole('button',{name:'項目を追加',exact:true}).click()
@@ -43,7 +43,6 @@ async function search(page:Page, verify=true) {
   await expect(panel(page)).toBeVisible()
   await expect(panel(page).getByRole('slider',{name:'似ている度合い'})).toHaveValue('0.85')
   await expect(panel(page).getByRole('slider',{name:'似ている度合い'})).toHaveAttribute('max','0.98')
-  await panel(page).getByRole('checkbox',{name:'画像でも確認する',exact:true}).setChecked(verify)
   await panel(page).getByRole('button',{name:'探す',exact:true}).click()
   await expect(panel(page)).toContainText('検索が終わりました',{timeout:60_000})
 }
@@ -71,12 +70,6 @@ test('線で6個を探し、横切る線を許容し、対角線の無い四角�
   expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count).length)).toBe(0)
 })
 
-test('画像の確認をオフにしても線の候補に確度を付け、設定を保持する',async({page})=>{
-  await open(page);await search(page,false)
-  const candidates=page.getByTestId('symbol-search-candidate');await expect(candidates).toHaveCount(6)
-  for(const candidate of await candidates.all()) await expect(candidate).toHaveAttribute('data-confidence',/^(high|check)$/)
-  expect(await page.evaluate(()=>localStorage.getItem('karu-pdf:symbol-search-verify'))).toBe('false')
-})
 test('画像だけのページでは画像で探す',async({page})=>{
   await open(page,true);await search(page)
   await expect(panel(page)).toContainText('画像で探しました（線の情報が無いページ）')

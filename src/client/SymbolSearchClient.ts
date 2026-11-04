@@ -2,6 +2,7 @@ import { VectorCache, vectorWorkerTask, SYMBOL_SEARCH_STALL_MS } from './VectorC
 import { paintBytes } from '../core/vectorPaint'
 import type { VectorSearchResult, LocalDescribedBody, LocalShape } from '../worker/symbolSearchMessages'
 import { assignSymbolLabels, normalizeSymbolLabel, UNKNOWN_SYMBOL_LABEL, type SymbolLabelValue } from '../core/symbolLabels'
+import { sampleBoxForMatch, unionRect } from '../core/symbolSampleBox'
 import { compareLocalLabel } from '../core/symbolGlyphs'
 import { planLocalImageTiles, compareLocalBody, type LocalBody } from '../core/symbolLocalImage'
 import { decideSymbolShape, type SymbolShapeDecision } from '../core/symbolShapeDecision'
@@ -20,6 +21,7 @@ export interface SymbolSearchRequest {
   sampleLines?: { segments: Float32Array; widths: Float32Array }
 }
 export interface SymbolCandidate { pageIndex: number; rect: Rect; center: Point; score: number; rotation: number
+  sampleBox?: Rect
   confidence?: 'high' | 'check'; imageScore?: number; extra?: number; around?: number; aroundCheck?: boolean; label?: string; gc?: boolean
   structureScore?:number;fillScore?:number;structureCheck?:boolean;shape?:SymbolShapeDecision }
 // Image similarity only grades line matches; it never removes them. On real drawings the
@@ -141,8 +143,9 @@ export class SymbolSearchClient {
         }
         localMs+=performance.now()-began;return descriptions
       }
-      const finishVector = (candidates: SymbolCandidate[], verification?: { renderScale: number; requestedRenderScale: number; pagePixels: number; renderMs: number; verifyMs: number; bytes: number }) => {
+      const finishVector = (candidates: Array<SymbolCandidate & { angle: number }>, verification?: { renderScale: number; requestedRenderScale: number; pagePixels: number; renderMs: number; verifyMs: number; bytes: number }) => {
         const result = vector!, searchMs = result.stats.ms
+        const body = result.template.rect, sampleBox = unionRect(request.sampleRect, body)
         run.done = true; clearInterval(watchdog); this.running = null
         if (this.worker) {
           this.worker.onmessage = null; this.worker.onerror = null; this.worker.onmessageerror = null
@@ -153,7 +156,7 @@ export class SymbolSearchClient {
           candidates: candidates.map((c, i) => {
             const aroundCheck = (c.around ?? 0) - result.template.sampleAround > .3
             const shape=shapeDecisions?.[i]
-            return { ...c, ...labelValues[i], ...(shape?{shape}:{}), aroundCheck, confidence: aroundCheck || c.structureCheck || (shape&&shape.decision!=='same') || sampleValue.label===UNKNOWN_SYMBOL_LABEL || labelValues[i]?.label===UNKNOWN_SYMBOL_LABEL ? 'check' : c.confidence }
+            return { ...c, sampleBox: sampleBoxForMatch(sampleBox, body, c), ...labelValues[i], ...(shape?{shape}:{}), aroundCheck, confidence: aroundCheck || c.structureCheck || (shape&&shape.decision!=='same') || sampleValue.label===UNKNOWN_SYMBOL_LABEL || labelValues[i]?.label===UNKNOWN_SYMBOL_LABEL ? 'check' : c.confidence }
           }),
           metrics: { renderScale: verification?.renderScale ?? 0, requestedRenderScale: verification?.requestedRenderScale ?? 0,
             scaleReduced: !!verification && verification.renderScale < verification.requestedRenderScale, renderTiles: localTiles+(verification ? 2 : 0),
@@ -201,11 +204,12 @@ export class SymbolSearchClient {
             const sampleLabels = samePage ? targetLabels : await sampleCache.getLabels(request.samplePageIndex, this.pool, run.abort.signal)
             check(); lastHeard = performance.now()
             const body = vector.template.rect, radius = Math.max(body[2] - body[0], body[3] - body[1])
-            labelValues = assignSymbolLabels(targetLabels, vector.matches, radius, request.splitG ?? true)
+            const sampleBox = unionRect(request.sampleRect, body)
+            labelValues = assignSymbolLabels(targetLabels, vector.matches.map(m => ({ rect: m.rect, box: sampleBoxForMatch(sampleBox, body, m) })), radius, request.splitG ?? true)
             // Use all bodies on the sample page as competitors, so a neighboring
             // body's overlapping label cannot be stolen by the selected sample.
             const sampleBodies = samePage ? vector.matches.filter(m => Math.hypot(m.center[0] - (body[0] + body[2]) / 2, m.center[1] - (body[1] + body[3]) / 2) > .01) : []
-            sampleValue = assignSymbolLabels(sampleLabels, [{ rect: body }, ...sampleBodies], radius, request.splitG ?? true)[0]
+            sampleValue = assignSymbolLabels(sampleLabels, [{ rect: body, box: sampleBox }, ...sampleBodies.map(m => ({ rect: m.rect, box: sampleBoxForMatch(sampleBox, body, m) }))], radius, request.splitG ?? true)[0]
             if(samplePage.paint&&(samplePage.paint.truncated||target.paint?.truncated||!sampleValue.label)){
               const scale=Math.min(8,128/Math.max(body[2]-body[0],body[3]-body[1]))
               const [sample]=await describeLocal(sampleDocId,request.samplePageIndex,[body],scale,probes?[probes.sample]:undefined)
@@ -365,7 +369,8 @@ export class SymbolSearchClient {
         const candidates: SymbolCandidate[] = response.matches.map(match => {
           const x = (match.x + searchDevice[0]) / renderScale, y = (match.y + searchDevice[1]) / renderScale
           const w = match.width / renderScale, h = match.height / renderScale
-          return { pageIndex: request.pageIndex, rect: [x, y, x + w, y + h], center: [x + w / 2, y + h / 2], score: match.score, rotation: match.rotation, label: '', gc: false }
+          const rect: Rect = [x, y, x + w, y + h]
+          return { pageIndex: request.pageIndex, rect, sampleBox: [...rect], center: [x + w / 2, y + h / 2], score: match.score, rotation: match.rotation, label: '', gc: false }
         })
         run.done = true; clearInterval(watchdog); this.running = null
         worker.onmessage = null; worker.onerror = null; worker.onmessageerror = null

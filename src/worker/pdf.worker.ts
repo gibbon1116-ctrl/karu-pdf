@@ -362,18 +362,29 @@ async function execute(job: QueuedRequest): Promise<void> {
 }
 
 // Only the requested rectangle is rasterized; annotations and widgets never run.
-// This path is used on demand and does not build another full-page DisplayList.
+// Reuse the cached DisplayList for PDF pages without annotations/widgets;
+// otherwise run page contents directly to keep the tile contents-only.
 function renderFixtureRegion(entry: WorkerDocument, job: RenderRequest) {
   const rect = job.deviceRect
   if (!rect || !Number.isFinite(job.renderScale) || job.renderScale <= 0 || !rect.every(Number.isSafeInteger)
-    || rect[2] <= rect[0] || rect[3] <= rect[1] || rect[2] - rect[0] > 160 || rect[3] - rect[1] > 160) throw new Error('見本の描画範囲が不正です。')
+    || rect[2] <= rect[0] || rect[3] <= rect[1] || rect[2] - rect[0] > 4096 || rect[3] - rect[1] > 4096
+    || (rect[2] - rect[0]) * (rect[3] - rect[1]) > 4_194_304) throw new Error('見本の描画範囲が不正です。')
   const page = entry.opened.document.loadPage(job.pageIndex)
   let pixmap: Pixmap | undefined, device: DrawDevice | undefined
   try {
     pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, rect, true)
     pixmap.clear(255)
     device = new mupdf.DrawDevice(mupdf.Matrix.identity, pixmap)
-    page.runPageContents(device, mupdf.Matrix.scale(job.renderScale, job.renderScale))
+    let contentsOnly = false
+    if (page.isPDF()) {
+      const pdfPage = page as import('mupdf').PDFPage
+      const annotations = pdfPage.getAnnotations(), widgets = pdfPage.getWidgets()
+      contentsOnly = annotations.length === 0 && widgets.length === 0
+      for (const a of annotations) a.destroy()
+      for (const w of widgets) w.destroy()
+    }
+    if (contentsOnly) entry.displayLists.get(job.pageIndex).run(device, mupdf.Matrix.scale(job.renderScale, job.renderScale))
+    else page.runPageContents(device, mupdf.Matrix.scale(job.renderScale, job.renderScale))
     device.close()
     return { width: pixmap.getWidth(), height: pixmap.getHeight(), rgba: new Uint8ClampedArray(pixmap.getPixels()) }
   } finally { device?.destroy(); pixmap?.destroy(); page.destroy() }

@@ -128,3 +128,71 @@ describe('symbol labels', () => {
     } finally {upright?.destroy();ref?.destroy();fonts.destroy();resources.destroy();fontRef.destroy();font.destroy();doc.destroy()}
   })
 })
+
+
+describe('symbol labels in sample boxes', () => {
+  it('prefers a word centered on the box boundary over a closer word outside', () => {
+    expect(assignSymbolLabels([
+      { text: 'W', rect: [30, 11, 34, 15] },
+      { text: '4H', rect: [12, 21, 16, 23] },
+    ], [{ rect: bodies[0].rect, box: [8, 8, 32, 20] }], 12))
+      .toEqual([{ label: 'W', gc: false }])
+  })
+
+  it('accepts an in-box word beyond the radius, while an unboxed body ignores it', () => {
+    const words = [{ text: 'W', rect: [40, 11, 44, 15] as Rect }]
+    expect(assignSymbolLabels(words, [{ rect: bodies[0].rect, box: [8, 8, 42, 22] }], 10))
+      .toEqual([{ label: 'W', gc: false }])
+    expect(assignSymbolLabels(words, [bodies[0]], 10)).toEqual([{ label: '', gc: false }])
+  })
+
+  it('gives an overlapping neighboring body priority over another body sample box', () => {
+    expect(assignSymbolLabels([{ text: 'ET', rect: [30, 11, 34, 15] }], [
+      { rect: bodies[0].rect, box: [8, 8, 36, 22] }, bodies[1],
+    ], 12)).toEqual([{ label: '', gc: false }, { label: 'ET', gc: false }])
+  })
+
+  it('gives an in-box body priority over a closer non-overlapping body', () => {
+    expect(assignSymbolLabels([{ text: 'ET', rect: [26, 11, 28, 15] }], [
+      { rect: bodies[0].rect, box: [8, 8, 29, 22] }, bodies[1],
+    ], 10)).toEqual([{ label: 'ET', gc: false }, { label: '', gc: false }])
+  })
+
+  it('chooses the nearer body when both boxes contain a word, keeping the first on ties', () => {
+    const boxed = [
+      { rect: bodies[0].rect, box: [8, 8, 35, 22] as Rect },
+      { rect: bodies[1].rect, box: [20, 8, 42, 22] as Rect },
+    ]
+    expect(assignSymbolLabels([{ text: 'ET', rect: [26, 11, 28, 15] }], boxed, 10))
+      .toEqual([{ label: '', gc: false }, { label: 'ET', gc: false }])
+    expect(assignSymbolLabels([{ text: 'ET', rect: [24, 11, 26, 15] }], boxed, 10))
+      .toEqual([{ label: 'ET', gc: false }, { label: '', gc: false }])
+  })
+
+  it('keeps the nearest-word rule when the box contains no words', () => {
+    const words = [{ text: '4H', rect: [21, 11, 23, 15] as Rect },
+      { text: 'W', rect: [24, 11, 26, 15] as Rect }]
+    expect(assignSymbolLabels(words, [{ rect: bodies[0].rect, box: [10, 10, 20, 20] }], 10))
+      .toEqual(assignSymbolLabels(words, [bodies[0]], 10))
+    expect(assignSymbolLabels(words, [{ rect: bodies[0].rect, box: [10, 10, 20, 20] }], 10))
+      .toEqual([{ label: '4H', gc: false }])
+  })
+
+  it('retains an outside G within the radius alongside an in-box ET', () => {
+    const words = [{ text: 'ET', rect: [26, 11, 28, 15] as Rect },
+      { text: 'G', rect: [12, 21, 16, 23] as Rect }]
+    const boxed = [{ rect: bodies[0].rect, box: [8, 8, 29, 20] as Rect }]
+    expect(assignSymbolLabels(words, boxed, 10)).toEqual([{ label: 'ET', gc: true }])
+    expect(assignSymbolLabels(words, boxed, 10, false)).toEqual([{ label: 'ET+G', gc: false }])
+  })
+
+  it('applies the inclusive half-point distance window only to in-box non-G words', () => {
+    expect(assignSymbolLabels([
+      { text: 'ET', rect: [26, 11, 28, 15] },
+      { text: 'LK', rect: [26.5, 16, 28.5, 19] },
+      { text: 'W', rect: [26.51, 8, 28.51, 10] },
+      { text: '4H', rect: [12, 21, 16, 23] },
+    ], [{ rect: bodies[0].rect, box: [8, 8, 29, 20] }], 10))
+      .toEqual([{ label: 'ET+LK', gc: false }])
+  })
+})

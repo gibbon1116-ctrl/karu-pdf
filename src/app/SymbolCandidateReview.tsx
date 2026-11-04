@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { Rect } from '../core/annotations'
+import { unionRect } from '../core/symbolSampleBox'
+import { planThumbnailTile, type ThumbnailRequest, type ThumbnailTile } from '../core/symbolThumbnailTiles'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import type { SymbolSearchCandidate } from '../editor/AnnotationStore'
 import type { DocumentSession } from './documentModel'
 
-type RegionTask = ReturnType<PdfWorkerPool['renderRegionImage']>
+type RegionTask = ReturnType<PdfWorkerPool['renderRegionTile']>
 
 function Thumbnail({ canvas, label }: {
   canvas: HTMLCanvasElement | null | undefined
@@ -127,9 +129,12 @@ export default function SymbolCandidateReview({ session, pool, open, onClose, on
       if (!page) throw new Error('ページが見つかりません')
       const [left, top, right, bottom] = candidate.rect
       const dx = (right - left) * .35, dy = (bottom - top) * .35
+      const base: Rect = [left - dx, top - dy, right + dx, bottom + dy]
+      const area = candidate.sampleBox ? unionRect(base, candidate.sampleBox) : base
+      const pad = Math.max(area[2] - area[0], area[3] - area[1]) * .05
       return [
-        Math.max(0, left - dx), Math.max(0, top - dy),
-        Math.min(page.width, right + dx), Math.min(page.height, bottom + dy),
+        Math.max(0, area[0] - pad), Math.max(0, area[1] - pad),
+        Math.min(page.width, area[2] + pad), Math.min(page.height, area[3] + pad),
       ]
     }
 
@@ -143,21 +148,61 @@ export default function SymbolCandidateReview({ session, pool, open, onClose, on
       if (stopped) return
       while (running.size < 2 && queue.length) {
         const visibleIndex = queue.findIndex(candidate => onscreen.has(candidate.id))
-        const [candidate] = queue.splice(visibleIndex < 0 ? 0 : visibleIndex, 1)
-        if (images.current.has(candidate.id)) continue
-        let task: RegionTask
+        const [first] = queue.splice(visibleIndex < 0 ? 0 : visibleIndex, 1)
+        if (images.current.has(first.id)) continue
+        let tile: ThumbnailTile
         try {
-          task = pool.renderRegionImage(session.docId, candidate.pageIndex, expandedRect(candidate), 96)
+          const rect = expandedRect(first)
+          const others: ThumbnailRequest[] = []
+          for (const candidate of queue) {
+            if (candidate.pageIndex !== first.pageIndex || images.current.has(candidate.id)) continue
+            try {
+              others.push({ id: candidate.id, rect: expandedRect(candidate) })
+            } catch {
+              record(candidate.id, null)
+            }
+          }
+          tile = planThumbnailTile({ id: first.id, rect }, others, 96)
         } catch {
-          record(candidate.id, null)
+          record(first.id, null)
           continue
         }
-        running.set(candidate.id, task)
-        void task.promise.then(
-          canvas => record(candidate.id, canvas),
-          () => record(candidate.id, null),
-        ).finally(() => {
-          running.delete(candidate.id)
+        const ids = new Set(tile.items.map(item => item.id))
+        for (let i = queue.length - 1; i >= 0; i--) {
+          if (ids.has(queue[i].id)) queue.splice(i, 1)
+        }
+        let task: RegionTask
+        try {
+          task = pool.renderRegionTile(session.docId, first.pageIndex, tile.renderScale, tile.deviceRect)
+        } catch {
+          for (const item of tile.items) record(item.id, null)
+          continue
+        }
+        running.set(first.id, task)
+        void task.promise.then(bitmap => {
+          try {
+            if (stopped) return
+            for (const item of tile.items) {
+              const canvas = document.createElement('canvas')
+              canvas.width = item.width
+              canvas.height = item.height
+              const context = canvas.getContext('2d')
+              if (!context) {
+                record(item.id, null)
+                continue
+              }
+              context.fillStyle = '#fff'
+              context.fillRect(0, 0, canvas.width, canvas.height)
+              context.drawImage(bitmap, item.sx, item.sy, item.width, item.height, 0, 0, item.width, item.height)
+              record(item.id, canvas)
+            }
+          } finally {
+            bitmap.close()
+          }
+        }).catch(() => {
+          for (const item of tile.items) record(item.id, null)
+        }).finally(() => {
+          running.delete(first.id)
           if (!stopped) pump()
         })
       }

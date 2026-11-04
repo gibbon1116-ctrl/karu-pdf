@@ -29,10 +29,6 @@ async function capture(page: Page, rect: readonly number[] = symbolShapeSampleRe
 }
 
 async function prepare(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.removeItem('karu-pdf:symbol-search-shape')
-    localStorage.removeItem('karu-pdf:symbol-search-verify')
-  })
   await page.goto('/karu-pdf/?test=1&workers=3&warm=0')
   await page.waitForFunction(() => !!window.__karu)
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, 'symbol-sample-register.pdf'), symbolShapePdf())
@@ -54,8 +50,6 @@ async function start(page: Page) {
 }
 
 async function search(page: Page) {
-  await panel(page).getByRole('checkbox', { name: '形の細部（円弧・枠・斜線・塗り）も見本と比べる', exact: true }).uncheck()
-  await panel(page).getByRole('checkbox', { name: '画像でも確認する', exact: true }).uncheck()
   await panel(page).getByRole('button', { name: '探す', exact: true }).click()
   await expect(panel(page)).toContainText('検索が終わりました', { timeout: 60_000 })
   const candidates = page.getByTestId('symbol-search-candidate')

@@ -25,11 +25,6 @@ test('添字・GC の表示中の候補だけ選択・数量追加し、二重�
   const a=await point(page,34,53),b=await point(page,64,67)
   await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y);await page.mouse.up()
   await expect(panel(page)).toBeVisible()
-  // Isolate around/extra grading from image similarity for this fixture.
-  await panel(page).getByRole('checkbox',{name:'画像でも確認する',exact:true}).uncheck()
-  // This test protects the label grouping without the shape comparison (SPEC-S02b).
-  await panel(page).getByRole('checkbox',{name:'形の細部（円弧・枠・斜線・塗り）も見本と比べる',exact:true}).uncheck()
-  await panel(page).getByRole('checkbox',{name:'回転した記号も探す',exact:true}).check()
   await panel(page).getByRole('button',{name:'探す',exact:true}).click()
   await expect(panel(page)).toContainText('検索が終わりました',{timeout:60_000})
   for(const [label,count] of [['ET',5],['4H',1],['20A',2],['添字なし',2]] as const) {

@@ -9,9 +9,8 @@ async function point(page:Page,x:number,y:number) {
   },{x,y})
 }
 
-test('形の細部が違う候補は初めは隠し、表示中の候補だけ数量へ追加する',async({page})=>{
+test('形の細部が違う候補も初めから表示し、すべて選んで数量へ追加する',async({page})=>{
   test.setTimeout(180_000)
-  await page.addInitScript(()=>localStorage.removeItem('karu-pdf:symbol-search-shape'))
   await page.goto('/karu-pdf/?test=1&workers=3&warm=0')
   await page.waitForFunction(()=>!!window.__karu)
   await page.evaluate(bytes=>window.__karu!.openBytes(bytes,'symbol-shape.pdf'),symbolShapePdf())
@@ -29,25 +28,15 @@ test('形の細部が違う候補は初めは隠し、表示中の候補だけ�
   const b=await point(page,symbolShapeSampleRect[2],symbolShapeSampleRect[3])
   await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y);await page.mouse.up()
   await expect(panel(page)).toBeVisible()
-  const shapeCheck=panel(page).getByRole('checkbox',{name:'形の細部（円弧・枠・斜線・塗り）も見本と比べる',exact:true})
-  await expect(shapeCheck).not.toBeChecked()
-  await shapeCheck.check()
-  await panel(page).getByRole('checkbox',{name:'画像でも確認する',exact:true}).uncheck()
   await panel(page).getByRole('button',{name:'探す',exact:true}).click()
   await expect(panel(page)).toContainText('検索が終わりました',{timeout:60_000})
 
   const candidates=page.getByTestId('symbol-search-candidate')
-  await expect(candidates).toHaveCount(4)
-  await expect(page.locator('[data-testid="symbol-search-candidate"][data-shape="same"]')).toHaveCount(4)
-  await expect(panel(page)).toContainText('候補 4 件')
-  const showDifferent=panel(page).getByRole('checkbox',{name:/^形の細部が見本と違う 4 件も表示する/})
-  await expect(showDifferent).not.toBeChecked()
-  await expect(panel(page)).toContainText('形の細部が見本と違う 4 件も表示する（円弧 4）')
-  expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count).length)).toBe(0)
-
-  await showDifferent.check()
   await expect(candidates).toHaveCount(8)
+  await expect(page.locator('[data-testid="symbol-search-candidate"][data-shape="same"]')).toHaveCount(4)
   await expect(panel(page)).toContainText('候補 8 件')
+  await expect(panel(page).getByRole('checkbox',{name:/^形の細部が見本と違う/})).toHaveCount(0)
+  await expect(panel(page).getByText('形の細部も見本と比べました',{exact:true})).toBeVisible()
   const different=page.locator('[data-testid="symbol-search-candidate"][data-shape="different"]')
   await expect(different).toHaveCount(4)
   for(const c of await different.all()) {
@@ -56,22 +45,9 @@ test('形の細部が違う候補は初めは隠し、表示中の候補だけ�
   }
   expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count).length)).toBe(0)
 
-  await showDifferent.uncheck()
-  await expect(candidates).toHaveCount(4)
-  await expect(different).toHaveCount(0)
   await panel(page).getByRole('button',{name:'すべて選ぶ',exact:true}).click()
-  await expect(page.locator('[data-testid="symbol-search-candidate"][data-state="chosen"]')).toHaveCount(4)
-  await panel(page).getByRole('button',{name:'選んだ 4 件を数量へ追加',exact:true}).click()
-  expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count).length)).toBe(4)
+  await expect(page.locator('[data-testid="symbol-search-candidate"][data-state="chosen"]')).toHaveCount(8)
+  await panel(page).getByRole('button',{name:'選んだ 8 件を数量へ追加',exact:true}).click()
+  expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count).length)).toBe(8)
 
-  await shapeCheck.uncheck()
-  await expect(candidates).toHaveCount(0)
-  expect(await page.evaluate(()=>localStorage.getItem('karu-pdf:symbol-search-shape'))).toBe('false')
-  await panel(page).getByRole('button',{name:'探す',exact:true}).click()
-  await expect(panel(page)).toContainText('検索が終わりました',{timeout:60_000})
-  await expect(candidates).toHaveCount(8)
-  await expect(page.locator('[data-testid="symbol-search-candidate"][data-shape="none"]')).toHaveCount(8)
-  await expect(panel(page)).toContainText('候補 8 件')
-  await expect(showDifferent).toHaveCount(0)
-  expect(await page.evaluate(()=>window.__karu!.getEditableAnnotations(0).filter(a=>a.count).length)).toBe(4)
 })

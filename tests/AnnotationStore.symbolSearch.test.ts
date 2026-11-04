@@ -491,6 +491,7 @@ describe('other-fixture candidates', () => {
       { ...candidate(160, 50), label: 'ET', gc: false, shape: { decision: 'same', differences: [], unknown: [] } },
       { ...candidate(200, 50), label: '4H', gc: true, shape: { decision: 'same', differences: [], unknown: [] } },
     ])
+    store.setSymbolShapeFilter('same')
     store.setSymbolCandidateFilters(['ET'], 'with')
     expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[120, 50]])
     store.setSymbolOtherFilter('show')
@@ -533,7 +534,7 @@ describe('other-fixture candidates', () => {
 })
 
 describe('shape-filtered candidates', () => {
-  it('hides different shapes by default while retaining same, unknown and untested candidates', async () => {
+  it('shows different shapes by default and can still hide them through the store filter', async () => {
     const store = await setup()
     store.beginSymbolCandidates('led', sampleRect)
     store.appendSymbolCandidates([
@@ -542,14 +543,15 @@ describe('shape-filtered candidates', () => {
       { ...candidate(120, 50), shape: { decision: 'unknown', differences: [], unknown: ['topArc'] } },
       candidate(160, 50),
     ])
-    expect(store.symbolShapeFilter).toBe('same')
+    expect(store.symbolShapeFilter).toBe('all')
     expect(store.symbolCandidates).toHaveLength(4)
+    expect(store.visibleSymbolCandidates).toHaveLength(4)
+    expect(store.isSymbolCandidateVisible(store.symbolCandidates![1])).toBe(true)
+    store.setSymbolShapeFilter('same')
     expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[40, 50], [120, 50], [160, 50]])
     expect(store.isSymbolCandidateVisible(store.symbolCandidates![1])).toBe(false)
     store.setSymbolShapeFilter('all')
     expect(store.visibleSymbolCandidates).toHaveLength(4)
-    store.setSymbolShapeFilter('same')
-    expect(store.visibleSymbolCandidates).toHaveLength(3)
   })
   it('blocks hidden shapes in all selection actions and excludes already chosen hidden shapes from quantity addition', async () => {
     const store = await setup()
@@ -559,6 +561,7 @@ describe('shape-filtered candidates', () => {
       { ...candidate(40, 50), confidence: 'high', shape: { decision: 'same', differences: [], unknown: [] } },
       { ...candidate(80, 50), confidence: 'high', shape: { decision: 'different', differences: ['topArc'], unknown: [] } },
     ])
+    store.setSymbolShapeFilter('same')
     const hiddenId = store.symbolCandidates![1].id
     store.chooseSymbolCandidates(true)
     expect(store.symbolCandidates?.map(c => c.state)).toEqual(['chosen', 'pending'])
@@ -591,6 +594,7 @@ describe('shape-filtered candidates', () => {
       { ...candidate(120, 50), label: 'ET', gc: false, shape: { decision: 'same', differences: [], unknown: [] } },
       { ...candidate(160, 50), label: '4H', gc: true, shape: { decision: 'same', differences: [], unknown: [] } },
     ])
+    store.setSymbolShapeFilter('same')
     store.setSymbolCandidateFilters(['ET'], 'with')
     expect(store.visibleSymbolCandidates?.map(c => c.center)).toEqual([[40, 50]])
     store.setSymbolShapeFilter('all')
@@ -605,20 +609,20 @@ describe('shape-filtered candidates', () => {
   it('resets the shape filter on begin and clear, including clear without candidates, without changing persisted state', async () => {
     const store = await setup(), index = store.quantityIndex(), dirty = store.dirtySummary()
     expect(store.symbolCandidates).toBeNull()
-    store.setSymbolShapeFilter('all')
+    store.setSymbolShapeFilter('same')
     store.clearSymbolCandidates()
-    expect(store.symbolCandidates).toBeNull(); expect(store.symbolShapeFilter).toBe('same')
+    expect(store.symbolCandidates).toBeNull(); expect(store.symbolShapeFilter).toBe('all')
 
     store.beginSymbolCandidates('led', sampleRect)
     store.appendSymbolCandidates([
       { ...candidate(40, 50), shape: { decision: 'different', differences: ['topArc'], unknown: [] } },
     ])
-    store.setSymbolShapeFilter('all')
+    store.setSymbolShapeFilter('same')
     store.beginSymbolCandidates('led', sampleRect)
-    expect(store.symbolCandidates).toEqual([]); expect(store.symbolShapeFilter).toBe('same')
-    store.setSymbolShapeFilter('all')
+    expect(store.symbolCandidates).toEqual([]); expect(store.symbolShapeFilter).toBe('all')
+    store.setSymbolShapeFilter('same')
     store.clearSymbolCandidates()
-    expect(store.symbolCandidates).toBeNull(); expect(store.symbolShapeFilter).toBe('same')
+    expect(store.symbolCandidates).toBeNull(); expect(store.symbolShapeFilter).toBe('all')
     expect(store.quantityIndex()).toBe(index); expect(store.dirtySummary()).toEqual(dirty)
     expect(store.toEdits()).toEqual([]); expect(store.canUndo()).toBe(false)
   })
@@ -633,7 +637,7 @@ describe('shape-filtered candidates', () => {
     expect(stored.unknown).not.toBe(shape.unknown)
     shape.decision = 'same'; shape.differences.push('interior'); shape.unknown.push('annexFrame')
     expect(stored).toEqual({ decision: 'different', differences: ['topArc'], unknown: ['interiorLines'] })
-    expect(store.visibleSymbolCandidates).toHaveLength(0)
+    expect(store.visibleSymbolCandidates).toHaveLength(1)
   })
 })
 
@@ -644,5 +648,21 @@ describe('page selection', () => {
   })
   it.each(['', '0', '6', '1-6', '3-1', '1,', ',1', '1--3', '1.5', 'abc', '1 2', '-1', '9007199254740992'])('rejects invalid pages %s', text => {
     expect(() => parseSymbolSearchPages(text, 5)).toThrow(Error)
+  })
+})
+
+
+describe('symbol candidate sample boxes', () => {
+  it('copies sampleBox when appending and omits it for candidates without one', async () => {
+    const store = await setup()
+    const sampleBox: Rect = [20, 30, 60, 70]
+    store.beginSymbolCandidates('led', sampleRect)
+    store.appendSymbolCandidates([{ ...candidate(40, 50), sampleBox }, candidate(80, 50)])
+    const [stored, withoutBox] = store.symbolCandidates!
+    expect(stored.sampleBox).toEqual([20, 30, 60, 70])
+    expect(stored.sampleBox).not.toBe(sampleBox)
+    sampleBox[0] = -999; sampleBox[3] = 999
+    expect(stored.sampleBox).toEqual([20, 30, 60, 70])
+    expect(withoutBox).not.toHaveProperty('sampleBox')
   })
 })

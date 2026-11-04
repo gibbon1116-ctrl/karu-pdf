@@ -61,12 +61,25 @@ export function mergeAutomaticDrawingInfo(current: DrawingInfo | null, result: P
   return { ...current, number: current?.numberManual ? current.number : result.number, name: current?.nameManual ? current.name : result.name, scanned: true }
 }
 const numberHeading = /^(?:図\s*面\s*(?:番\s*号|No\.?)|通\s*し\s*番\s*号|図\s*番|DWG\.?\s*No\.?|Drawing\s*No\.?|番\s*号)/i
-const nameHeading = /^(?:図\s*面\s*(?:名\s*称|名)|図\s*名|名\s*称|DRAWING\s*TITLE|TITLE)/i
+const nameHeading = /^(?:図\s*面\s*(?:名\s*称|名)|図\s*名|名\s*称|DRAWING(?:\s*(?:TITLE|NAME)|(?=\s*[:：]?\s*$))|DWG\.?\s*TITLE|SHEET\s*TITLE|TITLE)/i
 const projectHeading = /^(?:工\s*事\s*名(?:\s*称)?|件\s*名)/
 const fieldLabels = new Set('縮尺 縮 尺 作図 製図 設計 担当 照査 承認 検図 審査 区分 種別 図番 図面番号 番号 通し番号 図面名 図面名称 図名 名称 工事名 工事名称 件名 日付 年月日 作成日 作成年月 設計年月 設計年月日 変更年月 製作年月日 用紙 頁 版 改訂 備考 事務所 会社名 DRAWINGNO DRAWINGTITLE TITLE SCALE DATE DRAWN CHECKED APPROVED DESIGNED 所在地 摘要 変更 一部変更 仕様等一部変更 図面内容一部変更'.split(' '))
 const isFieldLabel = (text: string) => fieldLabels.has(text.replace(/[\s.:：]/g, '').toUpperCase())
 const isHeading = (text: string, pattern: RegExp) => pattern.test(text) && !text.replace(pattern, '').replace(/[:：]/g, '').trim()
-const isField = (text: string) => isFieldLabel(text) || isHeading(text, numberHeading) || isHeading(text, nameHeading)
+const isScaleValue = (text: string) => Boolean(text.trim()) && (
+  /^(?:A\d\s*[:：]\s*)?(?:\d+\s*[/:：]\s*\d+(?:\s*[,、]\s*(?:\d+\s*[/:：]\s*)?\d+)*)?$/i.test(text.trim())
+  || /^(?:N\.?\s*S\.?|NON\s*SCALE|[-－―])$/i.test(text.trim())
+)
+const isField = (text: string) => {
+  if (isFieldLabel(text) || isHeading(text, numberHeading) || isHeading(text, nameHeading)) return true
+  const scale = /^(?:縮\s*尺|SCALE)\s*[:：]?\s*/i.exec(text)
+  return Boolean(scale && (!text.slice(scale[0].length).trim() || isScaleValue(text.slice(scale[0].length))))
+}
+const isScaleFieldWithValue = (text: string) => {
+  const scale = /^(?:縮\s*尺|SCALE)\s*[:：]?\s*/i.exec(text)
+  const value = scale ? text.slice(scale[0].length).trim() : ''
+  return Boolean(value) && isScaleValue(value)
+}
 // Broader forms are whole field values and require a number heading. Never
 // extract a partial number from dimensions, multiple choices or longer codes.
 const labelledNumber = /^(?:\d{2,5}|[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]{1,2}-?\d{1,4}|[A-Za-z]{1,3}-?\d{2,4}|[A-Za-z]{1,3}-?\d{1,4}\([A-Za-z]{1,3}\))(?:-[A-Za-z0-9]{1,3}){0,2}$/u
@@ -84,7 +97,7 @@ function isNameValue(value: string): boolean {
   return [...value].length <= 40 && isNameText(value)
 }
 function isNameText(value: string): boolean {
-  return Boolean(value) && !/。/.test(value) && !isField(value)
+  return Boolean(value) && !/。/.test(value) && !isField(value) && !isScaleValue(value)
     && !/^\p{L}$/u.test(value) && !/^(?:名|称|番|号|図面内容追加.*|[A-Za-z0-9 .()-]+)$/.test(value)
     && !nameHeading.test(value) && !numberHeading.test(value) && !projectHeading.test(value) && !labelledNumber.test(normalizeNumberValue(value))
 }
@@ -154,6 +167,7 @@ export function detectDrawingInfo(lines: readonly ExtractedTextLine[], bounds: R
   // the original short-fragment joining above, and only add complete runs here.
   const singleCharacter = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}A-Za-z0-9]$/u
   const spacedUsed = new Set<TitleRow>()
+  const spacedRows = new Set<TitleRow>()
   for (let start = 0; start < ordered.length; start++) {
     const first = ordered[start]
     if (spacedUsed.has(first) || !singleCharacter.test(first.text)) continue
@@ -183,10 +197,11 @@ export function detectDrawingInfo(lines: readonly ExtractedTextLine[], bounds: R
     const existing = matches.find(row => row.rect.every((v, i) => Math.abs(v - joined.rect[i]) <= 1.5))
     if (existing) parts.set(existing, chain)
     else { rows.push(joined); parts.set(joined, chain); matches.push(joined); byText.set(joined.text, matches) }
+    spacedRows.add(existing ?? joined)
   }
   // Original fragments stay available, but must not compete with a complete
   // heading/number/name assembled from those same fragments.
-  const joinedName = (joined: TitleRow) => isNameValue(joined.text) && !(parts.get(joined) ?? []).some(part => isField(part.text) || unlabelledNumber.test(normalizeNumberValue(part.text)))
+  const joinedName = (joined: TitleRow) => isNameValue(joined.text) && !(parts.get(joined) ?? []).some(part => isField(part.text) || isScaleValue(part.text) || unlabelledNumber.test(normalizeNumberValue(part.text)))
   const joinedNumber = (joined: TitleRow) => labelledNumber.test(normalizeNumberValue(joined.text.replace(numberHeading, '')))
     && !(parts.get(joined) ?? []).some(part => isField(part.text) && !isHeading(part.text, numberHeading))
   const extensions = new Map<TitleRow, TitleRow[]>()
@@ -289,6 +304,9 @@ export function detectDrawingInfo(lines: readonly ExtractedTextLine[], bounds: R
     // Keep the stricter generic "名称" guard used by the original detector.
     if (label.text.replace(/\s/g, '') === '名称' && label.rect[1] < height * .75) continue
     const { lh, left, right, bottom } = fieldArea(label)
+    // A scale field written with its value sits beside the name lines; it never closes the cell below.
+    const cellBottom = Math.min(...fields.filter(other => other !== label && other.rect[1] >= label.rect[3]
+      && other.rect[2] > left && other.rect[0] < right && !isScaleFieldWithValue(other.text)).map(other => other.rect[1]))
     const sameColumn = fields.filter(other => other !== label && Math.abs(other.rect[0] - label.rect[0]) <= label.rect[2] - label.rect[0])
     // Only a heading just above closes a title-block cell; a matching word far up
     // in the drawing body must not stretch the cell over the drawing.
@@ -297,6 +315,7 @@ export function detectDrawingInfo(lines: readonly ExtractedTextLine[], bounds: R
     // Extend upward only into a cell closed by another field heading above it;
     // without one, the space above a title block is the drawing itself.
     const top = above.length ? Math.max(...above.map(other => other.rect[3])) : label.rect[1]
+    const tol = Math.max(1.5, lh * .3)
     const lower = below.length ? Math.min(...below.map(other => other.rect[1])) : label.rect[3] + lh * 3
     const rightFields = fields.filter(other => other !== label && other.rect[0] >= label.rect[2]
       && other.rect[3] >= label.rect[1] - lh * 3 && other.rect[1] <= label.rect[3] + lh * 3)
@@ -304,11 +323,20 @@ export function detectDrawingInfo(lines: readonly ExtractedTextLine[], bounds: R
       const rowFields = rightFields.filter(other => other.rect[1] < row.rect[3])
       return rowFields.length ? Math.min(...rowFields.map(other => other.rect[0])) : label.rect[0] + width * .25
     }
+    const withinRight = (row: TitleRow, boundary: number) => {
+      if (row.rect[2] <= boundary) return true
+      // Only a line starting inside the cell may overflow its usual right edge.
+      if (row.rect[0] >= boundary) return false
+      const rowFields = fields.filter(other => other.rect[0] >= label.rect[2]
+        && other.rect[3] > row.rect[1] && other.rect[1] < row.rect[3])
+      const rowRight = rowFields.length ? Math.min(...rowFields.map(other => other.rect[0])) : label.rect[0] + width * .25
+      return row.rect[2] <= rowRight
+    }
     const selected = cellRows.filter(row => (
-      row.rect[0] >= left && row.rect[2] <= right && row.rect[1] >= label.rect[3]
-        && row.rect[3] <= bottom && row.rect[1] - label.rect[3] <= Math.max(lh, row.rect[3] - row.rect[1]) * 4
-      || row.rect[0] >= label.rect[2] && row.rect[2] <= upperRight(row) && row.rect[1] >= top && row.rect[3] <= lower
-    ) && !otherValues.has(row) && isNameText(row.text) && !parts.get(row)?.some(part => isField(part.text)))
+      row.rect[0] >= left && withinRight(row, right) && row.rect[1] >= label.rect[3]
+        && row.rect[3] <= cellBottom && row.rect[1] - label.rect[3] <= Math.max(lh, row.rect[3] - row.rect[1]) * 4
+      || row.rect[0] >= label.rect[2] && withinRight(row, upperRight(row)) && row.rect[1] >= top - tol && row.rect[3] <= lower
+    ) && !otherValues.has(row) && isNameText(row.text) && !parts.get(row)?.some(part => isField(part.text) || isScaleValue(part.text)))
       .sort((a, b) => a.rect[1] - b.rect[1] || a.rect[0] - b.rect[0])
     // Preserve physical lines for document-wide common-line removal.
     const physical: TitleRow[] = []
@@ -328,9 +356,24 @@ export function detectDrawingInfo(lines: readonly ExtractedTextLine[], bounds: R
     if (!physical.length || [...value].length > (physical.length >= 2 ? 80 : 40) || !isNameText(value)) continue
     nameCells.push({ row: { text: value, rect: unionRect(physical) }, value, rows: physical })
   }
+  const combinedNameRows = new Set<Rect>()
   const addName = (row: TitleRow, value: string, headingNearby: boolean, details?: TitleRow[]) => {
     let score = 0; const reasons: string[] = []
     if (!headingNearby && (!inTitle(row.rect) || row.rect[3] < height * .9 || !numbers.some(n => n.score >= 50))) return
+    if (!headingNearby) {
+      const rh = row.rect[3] - row.rect[1]
+      const above = cellRows.filter(other => {
+        const oh = other.rect[3] - other.rect[1], gap = row.rect[1] - other.rect[3]
+        return other !== row && other.rect[1] < row.rect[1] && Math.abs(other.rect[0] - row.rect[0]) <= 2
+          && gap >= -Math.min(rh, oh) * .5 && gap <= Math.min(rh, oh) * .5 && oh / rh >= .7 && oh / rh <= 1.4
+          && isNameText(other.text) && !isField(other.text) && !otherValues.has(other) && [...other.text + ' ' + value].length <= 80
+      }).sort((a, b) => b.rect[3] - a.rect[3])[0]
+      if (above) {
+        combinedNameRows.add(above.rect)
+        details = [above, row]; value = above.text + ' ' + value
+        row = { text: value, rect: unionRect(details) }
+      }
+    }
     if (!headingNearby && /^(?:[A-Z]部)?(?:平面図|立面図|断面図|詳細図|結線図|配線要領図|取付要領図|参考図)$/.test(value)) return
     if (headingNearby) { score += 80; reasons.push('名称見出しの右・直下') }
     if (hasNameEnding(value)) { score += 25; reasons.push('図面名称の語尾') }
@@ -354,6 +397,16 @@ export function detectDrawingInfo(lines: readonly ExtractedTextLine[], bounds: R
     const headingNearby = Boolean(label || relatedLabels.length)
     addName(row, value, headingNearby)
   }
+  // A row included in a two-line name must not tie with the complete name.
+  for (let i = names.length - 1; i >= 0; i--) {
+    if (combinedNameRows.has(names[i].rect) && !names[i].reasons.includes('名称見出しの右・直下')) names.splice(i, 1)
+  }
+  if (!nameLabels.length && !numbers.some(n => n.score >= 50)) {
+    const largeTitles = [...spacedRows].filter(row => [...row.text].length >= 5
+      && (row.rect[0] + row.rect[2]) / 2 >= width * .5 && (row.rect[1] + row.rect[3]) / 2 >= height * .85
+      && hasNameEnding(row.text) && isNameValue(row.text) && row.rect[3] - row.rect[1] >= median * 1.5)
+    if (largeTitles.length === 1) names.push({ value: largeTitles[0].text, rect: largeTitles[0].rect, score: 60, reasons: ['大きな表題文字'] })
+  }
   names.sort((a, b) => b.score - a.score)
   // Equal strongest values are ambiguous; keep the candidates for diagnostics.
   const titleRows = cellRows.filter(row => !otherValues.has(row) && (row.rect[0] + row.rect[2]) / 2 > width * .55 && (row.rect[1] + row.rect[3]) / 2 > height * .6).sort((a, b) => b.rect[1] - a.rect[1] || b.rect[0] - a.rect[0]).slice(0, 80)
@@ -373,6 +426,7 @@ export function reconcileDrawingInfos(pages: readonly DrawingDetection[]): Drawi
   const lineCounts = new Map<string, number>()
   namePages.forEach(p => new Set(p.names.flatMap(n => n.rows?.map(row => row.text) ?? [n.value])).forEach(text => lineCounts.set(text, (lineCounts.get(text) ?? 0) + 1)))
   const commonLines = new Set([...lineCounts].filter(([, count]) => count >= namePages.length * .8).map(([text]) => text))
+  const commonPrefixes = [...commonLines].filter(text => [...text].length >= 2).sort((a, b) => b.length - a.length)
   const position = (rect: Rect) => rect.map(v => Math.round(v / 4)).join(',')
   const positions = new Map<string, { pages: Set<number>; texts: Set<string> }>()
   pages.forEach((p, i) => p.titleRows?.forEach(row => {
@@ -385,8 +439,15 @@ export function reconcileDrawingInfos(pages: readonly DrawingDetection[]): Drawi
     let removedCommon = false
     const mapped = p.names.map(candidate => {
       if (!candidate.rows || candidate.rows.length < 2) return candidate
-      const remaining = candidate.rows.filter(row => !commonLines.has(row.text))
-      if (!remaining.length || remaining.length === candidate.rows.length) return candidate
+      const remaining: TitleRow[] = [], overflow: TitleRow[] = []
+      for (const row of candidate.rows) {
+        if (commonLines.has(row.text)) continue
+        const prefix = commonPrefixes.find(text => row.text.startsWith(text) && row.text.slice(text.length).trim())
+        if (prefix) overflow.push({ ...row, text: row.text.slice(prefix.length).trim() })
+        else remaining.push(row)
+      }
+      remaining.push(...overflow)
+      if (!remaining.length || remaining.length === candidate.rows.length && !overflow.length) return candidate
       removedCommon = true
       return { ...candidate, value: remaining.map(row => row.text).join(' '), rect: unionRect(remaining), rows: remaining, reasons: [...candidate.reasons, '全ページ共通の行を除外'] }
     })

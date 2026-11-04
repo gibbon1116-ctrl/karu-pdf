@@ -33,17 +33,20 @@ export function deduplicateSymbolLabels(labels: readonly SymbolLabel[]): SymbolL
 export function rectDistance(a: Rect, b: Rect): number {
   return Math.hypot(Math.max(0, a[0] - b[2], b[0] - a[2]), Math.max(0, a[1] - b[3], b[1] - a[3]))
 }
-/** Each word belongs to one nearest body. Intersection has distance zero and wins. */
-export function assignSymbolLabels(labels: SymbolLabel[], bodies: readonly { rect: Rect }[], radius: number, splitG = true): SymbolLabelValue[] {
-  const words: Array<Array<{ text: string; distance: number }>> = bodies.map(() => [])
+/** Each word belongs to one body, preferring intersection, then the sample box, then distance. */
+export function assignSymbolLabels(labels: SymbolLabel[], bodies: readonly { rect: Rect; box?: Rect }[], radius: number, splitG = true): SymbolLabelValue[] {
+  const words: Array<Array<{ text: string; distance: number; inBox: boolean }>> = bodies.map(() => [])
   const values = bodies.map(() => ({ label: '', gc: false }))
   for (const word of deduplicateSymbolLabels(labels)) {
-    let nearest = -1, distance = Infinity, overlapping = false
+    let nearest = -1, distance = Infinity, overlapping = false, inBox = false
     for (let i = 0; i < bodies.length; i++) {
       const r = bodies[i].rect, d = rectDistance(word.rect, r)
       const overlap = word.rect[0] < r[2] && word.rect[2] > r[0] && word.rect[1] < r[3] && word.rect[3] > r[1]
-      if (d <= radius && ((overlap && !overlapping) || (overlap === overlapping && d < distance))) {
-        nearest = i; distance = d; overlapping = overlap
+      const box = bodies[i].box, x = (word.rect[0] + word.rect[2]) / 2, y = (word.rect[1] + word.rect[3]) / 2
+      const inside = !!box && x >= box[0] && x <= box[2] && y >= box[1] && y <= box[3]
+      if ((d <= radius || inside) && ((overlap && !overlapping)
+        || (overlap === overlapping && ((inside && !inBox) || (inside === inBox && d < distance))))) {
+        nearest = i; distance = d; overlapping = overlap; inBox = inside
       }
     }
     if (nearest < 0) continue
@@ -51,11 +54,12 @@ export function assignSymbolLabels(labels: SymbolLabel[], bodies: readonly { rec
     if (splitG && (text === 'G' || (text.length >= 3 && text.endsWith('G') && /^[0-9A-Z]+$/.test(text.slice(0, -1))))) {
       values[nearest].gc = true; text = text.slice(0, -1)
     }
-    if (text) words[nearest].push({ text, distance })
+    if (text) words[nearest].push({ text, distance, inBox })
   }
   values.forEach((v, i) => {
-    const d0 = words[i].reduce((d, word) => word.text === 'G' ? d : Math.min(d, word.distance), Infinity)
-    v.label = words[i].filter(word => word.text === 'G' || word.distance <= d0 + .5).map(word => word.text).sort().join('+')
+    const inBox = words[i].some(word => word.text !== 'G' && word.inBox)
+    const d0 = words[i].reduce((d, word) => word.text === 'G' || (inBox && !word.inBox) ? d : Math.min(d, word.distance), Infinity)
+    v.label = words[i].filter(word => word.text === 'G' || ((!inBox || word.inBox) && word.distance <= d0 + .5)).map(word => word.text).sort().join('+')
   })
   return values
 }

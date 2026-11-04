@@ -17,7 +17,7 @@ function displayOnlyStore() {
     symbolCandidateRadius: 0,
     symbolLabelFilter: null,
     symbolGcFilter: 'all',
-    symbolShapeFilter: 'same',
+    symbolShapeFilter: 'all',
     symbolOtherFilter: 'hide',
     notifyUi,
   })
