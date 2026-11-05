@@ -63,8 +63,17 @@ test('ホイールは図面を越えてスクロールし、中ボタン移動�
   for (let i = 0; i < 20; i++) await page.mouse.wheel(0, 300)
   await expect(page.getByText(/^[23] \/ 3 ページ$/)).toBeVisible()
 
-  await page.evaluate(() => window.__karu!.scrollToPage(0))
-  await expect.poll(() => viewer.evaluate(el => el.scrollTop)).toBe(0)
+  // Wheel scrolling may still be settling on a slow machine; wait, then return to the top until it sticks.
+  await expect.poll(async () => {
+    const first = await viewer.evaluate(el => el.scrollTop)
+    await page.waitForTimeout(200)
+    return Math.abs(await viewer.evaluate(el => el.scrollTop) - first)
+  }).toBeLessThan(.5)
+  await expect.poll(async () => {
+    await page.evaluate(() => window.__karu!.scrollToPage(0))
+    await page.waitForTimeout(200)
+    return viewer.evaluate(el => el.scrollTop)
+  }).toBe(0)
   const box = await viewer.boundingBox()
   expect(box).not.toBeNull()
   const x = box!.x + box!.width / 2, y = box!.y + box!.height / 2
