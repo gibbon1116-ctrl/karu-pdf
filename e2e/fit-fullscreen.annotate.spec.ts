@@ -80,7 +80,7 @@ test('全画面でページを画面いっぱいに送り、Escで元の倍率�
 test('全画面APIが拒否されても表示を続け、ホイールは1ジェスチャーで1ページ送る', async ({ page }) => {
   await page.addInitScript(() => {
     Element.prototype.requestFullscreen = () => Promise.reject(new Error('架空の全画面要求拒否'))
-    localStorage.setItem('karu-pdf:wheel-stops-at-page-edge', 'false')
+    localStorage.setItem('karu-pdf:pan-stops-at-page-edge', 'false')
   })
   await open(page)
   await page.getByRole('button', { name: '全画面表示', exact: true }).click()

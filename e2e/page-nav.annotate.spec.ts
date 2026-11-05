@@ -14,7 +14,7 @@ function fixture(): number[] {
 }
 
 async function open(page: Page) {
-  await page.addInitScript(() => localStorage.setItem('karu-pdf:wheel-stops-at-page-edge', 'true'))
+  await page.addInitScript(() => localStorage.setItem('karu-pdf:pan-stops-at-page-edge', 'true'))
   await page.goto('/karu-pdf/?test=1&workers=2&warm=0')
   await page.waitForFunction(() => !!window.__karu)
   await page.evaluate(bytes => window.__karu!.openBytes(bytes, '架空のページ送り試験.pdf'), fixture())
@@ -47,7 +47,7 @@ test('次のページで2へ進み、前のページで1へ戻り、先頭では
   await expect(number).toHaveValue('2')
 })
 
-test('ホイールの連続操作は図面の端で止まり、間を空けて回すと次の図面へ進む', async ({ page }) => {
+test('ホイールは図面を越えてスクロールし、中ボタン移動は図面の端で止まる', async ({ page }) => {
   await open(page)
   await page.evaluate(() => window.__karu!.setZoom(2))
   const viewer = page.getByTestId('viewer')
@@ -61,12 +61,49 @@ test('ホイールの連続操作は図面の端で止まり、間を空けて�
   expect(await viewer.evaluate(el => el.querySelector<HTMLElement>('.page-empty')!.offsetHeight > el.clientHeight)).toBe(true)
   await viewer.hover()
   for (let i = 0; i < 20; i++) await page.mouse.wheel(0, 300)
+  await expect(page.getByText(/^[23] \/ 3 ページ$/)).toBeVisible()
+
+  await page.evaluate(() => window.__karu!.scrollToPage(0))
+  await expect.poll(() => viewer.evaluate(el => el.scrollTop)).toBe(0)
+  const box = await viewer.boundingBox()
+  expect(box).not.toBeNull()
+  const x = box!.x + box!.width / 2, y = box!.y + box!.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down({ button: 'middle' })
+  await expect(viewer).toHaveClass(/panning/)
+  await page.mouse.move(x, y - 4000, { steps: 20 })
   await expect.poll(() => viewer.evaluate(el => {
     const first = el.querySelector<HTMLElement>('.page-empty')!
     return Math.abs(el.scrollTop - (first.offsetTop + first.offsetHeight - el.clientHeight))
-  })).toBeLessThan(1.5)
+  })).toBeLessThanOrEqual(1.5)
   await expect(page.getByText('1 / 3 ページ', { exact: true })).toBeVisible()
-  await page.waitForTimeout(400)
-  await page.mouse.wheel(0, 300)
+  await page.mouse.up({ button: 'middle' })
+  await expect(viewer).not.toHaveClass(/panning/)
+
+  await page.mouse.move(x, y)
+  await page.mouse.down({ button: 'middle' })
+  await page.mouse.move(x, y - 4000, { steps: 20 })
+  await expect.poll(() => viewer.evaluate(el => {
+    const second = el.querySelectorAll<HTMLElement>('.page-empty')[1]
+    return Math.abs(el.scrollTop - (second.offsetTop + second.offsetHeight - el.clientHeight))
+  })).toBeLessThanOrEqual(1.5)
   await expect(page.getByText('2 / 3 ページ', { exact: true })).toBeVisible()
+  await page.mouse.up({ button: 'middle' })
+
+  await page.getByRole('button', { name: '表示▼', exact: true }).click()
+  const stopAtEdge = page.getByRole('menuitemcheckbox', { name: '中ボタンでの移動を図面の端で止める', exact: true })
+  await expect(stopAtEdge).toBeChecked()
+  await stopAtEdge.click()
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('karu-pdf:pan-stops-at-page-edge'))).toBe('false')
+  // 同じ2ページ目の途中から始め、設定オフではその下端を越える。
+  await page.evaluate(() => window.__karu!.scrollToPage(1))
+  await expect(page.getByText('2 / 3 ページ', { exact: true })).toBeVisible()
+  await page.mouse.move(x, y)
+  await page.mouse.down({ button: 'middle' })
+  await page.mouse.move(x, y - 4000, { steps: 20 })
+  await expect.poll(() => viewer.evaluate(el => {
+    const second = el.querySelectorAll<HTMLElement>('.page-empty')[1]
+    return el.scrollTop - (second.offsetTop + second.offsetHeight - el.clientHeight)
+  })).toBeGreaterThan(1.5)
+  await page.mouse.up({ button: 'middle' })
 })

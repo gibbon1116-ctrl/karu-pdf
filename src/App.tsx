@@ -289,13 +289,13 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
   const updateServiceWorkerRef = useRef<((reloadPage?: boolean) => Promise<void>) | null>(null)
   const lastRasterizeMetricsRef = useRef<RasterizeMetrics | null>(null)
   const [, setTabsVersion] = useState(0)
-  const [wheelStopsAtPageEdge, setWheelStopsAtPageEdge] = useState(() => {
-    try { return localStorage.getItem('karu-pdf:wheel-stops-at-page-edge') !== 'false' } catch { return true }
+  const [panStopsAtPageEdge, setPanStopsAtPageEdge] = useState(() => {
+    try { return localStorage.getItem('karu-pdf:pan-stops-at-page-edge') !== 'false' } catch { return true }
   })
-  const toggleWheelStopsAtPageEdge = useCallback(() => {
-    setWheelStopsAtPageEdge(previous => {
+  const togglePanStopsAtPageEdge = useCallback(() => {
+    setPanStopsAtPageEdge(previous => {
       const next = !previous
-      try { localStorage.setItem('karu-pdf:wheel-stops-at-page-edge', String(next)) } catch { /* 表示の操作は続ける。 */ }
+      try { localStorage.setItem('karu-pdf:pan-stops-at-page-edge', String(next)) } catch { /* 表示の操作は続ける。 */ }
       return next
     })
   }, [])
@@ -2384,8 +2384,8 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
           pageCount={active?.pageSizes.length ?? 0}
           onPreviousPage={previousPage}
           onNextPage={nextPage}
-          wheelStopsAtPageEdge={wheelStopsAtPageEdge}
-          onToggleWheelStopsAtPageEdge={toggleWheelStopsAtPageEdge}
+          panStopsAtPageEdge={panStopsAtPageEdge}
+          onTogglePanStopsAtPageEdge={togglePanStopsAtPageEdge}
           editRestriction={active?.editRestriction}
           onPrivacy={() => setPrivacyOpen(true)}
           onSheetSizes={() => setSheetSizesOpen(true)}
@@ -2581,7 +2581,7 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
           }}>
           <DocumentWorkspace
           pageMode={fullscreen}
-          wheelStopsAtPageEdge={wheelStopsAtPageEdge}
+          panStopsAtPageEdge={panStopsAtPageEdge}
           outlineOperation={outlineApplyingId === active.docId ? 'applying' : saving ? 'saving' : undefined}
           onOutlineChange={refreshTabs}
           onOpenTocOutline={active.editRestriction || active.outlineDraft?.base.editable === false ? undefined : () => {

@@ -40,7 +40,7 @@ export interface OrganizeWorkspaceState {
 
 interface Props {
   pageMode?: boolean
-  wheelStopsAtPageEdge?: boolean
+  panStopsAtPageEdge?: boolean
   onNavigate(): void
   split: SplitWorkspaceProps | null
   session: DocumentSession
@@ -310,7 +310,7 @@ export function DocumentWorkspace(props: Props) {
       <div ref={viewerSlotRef} className={props.split ? 'viewer-slot split-view' : 'viewer-slot'} style={props.split ? { gridTemplateColumns: `minmax(0, ${props.split.settings.ratio}fr) 6px minmax(0, ${1 - props.split.settings.ratio}fr)` } : undefined}>
       <Viewer
         pageMode={props.pageMode}
-        wheelStopsAtPageEdge={props.wheelStopsAtPageEdge}
+        panStopsAtPageEdge={props.panStopsAtPageEdge}
         readOnly={!!props.session.editRestriction}
         onNavigate={props.onNavigate}
         ref={props.viewerRef}
@@ -348,7 +348,7 @@ export function DocumentWorkspace(props: Props) {
         onFirstSharp={props.onFirstSharp}
         onStatus={props.onStatus}
       />
-      {props.split && <SplitView wheelStopsAtPageEdge={props.wheelStopsAtPageEdge} {...props.split} left={props.session} pool={props.pool} scheduler={scheduler}
+      {props.split && <SplitView panStopsAtPageEdge={props.panStopsAtPageEdge} {...props.split} left={props.session} pool={props.pool} scheduler={scheduler}
         settings={props.pageMode ? { ...props.split.settings, synced: false } : props.split.settings}
         leftRef={props.viewerRef} containerRef={viewerSlotRef} controllerRef={splitControllerRef}
         formatDefaults={props.formatDefaults} onStatus={props.onStatus} />}

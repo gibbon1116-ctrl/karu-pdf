@@ -60,8 +60,8 @@ interface Props {
   pageCount: number
   onPreviousPage(): void
   onNextPage(): void
-  wheelStopsAtPageEdge: boolean
-  onToggleWheelStopsAtPageEdge(): void
+  panStopsAtPageEdge: boolean
+  onTogglePanStopsAtPageEdge(): void
   onOrganize(): void
   onHeaderFooter(): void
   onUndoOrganize(): void
@@ -133,7 +133,7 @@ export function MenuBar(props: Props) {
       { label: '縮小', disabled: !props.hasDocument, onSelect: props.onZoomOut },
       { label: '幅に合わせる', disabled: !props.hasDocument, onSelect: props.onFitWidth },
       { label: '全画面表示', disabled: !props.hasDocument || props.fullscreenDisabled, onSelect: props.onFullscreen },
-      { label: 'ホイールで図面の端に止める', checked: props.wheelStopsAtPageEdge, onSelect: props.onToggleWheelStopsAtPageEdge },
+      { label: '中ボタンでの移動を図面の端で止める', checked: props.panStopsAtPageEdge, onSelect: props.onTogglePanStopsAtPageEdge },
     ] },
     { label: 'ページ', items: [
       { label: '用紙サイズ一覧…', disabled: unavailable, onSelect: props.onSheetSizes },

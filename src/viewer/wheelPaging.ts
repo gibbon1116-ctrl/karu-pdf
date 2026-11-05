@@ -19,31 +19,40 @@ export function pageScrollRange(page: WheelPage, clientHeight: number, maxScroll
   return { lo: clamp(Math.min(page.top, bottom), 0, max), hi: clamp(Math.max(page.top, bottom), 0, max) }
 }
 
-export interface WheelTargetInput {
-  pages: readonly WheelPage[]
-  scrollTop: number
-  clientHeight: number
-  maxScrollTop: number
-  target: number
-  delta: number
-  gestureStart: boolean
-  anchorIndex: number
+export function panRange(input: {
+  pages: readonly { top: number; height: number; width: number }[]
+  scrollLeft: number; scrollTop: number
+  clientWidth: number; clientHeight: number
+  contentWidth: number; maxScrollLeft: number; maxScrollTop: number
+}): { left: { lo: number; hi: number }; top: { lo: number; hi: number } } {
+  const { pages, scrollLeft, scrollTop, clientWidth, clientHeight, contentWidth } = input
+  const maxLeft = Math.max(0, input.maxScrollLeft), maxTop = Math.max(0, input.maxScrollTop)
+  const index = anchorPageIndex(pages, scrollTop, clientHeight)
+  if (index < 0) return { left: { lo: 0, hi: maxLeft }, top: { lo: 0, hi: maxTop } }
+  const top = pageScrollRange(pages[index], clientHeight, maxTop)
+  const included = [pages[index]]
+  const atBottom = scrollTop >= top.hi - 1.5, atTop = scrollTop <= top.lo + 1.5
+  if (atBottom && index < pages.length - 1) {
+    top.hi = pageScrollRange(pages[index + 1], clientHeight, maxTop).hi
+    included.push(pages[index + 1])
+  }
+  if (atTop && index > 0) {
+    top.lo = pageScrollRange(pages[index - 1], clientHeight, maxTop).lo
+    included.push(pages[index - 1])
+  }
+  const left = { lo: Infinity, hi: -Infinity }
+  for (const page of included) {
+    const pageLeft = (contentWidth - page.width) / 2
+    left.lo = Math.min(left.lo, pageLeft, pageLeft + page.width - clientWidth)
+    left.hi = Math.max(left.hi, pageLeft, pageLeft + page.width - clientWidth)
+  }
+  left.lo = clamp(Math.min(left.lo, scrollLeft), 0, maxLeft)
+  left.hi = clamp(Math.max(left.hi, scrollLeft), 0, maxLeft)
+  top.lo = clamp(Math.min(top.lo, scrollTop), 0, maxTop)
+  top.hi = clamp(Math.max(top.hi, scrollTop), 0, maxTop)
+  return { left, top }
 }
 
-export function wheelTarget(input: WheelTargetInput): { target: number; anchorIndex: number } {
-  const { pages, scrollTop, clientHeight, maxScrollTop, delta, gestureStart } = input
-  let anchorIndex = gestureStart ? anchorPageIndex(pages, scrollTop, clientHeight) : input.anchorIndex
-  if (!pages.length) return { target: 0, anchorIndex: -1 }
-  anchorIndex = clamp(anchorIndex, 0, pages.length - 1)
-  const { lo, hi } = pageScrollRange(pages[anchorIndex], clientHeight, maxScrollTop)
-  if (gestureStart && delta > 0 && scrollTop >= hi - 1.5 && anchorIndex < pages.length - 1) {
-    anchorIndex++
-    return { target: clamp(pages[anchorIndex].top, 0, Math.max(0, maxScrollTop)), anchorIndex }
-  }
-  if (gestureStart && delta < 0 && scrollTop <= lo + 1.5 && anchorIndex > 0) {
-    anchorIndex--
-    const page = pages[anchorIndex]
-    return { target: clamp(Math.max(page.top, page.top + page.height - clientHeight), 0, Math.max(0, maxScrollTop)), anchorIndex }
-  }
-  return { target: clamp((gestureStart ? scrollTop : input.target) + delta, lo, hi), anchorIndex }
+export function clampPan(value: number, range: { lo: number; hi: number }): number {
+  return clamp(value, range.lo, range.hi)
 }

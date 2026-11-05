@@ -16,7 +16,7 @@ import { getDetailRecoveryCount, subscribeDetailRecovery } from './detailRequest
 import { computePageLayout, currentPageIndex, CSS_PX_PER_PT, fitPageView, pagesInRange, type PageLayout } from './pageLayout'
 import { PageView } from './PageView'
 import { mapViewPosition, readViewPosition, type ViewPosition } from './viewSync'
-import { wheelTarget } from './wheelPaging'
+import { clampPan, panRange } from './wheelPaging'
 import { perfCount } from '../perf/counters'
 
 export const ZOOM_STEPS = [0.25, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8]
@@ -43,7 +43,7 @@ export interface ViewerHandle {
 
 interface Props {
   pageMode?: boolean
-  wheelStopsAtPageEdge?: boolean
+  panStopsAtPageEdge?: boolean
   onNavigate?(): void
   minZoom?: number
   renderVariant?: string
@@ -114,14 +114,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   const annotationVersion = useSyncExternalStore(props.annotationStore.subscribe, props.annotationStore.getSnapshot)
   perfCount('Viewer.render')
   const scrollerRef = useRef<HTMLDivElement>(null)
-  const wheelRef = useRef({ frame: 0, lastAt: -Infinity, target: 0, position: 0, anchorIndex: -1 })
+  const wheelRef = useRef({ lastAt: -Infinity })
   const fitPageRef = useRef<((index: number) => void) | null>(null)
   const stopWheel = useCallback(() => {
-    const wheel = wheelRef.current
-    cancelAnimationFrame(wheel.frame)
-    wheel.frame = 0
-    wheel.lastAt = -Infinity
-    wheel.anchorIndex = -1
+    wheelRef.current.lastAt = -Infinity
   }, [])
   const prefetchRef = useRef(new Map<number, PrefetchEntry>())
   const warmReleasesRef = useRef<Array<() => void>>([])
@@ -260,22 +256,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   useEffect(() => {
     const scroller = scrollerRef.current
     if (!scroller) return
-    const animate = () => {
-      const wheel = wheelRef.current
-      const remaining = wheel.target - wheel.position
-      if (Math.abs(remaining) < .5) {
-        scroller.scrollTop = wheel.target
-        wheel.position = wheel.target
-        wheel.frame = 0
-        return
-      }
-      wheel.position += remaining * .35
-      scroller.scrollTop = wheel.position
-      wheel.frame = requestAnimationFrame(animate)
-    }
     const handler = (event: WheelEvent) => {
+      if (!props.pageMode) return
       const pages = layoutRef.current.pages
-      if ((!props.pageMode && props.wheelStopsAtPageEdge === false) || event.ctrlKey || event.shiftKey
+      if (event.ctrlKey || event.shiftKey
         || Math.abs(event.deltaX) > Math.abs(event.deltaY) || event.deltaY === 0 || !pages.length) return
       // Panels and inputs placed over the drawing keep their own wheel behaviour.
       for (let node = event.target instanceof Element ? event.target : null; node && node !== scroller; node = node.parentElement) {
@@ -296,24 +280,6 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
         wheel.lastAt = now
         return
       }
-      const delta = event.deltaY * (event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? scroller.clientHeight : 1)
-      const next = wheelTarget({
-        pages, scrollTop: scroller.scrollTop, clientHeight: scroller.clientHeight,
-        maxScrollTop: scroller.scrollHeight - scroller.clientHeight,
-        target: wheel.target, delta, gestureStart, anchorIndex: wheel.anchorIndex,
-      })
-      wheel.lastAt = now
-      wheel.anchorIndex = next.anchorIndex
-      wheel.target = next.target
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        cancelAnimationFrame(wheel.frame)
-        wheel.frame = 0
-        scroller.scrollTop = wheel.target
-        wheel.position = wheel.target
-      } else if (!wheel.frame) {
-        wheel.position = scroller.scrollTop
-        wheel.frame = requestAnimationFrame(animate)
-      }
     }
     scroller.addEventListener('wheel', handler, { passive: false })
     document.addEventListener('pointerdown', stopWheel, true)
@@ -324,7 +290,95 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       document.removeEventListener('keydown', stopWheel, true)
       stopWheel()
     }
-  }, [props.pageMode, props.wheelStopsAtPageEdge, props.pageSizes, stopWheel])
+  }, [props.pageMode, props.pageSizes, stopWheel])
+
+  // 表示の更新でハンドラーを付け直さず、押した時点の範囲を離すまで保つ。
+  const panOptionsRef = useRef({ beginInteraction, stopsAtPageEdge: props.panStopsAtPageEdge })
+  panOptionsRef.current = { beginInteraction, stopsAtPageEdge: props.panStopsAtPageEdge }
+  useEffect(() => {
+    const scroller = scrollerRef.current
+    if (!scroller) return
+    let pan: {
+      pointerId: number; startX: number; startY: number; startLeft: number; startTop: number
+      range: ReturnType<typeof panRange>
+    } | null = null
+    let moved = false
+    const mouseDown = (event: MouseEvent) => {
+      if (event.button !== 1) return
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const pointerDown = (event: PointerEvent) => {
+      if (event.button !== 1 || event.pointerType !== 'mouse') return
+      event.preventDefault()
+      event.stopPropagation()
+      scroller.setPointerCapture(event.pointerId)
+      const maxScrollLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth)
+      const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+      const range = panOptionsRef.current.stopsAtPageEdge === false
+        ? { left: { lo: 0, hi: maxScrollLeft }, top: { lo: 0, hi: maxScrollTop } }
+        : panRange({
+          pages: layoutRef.current.pages, scrollLeft: scroller.scrollLeft, scrollTop: scroller.scrollTop,
+          clientWidth: scroller.clientWidth, clientHeight: scroller.clientHeight,
+          contentWidth: Math.max(layoutRef.current.maxWidth, scroller.clientWidth), maxScrollLeft, maxScrollTop,
+        })
+      pan = {
+        pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
+        startLeft: scroller.scrollLeft, startTop: scroller.scrollTop, range,
+      }
+      moved = false
+      scroller.classList.add('panning')
+      stopWheel()
+      panOptionsRef.current.beginInteraction()
+    }
+    const pointerMove = (event: PointerEvent) => {
+      if (!pan || event.pointerId !== pan.pointerId) return
+      event.preventDefault()
+      event.stopPropagation()
+      const dx = event.clientX - pan.startX, dy = event.clientY - pan.startY
+      if (Math.hypot(dx, dy) >= 3) moved = true
+      scroller.scrollLeft = clampPan(pan.startLeft - dx, pan.range.left)
+      scroller.scrollTop = clampPan(pan.startTop - dy, pan.range.top)
+    }
+    const finishPan = () => {
+      if (!pan) return
+      const pointerId = pan.pointerId
+      pan = null
+      scroller.classList.remove('panning')
+      if (scroller.hasPointerCapture(pointerId)) scroller.releasePointerCapture(pointerId)
+    }
+    const pointerEnd = (event: PointerEvent) => {
+      if (!pan || event.pointerId !== pan.pointerId) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.type === 'pointerup' && Math.hypot(event.clientX - pan.startX, event.clientY - pan.startY) >= 3) moved = true
+      finishPan()
+    }
+    const auxClick = (event: MouseEvent) => {
+      if (event.button !== 1) return
+      event.stopPropagation()
+      if (moved) event.preventDefault()
+      moved = false
+    }
+    const options = { capture: true, passive: false }
+    scroller.addEventListener('mousedown', mouseDown, options)
+    scroller.addEventListener('pointerdown', pointerDown, options)
+    scroller.addEventListener('pointermove', pointerMove, options)
+    scroller.addEventListener('pointerup', pointerEnd, options)
+    scroller.addEventListener('pointercancel', pointerEnd, options)
+    scroller.addEventListener('lostpointercapture', pointerEnd, options)
+    scroller.addEventListener('auxclick', auxClick, options)
+    return () => {
+      scroller.removeEventListener('mousedown', mouseDown, true)
+      scroller.removeEventListener('pointerdown', pointerDown, true)
+      scroller.removeEventListener('pointermove', pointerMove, true)
+      scroller.removeEventListener('pointerup', pointerEnd, true)
+      scroller.removeEventListener('pointercancel', pointerEnd, true)
+      scroller.removeEventListener('lostpointercapture', pointerEnd, true)
+      scroller.removeEventListener('auxclick', auxClick, true)
+      finishPan()
+    }
+  }, [props.docId, stopWheel])
 
   const setZoom = useCallback((next: number, anchor?: { x: number; y: number }, positionFromSync = false, position?: { left: number; top: number }) => {
     const scroller = scrollerRef.current
