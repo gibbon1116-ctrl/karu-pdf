@@ -295,21 +295,23 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   // 表示の更新でハンドラーを付け直さず、押した時点の範囲を離すまで保つ。
   const panOptionsRef = useRef({ beginInteraction, stopsAtPageEdge: props.panStopsAtPageEdge })
   panOptionsRef.current = { beginInteraction, stopsAtPageEdge: props.panStopsAtPageEdge }
+  const spacePanRef = useRef(false)
   useEffect(() => {
     const scroller = scrollerRef.current
     if (!scroller) return
     let pan: {
       pointerId: number; startX: number; startY: number; startLeft: number; startTop: number
+      source: 'middle' | 'space'
       range: ReturnType<typeof panRange>
     } | null = null
     let moved = false
+    let suppressSpaceClick = false
     const mouseDown = (event: MouseEvent) => {
-      if (event.button !== 1) return
+      if (event.button !== 1 && !(spacePanRef.current && event.button === 0)) return
       event.preventDefault()
       event.stopPropagation()
     }
-    const pointerDown = (event: PointerEvent) => {
-      if (event.button !== 1 || event.pointerType !== 'mouse') return
+    const startPan = (event: PointerEvent, source: 'middle' | 'space') => {
       event.preventDefault()
       event.stopPropagation()
       scroller.setPointerCapture(event.pointerId)
@@ -324,12 +326,18 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
         })
       pan = {
         pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
-        startLeft: scroller.scrollLeft, startTop: scroller.scrollTop, range,
+        startLeft: scroller.scrollLeft, startTop: scroller.scrollTop, source, range,
       }
       moved = false
       scroller.classList.add('panning')
       stopWheel()
       panOptionsRef.current.beginInteraction()
+    }
+    const pointerDown = (event: PointerEvent) => {
+      suppressSpaceClick = false
+      if (event.pointerType !== 'mouse') return
+      if (event.button === 1) startPan(event, 'middle')
+      else if (spacePanRef.current && event.button === 0) startPan(event, 'space')
     }
     const pointerMove = (event: PointerEvent) => {
       if (!pan || event.pointerId !== pan.pointerId) return
@@ -343,6 +351,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     const finishPan = () => {
       if (!pan) return
       const pointerId = pan.pointerId
+      if (pan.source === 'space' && moved) suppressSpaceClick = true
       pan = null
       scroller.classList.remove('panning')
       if (scroller.hasPointerCapture(pointerId)) scroller.releasePointerCapture(pointerId)
@@ -360,6 +369,43 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       if (moved) event.preventDefault()
       moved = false
     }
+    const click = (event: MouseEvent) => {
+      if (event.button !== 0 || !suppressSpaceClick) return
+      suppressSpaceClick = false
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const clearSpacePan = () => {
+      spacePanRef.current = false
+      scroller.classList.remove('space-pan')
+    }
+    const keyDown = (event: KeyboardEvent) => {
+      // 押している間のキーリピートは、マウスが図面の外へ出ても Space の既定動作をさせない。
+      if ((event.key === ' ' || event.code === 'Space') && spacePanRef.current) {
+        event.preventDefault()
+        return
+      }
+      if ((event.key !== ' ' && event.code !== 'Space') || event.ctrlKey || event.metaKey || event.altKey
+        || props.pageMode || event.isComposing
+        || (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])'))
+        || document.querySelector('dialog[open], [role="dialog"], [role="menu"]')
+        || !scroller.matches(':hover')) return
+      event.preventDefault()
+      spacePanRef.current = true
+      scroller.classList.add('space-pan')
+    }
+    const keyUp = (event: KeyboardEvent) => {
+      if ((event.key !== ' ' && event.code !== 'Space') || !spacePanRef.current) return
+      event.preventDefault()
+      clearSpacePan()
+    }
+    const blur = () => {
+      clearSpacePan()
+      finishPan()
+    }
+    const visibilityChange = () => {
+      if (document.hidden) blur()
+    }
     const options = { capture: true, passive: false }
     scroller.addEventListener('mousedown', mouseDown, options)
     scroller.addEventListener('pointerdown', pointerDown, options)
@@ -368,6 +414,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     scroller.addEventListener('pointercancel', pointerEnd, options)
     scroller.addEventListener('lostpointercapture', pointerEnd, options)
     scroller.addEventListener('auxclick', auxClick, options)
+    scroller.addEventListener('click', click, options)
+    window.addEventListener('keydown', keyDown, options)
+    window.addEventListener('keyup', keyUp, options)
+    window.addEventListener('blur', blur)
+    document.addEventListener('visibilitychange', visibilityChange)
     return () => {
       scroller.removeEventListener('mousedown', mouseDown, true)
       scroller.removeEventListener('pointerdown', pointerDown, true)
@@ -376,9 +427,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       scroller.removeEventListener('pointercancel', pointerEnd, true)
       scroller.removeEventListener('lostpointercapture', pointerEnd, true)
       scroller.removeEventListener('auxclick', auxClick, true)
+      scroller.removeEventListener('click', click, true)
+      window.removeEventListener('keydown', keyDown, true)
+      window.removeEventListener('keyup', keyUp, true)
+      window.removeEventListener('blur', blur)
+      document.removeEventListener('visibilitychange', visibilityChange)
+      clearSpacePan()
       finishPan()
     }
-  }, [props.docId, stopWheel])
+  }, [props.docId, props.pageMode, stopWheel])
 
   const setZoom = useCallback((next: number, anchor?: { x: number; y: number }, positionFromSync = false, position?: { left: number; top: number }) => {
     const scroller = scrollerRef.current

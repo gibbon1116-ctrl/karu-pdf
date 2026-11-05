@@ -38,8 +38,8 @@ it('SOURCE のソース ZIP をチェックサムに含め、必要なソース�
 })
 
 for (const [distribution, filename] of [
-  ['fixed', 'release/karu-pdf-fixed-v1.13.1.zip'],
-  ['single', 'release/karu-pdf-v1.13.1-single.zip'],
+  ['fixed', 'release/karu-pdf-fixed-v1.13.2.zip'],
+  ['single', 'release/karu-pdf-v1.13.2-single.zip'],
 ]) {
   it.skipIf(!fs.existsSync(filename))(distribution + ' の実配布 ZIP にビルドコミットのソースが同梱される', () => {
     const dir = fs.mkdtempSync('scripts/.release-source-test-')

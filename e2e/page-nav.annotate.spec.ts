@@ -100,7 +100,7 @@ test('ホイールは図面を越えてスクロールし、中ボタン移動�
   await page.mouse.up({ button: 'middle' })
 
   await page.getByRole('button', { name: '表示▼', exact: true }).click()
-  const stopAtEdge = page.getByRole('menuitemcheckbox', { name: '中ボタンでの移動を図面の端で止める', exact: true })
+  const stopAtEdge = page.getByRole('menuitemcheckbox', { name: 'つかんで動かすときは図面の端で止める', exact: true })
   await expect(stopAtEdge).toBeChecked()
   await stopAtEdge.click()
   await expect.poll(() => page.evaluate(() => localStorage.getItem('karu-pdf:pan-stops-at-page-edge'))).toBe('false')
@@ -115,4 +115,90 @@ test('ホイールは図面を越えてスクロールし、中ボタン移動�
     return el.scrollTop - (second.offsetTop + second.offsetHeight - el.clientHeight)
   })).toBeGreaterThan(1.5)
   await page.mouse.up({ button: 'middle' })
+})
+
+test('Space を押しながら左ドラッグすると図面の端で止まり、ボタンは押されない', async ({ page }) => {
+  await open(page)
+  await page.evaluate(() => window.__karu!.setZoom(2))
+  const viewer = page.getByTestId('viewer')
+  await expect(viewer).toHaveAttribute('data-zoom', '2')
+  await expect.poll(async () => {
+    await page.evaluate(() => window.__karu!.scrollToPage(0))
+    await page.waitForTimeout(200)
+    return viewer.evaluate(el => el.scrollTop)
+  }).toBe(0)
+
+  const next = page.getByRole('button', { name: '次のページ', exact: true })
+  await next.click()
+  await expect(page.getByText('2 / 3 ページ', { exact: true })).toBeVisible()
+  await expect.poll(async () => {
+    await page.evaluate(() => window.__karu!.scrollToPage(0))
+    await page.waitForTimeout(200)
+    return viewer.evaluate(el => el.scrollTop)
+  }).toBe(0)
+  await expect(next).toBeFocused()
+  await expect(page.getByText('1 / 3 ページ', { exact: true })).toBeVisible()
+
+  const box = await viewer.boundingBox()
+  expect(box).not.toBeNull()
+  const x = box!.x + box!.width / 2, y = box!.y + box!.height / 2
+  await page.mouse.move(x, y)
+  await page.keyboard.down(' ')
+  await expect(viewer).toHaveClass(/space-pan/)
+  await page.mouse.down()
+  await expect(viewer).toHaveClass(/panning/)
+  await page.mouse.move(x, y - 4000, { steps: 20 })
+  await expect.poll(() => viewer.evaluate(el => {
+    const first = el.querySelector<HTMLElement>('.page-empty')!
+    return Math.abs(el.scrollTop - (first.offsetTop + first.offsetHeight - el.clientHeight))
+  })).toBeLessThanOrEqual(1.5)
+  await page.mouse.up()
+  await expect(viewer).not.toHaveClass(/panning/)
+  await expect(viewer).toHaveClass(/space-pan/)
+  await page.keyboard.up(' ')
+  await expect(viewer).not.toHaveClass(/space-pan/)
+  await expect(page.getByText('1 / 3 ページ', { exact: true })).toBeVisible()
+
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x, y - 100, { steps: 5 })
+  await expect(viewer).not.toHaveClass(/panning/)
+  await page.mouse.up()
+
+  // 既存の数量項目と書き込み取得 API で、道具にドラッグが届かないことも確かめる。
+  await page.getByRole('tab', { name: '数量', exact: true }).click()
+  await page.evaluate(() => window.__karu!.addFixturePresets('電気設備'))
+  await page.getByRole('button', { name: 'DL ダウンライト', exact: true }).click()
+  for (const name of ['数量拾い', '手書き']) {
+    const tool = page.getByRole('button', { name, exact: true })
+    if (await tool.count()) {
+      await tool.click()
+    } else {
+      await page.getByRole('button', { name: 'ペン▼', exact: true }).click()
+      await page.getByRole('menuitemcheckbox', { name: /^(?:✓\s*)?手書き(?:\s|$)/ }).click()
+    }
+    await expect(tool).toHaveAttribute('aria-pressed', 'true')
+    await expect.poll(async () => {
+      await page.evaluate(() => window.__karu!.scrollToPage(0))
+      await page.waitForTimeout(200)
+      return viewer.evaluate(el => el.scrollTop)
+    }).toBe(0)
+    const count = await page.evaluate(() => window.__karu!.getEditableAnnotations(0).length)
+    await viewer.hover()
+    const toolBox = await viewer.boundingBox()
+    expect(toolBox).not.toBeNull()
+    const toolX = toolBox!.x + toolBox!.width / 2, toolY = toolBox!.y + toolBox!.height / 2
+    await page.keyboard.down(' ')
+    await expect(viewer).toHaveClass(/space-pan/)
+    await page.mouse.down()
+    await expect(viewer).toHaveClass(/panning/)
+    await page.mouse.move(toolX, toolY - 50, { steps: 5 })
+    await page.keyboard.up(' ')
+    await expect(viewer).not.toHaveClass(/space-pan/)
+    await expect(viewer).toHaveClass(/panning/)
+    await page.mouse.move(toolX, toolY - 100, { steps: 5 })
+    await page.mouse.up()
+    await expect(viewer).not.toHaveClass(/panning/)
+    await expect.poll(() => page.evaluate(() => window.__karu!.getEditableAnnotations(0).length)).toBe(count)
+  }
 })
