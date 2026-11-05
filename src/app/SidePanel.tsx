@@ -37,7 +37,6 @@ interface Props {
   onOutlineNavigate(pageIndex: number, view: OutlineView | null): void
   getOutlineViewPoint(): { pageIndex: number; x: number; y: number } | null
   outlineOperation?: 'applying' | 'saving'
-  onApplyOutline(): Promise<boolean>
   onOutlineChange(): void
   onOpenDrawingOutline?(): void
   onOpenTocOutline?(): void
@@ -80,7 +79,7 @@ export function SidePanel(props: Props) {
   else if (props.activeTab === 'outline') content = <Suspense fallback={<p className="side-panel-message">目次を開いています…</p>}><OutlinePanel
     key={props.session.docId} session={props.session} pool={props.pool}
     onOutlineNavigate={props.onOutlineNavigate} getOutlineViewPoint={props.getOutlineViewPoint}
-    outlineOperation={props.outlineOperation} onApplyOutline={props.onApplyOutline} onOutlineChange={props.onOutlineChange} onOpenDrawingOutline={props.onOpenDrawingOutline} onOpenTocOutline={props.onOpenTocOutline}
+    outlineOperation={props.outlineOperation} onOutlineChange={props.onOutlineChange} onOpenDrawingOutline={props.onOpenDrawingOutline} onOpenTocOutline={props.onOpenTocOutline}
   /></Suspense>
   else if (props.activeTab === 'search') content = <SearchPanel
     docId={props.session.docId} pool={props.pool} focusVersion={props.focusSearchVersion}

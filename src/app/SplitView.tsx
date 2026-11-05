@@ -43,6 +43,7 @@ export interface SplitWorkspaceProps {
 }
 interface Props extends SplitWorkspaceProps {
   left: DocumentSession
+  wheelStopsAtPageEdge?: boolean
   pool: PdfWorkerPool
   scheduler: RenderScheduler
   leftRef: RefObject<ViewerHandle | null>
@@ -173,7 +174,7 @@ export function SplitView(props: Props) {
       </header>
       {!right ? <p>表示する文書を選んでください</p> : failure ? <p role="alert">{failure}</p> : ready === token ? <Viewer
         key={`${right.docId}:${right.pageRevision}:${right.savedRevision}`}
-        ref={rightRef} readOnly renderRevisions={right.savedPageRevisions}
+        ref={rightRef} wheelStopsAtPageEdge={props.wheelStopsAtPageEdge} readOnly renderRevisions={right.savedPageRevisions}
         docId={right.docId} pageSizes={right.pageSizes} pool={props.pool} scheduler={scheduler}
         annotationStore={readOnlyStore} formatDefaults={props.formatDefaults} tool="select"
         selectedAnnotationId={null} searchMatches={[]} activeSearchIndex={-1}

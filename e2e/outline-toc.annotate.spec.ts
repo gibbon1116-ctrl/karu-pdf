@@ -118,9 +118,9 @@ async function dialog(page: Page) {
 }
 async function items(page: Page) { return page.evaluate(() => window.__karu!.outlineDraft()!.getItems()) }
 async function apply(page: Page) {
-  await page.getByRole('button', { name: '目次を反映', exact: true }).click()
+  await page.evaluate(() => window.__karu!.applyOutline())
   await expect(page.getByTestId('outline-panel')).toHaveAttribute('aria-busy', 'false')
-  await expect(page.getByText('未反映の変更があります', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('目次の変更は保存するとPDFに書き込まれます', { exact: true })).toHaveCount(0)
 }
 
 test('printed TOC detects A/B, supports shape edits, applies, saves and reloads', async ({ page }) => {

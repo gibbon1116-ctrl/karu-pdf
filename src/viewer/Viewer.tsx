@@ -13,9 +13,10 @@ import type { Priority } from '../worker/protocol'
 import { BitmapCache } from './BitmapCache'
 import { type Box } from './detailRegion'
 import { getDetailRecoveryCount, subscribeDetailRecovery } from './detailRequestSync'
-import { computePageLayout, CSS_PX_PER_PT, pagesInRange, type PageLayout } from './pageLayout'
+import { computePageLayout, currentPageIndex, CSS_PX_PER_PT, fitPageView, pagesInRange, type PageLayout } from './pageLayout'
 import { PageView } from './PageView'
 import { mapViewPosition, readViewPosition, type ViewPosition } from './viewSync'
+import { wheelTarget } from './wheelPaging'
 import { perfCount } from '../perf/counters'
 
 export const ZOOM_STEPS = [0.25, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8]
@@ -25,6 +26,7 @@ export interface ViewerHandle {
   zoomIn(): void
   zoomOut(): void
   fitWidth(): void
+  fitPage(index: number): void
   scrollToPage(index: number): void
   scrollToPosition(index: number, x: number | null, y: number | null): void
   zoomToRect(index: number, rect: readonly number[]): void
@@ -40,6 +42,8 @@ export interface ViewerHandle {
 }
 
 interface Props {
+  pageMode?: boolean
+  wheelStopsAtPageEdge?: boolean
   onNavigate?(): void
   minZoom?: number
   renderVariant?: string
@@ -110,6 +114,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
   const annotationVersion = useSyncExternalStore(props.annotationStore.subscribe, props.annotationStore.getSnapshot)
   perfCount('Viewer.render')
   const scrollerRef = useRef<HTMLDivElement>(null)
+  const wheelRef = useRef({ frame: 0, lastAt: -Infinity, target: 0, position: 0, anchorIndex: -1 })
+  const fitPageRef = useRef<((index: number) => void) | null>(null)
+  const stopWheel = useCallback(() => {
+    const wheel = wheelRef.current
+    cancelAnimationFrame(wheel.frame)
+    wheel.frame = 0
+    wheel.lastAt = -Infinity
+    wheel.anchorIndex = -1
+  }, [])
   const prefetchRef = useRef(new Map<number, PrefetchEntry>())
   const warmReleasesRef = useRef<Array<() => void>>([])
   const firstBitmapRef = useRef(false)
@@ -244,8 +257,78 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     props.onViewInteraction?.()
   }, [props.onViewInteraction])
 
-  const setZoom = useCallback((next: number, anchor?: { x: number; y: number }, positionFromSync = false) => {
+  useEffect(() => {
     const scroller = scrollerRef.current
+    if (!scroller) return
+    const animate = () => {
+      const wheel = wheelRef.current
+      const remaining = wheel.target - wheel.position
+      if (Math.abs(remaining) < .5) {
+        scroller.scrollTop = wheel.target
+        wheel.position = wheel.target
+        wheel.frame = 0
+        return
+      }
+      wheel.position += remaining * .35
+      scroller.scrollTop = wheel.position
+      wheel.frame = requestAnimationFrame(animate)
+    }
+    const handler = (event: WheelEvent) => {
+      const pages = layoutRef.current.pages
+      if ((!props.pageMode && props.wheelStopsAtPageEdge === false) || event.ctrlKey || event.shiftKey
+        || Math.abs(event.deltaX) > Math.abs(event.deltaY) || event.deltaY === 0 || !pages.length) return
+      // Panels and inputs placed over the drawing keep their own wheel behaviour.
+      for (let node = event.target instanceof Element ? event.target : null; node && node !== scroller; node = node.parentElement) {
+        if (node.matches('input, select, textarea, [contenteditable="true"]')) return
+        const overflowY = getComputedStyle(node).overflowY
+        if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight + 1
+          && (event.deltaY > 0 ? node.scrollTop + node.clientHeight < node.scrollHeight - 1 : node.scrollTop > 0)) return
+      }
+      event.preventDefault()
+      const wheel = wheelRef.current, now = performance.now()
+      const gestureStart = now - wheel.lastAt >= 250
+      if (props.pageMode) {
+        if (gestureStart) {
+          const index = currentPageIndex(pages, scroller.scrollTop, scroller.clientHeight) + (event.deltaY > 0 ? 1 : -1)
+          if (index >= 0 && index < pages.length) fitPageRef.current?.(index)
+        }
+        // fitPage changes zoom and stops scrolling; keep this gesture consumed.
+        wheel.lastAt = now
+        return
+      }
+      const delta = event.deltaY * (event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? scroller.clientHeight : 1)
+      const next = wheelTarget({
+        pages, scrollTop: scroller.scrollTop, clientHeight: scroller.clientHeight,
+        maxScrollTop: scroller.scrollHeight - scroller.clientHeight,
+        target: wheel.target, delta, gestureStart, anchorIndex: wheel.anchorIndex,
+      })
+      wheel.lastAt = now
+      wheel.anchorIndex = next.anchorIndex
+      wheel.target = next.target
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        cancelAnimationFrame(wheel.frame)
+        wheel.frame = 0
+        scroller.scrollTop = wheel.target
+        wheel.position = wheel.target
+      } else if (!wheel.frame) {
+        wheel.position = scroller.scrollTop
+        wheel.frame = requestAnimationFrame(animate)
+      }
+    }
+    scroller.addEventListener('wheel', handler, { passive: false })
+    document.addEventListener('pointerdown', stopWheel, true)
+    document.addEventListener('keydown', stopWheel, true)
+    return () => {
+      scroller.removeEventListener('wheel', handler)
+      document.removeEventListener('pointerdown', stopWheel, true)
+      document.removeEventListener('keydown', stopWheel, true)
+      stopWheel()
+    }
+  }, [props.pageMode, props.wheelStopsAtPageEdge, props.pageSizes, stopWheel])
+
+  const setZoom = useCallback((next: number, anchor?: { x: number; y: number }, positionFromSync = false, position?: { left: number; top: number }) => {
+    const scroller = scrollerRef.current
+    stopWheel()
     const bounded = Math.max(minZoom, Math.min(8, next))
     const previousZoom = zoomRef.current
     zoomRef.current = bounded
@@ -253,25 +336,29 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     prefetchRef.current.clear()
     suppressPanUntilRef.current = performance.now() + 400
     if (scroller) {
-      const x = anchor?.x ?? scroller.clientWidth / 2
-      const y = anchor?.y ?? scroller.clientHeight / 2
-      const ratio = bounded / previousZoom
-      const previousLayout = layoutRef.current
-      const nextLayout = computePageLayout(props.pageSizes, bounded)
-      const anchorY = scroller.scrollTop + y
-      const previousPage = previousLayout.pages.find((page) => page.top <= anchorY && page.top + page.height >= anchorY)
-        ?? pagesInRange(previousLayout.pages, scroller.scrollTop, scroller.scrollTop + scroller.clientHeight)[0]
-      const nextPage = previousPage ? nextLayout.pages[previousPage.index] : undefined
-      const previousContentWidth = Math.max(previousLayout.maxWidth, scroller.clientWidth)
-      const nextContentWidth = Math.max(nextLayout.maxWidth, scroller.clientWidth)
-      const previousPageLeft = previousPage ? (previousContentWidth - previousPage.width) / 2 : 0
-      const nextPageLeft = nextPage ? (nextContentWidth - nextPage.width) / 2 : 0
-      const nextLeft = previousPage && nextPage
-        ? nextPageLeft + (scroller.scrollLeft + x - previousPageLeft) * ratio - x
-        : (scroller.scrollLeft + x) * ratio - x
-      const nextTop = previousPage && nextPage
-        ? nextPage.top + (anchorY - previousPage.top) * ratio - y
-        : (scroller.scrollTop + y) * ratio - y
+      let nextLeft = position?.left ?? 0
+      let nextTop = position?.top ?? 0
+      if (!position) {
+        const x = anchor?.x ?? scroller.clientWidth / 2
+        const y = anchor?.y ?? scroller.clientHeight / 2
+        const ratio = bounded / previousZoom
+        const previousLayout = layoutRef.current
+        const nextLayout = computePageLayout(props.pageSizes, bounded)
+        const anchorY = scroller.scrollTop + y
+        const previousPage = previousLayout.pages.find((page) => page.top <= anchorY && page.top + page.height >= anchorY)
+          ?? pagesInRange(previousLayout.pages, scroller.scrollTop, scroller.scrollTop + scroller.clientHeight)[0]
+        const nextPage = previousPage ? nextLayout.pages[previousPage.index] : undefined
+        const previousContentWidth = Math.max(previousLayout.maxWidth, scroller.clientWidth)
+        const nextContentWidth = Math.max(nextLayout.maxWidth, scroller.clientWidth)
+        const previousPageLeft = previousPage ? (previousContentWidth - previousPage.width) / 2 : 0
+        const nextPageLeft = nextPage ? (nextContentWidth - nextPage.width) / 2 : 0
+        nextLeft = previousPage && nextPage
+          ? nextPageLeft + (scroller.scrollLeft + x - previousPageLeft) * ratio - x
+          : (scroller.scrollLeft + x) * ratio - x
+        nextTop = previousPage && nextPage
+          ? nextPage.top + (anchorY - previousPage.top) * ratio - y
+          : (scroller.scrollTop + y) * ratio - y
+      }
       lastPositionRef.current = { left: nextLeft, top: nextTop }
       setViewport({ x: nextLeft, y: nextTop, width: scroller.clientWidth, height: scroller.clientHeight })
       setZoomState(bounded)
@@ -287,16 +374,39 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     } else setZoomState(bounded)
     props.onZoomChange(bounded)
     commitZoom(bounded)
-  }, [commitZoom, props.onScrollPositionChange, props.onZoomChange, props.pageSizes, props.onViewChange, minZoom])
+  }, [commitZoom, props.onScrollPositionChange, props.onZoomChange, props.pageSizes, props.onViewChange, minZoom, stopWheel])
 
-  const fitWidth = useCallback(() => {
+  const fitWidth = useCallback((widest = false) => {
     beginInteraction()
     const scroller = scrollerRef.current
     if (!scroller || props.pageSizes.length === 0) return
     resetBlankFrames()
-    const widest = Math.max(...props.pageSizes.map((page) => page.width))
-    setZoom((scroller.clientWidth - 32) / (widest * 96 / 72))
-  }, [props.pageSizes, setZoom, beginInteraction])
+    // Opening a document fits the widest sheet so mixed sizes never start with a horizontal scroll.
+    if (widest) {
+      setZoom((scroller.clientWidth - 32) / (Math.max(...props.pageSizes.map(size => size.width)) * CSS_PX_PER_PT))
+      return
+    }
+    const index = currentPageIndex(layoutRef.current.pages, scroller.scrollTop, scroller.clientHeight)
+    const previousPage = layoutRef.current.pages[index]
+    const next = Math.max(minZoom, Math.min(8, (scroller.clientWidth - 32) / (props.pageSizes[index].width * CSS_PX_PER_PT)))
+    const nextLayout = computePageLayout(props.pageSizes, next)
+    const page = nextLayout.pages[index]
+    setZoom(next, undefined, false, {
+      left: Math.max(0, (Math.max(nextLayout.maxWidth, scroller.clientWidth) - page.width) / 2 - 16),
+      top: Math.max(0, page.top + (scroller.scrollTop - previousPage.top) / previousPage.height * page.height),
+    })
+  }, [props.pageSizes, setZoom, beginInteraction, minZoom])
+
+  const fitPage = useCallback((index: number) => {
+    const scroller = scrollerRef.current
+    if (!scroller || !props.pageSizes.length) return
+    const view = fitPageView(props.pageSizes, Math.max(0, Math.min(props.pageSizes.length - 1, index)), scroller.clientWidth, scroller.clientHeight, minZoom)
+    if (!view) return
+    props.onNavigate?.()
+    beginInteraction()
+    setZoom(view.zoom, undefined, false, { left: view.left, top: view.top })
+  }, [props.pageSizes, props.onNavigate, beginInteraction, setZoom, minZoom])
+  fitPageRef.current = fitPage
 
   const stepZoom = useCallback((direction: -1 | 1) => {
     beginInteraction()
@@ -319,12 +429,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     lastPositionRef.current = next
     props.onScrollPositionChange(next.left, next.top)
     setViewport({ x: next.left, y: next.top, width: scroller.clientWidth, height: scroller.clientHeight })
-    let current = layoutRef.current.pages[0]
-    for (const candidate of layoutRef.current.pages) {
-      if (candidate.top > next.top + scroller.clientHeight / 3) break
-      current = candidate
-    }
-    props.onPageChange((current?.index ?? 0) + 1)
+    props.onPageChange(currentPageIndex(layoutRef.current.pages, next.top, scroller.clientHeight) + 1)
     if (!syncMutedRef.current) props.onViewChange?.()
   }, [props.onPageChange, props.onScrollPositionChange, props.onViewChange])
 
@@ -426,7 +531,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
         updateViewport()
       }
     } else {
-      fitWidth()
+      fitWidth(true)
     }
     firstBitmapRef.current = false
     firstSharpRef.current = false
@@ -512,8 +617,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
     },
     zoomIn: () => stepZoom(1),
     zoomOut: () => stepZoom(-1),
-    fitWidth,
+    fitWidth: () => fitWidth(),
+    fitPage,
     scrollToPage: (index) => {
+      stopWheel()
       props.onNavigate?.()
       beginInteraction()
       const page = layoutRef.current.pages[Math.max(0, Math.min(layoutRef.current.pages.length - 1, index))]
@@ -525,6 +632,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       })
     },
     scrollToPosition: (index, x, y) => {
+      stopWheel()
       props.onNavigate?.()
       beginInteraction()
       const currentLayout = layoutRef.current
@@ -568,6 +676,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
       return { ...readViewPosition(props.pageSizes, zoomRef.current, el?.scrollLeft ?? 0, el?.scrollTop ?? 0, el?.clientWidth ?? 800, el?.clientHeight ?? 600), scrolling: isScrolling }
     },
     applyViewPosition: (position) => {
+      stopWheel()
       const el = scrollerRef.current
       if (!el) return
       syncMutedRef.current = true
@@ -595,7 +704,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer(props, ref
         if (el.scrollLeft === previousLeft && el.scrollTop === previousTop) updateViewport()
       })
     },
-  }), [beginInteraction, fitWidth, isSharpNow, isScrolling, props.onSelectAnnotation, props.pageSizes, scheduler, setZoom, stepZoom, updateViewport, minZoom])
+  }), [beginInteraction, fitWidth, fitPage, isSharpNow, isScrolling, props.onSelectAnnotation, props.pageSizes, scheduler, setZoom, stepZoom, updateViewport, minZoom])
 
   const registerEditorCommit = useCallback((commit: (() => Promise<void>) | null) => {
     editorCommitRef.current = commit

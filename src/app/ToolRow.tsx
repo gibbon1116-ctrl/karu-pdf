@@ -7,6 +7,29 @@ import { ToolIcon } from '../ui/ToolIcon'
 export type SplitToolGroup = 'text' | 'shape' | 'pen' | 'mark' | 'measure'
 export type LastSplitTools = Record<SplitToolGroup, EditorTool>
 
+function PageNumberInput(props: { page: number; pageCount: number; disabled: boolean; onGoToPage(pageIndex: number): void }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const shown = props.pageCount ? String(props.page) : ''
+  const go = (text: string) => {
+    const number = Number(text.trim())
+    if (Number.isInteger(number) && number >= 1 && number <= props.pageCount) props.onGoToPage(number - 1)
+    setDraft(null)
+  }
+  return <span className="page-nav-number">
+    <input aria-label="ページ番号" title="ページ番号を入れて Enter で移動" inputMode="numeric" disabled={props.disabled}
+      value={draft ?? shown} size={Math.max(2, String(props.pageCount).length)}
+      onFocus={event => event.currentTarget.select()}
+      onChange={event => setDraft(event.currentTarget.value.replace(/[０-９]/g, digit => String.fromCharCode(digit.charCodeAt(0) - 0xfee0)))}
+      onBlur={() => setDraft(null)}
+      onKeyDown={event => {
+        if (event.nativeEvent.isComposing) return
+        if (event.key === 'Enter') { event.preventDefault(); go(event.currentTarget.value); event.currentTarget.blur() }
+        else if (event.key === 'Escape') { event.preventDefault(); setDraft(null); event.currentTarget.blur() }
+      }} />
+    <span>/{props.pageCount}</span>
+  </span>
+}
+
 export const LAST_TOOLS_STORAGE_KEY = 'karu-pdf:last-tools'
 export const DEFAULT_LAST_TOOLS: LastSplitTools = { text: 'text', shape: 'line', pen: 'highlight', mark: 'textSelect', measure: 'distance' }
 
@@ -86,6 +109,11 @@ interface Props {
   tool: EditorTool
   hasDocument: boolean
   zoom: number
+  page: number
+  pageCount: number
+  onPreviousPage(): void
+  onNextPage(): void
+  onGoToPage(pageIndex: number): void
   canUndo: boolean
   canRedo: boolean
   onScale(): void
@@ -97,6 +125,8 @@ interface Props {
   onZoomOut(): void
   onSetZoom(zoom: number): void
   onFitWidth(): void
+  onFullscreen(): void
+  fullscreenDisabled?: boolean
 }
 
 export function ToolRow(props: Props) {
@@ -157,11 +187,18 @@ export function ToolRow(props: Props) {
     <button type="button" className="icon-button" title="元に戻す" aria-label="元に戻す" disabled={!props.canUndo} onClick={props.onUndo}>↶ 戻す</button>
     <button type="button" className="icon-button" title="やり直し" aria-label="やり直し" disabled={!props.canRedo} onClick={props.onRedo}>↷ やり直し</button>
     <span className="tool-row-separator" />
+    <div className="page-nav">
+      <button type="button" aria-label="前のページ" title="前のページ" disabled={!props.hasDocument || props.pageCount === 0 || props.page <= 1} onClick={props.onPreviousPage}>◀</button>
+      <PageNumberInput page={props.page} pageCount={props.pageCount} disabled={!props.hasDocument || props.pageCount === 0} onGoToPage={props.onGoToPage} />
+      <button type="button" aria-label="次のページ" title="次のページ" disabled={!props.hasDocument || props.pageCount === 0 || props.page >= props.pageCount} onClick={props.onNextPage}>▶</button>
+    </div>
+    <span className="tool-row-separator" />
     <div className="zoom-controls">
       <button type="button" title="縮小" aria-label="縮小" disabled={!props.hasDocument} onClick={props.onZoomOut}>−</button>
       <Dropdown label={`${Math.round(props.zoom * 100)}%`} items={zoomItems} disabled={!props.hasDocument} buttonClassName="zoom-value" />
       <button type="button" title="拡大" aria-label="拡大" disabled={!props.hasDocument} onClick={props.onZoomIn}>＋</button>
       <button type="button" className="fit-width" disabled={!props.hasDocument} onClick={props.onFitWidth}>幅に合わせる</button>
+      <button type="button" aria-label="全画面表示" title="全画面表示（Esc で終了）" disabled={!props.hasDocument || props.fullscreenDisabled} onClick={props.onFullscreen}>全画面</button>
     </div>
   </header>
 }

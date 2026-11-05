@@ -56,9 +56,9 @@ async function rename(page: Page, title: string) {
 }
 async function draftItems(page: Page) { return page.evaluate(() => window.__karu!.outlineDraft()!.getItems()) }
 async function apply(page: Page) {
-  await page.getByRole('button', { name: '目次を反映', exact: true }).click()
+  await page.evaluate(() => window.__karu!.applyOutline())
   await expect(page.getByTestId('outline-panel')).toHaveAttribute('aria-busy', 'false')
-  await expect(page.getByText('未反映の変更があります', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('目次の変更は保存するとPDFに書き込まれます', { exact: true })).toHaveCount(0)
 }
 async function roundtrip(page: Page) {
   const expected = await page.evaluate(() => window.__karu!.getOutline())
@@ -132,7 +132,7 @@ test('多階層・色・URI・XYZを表示し、移動と開閉、編集後の�
   await row(page, '架空の外部').click()
   await rename(page, '架空の外部・改名')
   await apply(page)
-  await expect(page.getByText('未反映の変更があります', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('目次の変更は保存するとPDFに書き込まれます', { exact: true })).toHaveCount(0)
   const snapshot = await roundtrip(page)
   expect(snapshot.items[0]).toMatchObject({ title: '架空の章・改名', style: { bold: true, italic: true, color: [0.25, 0.5, 0.75] }, target: { kind: 'page', pageIndex: 1, view: { type: 'XYZ', params: [80, 700, 1.5] } } })
   expect(snapshot.items[2].target).toEqual({ kind: 'external', uri: 'https://example.test/fictional-outline' })
@@ -176,44 +176,67 @@ test('子の追加・改名・上下と階層・Undo/Redo・子を残す削除�
   await drag(page, '架空の追加項目', '架空の章', .5)
   await expect(row(page, '架空の追加項目')).toHaveAttribute('aria-level', '2')
   await apply(page)
-  await expect(page.getByText('未反映の変更があります', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('目次の変更は保存するとPDFに書き込まれます', { exact: true })).toHaveCount(0)
   await roundtrip(page)
 })
 
-test('未反映の下書きがあると閉じる確認を行い、整理・ヘッダー操作を拒否する', async ({ page }) => {
+test('目次の下書きを含めて閉じる確認を1回行い、整理・ヘッダー操作の前に自動反映する', async ({ page }) => {
   await open(page); await openOutline(page)
   await page.getByRole('button', { name: '表示中のページで目次を作成', exact: true }).click()
-  await rename(page, '架空の未反映')
-  const dialogPromise = page.waitForEvent('dialog')
-  const closePromise = page.getByRole('button', { name: '架空の目次試験.pdfを閉じる', exact: true }).click()
-  const dialog = await dialogPromise
-  expect(dialog.message()).toContain('目次に反映していない変更があります')
-  await dialog.dismiss(); await closePromise
-  await expect(row(page, '架空の未反映')).toBeVisible()
+  await rename(page, '架空の保存前目次')
+  await expect(page.locator('.document-tab.active').getByLabel('未保存', { exact: true })).toBeVisible()
+  const messages: string[] = []
+  page.on('dialog', dialog => { messages.push(dialog.message()); void dialog.dismiss() })
+  await page.getByRole('button', { name: '架空の目次試験.pdfを閉じる', exact: true }).click()
+  await expect.poll(() => messages.length).toBe(1)
+  expect(messages).toEqual(['「架空の目次試験.pdf」に保存していない変更があります（目次）。\n保存せずに閉じますか？'])
+  await expect(row(page, '架空の保存前目次')).toBeVisible()
   await page.evaluate(() => window.__karu!.openOrganize())
-  await expect(page.getByText('目次に反映していない変更があります。［目次を反映］するか［変更を破棄］してから操作してください。', { exact: true })).toBeVisible()
-  await expect(page.getByTestId('organize-view')).toHaveCount(0)
-  expect(await page.evaluate(() => window.__karu!.removeHeaderFooter())).toBeNull()
-  await expect(row(page, '架空の未反映')).toBeVisible()
+  await expect(page.getByTestId('organize-view')).toBeVisible()
+  expect(await page.evaluate(() => window.__karu!.outlineDraft()!.isChanged())).toBe(false)
+  expect((await page.evaluate(() => window.__karu!.getOutline()))!.items[0].title).toBe('架空の保存前目次')
+  await page.getByTestId('organize-view').getByRole('button', { name: 'やめる', exact: true }).click()
+  await openOutline(page)
+  await rename(page, '架空のヘッダー削除前')
+  expect(await page.evaluate(() => window.__karu!.removeHeaderFooter())).not.toBeNull()
+  expect((await page.evaluate(() => window.__karu!.getOutline()))!.items[0].title).toBe('架空のヘッダー削除前')
+  expect(messages).toHaveLength(1)
 })
 
-test('保存時に未反映の変更を含めるか選べ、除いて保存しても下書きが残る', async ({ page }) => {
+test('目次タブを閉じていても保存時に確認なしで下書きを書き込む', async ({ page }) => {
   await open(page); await openOutline(page)
   await page.getByRole('button', { name: '表示中のページで目次を作成', exact: true }).click()
   await rename(page, '架空の保存前確認')
-  page.once('dialog', dialog => dialog.dismiss())
-  const omitted = await page.evaluate(async () => Array.from((await window.__karu!.saveToBytes())!))
-  const document = new mupdf.PDFDocument(new Uint8Array(omitted))
-  try { expect(readOutline(document).itemCount).toBe(0) } finally { document.destroy() }
-  expect(await page.evaluate(() => window.__karu!.outlineDraft()!.isChanged())).toBe(true)
+  const dialogs: string[] = []
+  page.on('dialog', dialog => { dialogs.push(dialog.message()); void dialog.dismiss() })
   await page.getByRole('tab', { name: 'ページ', exact: true }).click()
-  page.once('dialog', dialog => dialog.accept())
-  const included = await page.evaluate(async () => Array.from((await window.__karu!.saveToBytes())!))
+  const bytes = await page.evaluate(async () => Array.from((await window.__karu!.saveToBytes())!))
+  expect(dialogs).toEqual([])
+  expect(await page.evaluate(() => window.__karu!.outlineDraft()!.isChanged())).toBe(false)
+  const document = new mupdf.PDFDocument(new Uint8Array(bytes))
+  try { expect(readOutline(document).items[0].title).toBe('架空の保存前確認') } finally { document.destroy() }
   await openOutline(page)
   await expect(row(page, '架空の保存前確認')).toHaveAttribute('aria-selected', 'true')
-  await page.evaluate(bytes => window.__karu!.openBytes(bytes, '架空の保存確認.pdf'), included)
+  await page.evaluate(bytes => window.__karu!.openBytes(bytes, '架空の保存確認.pdf'), bytes)
   await openOutline(page)
   await expect(row(page, '架空の保存前確認')).toBeVisible()
+})
+
+test('名称を変更した目次は反映ボタンなしで保存・再読込でき、確認ダイアログを出さない', async ({ page }) => {
+  await open(page, true); await openOutline(page)
+  const dialogs: string[] = []
+  page.on('dialog', dialog => { dialogs.push(dialog.message()); void dialog.dismiss() })
+  await row(page, '架空の章').click()
+  await rename(page, '架空の章・自動保存')
+  await expect(page.getByRole('button', { name: '目次を反映', exact: true })).toHaveCount(0)
+  await expect(page.getByText('目次の変更は保存するとPDFに書き込まれます', { exact: true })).toBeVisible()
+  const bytes = await page.evaluate(async () => Array.from((await window.__karu!.saveToBytes())!))
+  expect(dialogs).toEqual([])
+  await expect(page.getByText('目次の変更は保存するとPDFに書き込まれます', { exact: true })).toHaveCount(0)
+  await page.evaluate(bytes => window.__karu!.openBytes(bytes, '架空の名称変更後.pdf'), bytes)
+  await openOutline(page)
+  await expect(row(page, '架空の章・自動保存')).toBeVisible()
+  expect(dialogs).toEqual([])
 })
 
 test('目次タブを開くまでパネルと下書きを作らず、表示メニューから開ける', async ({ page }) => {

@@ -11,7 +11,6 @@ interface Props {
   onOutlineNavigate(pageIndex: number, view: OutlineView | null): void
   getOutlineViewPoint(): { pageIndex: number; x: number; y: number } | null
   outlineOperation?: 'applying' | 'saving'
-  onApplyOutline(): Promise<boolean>
   onOutlineChange(): void
   onOpenDrawingOutline?(): void
   onOpenTocOutline?(): void
@@ -136,8 +135,6 @@ function OutlineEditor(props: Props & { draft: OutlineDraft }) {
   const version = useSyncExternalStore(draft.subscribe, draft.getSnapshot)
   const [memory] = useState(() => panelMemory(session, draft))
   const [, redraw] = useState(0)
-  const [busy, setBusy] = useState(false)
-  const busyRef = useRef(false)
   const [error, setError] = useState('')
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -154,8 +151,8 @@ function OutlineEditor(props: Props & { draft: OutlineDraft }) {
   const pointSequence = useRef(0)
   const items = draft.getItems() as OutlineItem[]
   const selected = memory.selectedId ? findOutlineItem(items, memory.selectedId)?.item ?? null : null
-  const applying = busy || props.outlineOperation === 'applying'
-  const disabled = busy || !!props.outlineOperation || !draft.base.editable || !!session.editRestriction
+  const applying = props.outlineOperation === 'applying'
+  const disabled = !!props.outlineOperation || !draft.base.editable || !!session.editRestriction
   const disabledRef = useRef(disabled)
   disabledRef.current = disabled
   const rows: Array<{ item: OutlineItem; depth: number }> = []
@@ -186,7 +183,7 @@ function OutlineEditor(props: Props & { draft: OutlineDraft }) {
     return () => cancelAnimationFrame(frame)
   }, [focusName])
   const run = (action: () => void) => {
-    if (disabled || busyRef.current) return
+    if (disabled) return
     try { action(); setError('') } catch (reason) { setError(message(reason)) }
   }
   const select = useCallback((id: string, navigate = false) => {
@@ -224,7 +221,7 @@ function OutlineEditor(props: Props & { draft: OutlineDraft }) {
     draft.setTarget(selected.id, { kind: 'page', pageIndex, view: selected.target.kind === 'page' ? selected.target.view : null, source: 'dest' }, { replaceLocked })
   })
   const setCurrentPosition = async () => {
-    if (!selected || disabled || busyRef.current) return
+    if (!selected || disabled) return
     const point = props.getOutlineViewPoint()
     if (!point) { setError('表示位置を取得できませんでした。'); return }
     const sequence = ++pointSequence.current, currentVersion = draft.getSnapshot(), revision = session.pageRevision
@@ -236,12 +233,6 @@ function OutlineEditor(props: Props & { draft: OutlineDraft }) {
       setError('')
     } catch (reason) { if (alive.current && sequence === pointSequence.current) setError(message(reason)) }
   }
-  const apply = async () => {
-    if (disabled || busyRef.current) return
-    busyRef.current = true; pointSequence.current++; setBusy(true)
-    try { await props.onApplyOutline() } catch (reason) { if (alive.current) setError(message(reason)) }
-    finally { busyRef.current = false; if (alive.current) setBusy(false) }
-  }
   const dropLocation = useCallback((event: DragEvent, id: string): DropMarker => {
     const found = findOutlineItem(draft.getItems() as OutlineItem[], id)!
     const box = event.currentTarget.getBoundingClientRect(), fraction = (event.clientY - box.top) / box.height
@@ -250,7 +241,7 @@ function OutlineEditor(props: Props & { draft: OutlineDraft }) {
       invalid: !dragging.current || isOutlineDescendant(draft.getItems() as OutlineItem[], dragging.current, id) }
   }, [draft])
   const dragStart = useCallback((event: DragEvent, id: string) => {
-    if (disabled || busyRef.current) { event.preventDefault(); return }
+    if (disabled) { event.preventDefault(); return }
     dragging.current = id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-karu-outline', id)
   }, [disabled])
   const dragOver = useCallback((event: DragEvent, id: string) => {
@@ -265,7 +256,7 @@ function OutlineEditor(props: Props & { draft: OutlineDraft }) {
     event.preventDefault(); event.stopPropagation()
     const location = dropLocation(event, id), sourceId = dragging.current
     dragEnd()
-    if (!sourceId || location.invalid || disabled || busyRef.current) return
+    if (!sourceId || location.invalid || disabled) return
     const list = draft.getItems() as OutlineItem[], target = findOutlineItem(list, id)!, source = findOutlineItem(list, sourceId)!
     const parentId = location.side === 'child' ? id : target.parent?.id ?? null
     let index = location.side === 'child' ? target.item.children.length : target.index + (location.side === 'after' ? 1 : 0)
@@ -375,10 +366,9 @@ function OutlineEditor(props: Props & { draft: OutlineDraft }) {
       {error && <p role="alert">{error}</p>}
     </div>
     <div className="outline-footer">
-      {applying ? <p role="status">目次を反映しています…</p> : draft.isChanged() && <>
-        <p>未反映の変更があります</p>
-        <button className="outline-primary" disabled={disabled} onClick={() => void apply()}>目次を反映</button>
-        {button('変更を破棄', '変更を破棄', () => { if (window.confirm('反映していない目次の変更を破棄しますか？')) run(() => draft.discard()) })}
+      {applying ? <p role="status">目次を書き込んでいます…</p> : draft.isChanged() && <>
+        <p>目次の変更は保存するとPDFに書き込まれます</p>
+        {button('変更を破棄', '変更を破棄', () => { if (window.confirm('保存していない目次の変更を破棄しますか？')) run(() => draft.discard()) })}
       </>}
       {props.onOpenDrawingOutline && button('図面情報から目次を作成', '図面情報から目次を作成', props.onOpenDrawingOutline)}
       {props.onOpenTocOutline && draft.base.editable && !session.editRestriction && button('目次ページから作成', '目次ページから作成', props.onOpenTocOutline)}

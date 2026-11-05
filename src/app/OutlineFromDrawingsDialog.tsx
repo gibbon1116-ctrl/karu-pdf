@@ -100,7 +100,7 @@ export function OutlineFromDrawingsDialog({ session, pool, draft, onClose, onCha
       {mode === 'replace' && <><p>次の目次（{oldItems.length}件）が削除されます</p><ul className="outline-dialog-scroll">{oldItems.slice(0, 20).map(({ item, depth }) => <li key={item.id}>{'　'.repeat(depth)}{item.title}</li>)}</ul>{oldItems.length > 20 && <p>ほか{oldItems.length - 20}件</p>}</>}
     </fieldset>}
     {error && <p role="alert">{error}</p>}
-    <p>下書きに入れた後は、目次タブで［目次を反映］してから保存してください。追加・置き換えは1回の［戻す］で取り消せます。</p>
+    <p>下書きに入れた目次は、保存するとPDFに書き込まれます。追加・置き換えは1回の［戻す］で取り消せます。</p>
     <div className="dialog-actions"><button onClick={onClose}>キャンセル</button>{editable && <button className="outline-primary" disabled={invalid} onClick={insert}>目次の下書きに入れる</button>}</div>
   </dialog>
 }

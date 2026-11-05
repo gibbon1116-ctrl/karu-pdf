@@ -190,7 +190,7 @@ export class DocumentSession {
     if (summary.roomSets) parts.push('部屋の組')
     if (summary.quantityChecks) parts.push('チェックシートの基本の値')
     if (summary.relatedReviews) parts.push('関連候補の判断')
-    if (this.outlineChanged) parts.push('目次')
+    if (this.outlineChanged || this.hasPendingOutlineDraft()) parts.push('目次')
     if (this.fileOutdated) parts.push('ページの編集・まだ保存していない文書')
     return parts.join('、')
   }

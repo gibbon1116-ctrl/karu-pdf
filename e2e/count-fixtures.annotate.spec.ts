@@ -337,7 +337,7 @@ test('changes suggestions repeatedly while retaining size, opacity, code display
   await dialog.getByRole('textbox', { name: 'メモ', exact: true }).fill('複製メモ')
   if (!await dialog.getByTestId('fixture-advanced').evaluate(element => (element as HTMLDetailsElement).open)) await dialog.getByTestId('fixture-advanced').locator(':scope > summary').click()
   await dialog.getByRole('combobox', { name: '大きさ', exact: true }).selectOption('20')
-  await dialog.getByRole('combobox', { name: '透明度', exact: true }).selectOption('0.5')
+  await dialog.getByRole('group', { name: '透明度', exact: true }).getByRole('button', { name: '50%', exact: true }).click()
   await dialog.getByLabel('略号を図面に表示', { exact: true }).uncheck()
   const appearances: string[] = []
   for (let i = 0; i < 4; i++) {
@@ -354,7 +354,7 @@ test('changes suggestions repeatedly while retaining size, opacity, code display
   await expect(dialog.getByRole('textbox', { name: 'メモ', exact: true })).toHaveValue('複製メモ')
   if (!await dialog.getByTestId('fixture-advanced').evaluate(element => (element as HTMLDetailsElement).open)) await dialog.getByTestId('fixture-advanced').locator(':scope > summary').click()
   await expect(dialog.getByRole('combobox', { name: '大きさ', exact: true })).toHaveValue('20')
-  await expect(dialog.getByRole('combobox', { name: '透明度', exact: true })).toHaveValue('0.5')
+  await expect(dialog.getByRole('group', { name: '透明度', exact: true }).getByRole('button', { name: '50%', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await expect(dialog.getByLabel('略号を図面に表示', { exact: true })).not.toBeChecked()
   await dialog.getByRole('button', { name: '追加する', exact: true }).click()
   const copy = (await savedFixtures(page)).find(f => f.name === '提案試験 のコピー')!

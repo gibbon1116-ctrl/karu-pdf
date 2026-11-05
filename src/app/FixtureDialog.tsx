@@ -2017,7 +2017,7 @@ export default function FixtureDialog({
             onToggle={event => setAdvancedOpen(event.currentTarget.open)}
           >
             <summary>詳しい設定</summary>
-            <p>印の大きさ・透明度や、数量の集計方法を調整します。</p>
+            <p>印の大きさや、数量の集計方法を調整します。</p>
             <div className="fixture-fields">
               <label>{length ? '文字の大きさ' : '大きさ'}
                 <select
@@ -2026,16 +2026,6 @@ export default function FixtureDialog({
                 >
                   {COUNT_SIZES.map(size =>
                     <option key={size} value={size}>{size} pt</option>)}
-                </select>
-              </label>
-              <label>透明度
-                <select
-                  value={value.style.opacity}
-                  onChange={event => style({ opacity: Number(event.currentTarget.value) })}
-                >
-                  {COUNT_OPACITIES.map(opacity => <option key={opacity} value={opacity}>
-                    {Math.round(opacity * 100)}%
-                  </option>)}
                 </select>
               </label>
             </div>
@@ -3989,6 +3979,20 @@ export default function FixtureDialog({
                 onChange={event => style({ color: countRgb(event.currentTarget.value) })}
               />
             </label>
+          </fieldset>
+          <fieldset>
+            <legend>透明度</legend>
+            <div className="fixture-opacities">
+              {COUNT_OPACITIES.map(opacity => <button
+                type="button"
+                key={opacity}
+                aria-pressed={value.style.opacity === opacity}
+                onClick={() => style({ opacity })}
+              >
+                <span aria-hidden="true" style={{ backgroundColor: countHex(value.style.color), opacity }} />
+                {Math.round(opacity * 100)}%
+              </button>)}
+            </div>
           </fieldset>
         </div>
       </div>

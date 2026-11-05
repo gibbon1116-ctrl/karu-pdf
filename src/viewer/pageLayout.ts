@@ -45,3 +45,34 @@ export function pagesInRange(
 ): PageLayout[] {
   return pages.filter((page) => page.top + page.height >= start && page.top <= end)
 }
+
+export function currentPageIndex(pages: readonly PageLayout[], scrollTop: number, clientHeight: number): number {
+  let current = pages[0]
+  for (const candidate of pages) {
+    if (candidate.top > scrollTop + clientHeight / 3) break
+    current = candidate
+  }
+  return current?.index ?? 0
+}
+
+export function fitPageView(
+  pageSizes: readonly PageSize[],
+  index: number,
+  clientWidth: number,
+  clientHeight: number,
+  minZoom = .25,
+): { zoom: number; left: number; top: number } | null {
+  const size = pageSizes[index]
+  if (!size) return null
+  const zoom = Math.max(minZoom, Math.min(8,
+    (clientWidth - 16) / (size.width * CSS_PX_PER_PT),
+    (clientHeight - 16) / (size.height * CSS_PX_PER_PT)))
+  const layout = computePageLayout(pageSizes, zoom)
+  const page = layout.pages[index]
+  const contentWidth = Math.max(layout.maxWidth, clientWidth)
+  return {
+    zoom,
+    left: Math.max(0, Math.min(contentWidth - clientWidth, (contentWidth - clientWidth) / 2)),
+    top: Math.max(0, Math.min(layout.totalHeight - clientHeight, page.top + (page.height - clientHeight) / 2)),
+  }
+}

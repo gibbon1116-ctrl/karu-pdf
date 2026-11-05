@@ -54,6 +54,14 @@ interface Props {
   onZoomIn(): void
   onZoomOut(): void
   onFitWidth(): void
+  onFullscreen(): void
+  fullscreenDisabled?: boolean
+  page: number
+  pageCount: number
+  onPreviousPage(): void
+  onNextPage(): void
+  wheelStopsAtPageEdge: boolean
+  onToggleWheelStopsAtPageEdge(): void
   onOrganize(): void
   onHeaderFooter(): void
   onUndoOrganize(): void
@@ -119,9 +127,13 @@ export function MenuBar(props: Props) {
       { label: '左右に並べて表示', shortcut: 'Ctrl+\\', checked: props.splitEnabled, disabled: !props.hasDocument || props.organizing, onSelect: props.onToggleSplit },
       { label: '2つの PDF を比較…', disabled: unavailable, onSelect: props.onCompare },
       separator(),
+      { label: '前のページ', disabled: !props.hasDocument || props.pageCount === 0 || props.page <= 1, onSelect: props.onPreviousPage },
+      { label: '次のページ', disabled: !props.hasDocument || props.pageCount === 0 || props.page >= props.pageCount, onSelect: props.onNextPage },
       { label: '拡大', disabled: !props.hasDocument, onSelect: props.onZoomIn },
       { label: '縮小', disabled: !props.hasDocument, onSelect: props.onZoomOut },
       { label: '幅に合わせる', disabled: !props.hasDocument, onSelect: props.onFitWidth },
+      { label: '全画面表示', disabled: !props.hasDocument || props.fullscreenDisabled, onSelect: props.onFullscreen },
+      { label: 'ホイールで図面の端に止める', checked: props.wheelStopsAtPageEdge, onSelect: props.onToggleWheelStopsAtPageEdge },
     ] },
     { label: 'ページ', items: [
       { label: '用紙サイズ一覧…', disabled: unavailable, onSelect: props.onSheetSizes },

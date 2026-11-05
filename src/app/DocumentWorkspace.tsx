@@ -39,6 +39,8 @@ export interface OrganizeWorkspaceState {
 }
 
 interface Props {
+  pageMode?: boolean
+  wheelStopsAtPageEdge?: boolean
   onNavigate(): void
   split: SplitWorkspaceProps | null
   session: DocumentSession
@@ -62,7 +64,6 @@ interface Props {
   onStatus(message: string): void
   organize: OrganizeWorkspaceState | null
   outlineOperation?: 'applying' | 'saving'
-  onApplyOutline(): Promise<boolean>
   onOutlineChange(): void
   onOpenDrawingOutline?(): void
   onOpenTocOutline?(): void
@@ -283,7 +284,6 @@ export function DocumentWorkspace(props: Props) {
         onOutlineNavigate={onOutlineNavigate}
         getOutlineViewPoint={getOutlineViewPoint}
         outlineOperation={props.outlineOperation}
-        onApplyOutline={props.onApplyOutline}
         onOutlineChange={props.onOutlineChange}
         onOpenDrawingOutline={props.onOpenDrawingOutline}
         onOpenTocOutline={props.onOpenTocOutline}
@@ -309,6 +309,8 @@ export function DocumentWorkspace(props: Props) {
       <div className="quantity-viewer-stack" style={{ gridTemplateRows: tableOpen ? `minmax(0, ${100 - tableHeight}fr) minmax(0, ${tableHeight}fr)` : 'minmax(0, 1fr)' }}>
       <div ref={viewerSlotRef} className={props.split ? 'viewer-slot split-view' : 'viewer-slot'} style={props.split ? { gridTemplateColumns: `minmax(0, ${props.split.settings.ratio}fr) 6px minmax(0, ${1 - props.split.settings.ratio}fr)` } : undefined}>
       <Viewer
+        pageMode={props.pageMode}
+        wheelStopsAtPageEdge={props.wheelStopsAtPageEdge}
         readOnly={!!props.session.editRestriction}
         onNavigate={props.onNavigate}
         ref={props.viewerRef}
@@ -326,8 +328,8 @@ export function DocumentWorkspace(props: Props) {
           else if (!props.session.annotationStore.isSelected(id)) props.session.annotationStore.selectOnly(id)
         }}
         initialView={initialView}
-        onViewChange={props.split ? () => splitControllerRef.current?.change() : undefined}
-        onViewInteraction={props.split ? () => splitControllerRef.current?.interact() : undefined}
+        onViewChange={props.split && !props.pageMode ? () => splitControllerRef.current?.change() : undefined}
+        onViewInteraction={props.split && !props.pageMode ? () => splitControllerRef.current?.interact() : undefined}
         onToolChange={props.onToolChange}
         pageSizes={props.session.pageSizes}
         onZoomChange={(zoom) => {
@@ -346,7 +348,8 @@ export function DocumentWorkspace(props: Props) {
         onFirstSharp={props.onFirstSharp}
         onStatus={props.onStatus}
       />
-      {props.split && <SplitView {...props.split} left={props.session} pool={props.pool} scheduler={scheduler}
+      {props.split && <SplitView wheelStopsAtPageEdge={props.wheelStopsAtPageEdge} {...props.split} left={props.session} pool={props.pool} scheduler={scheduler}
+        settings={props.pageMode ? { ...props.split.settings, synced: false } : props.split.settings}
         leftRef={props.viewerRef} containerRef={viewerSlotRef} controllerRef={splitControllerRef}
         formatDefaults={props.formatDefaults} onStatus={props.onStatus} />}
       {!props.session.editRestriction && (props.tool === 'count' || props.session.annotationStore.selectedPickupsOnly()) &&

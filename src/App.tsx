@@ -289,8 +289,27 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
   const updateServiceWorkerRef = useRef<((reloadPage?: boolean) => Promise<void>) | null>(null)
   const lastRasterizeMetricsRef = useRef<RasterizeMetrics | null>(null)
   const [, setTabsVersion] = useState(0)
+  const [wheelStopsAtPageEdge, setWheelStopsAtPageEdge] = useState(() => {
+    try { return localStorage.getItem('karu-pdf:wheel-stops-at-page-edge') !== 'false' } catch { return true }
+  })
+  const toggleWheelStopsAtPageEdge = useCallback(() => {
+    setWheelStopsAtPageEdge(previous => {
+      const next = !previous
+      try { localStorage.setItem('karu-pdf:wheel-stops-at-page-edge', String(next)) } catch { /* 表示の操作は続ける。 */ }
+      return next
+    })
+  }, [])
   const [page, setPage] = useState(() => tabs.active?.view.page ?? 0)
   const [zoom, setZoom] = useState(() => tabs.active?.view.zoom ?? 1)
+  const [fullscreen, setFullscreen] = useState(false)
+  const fullscreenRef = useRef(false)
+  const fullscreenZoomRef = useRef(1)
+  const fullscreenEntryPageRef = useRef(0)
+  const fullscreenRequestSucceededRef = useRef(false)
+  const fullscreenSequenceRef = useRef(0)
+  const [fullscreenNavVisible, setFullscreenNavVisible] = useState(true)
+  const fullscreenNavHoverRef = useRef(false)
+  const fullscreenNavTimerRef = useRef<number | undefined>(undefined)
   const [passwordPrompt, setPasswordPrompt] = useState<{ name: string; incorrect: boolean; resolve(password: string | null): void } | null>(null)
   const passwordPromptCancel = useRef<(() => void) | null>(null)
   const requestPdfPassword = useCallback((name: string, incorrect: boolean, signal?: AbortSignal): Promise<string | null> => {
@@ -422,9 +441,113 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
     finishOpeningDocument(docId)
     setError(`ページを表示できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
   }, [finishOpeningDocument])
+  const navigatePage = useCallback((index: number) => {
+    if (fullscreenRef.current) viewerRef.current?.fitPage(index)
+    else viewerRef.current?.scrollToPage(index)
+  }, [])
+  const previousPage = () => {
+    if (page > 1 && page <= (activeRef.current?.pageSizes.length ?? 0)) navigatePage(page - 2)
+  }
+  const nextPage = () => {
+    if (page >= 1 && page < (activeRef.current?.pageSizes.length ?? 0)) navigatePage(page)
+  }
+  const exitFullscreen = useCallback(() => {
+    if (!fullscreenRef.current) return
+    const session = activeRef.current
+    const index = Math.max(0, (session?.view.page ?? 1) - 1)
+    const savedZoom = fullscreenZoomRef.current
+    const sequence = ++fullscreenSequenceRef.current
+    fullscreenRef.current = false
+    fullscreenRequestSucceededRef.current = false
+    setFullscreen(false)
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+    // Restore after the panels return, then navigate after setZoom's anchor frame.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (sequence !== fullscreenSequenceRef.current || !session || activeRef.current !== session) return
+      viewerRef.current?.setZoom(savedZoom)
+      requestAnimationFrame(() => {
+        if (sequence === fullscreenSequenceRef.current && activeRef.current === session) viewerRef.current?.scrollToPage(index)
+      })
+    }))
+  }, [])
+  const enterFullscreen = () => {
+    if (fullscreenRef.current || !activeRef.current || comparison) return
+    fullscreenZoomRef.current = viewerRef.current?.getZoom() ?? zoom
+    fullscreenEntryPageRef.current = Math.max(0, page - 1)
+    fullscreenRequestSucceededRef.current = false
+    const sequence = ++fullscreenSequenceRef.current
+    fullscreenRef.current = true
+    setFullscreen(true)
+    // CSS fullscreen remains available when the browser API is missing or denied.
+    try {
+      const request = document.documentElement.requestFullscreen?.()
+      if (request) void request.then(() => {
+        if (sequence !== fullscreenSequenceRef.current) {
+          if (!fullscreenRef.current && document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+          return
+        }
+        fullscreenRequestSucceededRef.current = true
+        if (!document.fullscreenElement) { exitFullscreen(); return }
+        requestAnimationFrame(() => {
+          if (sequence === fullscreenSequenceRef.current && fullscreenRef.current) viewerRef.current?.fitPage(Math.max(0, (activeRef.current?.view.page ?? 1) - 1))
+        })
+      }).catch(() => {})
+    } catch { /* アプリ内の全画面表示は続ける。 */ }
+  }
+  const revealFullscreenNav = useCallback(() => {
+    setFullscreenNavVisible(true)
+    window.clearTimeout(fullscreenNavTimerRef.current)
+    fullscreenNavTimerRef.current = window.setTimeout(() => {
+      if (!fullscreenNavHoverRef.current) setFullscreenNavVisible(false)
+    }, 3000)
+  }, [])
   const active = tabs.active
   activeRef.current = active
   organizeRef.current = organize
+  useEffect(() => {
+    if (fullscreen && !active) exitFullscreen()
+  }, [fullscreen, active, exitFullscreen])
+  useEffect(() => {
+    const changed = () => {
+      if (!document.fullscreenElement && fullscreenRequestSucceededRef.current) exitFullscreen()
+    }
+    document.addEventListener('fullscreenchange', changed)
+    return () => document.removeEventListener('fullscreenchange', changed)
+  }, [exitFullscreen])
+  useEffect(() => {
+    if (!fullscreen) return
+    const sequence = fullscreenSequenceRef.current
+    let secondFrame = 0
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        if (fullscreenRef.current && sequence === fullscreenSequenceRef.current) viewerRef.current?.fitPage(fullscreenEntryPageRef.current)
+      })
+    })
+    let resizeTimer: number | undefined
+    const resize = () => {
+      window.clearTimeout(resizeTimer)
+      resizeTimer = window.setTimeout(() => {
+        if (fullscreenRef.current) viewerRef.current?.fitPage(Math.max(0, (activeRef.current?.view.page ?? 1) - 1))
+      }, 150)
+    }
+    window.addEventListener('resize', resize)
+    return () => {
+      cancelAnimationFrame(firstFrame)
+      cancelAnimationFrame(secondFrame)
+      window.clearTimeout(resizeTimer)
+      window.removeEventListener('resize', resize)
+    }
+  }, [fullscreen])
+  useEffect(() => {
+    if (!fullscreen) return
+    fullscreenNavHoverRef.current = false
+    revealFullscreenNav()
+    window.addEventListener('mousemove', revealFullscreenNav)
+    return () => {
+      window.clearTimeout(fullscreenNavTimerRef.current)
+      window.removeEventListener('mousemove', revealFullscreenNav)
+    }
+  }, [fullscreen, revealFullscreenNav])
   useSyncExternalStore(active?.annotationStore.subscribe ?? noopSubscribe, active?.annotationStore.getSnapshot ?? zeroSnapshot)
   perfCount('App.render')
   useEffect(() => {
@@ -1019,8 +1142,7 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
     if (!session) return
     if (organizeRef.current?.docId === docId && !discardOrganize(confirmDirty)) return
     if (activeRef.current?.docId === docId) await viewerRef.current?.commitEditor()
-    if (confirmDirty && session.dirty && !window.confirm(`「${session.name}」に保存していない変更があります（${session.dirtyDescription()}）。\n保存せずに閉じますか？`)) return
-    if (confirmDirty && session.hasPendingOutlineDraft() && !window.confirm('「' + session.name + '」の目次に反映していない変更があります。\n変更を捨てて閉じますか？')) return
+    if (confirmDirty && (session.dirty || session.hasPendingOutlineDraft()) && !window.confirm(`「${session.name}」に保存していない変更があります（${session.dirtyDescription()}）。\n保存せずに閉じますか？`)) return
     if (activeRef.current?.docId === docId || symbolSearchRef.current?.sampleSession?.docId === docId) closeSymbolSearch()
     if (activeRef.current?.docId === docId) {
       persistView(session)
@@ -1040,7 +1162,7 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
     refreshTabs()
   }, [closeSymbolSearch, discardOrganize, finishOpeningDocument, persistView, pool, refreshTabs, tabs])
 
-  const applyOutlineDraft = useCallback(async (session: DocumentSession): Promise<boolean> => {
+  const applyOutlineDraft = useCallback(async (session: DocumentSession, options?: { quiet?: boolean }): Promise<boolean> => {
     if (savingRef.current || organizeRef.current) {
       showStatus(savingRef.current ? '保存中のため目次を反映できません' : 'ページ整理を閉じてから目次を反映してください')
       return false
@@ -1056,24 +1178,23 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
         session.fileOutdated = true
         session.canUndoOrganize = false
         refreshTabs()
-        showStatus('目次を反映しました。保存するとPDFファイルに書き出されます')
+        if (!options?.quiet) showStatus('目次を反映しました。保存するとPDFファイルに書き出されます')
       }
       return tabs.list().includes(session)
     } catch (reason) {
-      setError('目次を反映できませんでした: ' + (reason instanceof Error ? reason.message : String(reason)))
+      setError('目次を保存できませんでした: ' + (reason instanceof Error ? reason.message : String(reason)))
       return false
     } finally { savingRef.current = false; setSaving(false); setOutlineApplyingId(null) }
   }, [pool, tabs, refreshTabs, showStatus])
 
   const prepareOutlineForSave = useCallback(async (session: DocumentSession): Promise<boolean> => {
     if (!session.hasPendingOutlineDraft()) return true
-    if (!window.confirm('目次に反映していない変更があります。\n［OK］目次を反映してから保存します。\n［キャンセル］目次の変更を除いて保存します。')) return true
-    return applyOutlineDraft(session)
+    return applyOutlineDraft(session, { quiet: true })
   }, [applyOutlineDraft])
 
   const rejectPendingOutline = useCallback((session: DocumentSession): boolean => {
     if (!session.hasPendingOutlineDraft()) return false
-    setError('目次に反映していない変更があります。［目次を反映］するか［変更を破棄］してから操作してください。')
+    setError('目次を変更したため、直前のページ操作は元に戻せません。目次の［変更を破棄］をすると戻せます。')
     return true
   }, [])
 
@@ -1449,7 +1570,7 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
     const session = activeRef.current
     if (!session || organizeRef.current || savingRef.current) return
     commitFocusedField()
-    if (rejectPendingOutline(session)) return
+    if (!await applyOutlineDraft(session, { quiet: true })) return
     await viewerRef.current?.commitEditor()
     const next: ActiveOrganize = {
       docId: session.docId,
@@ -1461,7 +1582,7 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
     organizeRef.current = next
     setOrganize(next)
     setTool('select')
-  }, [rejectPendingOutline])
+  }, [applyOutlineDraft])
 
   const loadOrganizeFile = useCallback(async (file: File): Promise<OrganizeSourceInfo> => {
     const current = organizeRef.current
@@ -1649,7 +1770,7 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
     const session = activeRef.current
     if (!session || savingRef.current || organizeRef.current) return null
     commitFocusedField()
-    if (rejectPendingOutline(session)) return null
+    if (!await applyOutlineDraft(session, { quiet: true })) return null
     savingRef.current = true; setSaving(true); setError('')
     try {
       await applyPendingEdits(session)
@@ -1662,13 +1783,13 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
       setError(`ページ番号・ヘッダー・フッターを適用できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
       throw reason
     } finally { savingRef.current = false; setSaving(false) }
-  }, [applyPendingEdits, finishPageLayout, pool, rejectPendingOutline, showStatus])
+  }, [applyOutlineDraft, applyPendingEdits, finishPageLayout, pool, showStatus])
 
   const removeHeaderFooterSettings = useCallback(async (): Promise<PageLayoutTimings | null> => {
     const session = activeRef.current
     if (!session || savingRef.current || organizeRef.current) return null
     commitFocusedField()
-    if (rejectPendingOutline(session)) return null
+    if (!await applyOutlineDraft(session, { quiet: true })) return null
     savingRef.current = true; setSaving(true); setError('')
     try {
       await applyPendingEdits(session)
@@ -1681,7 +1802,7 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
       setError(`ページ番号・ヘッダー・フッターを削除できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`)
       throw reason
     } finally { savingRef.current = false; setSaving(false) }
-  }, [applyPendingEdits, finishPageLayout, pool, rejectPendingOutline, showStatus])
+  }, [applyOutlineDraft, applyPendingEdits, finishPageLayout, pool, showStatus])
 
   const selectedCards = useCallback((cardIds: readonly string[]): PageLayoutCard[] => {
     const current = organizeRef.current
@@ -1783,12 +1904,34 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
   }, [showStatus, splitToBytes])
 
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
+    const onKey = (event: KeyboardEvent, fullscreenOnly = false) => {
       if (event.defaultPrevented) return
       if (comparison) return
       const target = event.target as HTMLElement | null
       const isInput = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false
       const key = event.key.toLowerCase()
+      if (fullscreen && !isInput && !target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), dialog, [role="dialog"]')
+        && !document.querySelector('dialog[open], [role="dialog"], [role="menu"]') && !event.isComposing && !isActiveTextEditorComposing()) {
+        if (event.key === 'Escape') {
+          event.preventDefault(); event.stopImmediatePropagation(); exitFullscreen(); return
+        }
+        if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+          const current = activeRef.current?.view.page ?? page
+          const count = activeRef.current?.pageSizes.length ?? 0
+          let index: number | undefined
+          if (['ArrowRight', 'ArrowDown', 'PageDown'].includes(event.key) || (event.key === ' ' && !event.shiftKey)) index = Math.min(count - 1, current)
+          else if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(event.key) || (event.key === ' ' && event.shiftKey)) index = Math.max(0, current - 2)
+          else if (event.key === 'Home') index = 0
+          else if (event.key === 'End') index = count - 1
+          if (index !== undefined) {
+            event.preventDefault()
+            event.stopImmediatePropagation()
+            if (count > 0) viewerRef.current?.fitPage(index)
+            return
+          }
+        }
+      }
+      if (fullscreenOnly) return
       if (!isInput && activeRef.current?.editRestriction && ((event.ctrlKey || event.metaKey) && ['s', 'x', 'v', 'd', 'z', 'y'].includes(key) || ['delete', 'backspace'].includes(key))) {
         event.preventDefault(); showStatus(activeRef.current.editRestriction); return
       }
@@ -1937,9 +2080,15 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
       else if (key === 'k') void changeTool('distance')
       else if (key === 'm') void changeTool('textSelect')
     }
+    // Handle fullscreen navigation before viewer scrolling and annotation nudging.
+    const onFullscreenKey = (event: KeyboardEvent) => onKey(event, true)
+    if (fullscreen) window.addEventListener('keydown', onFullscreenKey, true)
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [comparison, scaleTracing, scaleRegionDrawing, activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, moveViewHistory, openSidePanel, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, showStatus, tabs, toggleSplit])
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keydown', onFullscreenKey, true)
+    }
+  }, [fullscreen, exitFullscreen, page, comparison, scaleTracing, scaleRegionDrawing, activateDocument, changeTool, closeDocument, copyAnnotations, cutAnnotations, discardOrganize, duplicateAnnotations, moveViewHistory, openSidePanel, pasteAnnotations, pickFile, printDocument, refreshTabs, saveDocument, showStatus, tabs, toggleSplit])
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -2200,7 +2349,16 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
     <SymbolSearchContext.Provider value={{ start: startSymbolSearch }}>
     <FixtureSampleContext.Provider value={fixtureSampleInteraction}>
     <SnapUiContext.Provider value={{ enabled: snapEnabled, toggle: toggleSnap, drawingEndpoints: snapDrawingEndpoints, toggleDrawingEndpoints: toggleSnapDrawingEndpoints }}>
-    <main className={`app${comparison ? ' comparing' : ''}${(updateReady /* @pages:start */|| publicationStopped/* @pages:end */) ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { if (!comparison) void handleDrop(event).catch(reason => setError(`PDFを開けませんでした: ${String(reason)}`)) }}>
+    <main className={`app${fullscreen ? ' fullscreen-view' : ''}${comparison ? ' comparing' : ''}${(updateReady /* @pages:start */|| publicationStopped/* @pages:end */) ? ' update-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { if (!comparison) void handleDrop(event).catch(reason => setError(`PDFを開けませんでした: ${String(reason)}`)) }}>
+      {fullscreen && <div className={`fullscreen-nav${fullscreenNavVisible ? '' : ' dimmed'}`} role="toolbar" aria-label="全画面表示の操作"
+        style={{ position: 'fixed', zIndex: 25, left: '50%', bottom: 16, transform: 'translateX(-50%)' }}
+        onMouseEnter={() => { fullscreenNavHoverRef.current = true; revealFullscreenNav() }}
+        onMouseLeave={() => { fullscreenNavHoverRef.current = false; revealFullscreenNav() }}>
+        <button type="button" aria-label="前のページ" disabled={page <= 1} onClick={previousPage}>◀</button>
+        <span>{page} / {active?.pageSizes.length ?? 0}</span>
+        <button type="button" aria-label="次のページ" disabled={page >= (active?.pageSizes.length ?? 0)} onClick={nextPage}>▶</button>
+        <button type="button" onClick={exitFullscreen}>全画面を終了</button>
+      </div>}
       {sampleCapture && <div className="fixture-sample-instruction" role="status">{sampleMessage}<button type="button" onClick={() => finishSampleCapture(null)}>中止</button></div>}
       {/* @pages:start */}{publicationStopped && (
         <div className="update-banner" role="status">
@@ -2222,6 +2380,12 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
       />
       <div className="top-controls">
         <MenuBar
+          page={page}
+          pageCount={active?.pageSizes.length ?? 0}
+          onPreviousPage={previousPage}
+          onNextPage={nextPage}
+          wheelStopsAtPageEdge={wheelStopsAtPageEdge}
+          onToggleWheelStopsAtPageEdge={toggleWheelStopsAtPageEdge}
           editRestriction={active?.editRestriction}
           onPrivacy={() => setPrivacyOpen(true)}
           onSheetSizes={() => setSheetSizesOpen(true)}
@@ -2230,7 +2394,7 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
           onViewBack={() => moveViewHistory('back')}
           onViewForward={() => moveViewHistory('forward')}
           fileName={active?.name ?? null}
-          dirty={active?.dirty ?? false}
+          dirty={!!active && (active.dirty || active.hasPendingOutlineDraft())}
           dirtyDescription={active?.dirtyDescription() ?? ''}
           hasDocument={!!active}
           saving={saving}
@@ -2267,6 +2431,8 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
           onZoomIn={() => viewerRef.current?.zoomIn()}
           onZoomOut={() => viewerRef.current?.zoomOut()}
           onFitWidth={() => viewerRef.current?.fitWidth()}
+          onFullscreen={enterFullscreen}
+          fullscreenDisabled={!!comparison}
           onOrganize={() => void openOrganize()}
           onHeaderFooter={() => setHeaderFooterOpen(true)}
           onUndoOrganize={() => void undoLastOrganize()}
@@ -2274,6 +2440,11 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
           onDesktopSteps={() => setDesktopStepsOpen(true)}
         />
         <ToolRow
+          page={page}
+          pageCount={active?.pageSizes.length ?? 0}
+          onPreviousPage={previousPage}
+          onNextPage={nextPage}
+          onGoToPage={navigatePage}
           readOnly={!!active?.editRestriction}
           tool={tool}
           hasDocument={!!active}
@@ -2300,6 +2471,8 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
           onZoomOut={() => viewerRef.current?.zoomOut()}
           onSetZoom={(next) => viewerRef.current?.setZoom(next)}
           onFitWidth={() => viewerRef.current?.fitWidth()}
+          onFullscreen={enterFullscreen}
+          fullscreenDisabled={!!comparison}
         />
         {testMode && <button type="button" className="test-error-button" data-testid="throw-workspace-error" onClick={() => setWorkspaceFailure(true)}>作業領域エラー</button>}
         <DesktopPromptBanner onShowSteps={() => setDesktopStepsOpen(true)} />
@@ -2407,8 +2580,9 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
             },
           }}>
           <DocumentWorkspace
+          pageMode={fullscreen}
+          wheelStopsAtPageEdge={wheelStopsAtPageEdge}
           outlineOperation={outlineApplyingId === active.docId ? 'applying' : saving ? 'saving' : undefined}
-          onApplyOutline={() => applyOutlineDraft(active)}
           onOutlineChange={refreshTabs}
           onOpenTocOutline={active.editRestriction || active.outlineDraft?.base.editable === false ? undefined : () => {
             if (!savingRef.current && !organizeRef.current && active.outlineDraft?.base.editable) setTocOutlineSession(active)

@@ -23,6 +23,26 @@ button, input { font: inherit; }
 .app.update-ready { grid-template-rows: auto 38px auto minmax(0, 1fr) 28px; }
 .app.comparing { grid-template-rows: minmax(0, 1fr) 28px; }
 .app.comparing.update-ready { grid-template-rows: auto minmax(0, 1fr) 28px; }
+.app.fullscreen-view, .app.fullscreen-view.update-ready { grid-template-rows: minmax(0, 1fr); }
+.app.fullscreen-view .document-tabs,
+.app.fullscreen-view .top-controls,
+.app.fullscreen-view .status-bar,
+.app.fullscreen-view .update-banner,
+.app.fullscreen-view .document-workspace > .side-panel,
+.app.fullscreen-view .side-panel-resizer,
+.app.fullscreen-view .format-panel-slot,
+.app.fullscreen-view .quantity-viewer-stack > :not(.viewer-slot),
+.app.fullscreen-view .split-divider,
+.app.fullscreen-view .split-reference { display: none; }
+.app.fullscreen-view .document-workspace { grid-template-columns: minmax(0, 1fr); }
+.app.fullscreen-view .quantity-viewer-stack { grid-template-rows: minmax(0, 1fr) !important; }
+.app.fullscreen-view .viewer-slot.split-view { grid-template-columns: minmax(0, 1fr) !important; }
+.app.fullscreen-view .pickup-bar-region { width: 100% !important; }
+.fullscreen-nav { display: flex; align-items: center; gap: 8px; padding: 8px; color: #fff; background: rgb(20 25 32 / 80%); border-radius: 8px; transition: opacity .2s; }
+.fullscreen-nav.dimmed { opacity: .15; }
+.fullscreen-nav:hover { opacity: 1; }
+.fullscreen-nav button { min-width: 36px; height: 36px; padding: 0 8px; border: 1px solid rgb(255 255 255 / 40%); border-radius: 4px; color: #fff; background: transparent; }
+.fullscreen-nav button:disabled { opacity: .4; }
 .compare-dialog { width: min(560px, 95vw); }
 .compare-dialog label { display: flex; align-items: center; gap: 12px; margin: 14px 0; }
 .compare-dialog select { flex: 1; min-width: 0; padding: 6px; }
@@ -82,6 +102,10 @@ button, input { font: inherit; }
 .split-main { border-radius: 3px 0 0 3px; }
 .split-arrow-wrap, .split-arrow-wrap > .dropdown { display: flex; }
 .split-arrow { width: 25px; padding: 0 !important; border-left: 0; border-radius: 0 3px 3px 0; }
+.page-nav { display: flex; align-items: center; gap: 5px; flex: none; }
+.page-nav > button { height: 31px; min-width: 31px; padding: 0 7px; }
+.page-nav-number { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.page-nav-number > input { width: auto; min-width: 0; height: 27px; padding: 0 4px; text-align: right; font-variant-numeric: tabular-nums; }
 .zoom-controls { display: flex; align-items: center; min-width: 0; }
 .zoom-controls > button { min-width: 31px; padding: 0 7px; font-size: 18px; }
 .zoom-controls .dropdown { display: flex; }
@@ -782,6 +806,10 @@ button, input { font: inherit; }
 .fixture-dialog-appearance .fixture-shapes button { min-width: 0; }
 .fixture-dialog-appearance .fixture-shapes svg { width: 100%; max-width: 32px; }
 .fixture-fills { grid-template-columns: repeat(5, 1fr); }
+.fixture-opacities { display: flex; flex-wrap: wrap; gap: 6px; }
+.fixture-opacities button { display: inline-flex; align-items: center; gap: 5px; padding: 5px; }
+.fixture-opacities button > span { width: 14px; height: 14px; }
+.fixture-opacities button[aria-pressed="true"] { outline: 2px solid #0068b7; outline-offset: 1px; }
 .fixture-colors { grid-template-columns: repeat(12, 1fr); }
 .fixture-colors button { height: 26px; min-width: 0; border: 1px solid #aaa; }
 .fixture-shapes button[aria-pressed="true"], .fixture-colors button[aria-pressed="true"] { outline: 2px solid #0068b7; outline-offset: 1px; }

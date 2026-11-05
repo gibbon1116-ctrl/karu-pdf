@@ -1,7 +1,8 @@
 import { LocationInput } from './LocationInput'
 import { lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
-import { fixtureCode, nextCountStyle, nextQuantityLineStyle, quantityDecimals, quantityKind, quantityUnit, type FixturePreset, type CountFixture } from '../core/countFixtures'
+import { commonOpacity, withOpacity } from './fixtureOpacity'
+import { COUNT_OPACITIES, fixtureCode, nextCountStyle, nextQuantityLineStyle, quantityDecimals, quantityKind, quantityUnit, type FixturePreset, type CountFixture } from '../core/countFixtures'
 import { appendFixtures, type FixtureAppendOptions } from './fixtureAppend'
 import { fixtureCrossingBarriers } from '../core/fixtureLink'
 import FixtureHoverCard, { useFixtureHover } from './FixtureHoverCard'
@@ -205,6 +206,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   const drawingStatus = useSyncExternalStore(session.subscribeDrawingScan, session.getDrawingScanSnapshot)
   useEffect(() => { void session.scanDrawingInfos(pool) }, [session, pool, session.pageRevision])
   const fixtures = store.getCountFixturesSnapshot()
+  const opacity = commonOpacity(fixtures)
   const relations = useMemo(() => perfTime('FixturePanel.linkRelations', () => linkRelations(fixtures)), [fixtures])
   const missingLinkSources = useMemo(() => new Set(fixtures
     .filter(f => f.link && ['rc', 'shape', 'steel', 'crossing'].includes(f.link.kind)
@@ -803,6 +805,21 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       <p className="fixture-drawing-status" aria-live="polite" data-testid={session.drawingScanning || drawingStatus.includes('失敗') ? 'drawing-scan-settings-status' : 'drawing-scan-status'} title={drawingStatus}>{drawingStatus}</p>
       <button type="button" disabled={session.drawingScanning} onClick={() => void session.scanDrawingInfos(pool, true)}>図面番号・図面名称を読み直す</button>
       <label><input type="checkbox" checked={store.onlySelectedFixture} onChange={e => store.setOnlySelectedFixture(e.currentTarget.checked)} />選択中の項目だけ表示</label>
+      <label>すべての項目の印の透明度
+        <select aria-label="すべての項目の印の透明度" value={opacity ?? ''} disabled={!canEdit || fixtures.length === 0}
+          onChange={event => {
+            if (!canEdit || !event.currentTarget.value) return
+            const value = Number(event.currentTarget.value)
+            if (!COUNT_OPACITIES.includes(value as typeof COUNT_OPACITIES[number])) return
+            const { next, changedIds } = withOpacity(fixtures, value)
+            if (!changedIds.length) return
+            store.setCountFixtures(next, [], changedIds)
+            setStatus(`すべての項目の印の透明度を${Math.round(value * 100)}%にしました（Ctrl+Z で戻せます）`)
+          }}>
+          {opacity === null && <option value="">（項目ごとに異なる）</option>}
+          {COUNT_OPACITIES.map(value => <option key={value} value={value}>{Math.round(value * 100)}%</option>)}
+        </select>
+      </label>
       <label><input type="checkbox" checked={store.showQuantityValues} onChange={e => store.setShowQuantityValues(e.currentTarget.checked)} />図面に長さ・面積・体積の数値を表示</label>
       <label><input type="checkbox" checked={store.showRoomRegions} onChange={e => store.setShowRoomRegions(e.currentTarget.checked)} />部屋の範囲を表示</label>
       <label title="計測・数量拾い・縮尺のなぞりで、既存の頂点に吸い付く（Alt で一時解除）"><input type="checkbox" checked={snap?.enabled ?? false} onChange={() => snap?.toggle()} />スナップ（既存の頂点に合わせる）</label>
