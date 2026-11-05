@@ -50,6 +50,12 @@ test('双方からページ・割合・幅の比率を合わせ、同期をオ�
     return Math.abs(left.fraction - right.fraction)
   }).toBeLessThan(.003)
   expect((await panePosition(page, 'right')).top).toBeGreaterThan(before.top)
+  // The wheel eases toward its target over several frames; let it settle first.
+  await expect.poll(async () => {
+    const first = (await panePosition(page, 'right')).top
+    await page.waitForTimeout(150)
+    return Math.abs((await panePosition(page, 'right')).top - first)
+  }).toBeLessThan(.5)
   const stable = await panePosition(page, 'right')
   await page.waitForTimeout(300)
   expect((await panePosition(page, 'right')).top).toBeCloseTo(stable.top, 0)
