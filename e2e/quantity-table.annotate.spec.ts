@@ -81,6 +81,26 @@ async function selected(page: Page) {
   })
 }
 
+test('pickup ring converges, stays visible and clears on a drawing press', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  const bytes = await drawingPdf()
+  await page.goto('/karu-pdf/?test=1&workers=2&warm=0')
+  await load(page, bytes)
+  await page.getByRole('button', { name: '集計表を開く', exact: true }).click()
+  await cell(page, '1').click()
+  const converge = page.getByTestId('quantity-pickup-converge')
+  const flash = page.getByTestId('quantity-pickup-flash')
+  await expect(converge).toBeVisible()
+  await expect(flash).toHaveJSProperty('tagName', 'circle')
+  await page.waitForTimeout(1000)
+  await expect(converge).toBeHidden()
+  await page.waitForTimeout(1000)
+  await expect(flash).toBeVisible()
+  await page.getByTestId('annotation-layer-1').click({ position: { x: 300, y: 150 } })
+  await expect(flash).toHaveCount(0)
+})
+
 test('wide table, location reveal/cycling, filters, resize persistence, CSV and breakdown', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 })
   const bytes = await drawingPdf()

@@ -2,7 +2,7 @@ import { routeMembers, conditionSuffix } from '../core/quantity'
 import { fixtureCode, fixtureDrawingCode, fixtureLabelCode } from '../core/countFixtures'
 import { quantityMethod } from '../core/countFixtures'
 import { constrainLinePoint, arrowHeadSize } from '../core/lineGeometry'
-import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { Quad } from 'mupdf'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import type { CountFixtureSample } from '../core/countFixtures'
@@ -62,6 +62,70 @@ export function MeasurementFeedbackPath({ points, kind, width, zoom, flash = fal
     data-testid={flash ? 'quantity-pickup-flash' : undefined} data-flash-id={flashId}
     points={points} strokeWidth={width + (flash ? 10 : 6) / Math.max(.01, zoom * CSS_PX_PER_PT)}
     fill="none" pointerEvents="none" aria-hidden="true" />
+}
+
+export function PickupFlash({ flash, zoom, flashVersion }: {
+  flash: EditableAnnotation; zoom: number; pageSize: PageSize; flashVersion: number
+}) {
+  const bounds: Rect = [...flash.rect]
+  if (flash.measure && flash.vertices?.length) {
+    bounds[0] = bounds[2] = flash.vertices[0][0]
+    bounds[1] = bounds[3] = flash.vertices[0][1]
+    for (const [x, y] of flash.vertices) {
+      bounds[0] = Math.min(bounds[0], x); bounds[2] = Math.max(bounds[2], x)
+      bounds[1] = Math.min(bounds[1], y); bounds[3] = Math.max(bounds[3], y)
+    }
+  }
+  const cx = (bounds[0] + bounds[2]) / 2, cy = (bounds[1] + bounds[3]) / 2
+  const scale = zoom * CSS_PX_PER_PT
+  const radius = Math.max(Math.hypot(bounds[2] - bounds[0], bounds[3] - bounds[1]) / 2 + 8 / scale, 14 / scale)
+  const reducedMotion = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  return <>
+    {flash.measure && flash.vertices ? <MeasurementFeedbackPath
+      points={measurementPathPoints(flash.vertices, flash.measure.kind === 'area')}
+      kind={flash.measure.kind} width={flash.borderWidth} zoom={zoom} flash flashId={flash.id} /> : <>
+      <circle className="quantity-pickup-marker-halo" cx={cx} cy={cy} r={radius}
+        fill="none" stroke="#ffffff" strokeWidth={8} vectorEffect="non-scaling-stroke" pointerEvents="none" aria-hidden="true" />
+      <circle className="quantity-pickup-flash quantity-pickup-marker" data-testid="quantity-pickup-flash" data-flash-id={flash.id}
+        cx={cx} cy={cy} r={radius} fill="rgba(120, 220, 180, 0.30)" stroke="#52c79b" strokeWidth={5}
+        vectorEffect="non-scaling-stroke" pointerEvents="none" aria-hidden="true" />
+    </>}
+    {!reducedMotion && <PickupConverge key={flashVersion} cx={cx} cy={cy} radius={radius} scale={scale} />}
+  </>
+}
+
+function PickupConverge({ cx, cy, radius, scale }: {
+  cx: number; cy: number; radius: number; scale: number
+}) {
+  const ref = useRef<SVGGElement>(null)
+  const initial = useRef({ cx, cy, radius, scale })
+  useLayoutEffect(() => {
+    const { radius, scale } = initial.current
+    const group = ref.current
+    if (!group) return
+    const startRadius = Math.max(radius * 2, radius + 24 / scale)
+    const circles = group.querySelectorAll('circle')
+    const setRadius = (r: number) => circles.forEach(circle => circle.setAttribute('r', String(r)))
+    group.removeAttribute('display')
+    setRadius(startRadius)
+    let elapsed = 0, last: number | null = null
+    let frame: number
+    const animate = (now: number) => {
+      if (last !== null) elapsed += Math.min(now - last, 1000 / 30)
+      last = now
+      const t = Math.min(1, elapsed / 300)
+      setRadius(startRadius + (radius - startRadius) * (1 - (1 - t) ** 3))
+      if (t < 1) frame = requestAnimationFrame(animate)
+      else group.setAttribute('display', 'none')
+    }
+    frame = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(frame)
+  }, [])
+  return <g ref={ref} className="quantity-pickup-converge" data-testid="quantity-pickup-converge" pointerEvents="none" aria-hidden="true">
+    <circle cx={cx} cy={cy} r={radius} fill="none" stroke="#ffffff" strokeWidth={7} vectorEffect="non-scaling-stroke" pointerEvents="none" />
+    <circle cx={cx} cy={cy} r={radius} fill="none" stroke="#52c79b" strokeWidth={4} vectorEffect="non-scaling-stroke" pointerEvents="none" />
+  </g>
 }
 
 export function QuantityPointMarks({ annotation, zoom, store }: {
@@ -331,7 +395,6 @@ export function AnnotationLayer(props: Props) {
   ), [props.docId, props.pageIndex, props.pool])
   const annotations = props.store.getPageAnnotationsSnapshot(props.pageIndex).filter(a => props.store.isShownOnDrawing(a))
   const flash = props.store.flashId ? props.store.get(props.store.flashId) : undefined
-  const flashPadding = 8 / (props.zoom * 96 / 72)
   const selectedIds = new Set(props.store.selectedIds())
   const orderedAnnotations = frontOrder(annotations, selectedIds)
   const hasSelection = selectedIds.size > 0
@@ -1279,13 +1342,8 @@ export function AnnotationLayer(props: Props) {
       <rect ref={resizePreviewRef} className="annotation-resize-preview" x="0" y="0" width="0" height="0" />
       <line ref={linePreviewRef} className="annotation-line-preview" x1="0" y1="0" x2="0" y2="0" />
       <line ref={calloutPreviewRef} className="annotation-line-preview" x1="0" y1="0" x2="0" y2="0" />
-      {flash?.pageIndex === props.pageIndex && (flash.measure && flash.vertices ? <MeasurementFeedbackPath key={props.store.flashVersion} points={measurementPathPoints(flash.vertices, flash.measure.kind === 'area')} kind={flash.measure.kind} width={flash.borderWidth} zoom={props.zoom} flash flashId={flash.id} /> : <rect key={props.store.flashVersion}
-        className="quantity-pickup-flash" data-testid="quantity-pickup-flash" data-flash-id={flash.id}
-        x={flash.rect[0] - flashPadding} y={flash.rect[1] - flashPadding}
-        width={Math.max(0, flash.rect[2] - flash.rect[0]) + 2 * flashPadding}
-        height={Math.max(0, flash.rect[3] - flash.rect[1]) + 2 * flashPadding}
-        rx={flashPadding} fill="none" stroke="#ff8a00" strokeWidth={3}
-        vectorEffect="non-scaling-stroke" pointerEvents="none" aria-hidden="true" />)}
+      {flash?.pageIndex === props.pageIndex && <PickupFlash flash={flash} zoom={props.zoom}
+        pageSize={props.pageSize} flashVersion={props.store.flashVersion} />}
     </svg>
     {measurement.dialog}
     {props.store.symbolSearchArea?.pageIndex === props.pageIndex && <svg className="annotation-layer symbol-search-area-layer"

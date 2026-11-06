@@ -374,16 +374,16 @@ export class AnnotationStore {
     this.notifyUi()
   }
   private flashTarget: string | null = null
-  private flashTimer: ReturnType<typeof setTimeout> | null = null
   flashVersion = 0
   get flashId(): string | null { return this.flashTarget }
   /** Selection feedback only: never dirty, indexed, added to history or saved. */
   flashPickup(id: string): void {
-    if (this.flashTimer !== null) clearTimeout(this.flashTimer)
     this.flashTarget = id; this.flashVersion++; this.notifyUi()
-    this.flashTimer = setTimeout(() => {
-      this.flashTimer = null; this.flashTarget = null; this.notifyUi()
-    }, 1500)
+  }
+  /** Selection feedback only: never dirty, indexed, added to history or saved. */
+  clearPickupFlash(): void {
+    if (this.flashTarget === null) return
+    this.flashTarget = null; this.notifyUi()
   }
   private filter: Readonly<AnnotationFilter> = DEFAULT_ANNOTATION_FILTER
   private followsFilter = false

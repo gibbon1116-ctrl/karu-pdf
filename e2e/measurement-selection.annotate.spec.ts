@@ -112,7 +112,7 @@ test('area closes its edges, count keeps its rectangle, and multi-selection has 
   await expect(layer(page).locator('rect.annotation-selection')).toHaveCount(1)
 })
 
-test('table navigation flashes the route without scaling; count still flashes a rectangle', async ({ page }) => {
+test('table navigation keeps the route without scaling and marks counts with a circle', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: '集計表を開く', exact: true }).click()
   const table = page.getByRole('region', { name: '数量の集計表', exact: true })
@@ -122,15 +122,16 @@ test('table navigation flashes the route without scaling; count still flashes a 
   await expect(flash).toHaveJSProperty('tagName', 'polyline')
   await expect(flash).toHaveClass(/quantity-pickup-flash-path/)
   await expect(layer(page).locator('polyline.annotation-selection-path')).toHaveCount(1)
-  expect(await flash.evaluate(el => getComputedStyle(el).animationName)).toBe('quantity-pickup-flash-path')
+  expect(await flash.evaluate(el => getComputedStyle(el).animationName)).toBe('none')
   expect(await flash.evaluate(el => getComputedStyle(el).transform)).toBe('none')
-  await expect(flash).toHaveCount(0, { timeout: 2500 })
+  await page.waitForTimeout(2000)
+  await expect(flash).toBeVisible()
   await table.getByLabel('集計表の種別', { exact: true }).selectOption('area')
   await table.locator('tr[data-fixture-id="area"] button[data-column-key="0"]').click()
   await expect(flash).toHaveJSProperty('tagName', 'polygon')
   await table.getByLabel('集計表の種別', { exact: true }).selectOption('count')
   await table.locator('tr[data-fixture-id="led"] button[data-column-key="0"]').click()
-  await expect(flash).toHaveJSProperty('tagName', 'rect')
+  await expect(flash).toHaveJSProperty('tagName', 'circle')
 })
 
 test('1000-vertex selected route keeps shared geometry and records drag frame timings', async ({ page }) => {

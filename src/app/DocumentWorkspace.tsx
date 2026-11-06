@@ -307,7 +307,11 @@ export function DocumentWorkspace(props: Props) {
         }}
       />}
       <div className="quantity-viewer-stack" style={{ gridTemplateRows: tableOpen ? `minmax(0, ${100 - tableHeight}fr) minmax(0, ${tableHeight}fr)` : 'minmax(0, 1fr)' }}>
-      <div ref={viewerSlotRef} className={props.split ? 'viewer-slot split-view' : 'viewer-slot'} style={props.split ? { gridTemplateColumns: `minmax(0, ${props.split.settings.ratio}fr) 6px minmax(0, ${1 - props.split.settings.ratio}fr)` } : undefined}>
+      <div ref={viewerSlotRef} className={props.split ? 'viewer-slot split-view' : 'viewer-slot'} style={props.split ? { gridTemplateColumns: `minmax(0, ${props.split.settings.ratio}fr) 6px minmax(0, ${1 - props.split.settings.ratio}fr)` } : undefined}
+        onPointerDownCapture={event => {
+          if (event.target instanceof Element && event.target.closest('.pickup-bar-region')) return
+          props.session.annotationStore.clearPickupFlash()
+        }}>
       <Viewer
         pageMode={props.pageMode}
         panStopsAtPageEdge={props.panStopsAtPageEdge}

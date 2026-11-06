@@ -127,11 +127,17 @@ describe('AnnotationStore fixture snapshots', () => {
       expect(store.flashId).toBe(pickupId)
       expectStable(store, previous)
 
-      vi.advanceTimersByTime(1499)
+      vi.advanceTimersByTime(3000)
       expect(store.flashId).toBe(pickupId)
       expectStable(store, previous)
 
-      vi.advanceTimersByTime(1)
+      const flashVersion = store.flashVersion
+      store.flashPickup(pickupId)
+      expect(store.flashVersion).toBe(flashVersion + 1)
+      expect(store.flashId).toBe(pickupId)
+      expectStable(store, previous)
+
+      store.clearPickupFlash()
       expect(store.flashId).toBeNull()
       expectStable(store, previous)
     } finally {

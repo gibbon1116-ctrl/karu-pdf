@@ -143,7 +143,15 @@ describe('AnnotationStore content revision', () => {
         }))
         ui(() => store.flashPickup(ids[0]))
         expect(store.flashId).toBe(ids[0])
-        ui(() => vi.advanceTimersByTime(1500))
+        const flashVersion = store.flashVersion
+        ui(() => store.flashPickup(ids[0]))
+        expect(store.flashVersion).toBe(flashVersion + 1)
+        const snapshot = store.getSnapshot(), calls = listener.mock.calls.length
+        vi.advanceTimersByTime(3000)
+        expect(store.flashId).toBe(ids[0])
+        expect(store.getSnapshot()).toBe(snapshot)
+        expect(listener).toHaveBeenCalledTimes(calls)
+        ui(() => store.clearPickupFlash())
         expect(store.flashId).toBeNull()
         ui(() => store.setAnnotationFilter({
           ...store.annotationFilter, discipline: `試験-${i}`,

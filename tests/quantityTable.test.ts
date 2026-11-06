@@ -327,7 +327,7 @@ it('builds a table from 1000 fixtures / 100 pages / 10000 index entries in under
   expect(median).toBeLessThan(50)
 })
 
-it('reveals and flashes only the chosen pickup, clears in 1500ms and never changes edits/history/index', async () => {
+it('reveals and keeps the chosen pickup flash until cleared without changing edits/history/index', async () => {
   vi.useFakeTimers()
   try {
     const store = new AnnotationStore()
@@ -344,8 +344,8 @@ it('reveals and flashes only the chosen pickup, clears in 1500ms and never chang
     const flashVersion = store.flashVersion
     vi.advanceTimersByTime(1000); store.flashPickup(mark.id)
     expect(store.flashVersion).toBe(flashVersion + 1)
-    vi.advanceTimersByTime(500); expect(store.flashId).toBe(mark.id)
-    vi.advanceTimersByTime(1000); expect(store.flashId).toBeNull()
+    vi.advanceTimersByTime(3000); expect(store.flashId).toBe(mark.id)
+    store.clearPickupFlash(); expect(store.flashId).toBeNull()
     expect(store.quantityIndex()).toBe(index); expect(store.toEdits()).toEqual(edits)
     // Flash did not add an undo step; the last data edit was creation.
     store.undo(); expect(store.get(mark.id)).toBeUndefined()
