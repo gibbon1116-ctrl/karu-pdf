@@ -25,6 +25,7 @@ export function csvKind(annotation: EditableAnnotation): CsvKind | null {
   if (annotation.issue) return 'issue'
   if (annotation.count || annotation.quantity) return 'count'
   if (annotation.measure) return 'measure'
+  if (annotation.kind === 'redact') return annotation.quads?.length ? 'markup' : 'shape'
   if (annotation.kind === 'freetext') return 'text'
   if (annotation.kind === 'callout' || annotation.kind === 'symbol') return annotation.kind
   if (annotation.kind === 'highlight' || annotation.kind === 'ink') return 'pen'
@@ -46,7 +47,7 @@ export function csvAnnotations(annotations: readonly EditableAnnotation[], kinds
 
 export function annotationKindLabel(kind: EditableAnnotation['kind']): string {
   const labels: Record<EditableAnnotation['kind'], string> = {
-    cloudSquare: '雲（四角）', cloudPolygon: '雲（多角形）', issue: '指摘', distance: '距離', perimeter: '連続した長さ', area: '面積', freetext: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角',
+    redact: '墨消し', cloudSquare: '雲（四角）', cloudPolygon: '雲（多角形）', issue: '指摘', distance: '距離', perimeter: '連続した長さ', area: '面積', freetext: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角',
     circle: '丸', highlight: '蛍光ペン', ink: '手書き', textHighlight: '文字ハイライト',
     underline: '文字に下線', strikeout: '文字に取り消し線', symbol: '記号',
   }

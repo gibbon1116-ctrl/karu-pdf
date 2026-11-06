@@ -79,12 +79,12 @@ interface Props {
 
 function formatTool(kind: Kind | EditorTool): FormatTool | null {
   if (kind === 'select' || kind === 'textSelect') return null
-  return kind === 'freetext' ? 'text' : kind
+  return kind === 'redactArea' || kind === 'redactText' ? 'redact' : kind === 'freetext' ? 'text' : kind
 }
 
 function formatToolLabel(tool: FormatTool): string {
   const labels: Record<FormatTool, string> = {
-    count: '数量拾い', cloudSquare: '雲（四角）', cloudPolygon: '雲（多角形）', issue: '指摘', distance: '距離', perimeter: '連続した長さ', area: '面積', text: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角', circle: '丸',
+    redact: '墨消し', count: '数量拾い', cloudSquare: '雲（四角）', cloudPolygon: '雲（多角形）', issue: '指摘', distance: '距離', perimeter: '連続した長さ', area: '面積', text: '文字', callout: '吹き出し', line: '線', arrow: '矢印', square: '四角', circle: '丸',
     highlight: '蛍光ペン', ink: '手書き', symbol: '記号', textHighlight: '文字ハイライト',
     underline: '文字に下線', strikeout: '文字に取り消し線',
   }
@@ -284,6 +284,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
   }
   return <aside className="format-panel" aria-label="書式" data-testid="format-panel">
     <h2>{target ? `${formatToolLabel(target)}の書式` : '書式'}</h2>
+    {target === 'redact' && <p>墨消しの範囲です。保存しただけでは消えません。『ファイル → 墨消しを適用して別名で保存…』で、この範囲の文字・画像・線を削除したコピーを作ります。</p>}
     {!target && <p>道具または書き込みを選んでください。</p>}
     {simpleColorTarget && values && <ColorField label="色" value={values.color} choices={target === 'highlight' || target === 'textHighlight' ? HIGHLIGHT_COLORS : COLORS} onChange={(next) => next && changeColor(next)} />}
     {target === 'issue' && <p>色は状態で決まります（未回答 赤・回答済み 青・修正確認 灰）</p>}
@@ -351,7 +352,7 @@ export function FormatPanel({ selected, tool, store, pool, defaults, onDefaultsC
         <option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option>{target === 'highlight' && <option value="0.35">35%（既定）</option>}{target === 'textHighlight' && <option value="0.4">40%（既定）</option>}<option value="0.25">25%</option>
       </select>
     </label>}
-    {target === 'square' && <button type="button" className="whiteout-button" title="上に白い四角を重ねて見えなくします。下の文字やデータはファイルに残ります" onClick={makeWhiteout}>白塗りにする</button>}
+    {target === 'square' && <button type="button" className="whiteout-button" title="上に白い四角を重ねて見えなくします。下の文字やデータはファイルに残ります。データを消すときは『墨消し』を使います" onClick={makeWhiteout}>白塗りにする</button>}
     {measureTarget && values && <label>文字の大きさ<select aria-label="文字の大きさ" value={values.fontSize} onChange={event => void changeText({ fontSize: Number(event.currentTarget.value) })}>{FONT_SIZES.map(v => <option key={v} value={v}>{v} pt</option>)}</select></label>}
     {activeSelection?.measure?.kind === 'area' && !activeSelection.quantity && !activeSelection.count && !activeSelection.legacyChange && activeSelection.vertices && store.selectedIds().length === 1 && <AreaHoles key={'holes:' + activeSelection.id} annotation={activeSelection} store={store} />}
     {textTarget && values && <>

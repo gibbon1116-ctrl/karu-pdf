@@ -47,7 +47,7 @@ export interface SymbolSearchCandidate {
   otherFixture?: string
 }
 
-export type Kind = MeasureKind | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
+export type Kind = MeasureKind | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'freetext' | 'callout' | 'line' | 'arrow' | 'square' | 'redact' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
 export interface EditableAnnotation {
   legacyChange?: boolean
@@ -317,6 +317,10 @@ export function annotationInsideSelection(annotation: EditableAnnotation, select
 
 export function isTextMarkup(kind: Kind): boolean {
   return kind === 'textHighlight' || kind === 'underline' || kind === 'strikeout'
+}
+
+export function isAnchoredMarkup(annotation: Pick<EditableAnnotation, 'kind' | 'quads'>): boolean {
+  return isTextMarkup(annotation.kind) || annotation.kind === 'redact' && !!annotation.quads?.length
 }
 
 export function translationToFit(rect: Rect, pageSize: { width: number; height: number }, offset: number): Point {
@@ -1001,6 +1005,7 @@ export class AnnotationStore {
           revision: 0,
         }
         this.annotations.set(id, annotation)
+        if (kind === 'redact') this.markTouched(annotation)
         if (annotation.issue) this.issueNumbers.observe(annotation.issue.number)
         this.baselines.set(id, cloneState(annotation))
       }
@@ -3630,7 +3635,7 @@ export class AnnotationStore {
   copySelected(): EditableAnnotation[] {
     return this.selectedIds().flatMap((id) => {
       const annotation = this.annotations.get(id)
-      return annotation && !annotation.deleted && !annotation.legacyChange && !isTextMarkup(annotation.kind) ? [publicAnnotation(annotation, this.isAnnotationDirty(annotation))] : []
+      return annotation && !annotation.deleted && !annotation.legacyChange && !isAnchoredMarkup(annotation) ? [publicAnnotation(annotation, this.isAnnotationDirty(annotation))] : []
     })
   }
 
@@ -3761,6 +3766,8 @@ export class AnnotationStore {
   }
 
   move(id: string, dx: number, dy: number): void {
+    const target = this.annotations.get(id)
+    if (target && isAnchoredMarkup(target)) return
     this.mutate(id, (annotation) => {
       if (dx === 0 && dy === 0) return
       annotation.rect = [annotation.rect[0] + dx, annotation.rect[1] + dy, annotation.rect[2] + dx, annotation.rect[3] + dy]
@@ -3776,7 +3783,7 @@ export class AnnotationStore {
 
   moveMany(ids: readonly string[], dx: number, dy: number): void {
     if (dx === 0 && dy === 0) return
-    this.mutateMany(ids, (annotation) => {
+    this.mutateMany(ids.filter(id => { const a = this.annotations.get(id); return a && !isAnchoredMarkup(a) }), (annotation) => {
       annotation.rect = [annotation.rect[0] + dx, annotation.rect[1] + dy, annotation.rect[2] + dx, annotation.rect[3] + dy]
       if (annotation.vertices) annotation.vertices = annotation.vertices.map(p => [p[0] + dx, p[1] + dy])
       if (annotation.line) annotation.line = annotation.line.map((point) => [point[0] + dx, point[1] + dy]) as [Point, Point]
@@ -3792,7 +3799,7 @@ export class AnnotationStore {
     if (dx === 0 && dy === 0) return
     const movableIds = [...new Set(ids)].filter((id) => {
       const annotation = this.annotations.get(id)
-      return annotation && !annotation.deleted && !isTextMarkup(annotation.kind)
+      return annotation && !annotation.deleted && !isAnchoredMarkup(annotation)
     })
     const before = movableIds.flatMap((id) => {
       const annotation = this.annotations.get(id)
@@ -3832,6 +3839,8 @@ export class AnnotationStore {
   }
 
   resize(id: string, rect: Rect): void {
+    const target = this.annotations.get(id)
+    if (target && isAnchoredMarkup(target)) return
     this.mutate(id, (annotation) => {
       const previous = annotation.rect
       if (annotation.vertices && annotation.measure) {
@@ -4379,6 +4388,10 @@ export class AnnotationStore {
 
   private toEdit(annotation: StoredAnnotation, savedObjNum: number | null): AnnotationEdit {
     const create = savedObjNum === null
+    if (annotation.kind === 'redact') {
+      const common = { pageIndex: annotation.pageIndex, rect: annotation.rect, quads: annotation.quads }
+      return create ? { kind: 'createRedact', ...common } : { kind: 'updateRedact', objNum: savedObjNum, ...common }
+    }
     if (annotation.legacyChange) {
       if (!annotation.legacyChangeData) throw new Error('旧版変更記録の復元データがありません。')
       return { kind: 'createLegacyChange', pageIndex: annotation.pageIndex, data: annotation.legacyChangeData }

@@ -44,6 +44,7 @@ const groups: Record<SplitToolGroup, Array<{ tool: EditorTool; label: string; de
     { tool: 'cloudPolygon', label: '雲（多角形）', description: '修正箇所を自由な形の雲形で囲む', shortcut: '' },
     { tool: 'line', label: '線', description: 'まっすぐな線を引く', shortcut: 'L' },
     { tool: 'arrow', label: '矢印', description: '矢印を引く', shortcut: 'A' },
+    { tool: 'redactArea', label: '墨消し（範囲）', description: '隠す範囲を四角で囲む。適用するまで消えない', shortcut: '' },
     { tool: 'square', label: '四角', description: '四角形を描く', shortcut: 'R' },
     { tool: 'circle', label: '丸', description: '円や楕円を描く', shortcut: 'O' },
   ],
@@ -58,6 +59,7 @@ const groups: Record<SplitToolGroup, Array<{ tool: EditorTool; label: string; de
   ],
   mark: [
     { tool: 'textSelect', label: '文字を選択', description: 'PDF の文字を選んでコピーする', shortcut: 'M' },
+    { tool: 'redactText', label: '文字を墨消し', description: '選んだ文字を墨消しの範囲にする', shortcut: '' },
     { tool: 'textHighlight', label: '文字ハイライト', description: '選んだ文字だけに色を付ける', shortcut: '' },
     { tool: 'underline', label: '文字に下線', description: '選んだ文字の下に線を引く', shortcut: '' },
     { tool: 'strikeout', label: '文字に取り消し線', description: '選んだ文字の中央に線を引く', shortcut: '' },

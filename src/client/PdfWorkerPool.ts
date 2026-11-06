@@ -1,3 +1,7 @@
+import type { RedactOptions, RedactStats } from '../core/redact'
+import type { SlimOptions, SlimStats } from '../core/slim'
+import type { SlimOutputPreparedResponse } from '../worker/protocol'
+import type { RedactOutputPreparedResponse } from '../worker/protocol'
 import { PdfPasswordError, type RequestPdfPassword } from '../core/passwordAccess'
 import type { DrawingInfo } from '../core/drawingInfo'
 import type { VectorPage } from '../core/vectorPaths'
@@ -93,6 +97,15 @@ export interface PreparedOutputResult {
   bytes: Uint8Array
   ms: number
   replacedCharacters: number
+  unsupportedCharacters: string[]
+  errors: ApplyError[]
+}
+
+export interface SlimOutputResult {
+  bytes: Uint8Array
+  sourceBytes: number
+  stats: SlimStats
+  ms: number
   unsupportedCharacters: string[]
   errors: ApplyError[]
 }
@@ -246,6 +259,7 @@ export class PdfWorkerPool {
     resolve(image: SearchImage): void; reject(error: Error): void
   }>()
   private readonly pendingRequests = new Map<number, { resolve(value: WorkerResponse): void; reject(error: Error): void }>()
+  private readonly slimProgress = new Map<number, (completed: number, total: number) => void>()
   private readonly pendingSearches = new Map<number, {
     docId: string
     onProgress(response: SearchProgressResponse): void
@@ -773,6 +787,44 @@ export class PdfWorkerPool {
     }
   }
 
+  async redactOutput(docId: string, edits: AnnotationEdit[], options: RedactOptions): Promise<{
+    bytes: Uint8Array; stats: RedactStats; ms: number; unsupportedCharacters: string[]; errors: ApplyError[]
+  }> {
+    const response = await this.request<RedactOutputPreparedResponse>(this.slots[0], requestId => ({
+      type: 'redactOutput', requestId, docId, edits, options,
+    }))
+    return { ...response, bytes: new Uint8Array(response.bytes) }
+  }
+
+  async slimOutput(docId: string, edits: AnnotationEdit[], options: SlimOptions, callbacks: {
+    onProgress?(completed: number, total: number): void; signal?: AbortSignal
+  } = {}): Promise<SlimOutputResult> {
+    const requestId = this.nextId++
+    const aborted = () => new DOMException('軽量化を中止しました。', 'AbortError')
+    if (callbacks.signal?.aborted) throw aborted()
+    let abort: (() => void) | undefined
+    try {
+      const response = await new Promise<SlimOutputPreparedResponse>((resolve, reject) => {
+        abort = () => {
+          // The worker may finish later. Drop its response and release callbacks now.
+          this.pendingRequests.delete(requestId)
+          this.slimProgress.delete(requestId)
+          reject(aborted())
+        }
+        this.pendingRequests.set(requestId, { resolve: value => resolve(value as SlimOutputPreparedResponse), reject })
+        if (callbacks.onProgress) this.slimProgress.set(requestId, callbacks.onProgress)
+        callbacks.signal?.addEventListener('abort', abort, { once: true })
+        this.slots[0].worker.postMessage({ type: 'slimOutput', requestId, docId, edits, options })
+      })
+      if (callbacks.signal?.aborted) throw aborted()
+      return { ...response, bytes: new Uint8Array(response.bytes) }
+    } finally {
+      if (abort) callbacks.signal?.removeEventListener('abort', abort)
+      this.pendingRequests.delete(requestId)
+      this.slimProgress.delete(requestId)
+    }
+  }
+
   async prepareOutput(docId: string, edits: AnnotationEdit[], bake: boolean, password?: string): Promise<PreparedOutputResult> {
     const response = await this.request<OutputPreparedResponse>(this.slots[0], (requestId) => ({
       type: 'prepareOutput', requestId, docId, edits, bake, password,
@@ -1107,6 +1159,10 @@ export class PdfWorkerPool {
   }
 
   private onMessage(slot: WorkerSlot, message: WorkerResponse): void {
+    if (message.type === 'slimProgress') {
+      this.slimProgress.get(message.requestId)?.(message.completed, message.total)
+      return
+    }
     if (message.type === 'vectorsExtracted') {
       const pending = this.pendingVectors.get(message.jobId)
       if (!pending) return

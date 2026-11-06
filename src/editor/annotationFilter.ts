@@ -13,7 +13,7 @@ export interface AnnotationFilter {
   status: '' | IssueStatusChoice
 }
 export const DEFAULT_ANNOTATION_FILTER: Readonly<AnnotationFilter> = Object.freeze({ kind: 'all', discipline: '', status: '' })
-type FilterAnnotation = Pick<EditableAnnotation, 'legacyChange' | 'kind' | 'count' | 'quantity' | 'issue' | 'measure'>
+type FilterAnnotation = Pick<EditableAnnotation, 'legacyChange' | 'kind' | 'count' | 'quantity' | 'issue' | 'measure'> & { quads?: EditableAnnotation['quads'] }
 
 export function matchesAnnotationFilter(annotation: FilterAnnotation, filter: Readonly<AnnotationFilter>): boolean {
   // Legacy change records appeared only under "all", independently of issue fields.
@@ -30,8 +30,8 @@ export function matchesAnnotationFilter(annotation: FilterAnnotation, filter: Re
     : kind === 'callout' ? annotation.kind === 'callout'
     : kind === 'symbol' ? annotation.kind === 'symbol' || !!annotation.quantity
     : kind === 'pen' ? annotation.kind === 'highlight' || annotation.kind === 'ink'
-    : kind === 'markup' ? annotation.kind === 'textHighlight' || annotation.kind === 'underline' || annotation.kind === 'strikeout'
-    : ['cloudSquare', 'cloudPolygon', 'line', 'arrow', 'square', 'circle'].includes(annotation.kind)
+    : kind === 'markup' ? annotation.kind === 'textHighlight' || annotation.kind === 'underline' || annotation.kind === 'strikeout' || annotation.kind === 'redact' && !!annotation.quads?.length
+    : annotation.kind === 'redact' ? !annotation.quads?.length : ['cloudSquare', 'cloudPolygon', 'line', 'arrow', 'square', 'circle'].includes(annotation.kind)
   return matchesKind
     && (!filter.discipline || !!annotation.issue?.discipline?.includes(filter.discipline))
     && (!filter.status || !!annotation.issue && issueStatusChoice(annotation.issue.status) === filter.status)

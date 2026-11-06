@@ -1,3 +1,5 @@
+import type { RedactOptions, RedactStats } from '../core/redact'
+import type { SlimOptions, SlimStats } from '../core/slim'
 import type { DrawingInfo, DrawingDetection } from '../core/drawingInfo'
 import type { TocPageText } from '../core/tocImport'
 import type { PageScale } from '../core/measure'
@@ -222,6 +224,47 @@ export interface ApplyEditsRequest {
   edits: AnnotationEdit[]
 }
 
+export interface RedactOutputRequest {
+  type: 'redactOutput'
+  requestId: number
+  docId: string
+  edits: AnnotationEdit[]
+  options: RedactOptions
+}
+export interface RedactOutputPreparedResponse {
+  type: 'redactOutputPrepared'
+  requestId: number
+  bytes: ArrayBuffer
+  stats: RedactStats
+  ms: number
+  unsupportedCharacters: string[]
+  errors: ApplyError[]
+}
+
+export interface SlimOutputRequest {
+  type: 'slimOutput'
+  requestId: number
+  docId: string
+  edits: AnnotationEdit[]
+  options: SlimOptions
+}
+export interface SlimProgressResponse {
+  type: 'slimProgress'
+  requestId: number
+  completed: number
+  total: number
+}
+export interface SlimOutputPreparedResponse {
+  type: 'slimOutputPrepared'
+  requestId: number
+  bytes: ArrayBuffer
+  sourceBytes: number
+  stats: SlimStats
+  ms: number
+  unsupportedCharacters: string[]
+  errors: ApplyError[]
+}
+
 export interface PrepareOutputRequest {
   type: 'prepareOutput'
   requestId: number
@@ -358,6 +401,8 @@ export type WorkerRequest =
   | LayoutTextRequest
   | ApplyAndSaveRequest
   | ApplyEditsRequest
+  | RedactOutputRequest
+  | SlimOutputRequest
   | PrepareOutputRequest
   | ApplyPageLayoutRequest
   | ApplyHeaderFooterRequest
@@ -612,6 +657,9 @@ export type WorkerResponse =
   | LayoutTextResponse
   | ApplyAndSaveResponse
   | AppliedEditsResponse
+  | RedactOutputPreparedResponse
+  | SlimProgressResponse
+  | SlimOutputPreparedResponse
   | OutputPreparedResponse
   | PageLayoutResponse
   | HeaderFooterSettingsResponse

@@ -3,7 +3,7 @@ import type { FontName } from '../core/fontMetrics'
 
 export const FORMAT_STORAGE_KEY = 'karu-pdf:format'
 
-export type FormatTool = 'count' | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'distance' | 'perimeter' | 'area' | 'text' | 'callout' | 'line' | 'arrow' | 'square' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
+export type FormatTool = 'count' | 'cloudSquare' | 'cloudPolygon' | 'issue' | 'distance' | 'perimeter' | 'area' | 'text' | 'callout' | 'line' | 'arrow' | 'square' | 'redact' | 'circle' | 'highlight' | 'ink' | 'textHighlight' | 'underline' | 'strikeout' | 'symbol'
 
 export interface ToolFormat {
   countGroup?: string
@@ -64,6 +64,7 @@ export const DEFAULT_FORMAT: FormatDefaults = {
   callout: format(red, 1, 10.5, 'BIZUDGothic', [1, 1, 1], red),
   line: format(red),
   arrow: format(red),
+  redact: format(red, 1, 10.5, 'BIZUDGothic', [0, 0, 0], red, 0.25),
   square: format(red, 1, 10.5, 'BIZUDGothic', null, red),
   circle: format(red, 1, 10.5, 'BIZUDGothic', null, red),
   highlight: format(yellow, 12, 10.5, 'BIZUDGothic', null, null, 0.35),

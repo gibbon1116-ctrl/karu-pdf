@@ -31,6 +31,8 @@ export function ToolIcon({ tool, className = '' }: Props) {
         return <><path {...common} d="M2.5 12.5 13.5 3.5" /></>
       case 'arrow':
         return <><path {...common} d="M2.5 12.5 13 3.8M8.8 3.6l4.5-.1-.7 4.4" /></>
+      case 'redactArea':
+      case 'redactText': return <><rect x="3" y="6" width="10" height="4" fill="black" /><rect x="1.5" y="3.5" width="13" height="9" fill="none" stroke="#e00000" strokeWidth="1" strokeDasharray="2 1.5" /></>
       case 'square':
         return <><rect {...common} x="2.7" y="2.7" width="10.6" height="10.6" rx=".6" /></>
       case 'circle':

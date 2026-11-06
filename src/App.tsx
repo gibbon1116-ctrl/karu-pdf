@@ -1,3 +1,8 @@
+import { RedactDialog } from './app/RedactDialog'
+import { SlimDialog } from './app/SlimDialog'
+import type { SlimOptions } from './core/slim'
+import type { SlimOutputResult } from './client/PdfWorkerPool'
+import type { RedactOptions } from './core/redact'
 import { PasswordOpenDialog } from './app/PasswordOpenDialog'
 import { PasswordSaveDialog } from './app/PasswordSaveDialog'
 import { QuantityNavigationContext } from './app/QuantityBreakdown'
@@ -372,7 +377,10 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
   const [sheetSizesOpen, setSheetSizesOpen] = useState(false)
   const [compareDialog, setCompareDialog] = useState(false)
   const [comparison, setComparison] = useState<{ old: DocumentSession; next: DocumentSession } | null>(null)
+  const [redactSession, setRedactSession] = useState<DocumentSession | null>(null)
   const [rasterizeOpen, setRasterizeOpen] = useState(false)
+  const [slimSession, setSlimSession] = useState<DocumentSession | null>(null)
+  const slimResultRef = useRef<{ session: DocumentSession; sourceBytes: number } | null>(null)
   const [imageFiles, setImageFiles] = useState<File[] | null>(null)
   const [headerFooterOpen, setHeaderFooterOpen] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
@@ -502,6 +510,12 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
     }, 3000)
   }, [])
   const active = tabs.active
+  useEffect(() => {
+    if (slimSession && active !== slimSession) {
+      slimResultRef.current = null
+      setSlimSession(null)
+    }
+  }, [active, slimSession])
   activeRef.current = active
   organizeRef.current = organize
   useEffect(() => {
@@ -1328,6 +1342,54 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
     } finally { if (saveStarted) endSave() }
   }, [beginSave, endSave, pool, prepareOutlineForSave, showStatus])
 
+  const computeSlim = useCallback(async (options: SlimOptions, signal: AbortSignal,
+    onProgress: (completed: number, total: number) => void): Promise<SlimOutputResult> => {
+    const session = activeRef.current
+    slimResultRef.current = null
+    if (!session || session !== slimSession || session.editRestriction) throw new Error('保存するPDFを開き直してください。')
+    commitFocusedField()
+    if (!beginSave()) throw new Error('保存中です。')
+    let saveStarted = true
+    const checkAbort = () => { if (signal.aborted) throw new DOMException('軽量化を中止しました。', 'AbortError') }
+    try {
+      checkAbort()
+      if (session.hasPendingOutlineDraft()) {
+        endSave(); saveStarted = false
+        if (!await prepareOutlineForSave(session)) throw new DOMException('軽量化を中止しました。', 'AbortError')
+        checkAbort()
+        if (!beginSave()) throw new Error('保存中です。')
+        saveStarted = true
+      }
+      await viewerRef.current?.commitEditor()
+      if (session.dirty && (session.annotationStore.fixturesReady || session.annotationStore.hasCountMarks())) await ensureSessionFixtures(session, pool)
+      checkAbort()
+      const result = await pool.slimOutput(session.docId, session.annotationStore.toEdits(), options, { signal, onProgress })
+      checkAbort()
+      if (activeRef.current !== session) throw new Error('保存するPDFを開き直してください。')
+      if (result.errors.length) throw new Error(result.errors.map(item => item.message).join(' / '))
+      slimResultRef.current = { session, sourceBytes: result.sourceBytes }
+      return result
+    } finally { if (saveStarted) endSave() }
+  }, [beginSave, endSave, pool, prepareOutlineForSave, slimSession])
+
+  const saveSlim = useCallback(async (bytes: Uint8Array): Promise<void> => {
+    const result = slimResultRef.current, session = activeRef.current
+    if (!session || result?.session !== session) throw new Error('もう一度計算してください。')
+    if (!beginSave()) throw new Error('保存中です。')
+    try {
+      const name = session.name.replace(/\.pdf$/i, '') + '_軽量化.pdf'
+      const handle = window.showSaveFilePicker ? await pickSaveHandle(name, session.handle ?? undefined) : null
+      if (handle) {
+        if (session.handle && (handle === session.handle || await handle.isSameEntry?.(session.handle))) throw new Error('元のPDFとは別の保存先を選んでください。')
+        await writePdf(handle, bytes)
+      } else downloadPdf(bytes, name)
+      showStatus(`軽量化したコピーを保存しました（${(result.sourceBytes / 1024 / 1024).toFixed(2)} MB → ${(bytes.byteLength / 1024 / 1024).toFixed(2)} MB）。今開いているファイルは変わりません。`)
+      slimResultRef.current = null
+    } finally { endSave() }
+  }, [beginSave, endSave, showStatus])
+
+  const closeSlim = useCallback(() => { slimResultRef.current = null; setSlimSession(null) }, [])
+
   const prepareOutput = useCallback(async (bake: boolean, checkOutline = bake): Promise<PreparedOutputResult | null> => {
     const session = activeRef.current
     if (!session) return null
@@ -1399,6 +1461,50 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
     if (!bytes) throw new Error('PDF が開かれていません。')
     return bytes.byteLength
   }, [rasterizeToBytes])
+
+  const openRedactDialog = useCallback(async () => {
+    const session = activeRef.current
+    if (!session || session.editRestriction) return
+    try {
+      await viewerRef.current?.commitEditor()
+      await session.annotationStore.ensurePagesLoaded(session.pageSizes.map((_, index) => index),
+        index => pool.listAnnotations(session.docId, index))
+      if (activeRef.current === session) setRedactSession(session)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) }
+  }, [pool])
+
+  const saveRedacted = useCallback(async (options: RedactOptions): Promise<boolean> => {
+    const session = activeRef.current
+    if (!session || session !== redactSession) throw new Error('保存するPDFを開き直してください。')
+    commitFocusedField()
+    if (!beginSave()) return false
+    let saveStarted = true
+    try {
+      const name = session.name.replace(/\.pdf$/i, '') + '_墨消し.pdf'
+      const handle = window.showSaveFilePicker ? await pickSaveHandle(name, session.handle ?? undefined) : null
+      if (handle && session.handle && (handle === session.handle || await handle.isSameEntry?.(session.handle))) {
+        throw new Error('元のPDFとは別の保存先を選んでください。')
+      }
+      if (session.hasPendingOutlineDraft()) {
+        endSave(); saveStarted = false
+        if (!await prepareOutlineForSave(session) || !beginSave()) return false
+        saveStarted = true
+      }
+      await viewerRef.current?.commitEditor()
+      if (session.dirty && (session.annotationStore.fixturesReady || session.annotationStore.hasCountMarks())) await ensureSessionFixtures(session, pool)
+      const result = await pool.redactOutput(session.docId, session.annotationStore.toEdits(), options)
+      if (result.errors.length) throw new Error(result.errors.map(item => item.message).join(' / '))
+      if (handle) await writePdf(handle, result.bytes)
+      else downloadPdf(result.bytes, name)
+      showStatus(`墨消しした PDF を保存しました（${result.stats.areas} か所・${result.stats.pages} ページ）。今開いているファイルは変わりません。`
+        + (result.stats.removedLinks ? `範囲に重なるリンクを ${result.stats.removedLinks} 件消しました。` : '')
+        + (result.unsupportedCharacters.length ? unsupportedCharactersMessage(result.unsupportedCharacters) : ''))
+      return true
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === 'AbortError') return false
+      throw reason
+    } finally { if (saveStarted) endSave() }
+  }, [beginSave, endSave, pool, prepareOutlineForSave, redactSession, showStatus])
 
   const saveFinalized = useCallback(async () => {
     commitFocusedField()
@@ -2414,7 +2520,9 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
           onSaveProtected={() => setPasswordSaveSession(activeRef.current)}
           onSaveAs={() => { menuActionsRef.current.push('save-as'); void saveDocument(true) }}
           onSaveFinalized={() => void saveFinalized()}
+          onSaveRedacted={() => void openRedactDialog()}
           onSaveRasterized={() => setRasterizeOpen(true)}
+          onSaveSlim={() => { slimResultRef.current = null; setSlimSession(active) }}
           onPrint={() => void printDocument()}
           onCloseTab={() => { if (active) void closeDocument(active.docId) }}
           onUndo={() => { active?.annotationStore.undo(); viewerRef.current?.clearSelection(); refreshTabs() }}
@@ -2803,6 +2911,12 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
         persistView()
         await openBuffer(copyToArrayBuffer(bytes), name, null, true, signal)
       }} />}
+      {redactSession && <RedactDialog
+        areas={redactSession.pageSizes.reduce((sum, _, index) => sum + redactSession.annotationStore.getPageAnnotationsSnapshot(index).filter(a => a.kind === 'redact').length, 0)}
+        pages={redactSession.pageSizes.filter((_, index) => redactSession.annotationStore.getPageAnnotationsSnapshot(index).some(a => a.kind === 'redact')).length}
+        onClose={() => setRedactSession(null)}
+        onSave={saveRedacted}
+      />}
       <RasterizeDialog
         open={rasterizeOpen && Boolean(active)}
         pageCount={active?.pageSizes.length ?? 0}
@@ -2810,6 +2924,13 @@ export default function App(/* @pages:start */{ onPublicationStopped }: { onPubl
         onEstimate={estimateRasterized}
         onSave={saveRasterized}
       />
+      {slimSession && active === slimSession && <SlimDialog
+        key={slimSession.docId}
+        open
+        onClose={closeSlim}
+        onCompute={computeSlim}
+        onSave={saveSlim}
+      />}
       {active && headerFooterOpen && <HeaderFooterDialog
         open
         docId={active.docId}

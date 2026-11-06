@@ -67,6 +67,7 @@ export type AnnotationKind =
   | 'line'
   | 'arrow'
   | 'square'
+  | 'redact'
   | 'circle'
   | 'highlight'
   | 'ink'
@@ -115,6 +116,8 @@ export interface AnnotationInfo {
 }
 
 export type AnnotationEdit =
+  | { kind: 'createRedact'; pageIndex: number; rect: Rect; quads: Quad[] | null }
+  | { kind: 'updateRedact'; objNum: number; pageIndex: number; rect: Rect; quads: Quad[] | null }
   | { kind: 'createCloud'; pageIndex: number; shape: 'square' | 'polygon'; rect: Rect; vertices: Point[] | null; color: RGB; borderWidth: number; interiorColor: RGB | null; opacity: number; cloudIntensity: CloudIntensity }
   | { kind: 'updateCloud'; objNum: number; pageIndex: number; shape: 'square' | 'polygon'; rect: Rect; vertices: Point[] | null; color: RGB; borderWidth: number; interiorColor: RGB | null; opacity: number; cloudIntensity: CloudIntensity }
   | { kind: 'createIssue'; pageIndex: number; rect: Rect; issue: Issue; text: string; color: RGB }
@@ -316,6 +319,7 @@ function annotationKind(
   if (type === 'FreeText') return intent === 'FreeTextCallout' ? 'callout' : 'freetext'
   if (type === 'Line') return lineEnding?.end === 'OpenArrow' ? 'arrow' : 'line'
   if (type === 'Square') return 'square'
+  if (type === 'Redact') return 'redact'
   if (type === 'Circle') return 'circle'
   if (type === 'Ink') {
     if (inkKind === 'Highlight') return 'highlight'
@@ -391,10 +395,12 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             ? { fontName: null, fontSize: null, color: null }
             : parseDefaultAppearance(da)
           const isTextMarkup = type === 'Highlight' || type === 'Underline' || type === 'StrikeOut'
+          const redactQuads = type === 'Redact' ? annotation.getQuadPoints() : null
           const editable = type === 'FreeText'
             || cloud || issue !== null
             || (measureKind !== null && measurement !== null)
             || type === 'Square'
+            || type === 'Redact'
             || type === 'Line'
             || type === 'Circle'
             || type === 'Ink'
@@ -458,7 +464,7 @@ export function listAnnotations(doc: PDFDocument, pageIndex: number): Annotation
             line: type === 'Line' && !measureKind ? annotation.getLine() as [Point, Point] : null,
             lineEnding,
             inkList: type === 'Ink' ? annotation.getInkList() : null,
-            quads: isTextMarkup ? annotation.getQuadPoints() : null,
+            quads: isTextMarkup ? annotation.getQuadPoints() : redactQuads?.length ? redactQuads : null,
             markedText: isTextMarkup ? annotation.getContents() : null,
             calloutPoint: calloutLine?.[0] ?? null,
             calloutLine,
@@ -710,6 +716,25 @@ function configureFreeText(
   } finally {
     updatedObject.destroy()
   }
+}
+
+export function configureRedact(annotation: PDFAnnotation, rect: Rect, quads: Quad[] | null, page: PDFPage): void {
+  annotation.setFlags(annotation.getFlags() | 4)
+  annotation.setRect(rect)
+  annotation.setQuadPoints(quads ?? [])
+  annotation.setColor([1, 0, 0])
+  const object = annotation.getObject()
+  try { object.put('IC', [0, 0, 0]) } finally { object.destroy() }
+  annotation.update()
+  // update() expands /Rect around QuadPoints. Keep the supplied rectangle and
+  // absolute appearance coordinates so normal saves round-trip the same range.
+  const dictionary = annotation.getObject(), appearance = dictionary.get('AP', 'N')
+  try {
+    const raw = mupdf.Rect.transform(rect, invertMatrix(page.getTransform()))
+    dictionary.put('Rect', raw)
+    if (!quads?.length) dictionary.delete('QuadPoints')
+    if (!appearance.isNull()) appearance.put('BBox', raw)
+  } finally { appearance.destroy(); dictionary.destroy() }
 }
 
 function configureSquare(
@@ -1626,6 +1651,16 @@ export function applyEdits(
         if (!annotation) throw new Error(`注釈オブジェクト ${edit.objNum} が見つかりません。`)
         page.deleteAnnotation(annotation)
         annotationIndexes.get(edit.pageIndex)!.delete(edit.objNum)
+        continue
+      }
+
+      if (edit.kind === 'createRedact' || edit.kind === 'updateRedact') {
+        const isNew = edit.kind === 'createRedact'
+        annotation = isNew ? page.createAnnotation('Redact') : lookupAnnotation(edit.pageIndex, edit.objNum)
+        if (!annotation) throw new Error(`注釈オブジェクト ${editObjectNumber(edit)} が見つかりません。`)
+        if (annotation.getType() !== 'Redact') throw new Error('更新対象は Redact ではありません。')
+        configureRedact(annotation, edit.rect, edit.quads, page)
+        if (isNew) result.created.push(objectNumber(annotation))
         continue
       }
 

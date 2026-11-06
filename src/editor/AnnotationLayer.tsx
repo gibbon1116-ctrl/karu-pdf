@@ -10,7 +10,7 @@ import { nearestCalloutEdgePoint, resizeSymbolRect, SYMBOL_OPTIONS, symbolRectFr
 import type { PageSize } from '../core/mupdfDoc'
 import { CSS_PX_PER_PT } from '../viewer/pageLayout'
 import { beginDragFrameMeasurement, TextEditor } from './TextEditor'
-import { AnnotationStore, isTextMarkup, type EditableAnnotation, type Kind } from './AnnotationStore'
+import { AnnotationStore, isAnchoredMarkup, type EditableAnnotation, type Kind } from './AnnotationStore'
 import type { FormatDefaults, FormatTool } from './formatDefaults'
 import { inkStrokePoints, mergeInkAnnotationId, simplifyPoints, type PreviousInkStroke } from './ink'
 import { TextSelectionQueue } from './textSelectionQueue'
@@ -32,7 +32,7 @@ export const ScaleRegionInteractionContext = createContext<{
   drawPage: number | null; dialogPage: number | null; complete(rect: Rect): void
 }>({ drawPage: null, dialogPage: null, complete: () => {} })
 
-export type EditorTool = 'select' | 'textSelect' | FormatTool
+export type EditorTool = 'select' | 'textSelect' | 'redactArea' | 'redactText' | Exclude<FormatTool, 'redact'>
 
 /** Display-only stable partition. Never mutate the store's creation/save order. */
 export function frontOrder<T extends { id: string }>(items: readonly T[], selected: ReadonlySet<string>): readonly T[] {
@@ -145,7 +145,7 @@ function SelectionHalo({ annotation: a, zoom, hollow, maskId, pageSize, pathPoin
 const TEXT_SELECTION_START = 'karu-pdf:text-selection-start'
 const MULTI_CLICK_MS = 500
 const MULTI_CLICK_DISTANCE = 4
-const TEXT_MARK_TOOLS = new Set<EditorTool>(['textSelect', 'textHighlight', 'underline', 'strikeout'])
+const TEXT_MARK_TOOLS = new Set<EditorTool>(['textSelect', 'textHighlight', 'underline', 'strikeout', 'redactText'])
 export const EditorToolChangeContext = createContext<(tool: EditorTool) => void>(() => undefined)
 export interface FixtureSampleInteraction {
   request(): Promise<CountFixtureSample | null>
@@ -272,7 +272,7 @@ function calloutArrowHead(line: [Point, Point], size: number): string {
 }
 
 function allResizeHandles(kind: Kind): boolean {
-  return kind === 'cloudSquare' || kind === 'square' || kind === 'circle' || kind === 'highlight' || kind === 'ink'
+  return kind === 'redact' || kind === 'cloudSquare' || kind === 'square' || kind === 'circle' || kind === 'highlight' || kind === 'ink'
 }
 
 function quadPoints(quad: Quad): string {
@@ -415,7 +415,7 @@ export function AnnotationLayer(props: Props) {
       if (!primaryAnnotation || primaryAnnotation.pageIndex !== props.pageIndex) return
       const ids = props.store.selectedIds().filter((id) => {
         const annotation = props.store.get(id)
-        return annotation?.pageIndex === props.pageIndex && !isTextMarkup(annotation.kind)
+        return annotation?.pageIndex === props.pageIndex && !isAnchoredMarkup(annotation)
       })
       if (ids.length === 0) return
       event.preventDefault()
@@ -512,7 +512,7 @@ export function AnnotationLayer(props: Props) {
     return () => window.removeEventListener('keydown', onKeyDown)
   })
 
-  const createMarkup = (kind: 'textHighlight' | 'underline' | 'strikeout', result = textSelection) => {
+  const createMarkup = (kind: 'textHighlight' | 'underline' | 'strikeout' | 'redact', result = textSelection) => {
     if (!result || result.quads.length === 0) return
     const format = props.formatDefaults[kind]
     const rect = selectionBounds(result.quads)
@@ -678,7 +678,7 @@ export function AnnotationLayer(props: Props) {
         drawTextSelection(result)
         if (result.quads.length === 0) return
         if (props.tool === 'textSelect') setTextSelection(result)
-        else if (props.tool === 'textHighlight' || props.tool === 'underline' || props.tool === 'strikeout') createMarkup(props.tool, result)
+        else if (props.tool === 'textHighlight' || props.tool === 'underline' || props.tool === 'strikeout' || props.tool === 'redactText') createMarkup(props.tool === 'redactText' ? 'redact' : props.tool, result)
       }).catch((reason) => props.onStatus(`文字を選択できませんでした: ${reason instanceof Error ? reason.message : String(reason)}`))
       return
     }
@@ -769,7 +769,7 @@ export function AnnotationLayer(props: Props) {
     if (operation.mode === 'shape' && operation.creationKind) {
       const rect = shapeRect(operation.start, operation.latest, (operation.creationKind === 'circle' || operation.creationKind === 'square') && operation.shift)
       if (rect[2] - rect[0] < 4 || rect[3] - rect[1] < 4) return
-      const format = props.formatDefaults[operation.creationKind as 'cloudSquare' | 'square' | 'circle']
+      const format = props.formatDefaults[operation.creationKind as 'cloudSquare' | 'square' | 'circle' | 'redact']
       const annotation = props.store.create({
         pageIndex: props.pageIndex,
         kind: operation.creationKind,
@@ -874,7 +874,7 @@ export function AnnotationLayer(props: Props) {
     const visible = normallyVisible || selectedOverlay
     const [x0, y0, x1, y1] = annotation.rect
     const handleSize = 8 / Math.max(0.01, props.zoom * CSS_PX_PER_PT)
-    const positions: Array<{ handle: ResizeHandle; x: number; y: number }> = annotation.count ? [] : allResizeHandles(annotation.kind)
+    const positions: Array<{ handle: ResizeHandle; x: number; y: number }> = annotation.count || isAnchoredMarkup(annotation) ? [] : allResizeHandles(annotation.kind)
       ? [
           { handle: 'nw', x: x0, y: y0 }, { handle: 'n', x: (x0 + x1) / 2, y: y0 }, { handle: 'ne', x: x1, y: y0 },
           { handle: 'e', x: x1, y: (y0 + y1) / 2 }, { handle: 'se', x: x1, y: y1 }, { handle: 's', x: (x0 + x1) / 2, y: y1 },
@@ -913,6 +913,9 @@ export function AnnotationLayer(props: Props) {
           <text x={(x0+x1)/2} y={(y0+y1)/2 + issueFontSize(annotation.issue.number, x1-x0)*.3} textAnchor="middle" fontFamily="KaruBIZUDGothic" fontSize={issueFontSize(annotation.issue.number, x1-x0)}>{annotation.issue.number}</text>
         </g>}
         {visible && annotation.measure && annotation.vertices && <MeasurementShape points={annotation.vertices} kind={annotation.measure.kind} text={annotation.quantity ? props.store.quantityText(annotation) : annotation.text} fontSize={annotation.fontSize} color={color(annotation.color)} width={annotation.borderWidth} opacity={annotation.opacity} dash={annotation.quantityDash} holes={annotation.quantity ? annotation.quantity.holes : annotation.measure.holes} holesId={`measurement-holes-${props.docId}-${annotation.id}`} showText={!annotation.quantity || props.store.showQuantityValues} showFill={!selectedOverlay} routeComposition={annotation.quantity?.extra?.length ? { count: annotation.quantity.extra.length + 1, title: routeMembers(annotation.quantity).map(e => { const f = props.store.getCountFixture(e.itemId); return (f ? fixtureLabelCode(f) : e.itemId) + (e.count === 1 ? '' : '×' + e.count) + conditionSuffix(e.cond) }).join('、') } : undefined} haloWidth={selected && annotation.opacity >= .99 ? annotation.borderWidth + 4 / Math.max(.01, props.zoom * CSS_PX_PER_PT) : undefined} />}
+        {visible && annotation.kind === 'redact' && (annotation.quads?.length
+          ? annotation.quads.map((quad, index) => <polygon key={index} className="annotation-redact" points={quadPoints(quad)} />)
+          : <rect className="annotation-redact" x={x0} y={y0} width={x1 - x0} height={y1 - y0} />)}
         {visible && annotation.kind === 'square' && <rect className="annotation-square" x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && annotation.kind === 'circle' && <ellipse className="annotation-shape" cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} rx={(x1 - x0) / 2} ry={(y1 - y0) / 2} fill={annotation.interiorColor ? color(annotation.interiorColor) : 'none'} stroke={annotation.borderColor ? color(annotation.borderColor) : 'none'} strokeWidth={annotation.borderColor ? annotation.borderWidth : 0} opacity={annotation.opacity} />}
         {visible && line && <>
@@ -1122,7 +1125,7 @@ export function AnnotationLayer(props: Props) {
             if (!props.store.isSelected(id)) props.store.selectOnly(id)
             const ids = props.store.selectedIds().filter(selectedId => !props.store.get(selectedId)?.legacyChange)
             props.onSelect(id)
-            if (annotation && (annotation.legacyChange || isTextMarkup(annotation.kind))) return
+            if (annotation && (annotation.legacyChange || isAnchoredMarkup(annotation))) return
             const pageIds = new Set(annotations.map((item) => item.id))
             const elements = ids.filter((selectedId) => pageIds.has(selectedId)).flatMap((selectedId) => {
               const element = svg.querySelector<SVGGElement>(`g[data-annotation-id="${selectedId}"]`)
@@ -1135,7 +1138,7 @@ export function AnnotationLayer(props: Props) {
           }
         } else {
           props.onSelect(null)
-          if (props.tool === 'textSelect' || props.tool === 'textHighlight' || props.tool === 'underline' || props.tool === 'strikeout') {
+          if (props.tool === 'textSelect' || props.tool === 'textHighlight' || props.tool === 'underline' || props.tool === 'strikeout' || props.tool === 'redactText') {
             selectionGenerationRef.current += 1
             setTextSelection(null)
             drawTextSelection(null)
@@ -1158,7 +1161,7 @@ export function AnnotationLayer(props: Props) {
             svg.setPointerCapture(event.pointerId)
             return
           }
-          const kind = props.tool === 'text' ? 'freetext' : props.tool
+          const kind = props.tool === 'text' ? 'freetext' : props.tool === 'redactArea' ? 'redact' : props.tool
           const mode = props.tool === 'text' ? 'text' : props.tool === 'callout' ? 'callout' : props.tool === 'symbol' || props.tool === 'count' ? 'symbol' : props.tool === 'line' || props.tool === 'arrow' ? 'line' : props.tool === 'highlight' || props.tool === 'ink' ? 'ink' : 'shape'
           const shown = kind === 'cloudSquare' ? draftCloudRef.current : mode === 'line' ? draftLineRef.current : mode === 'ink' ? draftInkRef.current : draftRectRef.current
           if (shown) shown.style.display = 'block'
@@ -1334,6 +1337,7 @@ export function AnnotationLayer(props: Props) {
     }}>
       <button type="button" onClick={copySelectedText}>コピー</button>
       <button type="button" onClick={() => createMarkup('textHighlight')}><ToolIcon tool="textHighlight" />ハイライト</button>
+      <button type="button" onClick={() => createMarkup('redact')}><ToolIcon tool="redactText" />墨消し</button>
       <button type="button" onClick={() => createMarkup('underline')}><ToolIcon tool="underline" />下線</button>
       <button type="button" onClick={() => createMarkup('strikeout')}><ToolIcon tool="strikeout" />取り消し線</button>
     </div>}

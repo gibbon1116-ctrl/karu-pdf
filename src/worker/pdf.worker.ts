@@ -1,4 +1,6 @@
 import { installWorkerExternalSendGuard } from '../security/externalSend'
+import { redactDocument } from '../core/redact'
+import { slimDocument } from '../core/slim'
 import { PdfPasswordError } from '../core/passwordAccess'
 import { detectDrawingInfo, readDocumentDrawingInfos } from '../core/drawingInfo'
 import { extractTextLines } from '../core/textExtract'
@@ -65,6 +67,7 @@ import type {
   GetHeaderFooterSettingsRequest,
   OpenRequest,
   PrepareOutputRequest,
+  RedactOutputRequest,
   RenderRequest,
   RenderSearchImageRequest,
   RenderCompareRequest,
@@ -124,6 +127,8 @@ type CoreRequest =
   | ApplyAndSaveRequest
   | ApplyEditsRequest
   | PrepareOutputRequest
+  | RedactOutputRequest
+  | import('./protocol').SlimOutputRequest
   | ApplyPageLayoutRequest
   | ApplyHeaderFooterRequest
   | RemoveHeaderFooterRequest
@@ -496,7 +501,7 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
     const document = entry.opened.document.asPDF()
     if (!document) throw new Error('PDF 文書ではありません。')
 
-    if (entry.opened.editRestriction && ['applyOutline', 'applyEdits', 'applyAndSave', 'applyPageLayout', 'applyHeaderFooter', 'removeHeaderFooter', 'extractPages', 'splitPages', 'beginRasterize'].includes(request.type)) assertEditablePdf(document)
+    if (entry.opened.editRestriction && ['applyOutline', 'applyEdits', 'applyAndSave', 'applyPageLayout', 'applyHeaderFooter', 'removeHeaderFooter', 'extractPages', 'splitPages', 'beginRasterize', 'redactOutput', 'slimOutput'].includes(request.type)) assertEditablePdf(document)
 
     if (request.type === 'getOutline') {
       post({ type: 'outlineRead', requestId: request.requestId, snapshot: readOutline(document) }); return
@@ -754,6 +759,50 @@ async function executeCoreRequest(request: CoreRequest): Promise<void> {
         unsupportedCharacters,
         errors,
       }, transfer)
+      return
+    }
+
+    if (request.type === 'redactOutput') {
+      const started = performance.now()
+      await loadFontsForEdits(request.edits)
+      const source = saveDocument(document, 'incremental').bytes
+      const output = openDocument(source, true, entry.opened.password)
+      try {
+        const copy = output.document.asPDF()
+        if (!copy) throw new Error('PDF 文書ではありません。')
+        assertEditablePdf(copy)
+        const applied = applyEdits(copy, request.edits, fontResources)
+        if (applied.errors.length) throw new Error(applied.errors.map(error => error.message).join(' / '))
+        const stats = redactDocument(copy, request.options)
+        // Full rewrite is mandatory: an incremental update retains removed data.
+        const buffer = copy.saveToBuffer('garbage=4,compress,compress-images,compress-fonts')
+        let bytes: ArrayBuffer
+        try { bytes = buffer.asUint8Array().slice().buffer as ArrayBuffer } finally { buffer.destroy() }
+        post({ type: 'redactOutputPrepared', requestId: request.requestId, bytes, stats,
+          ms: performance.now() - started, unsupportedCharacters: applied.unsupportedCharacters, errors: applied.errors,
+        }, [bytes])
+      } finally { output.document.destroy() }
+      return
+    }
+
+    if (request.type === 'slimOutput') {
+      const started = performance.now()
+      await loadFontsForEdits(request.edits)
+      const source = saveDocument(document, 'incremental').bytes
+      const output = prepareDocumentOutput(source, request.edits, fontResources, false, entry.opened.password)
+      const opened = openDocument(output.bytes, false, entry.opened.password)
+      try {
+        const copy = opened.document.asPDF()!
+        assertEditablePdf(copy)
+        const result = slimDocument(copy, request.options, (completed, total) => {
+          post({ type: 'slimProgress', requestId: request.requestId, completed, total })
+        })
+        const bytes = result.bytes.buffer as ArrayBuffer
+        post({ type: 'slimOutputPrepared', requestId: request.requestId, bytes,
+          sourceBytes: output.bytes.byteLength, stats: result.stats, ms: performance.now() - started,
+          unsupportedCharacters: output.applied.unsupportedCharacters, errors: output.applied.errors,
+        }, [bytes])
+      } finally { opened.document.destroy() }
       return
     }
 
@@ -1022,6 +1071,8 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     || message.type === 'applyAndSave'
     || message.type === 'applyEdits'
     || message.type === 'prepareOutput'
+    || message.type === 'slimOutput'
+    || message.type === 'redactOutput'
     || message.type === 'applyPageLayout'
     || message.type === 'applyHeaderFooter'
     || message.type === 'removeHeaderFooter'
