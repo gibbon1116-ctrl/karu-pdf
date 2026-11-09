@@ -1,5 +1,5 @@
 import { installWorkerExternalSendGuard } from '../security/externalSend'
-import { buildEndpointIndex, searchVectorMessage, probeVectorMatches, describeLocalMessage, type SymbolSearchMessage, type SymbolSearchResponse } from './symbolSearchMessages'
+import { buildEndpointIndex, searchVectorMessage, scoreVectorMessage, probeVectorMatches, describeLocalMessage, type SymbolSearchMessage, type SymbolSearchResponse } from './symbolSearchMessages'
 import { searchSymbol, verifyCandidates } from '../core/symbolSearch'
 import { resolveLocalLabels } from '../core/symbolGlyphs'
 
@@ -13,6 +13,13 @@ if (scope) scope.onmessage = (event: MessageEvent<SymbolSearchMessage>) => {
   try {
     if (busy) throw new Error('search already running')
     busy = true
+    if (message.type === 'vector-coverage') {
+      scope.postMessage({ type: 'progress', id: message.id, done: 0, total: 1 } satisfies SymbolSearchResponse)
+      const result = scoreVectorMessage(message)
+      scope.postMessage({ type: 'vector-coverage-result', id: message.id, ...result } satisfies SymbolSearchResponse,
+        [result.scores.buffer, result.centers.buffer])
+      return
+    }
     if(message.type==='local-labels'){
       if(message.labels.length>501||message.labels.some(l=>l.glyphs.length>6||l.glyphs.some(g=>g.mask.length!==560)))throw Error('局所添字の上限を超えました')
       scope.postMessage({type:'local-labels-resolved',id:message.id,labels:resolveLocalLabels(message.labels)} satisfies SymbolSearchResponse)

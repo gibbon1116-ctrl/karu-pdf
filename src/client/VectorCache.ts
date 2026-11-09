@@ -5,7 +5,7 @@ import type { Rect } from '../core/annotations'
 import type { SymbolLabel } from '../core/symbolLabels'
 import type { SnapIndex } from '../core/snap'
 import type { PdfWorkerPool } from './PdfWorkerPool'
-import type { EndpointMessage, VectorSearchMessage, SymbolSearchResponse, LocalDescribeMessage, LocalLabelMessage } from '../worker/symbolSearchMessages'
+import type { EndpointMessage, VectorSearchMessage, VectorCoverageMessage, SymbolSearchResponse, LocalDescribeMessage, LocalLabelMessage } from '../worker/symbolSearchMessages'
 
 export const SYMBOL_SEARCH_STALL_MS = 60_000
 export const VECTOR_CACHE_PAGES = 3
@@ -15,7 +15,7 @@ export const cancelled = () => new Error('cancelled')
 
 /** Disposable by default. Local search batches may supply one sequential Worker;
  * its caller must terminate it on completion/cancellation. No UI-thread matching. */
-export function vectorWorkerTask(message: VectorSearchMessage | EndpointMessage | LocalDescribeMessage | LocalLabelMessage, signal?: AbortSignal,
+export function vectorWorkerTask(message: VectorSearchMessage | VectorCoverageMessage | EndpointMessage | LocalDescribeMessage | LocalLabelMessage, signal?: AbortSignal,
   onProgress?: () => void, sequentialWorker?:Worker): Promise<SymbolSearchResponse> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(cancelled()); return }
@@ -49,6 +49,13 @@ export function vectorWorkerTask(message: VectorSearchMessage | EndpointMessage 
         worker.postMessage(message,[message.image.gray.buffer]);return
       }
       const segments = message.segments.slice()
+      if (message.type === 'vector-coverage') {
+        const sampleSegments = message.sampleSegments.slice(), sampleWidths = message.sampleWidths.slice()
+        const segmentWidths = message.segmentWidths?.slice()
+        worker.postMessage({ ...message, segments, sampleSegments, sampleWidths, segmentWidths },
+          [segments.buffer, sampleSegments.buffer, sampleWidths.buffer, ...(segmentWidths ? [segmentWidths.buffer] : [])])
+        return
+      }
       if (message.type === 'vector-search') {
         const sampleSegments = message.sampleSegments.slice()
         const sampleWidths = message.sampleWidths.slice()

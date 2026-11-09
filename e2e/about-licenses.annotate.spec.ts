@@ -7,7 +7,7 @@ test('版・法的告知・ソースの入手先と同じ配信元のライセ�
   const about = page.getByRole('dialog', { name: 'かるPDFについて' })
   const version = about.locator('p').filter({ hasText: /^版 / })
   await expect(version).toBeVisible()
-  await expect(version).toHaveText('版 1.14.1')
+  await expect(version).toHaveText('版 1.15.0')
   await expect(version).toHaveAttribute('title', /^(?:[a-f0-9]{40}|unknown)$/i)
   await expect(version).not.toContainText('（')
   await expect(about).toContainText('Copyright (C) 2026 gibbon1116-ctrl')

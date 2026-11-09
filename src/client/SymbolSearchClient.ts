@@ -1,7 +1,8 @@
-import { VectorCache, vectorWorkerTask, SYMBOL_SEARCH_STALL_MS } from './VectorCache'
+import { VectorCache, vectorWorkerTask, SYMBOL_SEARCH_STALL_MS, type CachedVectorPage } from './VectorCache'
+import { mergeSupplementCandidates, type SymbolSearchDiagnostics } from '../core/symbolSearchDiagnostics'
 import { paintBytes } from '../core/vectorPaint'
 import type { VectorSearchResult, LocalDescribedBody, LocalShape } from '../worker/symbolSearchMessages'
-import { assignSymbolLabels, normalizeSymbolLabel, UNKNOWN_SYMBOL_LABEL, type SymbolLabelValue } from '../core/symbolLabels'
+import { assignSymbolLabels, normalizeSymbolLabel, UNKNOWN_SYMBOL_LABEL, type SymbolLabelValue, type SymbolLabel } from '../core/symbolLabels'
 import { sampleBoxForMatch, unionRect } from '../core/symbolSampleBox'
 import { compareLocalLabel } from '../core/symbolGlyphs'
 import { planLocalImageTiles, compareLocalBody, type LocalBody } from '../core/symbolLocalImage'
@@ -19,9 +20,11 @@ export interface SymbolSearchRequest {
   docId: string; sampleDocId?: string; pageIndex: number; sampleRect: Rect; samplePageIndex: number
   searchRect?: Rect; options?: Partial<SymbolSearchOptions>; verify?: boolean; splitG?: boolean; shapeCheck?: boolean
   sampleLines?: { segments: Float32Array; widths: Float32Array }
+  supplement?: 'auto' | 'always' | 'off'; includeRejected?: boolean
 }
 export interface SymbolCandidate { pageIndex: number; rect: Rect; center: Point; score: number; rotation: number
   sampleBox?: Rect
+  scale?: number; supplement?: 'image'; vectorScore?: number; rejected?: 'structure'; source?: 'primary' | 'secondary' | 'ring' | 'exhaustive'
   confidence?: 'high' | 'check'; imageScore?: number; extra?: number; around?: number; aroundCheck?: boolean; label?: string; gc?: boolean
   structureScore?:number;fillScore?:number;structureCheck?:boolean;shape?:SymbolShapeDecision }
 // Image similarity only grades line matches; it never removes them. On real drawings the
@@ -42,7 +45,9 @@ export interface SymbolSearchMetrics {
   localMs?: number; localPeakBytes?: number
   shapeMs?: number; shapeDifferent?: number; shapeUnknown?: number
 }
-export interface SymbolSearchResult { candidates: SymbolCandidate[]; metrics: SymbolSearchMetrics; method: 'vector' | 'image'; vectorDetails?: VectorSearchResult; sampleLabel: string; sampleGc: boolean }
+export interface SymbolSearchResult { candidates: SymbolCandidate[]; metrics: SymbolSearchMetrics; method: 'vector' | 'image'; vectorDetails?: VectorSearchResult; sampleLabel: string; sampleGc: boolean; supplemented: boolean; diagnostics: SymbolSearchDiagnostics
+  /** Structure-rejected candidates (confidence check), kept apart so `candidates` stays the accepted set. */
+  rejectedCandidates: SymbolCandidate[] }
 export interface SymbolSearchTestHooks {
   symbolSearch(request: SymbolSearchRequest): Promise<SymbolSearchResult>
   symbolSearchCancelTest(request: SymbolSearchRequest, afterMs: number): Promise<{ cancelled: boolean; settledMs: number }>
@@ -110,6 +115,10 @@ export class SymbolSearchClient {
       }
       validRect(rect)
       let vector: VectorSearchResult | undefined
+      let coveragePage: CachedVectorPage | undefined, targetLabels: SymbolLabel[] = []
+      let rejectedCandidates: SymbolCandidate[] = [], supplementCandidates: SymbolCandidate[] = []
+      let supplemented = false, supplementStarted = 0, localImageExcluded = 0
+      const diagnostics: SymbolSearchDiagnostics = { pageIndex: request.pageIndex, method: 'image', ms: { total: 0 } }
       let sampleValue: SymbolLabelValue = { label: '', gc: false }, labelValues: SymbolLabelValue[] = []
       let vectorBytes = 0, vectorFinished = 0
       let localTiles=0,localPeakBytes=0,localMs=0
@@ -144,20 +153,35 @@ export class SymbolSearchClient {
         localMs+=performance.now()-began;return descriptions
       }
       const finishVector = (candidates: Array<SymbolCandidate & { angle: number }>, verification?: { renderScale: number; requestedRenderScale: number; pagePixels: number; renderMs: number; verifyMs: number; bytes: number }) => {
+        check()
         const result = vector!, searchMs = result.stats.ms
         const body = result.template.rect, sampleBox = unionRect(request.sampleRect, body)
+        const stats = result.stats
+        Object.assign(diagnostics, {
+          method: supplemented ? 'vector+image' : 'vector', extractedSegments: coveragePage?.segmentCount,
+          widthFilteredSegments: stats.widthFilteredSegments,
+          template: { inRect: result.template.total, used: result.template.segments,
+            removedWiring: result.template.removed.wiring, removedOther: result.template.removed.other,
+            removedThin: result.template.removed.thin, manual: !!request.sampleLines },
+          anchors: stats.anchors, ringAnchor: stats.ringAnchor, placements: stats.placements,
+          geometrySites: stats.geometrySites, structureExcluded: stats.structureExcludedSites,
+          otherExcluded: { region: stats.regionExcluded, rotation: stats.rotationExcluded, limit: stats.limited, localImage: localImageExcluded },
+          duplicates: stats.duplicates, final: candidates.length,
+          supplement: { ...diagnostics.supplement, ...(stats.exhaustiveRan ? { exhaustive: { found: stats.exhaustiveFound } } : {}) },
+          ms: { total: performance.now() - started, vector: searchMs, ...(supplemented ? { supplement: performance.now() - supplementStarted } : {}) },
+        })
         run.done = true; clearInterval(watchdog); this.running = null
         if (this.worker) {
           this.worker.onmessage = null; this.worker.onerror = null; this.worker.onmessageerror = null
           // Search-scoped font models and glyph buffers do not survive a search.
           if(localTiles){this.worker.terminate();this.worker=null}
         }
-        resolve({ method: 'vector', vectorDetails: result, ...{ sampleLabel: sampleValue.label, sampleGc: sampleValue.gc },
-          candidates: candidates.map((c, i) => {
+        resolve({ method: 'vector', supplemented, diagnostics, vectorDetails: result, ...{ sampleLabel: sampleValue.label, sampleGc: sampleValue.gc },
+          candidates: [...candidates.map((c, i) => {
             const aroundCheck = (c.around ?? 0) - result.template.sampleAround > .3
             const shape=shapeDecisions?.[i]
-            return { ...c, sampleBox: sampleBoxForMatch(sampleBox, body, c), ...labelValues[i], ...(shape?{shape}:{}), aroundCheck, confidence: aroundCheck || c.structureCheck || (shape&&shape.decision!=='same') || sampleValue.label===UNKNOWN_SYMBOL_LABEL || labelValues[i]?.label===UNKNOWN_SYMBOL_LABEL ? 'check' : c.confidence }
-          }),
+            return { ...c, sampleBox: sampleBoxForMatch(sampleBox, body, c), ...labelValues[i], ...(shape?{shape}:{}), aroundCheck, confidence: c.source === 'exhaustive' || c.scale !== undefined || c.supplement || c.rejected || aroundCheck || c.structureCheck || (shape&&shape.decision!=='same') || sampleValue.label===UNKNOWN_SYMBOL_LABEL || labelValues[i]?.label===UNKNOWN_SYMBOL_LABEL ? 'check' as const : c.confidence }
+          }), ...supplementCandidates], rejectedCandidates,
           metrics: { renderScale: verification?.renderScale ?? 0, requestedRenderScale: verification?.requestedRenderScale ?? 0,
             scaleReduced: !!verification && verification.renderScale < verification.requestedRenderScale, renderTiles: localTiles+(verification ? 2 : 0),
             pagePixels: verification?.pagePixels ?? 0, renderMs: Math.max(0, vectorFinished-started-searchMs) + (verification?.renderMs ?? 0),
@@ -180,6 +204,7 @@ export class SymbolSearchClient {
       if (samplePage.kind === 'vector' || samplePage.kind === 'mixed') {
         const target = samePage ? samplePage : await cache.get(request.pageIndex, this.pool, run.abort.signal, true)
         check(); lastHeard = performance.now()
+        diagnostics.pageKind = target.kind
         if (target.kind === 'vector' || target.kind === 'mixed') {
           onProgress?.('vector', 0, 1)
           const response = await vectorWorkerTask({ type: 'vector-search', id: run.id, segments: target.segments,
@@ -191,25 +216,31 @@ export class SymbolSearchClient {
             paint:target.paint,samplePaint:samplePage.paint,
             ...(request.shapeCheck?{features:{complete:!target.truncated&&target.kind==='vector',sampleComplete:!samplePage.truncated&&samplePage.kind==='vector',samePage}}:{}),
             options: { threshold: request.options?.threshold ?? .85, rotations: request.options?.rotations ?? false,
-              maxResults: request.options?.maxResults ?? 500, region: rect } }, run.abort.signal,
+              maxResults: request.options?.maxResults ?? 500, region: rect, exhaustiveWhenEmpty: request.supplement === 'auto' || request.supplement === 'always' } }, run.abort.signal,
             () => { lastHeard = performance.now(); onProgress?.('vector', 0, 1) })
           check(); lastHeard = performance.now()
           if (response.type !== 'vector-result') throw Error('Invalid vector response')
           if (response.result) {
             vector = response.result; vectorFinished = performance.now()
+            coveragePage = target
             const probes=request.shapeCheck?response.probes:undefined
             let sampleShape:LocalShape|undefined,matchShapes:Array<LocalShape|undefined>|undefined
-            const targetLabels = await cache.getLabels(request.pageIndex, this.pool, run.abort.signal)
+            targetLabels = await cache.getLabels(request.pageIndex, this.pool, run.abort.signal)
             check(); lastHeard = performance.now()
             const sampleLabels = samePage ? targetLabels : await sampleCache.getLabels(request.samplePageIndex, this.pool, run.abort.signal)
             check(); lastHeard = performance.now()
             const body = vector.template.rect, radius = Math.max(body[2] - body[0], body[3] - body[1])
             const sampleBox = unionRect(request.sampleRect, body)
             labelValues = assignSymbolLabels(targetLabels, vector.matches.map(m => ({ rect: m.rect, box: sampleBoxForMatch(sampleBox, body, m) })), radius, request.splitG ?? true)
+            const rejected = vector.rejected.slice(0, 500)
+            const rejectedLabels = assignSymbolLabels(targetLabels, rejected.map(m => ({ rect: m.rect, box: sampleBoxForMatch(sampleBox, body, m) })), radius, request.splitG ?? true)
+            rejectedCandidates = rejected.map((m, i) => ({ ...m, pageIndex: request.pageIndex, rotation: m.angle,
+              sampleBox: sampleBoxForMatch(sampleBox, body, m), ...rejectedLabels[i], rejected: 'structure', confidence: 'check' }))
             // Use all bodies on the sample page as competitors, so a neighboring
             // body's overlapping label cannot be stolen by the selected sample.
             const sampleBodies = samePage ? vector.matches.filter(m => Math.hypot(m.center[0] - (body[0] + body[2]) / 2, m.center[1] - (body[1] + body[3]) / 2) > .01) : []
             sampleValue = assignSymbolLabels(sampleLabels, [{ rect: body, box: sampleBox }, ...sampleBodies.map(m => ({ rect: m.rect, box: sampleBoxForMatch(sampleBox, body, m) }))], radius, request.splitG ?? true)[0]
+            // Keep describing the sample even with zero matches: its image-read label initializes the label filter.
             if(samplePage.paint&&(samplePage.paint.truncated||target.paint?.truncated||!sampleValue.label)){
               const scale=Math.min(8,128/Math.max(body[2]-body[0],body[3]-body[1]))
               const [sample]=await describeLocal(sampleDocId,request.samplePageIndex,[body],scale,probes?[probes.sample]:undefined)
@@ -255,6 +286,7 @@ export class SymbolSearchClient {
                   }
                   values.push(value)
                 })
+                localImageExcluded = keep.filter(value => !value).length
                 vector.matches=vector.matches.filter((_,i)=>keep[i]);labelValues=values.filter((_,i)=>keep[i])
                 if(localDifferent)localDifferent=localDifferent.filter((_,i)=>keep[i])
                 if(matchShapes)matchShapes=matchShapes.filter((_,i)=>keep[i])
@@ -263,7 +295,7 @@ export class SymbolSearchClient {
                 labelValues=labelValues.map(v=>v.label||v.gc?v:{label:UNKNOWN_SYMBOL_LABEL,gc:false})
               }
               vectorFinished=performance.now()
-            }else if(request.shapeCheck){
+            }else if(vector.matches.length > 0 && request.shapeCheck){
               const scale=Math.min(8,128/Math.max(body[2]-body[0],body[3]-body[1]))
               const [sample]=await describeLocal(sampleDocId,request.samplePageIndex,[body],scale,probes?[probes.sample]:undefined)
               const descriptions=await describeLocal(request.docId,request.pageIndex,vector.matches.map(m=>m.rect),scale,probes?.matches)
@@ -288,11 +320,13 @@ export class SymbolSearchClient {
             }
             vectorBytes = target.segments.byteLength + target.widths.byteLength + samplePage.segments.byteLength + samplePage.widths.byteLength
               +paintBytes(target.paint)+(samplePage.paint===target.paint?0:paintBytes(samplePage.paint))
-            if (request.verify === false || vector.matches.length === 0) {
+            const needsSupplement = vector.matches.length === 0 && (request.supplement === 'auto' || request.supplement === 'always')
+            if (!needsSupplement && (request.verify === false || vector.matches.length === 0)) {
               finishVector(vector.matches.map(m => ({ ...m, pageIndex: request.pageIndex, rotation: m.angle,
                 confidence: m.extra <= .4 ? 'high' : 'check' })))
               return
             }
+            if (needsSupplement) { supplemented = true; supplementStarted = performance.now() }
           }
         }
       }
@@ -325,7 +359,7 @@ export class SymbolSearchClient {
       const page = await render(request.docId, request.pageIndex, searchDevice)
       const template = await render(sampleDocId, request.samplePageIndex, sampleDevice)
       check()
-      if (vector) {
+      if (vector && !supplemented) {
         const result = vector, verifyRenderMs = performance.now() - renderStarted
         // Bound rotated/prepared buffers and local integral tables; excludes JS/GC/GPU overhead.
         const side = Math.ceil(Math.hypot(template.width, template.height))
@@ -372,9 +406,46 @@ export class SymbolSearchClient {
           const rect: Rect = [x, y, x + w, y + h]
           return { pageIndex: request.pageIndex, rect, sampleBox: [...rect], center: [x + w / 2, y + h / 2], score: match.score, rotation: match.rotation, label: '', gc: false }
         })
+        if (vector && supplemented) {
+          void (async () => {
+            check()
+            const result = vector!, body = result.template.rect, sampleBox = unionRect(request.sampleRect, body)
+            const top = candidates.sort((a, b) => b.score - a.score).slice(0, 500)
+            const coverage = top.length ? await vectorWorkerTask({ type: 'vector-coverage', id: run.id,
+              segments: coveragePage!.segments, segmentWidths: coveragePage!.widths,
+              sampleSegments: samplePage.segments, sampleWidths: samplePage.widths, sampleRect: request.sampleRect,
+              sampleLines: request.sampleLines, targets: top.map(c => ({ center: c.center, angle: c.rotation })) },
+              run.abort.signal, () => { lastHeard = performance.now() }, localWorker()) : undefined
+            check(); lastHeard = performance.now()
+            if (coverage && (coverage.type !== 'vector-coverage-result' || coverage.scores.length !== top.length || coverage.centers.length !== top.length * 2)) throw Error('Invalid vector coverage response')
+            let vectorConfirmed = 0
+            const extra = top.map((c, i): SymbolCandidate => {
+              const vectorScore = coverage?.type === 'vector-coverage-result' ? coverage.scores[i] : 0
+              if (vectorScore >= (request.options?.threshold ?? .85) && coverage?.type === 'vector-coverage-result') {
+                vectorConfirmed++
+                const center: Point = [coverage.centers[i * 2], coverage.centers[i * 2 + 1]]
+                const dx = center[0] - c.center[0], dy = center[1] - c.center[1]
+                c = { ...c, center, rect: [c.rect[0] + dx, c.rect[1] + dy, c.rect[2] + dx, c.rect[3] + dy] }
+              }
+              return { ...c, sampleBox: sampleBoxForMatch(sampleBox, body, { ...c, angle: c.rotation }),
+                supplement: 'image', vectorScore, confidence: 'check' }
+            })
+            const merged = mergeSupplementCandidates(result.matches, extra, Math.min(body[2] - body[0], body[3] - body[1]) / 2)
+            const labels = assignSymbolLabels(targetLabels, merged.added.map(c => ({ rect: c.rect, box: c.sampleBox })),
+              Math.max(body[2] - body[0], body[3] - body[1]), request.splitG ?? true)
+            supplementCandidates = merged.added.map((c, i) => ({ ...c, ...labels[i] }))
+            diagnostics.supplement = { image: { candidates: top.length, vectorConfirmed, duplicates: merged.duplicates, added: supplementCandidates.length } }
+            check()
+            finishVector([], { renderScale, requestedRenderScale, pagePixels: page.width * page.height,
+              renderMs: performance.now() - renderStarted - response.stats.workerMs,
+              verifyMs: response.stats.workerMs + (coverage?.type === 'vector-coverage-result' ? coverage.ms : 0), bytes: response.memory.bytes })
+          })().catch(error => fail(error instanceof Error ? error : new Error(String(error))))
+          return
+        }
+        diagnostics.ms.total = performance.now() - started
         run.done = true; clearInterval(watchdog); this.running = null
         worker.onmessage = null; worker.onerror = null; worker.onmessageerror = null
-        resolve({ method: 'image', candidates, sampleLabel: '', sampleGc: false, metrics: { renderScale, requestedRenderScale, scaleReduced: renderScale < requestedRenderScale, renderTiles,
+        resolve({ method: 'image', supplemented: false, diagnostics, candidates, rejectedCandidates: [], sampleLabel: '', sampleGc: false, metrics: { renderScale, requestedRenderScale, scaleReduced: renderScale < requestedRenderScale, renderTiles,
           pagePixels: response.memory.pagePixels, renderMs, transferMs: Math.max(0, performance.now() - transferred - response.stats.workerMs),
           searchMs: response.stats.workerMs, coarseCandidates: response.stats.coarseCandidates, refined: response.stats.refined, totalMs: performance.now() - started,
           estimatedWorkerBytes: response.memory.bytes, levels: response.stats.levels, coarseMs: response.stats.ms.coarse, refineMs: response.stats.ms.refine,

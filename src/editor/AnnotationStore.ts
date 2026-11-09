@@ -40,6 +40,7 @@ export type DrawingFilterReleaseReason = '数量拾いの印を数えるため' 
 export interface SymbolSearchCandidate {
   id: string; pageIndex: number; rect: Rect; center: Point; score: number
   sampleBox?: Rect
+  scale?: number; supplement?: 'image'; vectorScore?: number; rejected?: 'structure'; source?: 'primary' | 'secondary' | 'ring' | 'exhaustive'
   state: 'pending' | 'chosen' | 'counted'
   confidence?: 'high' | 'check'; imageScore?: number; extra?: number
   label: string; gc: boolean; around?: number; aroundCheck?: boolean
@@ -421,6 +422,7 @@ export class AnnotationStore {
   symbolGcFilter: 'all' | 'with' | 'without' = 'all'
   symbolShapeFilter: 'same' | 'all' = 'all'
   symbolOtherFilter: 'hide' | 'show' = 'hide'
+  symbolRejectedFilter: 'hide' | 'show' = 'hide'
   setSymbolSearchArea(area: { pageIndex: number; rect: Rect } | null): void {
     const current = this.symbolSearchArea
     if (current === null && area === null) return
@@ -434,6 +436,7 @@ export class AnnotationStore {
       && (this.symbolGcFilter === 'all' || (this.symbolGcFilter === 'with' ? c.gc : !c.gc))
       && (this.symbolShapeFilter === 'all' || c.shape?.decision !== 'different')
       && (this.symbolOtherFilter === 'show' || !c.otherFixture)
+      && (this.symbolRejectedFilter === 'show' || !c.rejected)
   }
   get visibleSymbolCandidates(): SymbolSearchCandidate[] | null { return this.symbolCandidates?.filter(c => this.isSymbolCandidateVisible(c)) ?? null }
   setSymbolCandidateFilters(labels: string[] | null, gc: 'all' | 'with' | 'without' = this.symbolGcFilter): void {
@@ -449,6 +452,13 @@ export class AnnotationStore {
     }
     this.notifyUi()
   }
+  setSymbolRejectedFilter(value: 'hide' | 'show'): void {
+    this.symbolRejectedFilter = value
+    if (value === 'hide') {
+      for (const c of this.symbolCandidates ?? []) if (c.rejected && c.state === 'chosen') c.state = 'pending'
+    }
+    this.notifyUi()
+  }
   symbolOtherFixtureLabel(fixtureId: string): string {
     const fixture = this.getCountFixture(fixtureId)
     return fixture ? fixtureCode(fixture) + ' ' + fixture.name : fixtureId
@@ -458,10 +468,11 @@ export class AnnotationStore {
 
   clearSymbolCandidates(): void {
     if (this.symbolCandidates === null && this.symbolSearchArea === null && this.symbolShapeFilter === 'all' && this.symbolOtherFilter === 'hide'
-      && this.symbolCandidateFocus === null) return
+      && (!('symbolRejectedFilter' in this) || this.symbolRejectedFilter === 'hide') && this.symbolCandidateFocus === null) return
     this.symbolCandidates = null; this.symbolSearchArea = null; this.symbolCandidateFixture = null; this.symbolCandidateRadius = 0
     this.symbolCandidateFocus = null
     this.symbolLabelFilter = null; this.symbolGcFilter = 'all'; this.symbolShapeFilter = 'all'; this.symbolOtherFilter = 'hide'
+    if ('symbolRejectedFilter' in this) this.symbolRejectedFilter = 'hide'
     this.notifyUi()
   }
   beginSymbolCandidates(fixtureId: string, sampleRect: Rect): void {
@@ -469,11 +480,13 @@ export class AnnotationStore {
     this.symbolCandidateFixture = fixtureId
     this.symbolCandidateRadius = Math.min(sampleRect[2] - sampleRect[0], sampleRect[3] - sampleRect[1]) / 2
     this.symbolLabelFilter = null; this.symbolGcFilter = 'all'; this.symbolShapeFilter = 'all'; this.symbolOtherFilter = 'hide'
+    if ('symbolRejectedFilter' in this) this.symbolRejectedFilter = 'hide'
     this.symbolCandidates = []; this.notifyUi()
   }
-  appendSymbolCandidates(candidates: Array<{ pageIndex: number; rect: Rect; sampleBox?: Rect; center: Point; score: number; confidence?: 'high' | 'check'; imageScore?: number; extra?: number; label?: string; gc?: boolean; around?: number; aroundCheck?: boolean; shape?: SymbolShapeDecision }>): void {
+  appendSymbolCandidates(candidates: Array<{ pageIndex: number; rect: Rect; sampleBox?: Rect; center: Point; score: number; confidence?: 'high' | 'check'; imageScore?: number; extra?: number; label?: string; gc?: boolean; around?: number; aroundCheck?: boolean; shape?: SymbolShapeDecision; scale?: number; supplement?: 'image'; vectorScore?: number; rejected?: 'structure'; source?: 'primary' | 'secondary' | 'ring' | 'exhaustive' }>): void {
     if (!this.symbolCandidates || this.symbolCandidateFixture !== this.selectedFixtureId) return
     for (const c of candidates) this.symbolCandidates.push({ ...c, label: c.label ?? '', gc: c.gc ?? false, rect: [...c.rect], center: [...c.center],
+      confidence: c.source === 'exhaustive' || c.scale !== undefined || c.supplement || c.rejected ? 'check' : c.confidence,
       ...(c.sampleBox ? { sampleBox: [...c.sampleBox] as Rect } : {}),
       shape: c.shape ? { decision: c.shape.decision, differences: [...c.shape.differences], unknown: [...c.shape.unknown] } : undefined,
       id: crypto.randomUUID(), state: 'pending' })

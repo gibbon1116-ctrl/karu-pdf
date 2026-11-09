@@ -7,6 +7,7 @@ import type { SymbolSearchClient } from '../client/SymbolSearchClient'
 import type { DocumentSession } from './documentModel'
 import { symbolLabelDisplay, UNKNOWN_SYMBOL_LABEL } from '../core/symbolLabels'
 import { defaultVectorTolerance } from '../core/vectorSymbolSearch'
+import { zeroResultReason, type SymbolSearchDiagnostics } from '../core/symbolSearchDiagnostics'
 import SymbolCandidateReview from './SymbolCandidateReview'
 
 import type { SymbolSearchSelection } from './symbolSearchContext'
@@ -45,6 +46,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('')
   const [progress, setProgress] = useState({ page: 0, total: 1, stage: '描画中', fraction: 0 })
   const [methods, setMethods] = useState<Record<number, 'vector' | 'image'>>({})
+  const [diagnostics, setDiagnostics] = useState<Record<number, SymbolSearchDiagnostics>>({})
   const [templateSummary, setTemplateSummary] = useState<{ segments: number; removed: number } | null>(null)
   const [vectorSource, setVectorSource] = useState<{
     segments: Float32Array; widths: Float32Array; total: number
@@ -71,7 +73,8 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
   const labelCounts = new Map<string, number>()
   // Count only candidates the shape and other-fixture filters can show, so a label never offers hidden marks.
   for (const c of store.symbolCandidates ?? []) if ((store.symbolShapeFilter === 'all' || c.shape?.decision !== 'different')
-    && (store.symbolOtherFilter === 'show' || !c.otherFixture)) labelCounts.set(c.label, (labelCounts.get(c.label) ?? 0) + 1)
+    && (store.symbolOtherFilter === 'show' || !c.otherFixture)
+    && (store.symbolRejectedFilter === 'show' || !c.rejected)) labelCounts.set(c.label, (labelCounts.get(c.label) ?? 0) + 1)
   const labelGroups = [...labelCounts].sort((a, b) => !a[0] ? 1 : !b[0] ? -1 : b[1] - a[1] || a[0].localeCompare(b[0]))
   const shapeCompared = store.symbolCandidates?.some(c => c.shape !== undefined) ?? false
   const otherCandidates = store.symbolCandidates?.filter(c => c.otherFixture) ?? []
@@ -111,8 +114,14 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
     for (const c of store.visibleSymbolCandidates ?? []) counts.set(c.pageIndex, (counts.get(c.pageIndex) ?? 0) + 1)
     return completedPages.map(page => [page, counts.get(page) ?? 0] as const)
   }, [store, version, completedPages])
+  const pageZeroReason = (page: number) => {
+    const d = diagnostics[page]
+    if (!d) return null
+    const all = store.symbolCandidates?.filter(c => c.pageIndex === page) ?? []
+    return zeroResultReason(d, { total: all.length, visible: candidates?.filter(c => c.pageIndex === page).length ?? 0, rejected: all.filter(c => c.rejected).length })
+  }
   const stop = () => { generation.current++; task.current?.cancel(); task.current = null; setBusy(false) }
-  const invalidate = () => { stop(); store.clearSymbolCandidates(); setCompletedPages([]); setMethods({}); setTemplateSummary(null); setMessage('条件を変えました。「探す」を押してください'); setError('') }
+  const invalidate = () => { stop(); store.clearSymbolCandidates(); setCompletedPages([]); setMethods({}); setDiagnostics({}); setTemplateSummary(null); setMessage('条件を変えました。「探す」を押してください'); setError('') }
   useLayoutEffect(() => {
     alive.current = true
     // Mount only during explicit search, outside the scrolling surface. No ordinary-view observer.
@@ -232,11 +241,13 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
       if (alive.current) setCapturingArea(false)
     }
   }
-  const search = async () => {
+  const search = async (retryPage?: number) => {
     if (capturingAreaRef.current) return
     let pages: number[], searchRect: Rect | undefined
     try {
-      if (scope === 'area') {
+      if (retryPage !== undefined) {
+        pages = [retryPage]
+      } else if (scope === 'area') {
         if (!area) throw new Error('範囲を囲んでください')
         if (area.rect[2] - area.rect[0] < rect[2] - rect[0] || area.rect[3] - area.rect[1] < rect[3] - rect[1])
           throw new Error('範囲が見本より小さいため探せません。広く囲んでください')
@@ -250,9 +261,12 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
     const run = generation.current
     const current = () => alive.current && generation.current === run && store.selectedFixtureId === fixtureId
     setReviewOpen(false); setReviewGeneration(value => value + 1)
-    store.beginSymbolCandidates(fixtureId, rect); setBusy(true); setMessage(''); setError(''); setCompletedPages([]); setSearchPageCount(pages.length); setTemplateSummary(null)
-    store.setSymbolCandidateFilters([''], 'all')
-    let initializedLabels = false
+    if (retryPage === undefined) {
+      store.beginSymbolCandidates(fixtureId, rect); setCompletedPages([]); setSearchPageCount(pages.length); setTemplateSummary(null)
+      setMethods({}); setDiagnostics({}); store.setSymbolCandidateFilters([''], 'all')
+    }
+    setBusy(true); setMessage(''); setError('')
+    let initializedLabels = retryPage !== undefined
     setProgress({ page: 1, total: pages.length, stage: '描画中', fraction: 0 })
     try {
       if (!client.current) {
@@ -269,6 +283,7 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
         await store.ensurePageLoaded(pageIndex, () => pool.listAnnotations(session.docId, pageIndex))
         if (!current()) return
         const next = client.current.search({ docId: session.docId, pageIndex, samplePageIndex: sample.pageIndex, sampleRect: rect, verify: true, shapeCheck: true, splitG: true,
+          supplement: pages.length === 1 ? 'auto' : 'off',
           ...(sampleSession !== session ? { sampleDocId: sampleSession.docId } : {}),
           ...(sampleLines ? { sampleLines } : {}),
           ...(searchRect ? { searchRect } : {}),
@@ -282,7 +297,8 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
         const template = result.vectorDetails?.template
         if (template?.cleaned && !sampleLines) setTemplateSummary({ segments: template.segments, removed: template.removed.wiring + template.removed.other + template.removed.thin })
         if (result.method === 'vector' && !initializedLabels) { store.setSymbolCandidateFilters(result.sampleLabel===UNKNOWN_SYMBOL_LABEL?null:[result.sampleLabel]); initializedLabels = true }
-        setMethods(methods => ({ ...methods, [pageIndex]: result.method })); task.current = null; store.appendSymbolCandidates(result.candidates); setCompletedPages(done => [...done, pageIndex])
+        setMethods(methods => ({ ...methods, [pageIndex]: result.method })); setDiagnostics(previous => ({ ...previous, [pageIndex]: result.diagnostics }))
+        task.current = null; store.appendSymbolCandidates([...result.candidates, ...result.rejectedCandidates]); setCompletedPages(done => done.includes(pageIndex) ? done : [...done, pageIndex])
       }
       if (current()) { setProgress(p => ({ ...p, fraction: 1 })); setMessage('検索が終わりました。候補を確認して選んでください') }
     } catch (reason) { if (current()) setError(`検索できませんでした: ${(reason as Error).message}`) }
@@ -356,14 +372,51 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
         onChange={e => store.setSymbolCandidateFilters(store.symbolLabelFilter, e.target.value as 'all' | 'with' | 'without')}>
         <option value="all">すべて</option><option value="with">G あり</option><option value="without">G なし</option>
       </select></label>
-      {searchPageCount === 1 && completedPages.length > 0 && <p>{methods[completedPages[0]] === 'vector' ? '線の情報で探しました' : '画像で探しました（線の情報が無いページ）'}</p>}
-      {searchPageCount > 1 && <div className="symbol-search-pages">{pageCounts.map(([page, count]) => <button key={page} type="button" onClick={() => onPage(page)}>p.{page + 1} {methods[page] === 'vector' ? '線で探しました' : '画像で探しました（線の情報が無いページ）'} {count} 件{confidenceSummary(candidates.filter(c => c.pageIndex === page))}</button>)}</div>}
+      {searchPageCount === 1 && completedPages.length > 0 && <p>{diagnostics[completedPages[0]]?.method === 'vector+image' ? '線の情報で探し、見つからない分を画像で補いました（要確認）' : methods[completedPages[0]] === 'vector' ? '線の情報で探しました' : '画像で探しました（線の情報が無いページ）'}</p>}
+      {searchPageCount > 1 && <div className="symbol-search-pages">{pageCounts.map(([page, count]) => <div key={page}>
+        <button type="button" onClick={() => onPage(page)}>p.{page + 1} {diagnostics[page]?.method === 'vector+image' ? '線の情報で探し、見つからない分を画像で補いました（要確認）' : methods[page] === 'vector' ? '線で探しました' : '画像で探しました（線の情報が無いページ）'} {count} 件{confidenceSummary(candidates.filter(c => c.pageIndex === page))}</button>
+        {completedPages.length === searchPageCount && diagnostics[page]?.method === 'vector' && !store.symbolCandidates?.some(c => c.pageIndex === page) &&
+          <button type="button" disabled={busy} onClick={() => void search(page)}>p.{page + 1} を画像でも探す（時間がかかります）</button>}
+      </div>)}</div>}
       <div className="symbol-search-actions"><button type="button" onClick={chooseAllCandidates}>すべて選ぶ</button><button type="button" onClick={() => store.chooseSymbolCandidates(false)}>すべて外す</button></div>
       <button type="button" disabled={busy || !candidates.some(c => c.confidence === 'high' && c.state === 'pending')}
         onClick={chooseHighConfidenceCandidates}>確度の高い候補を選ぶ</button>
       <button type="button" onClick={() => setReviewOpen(true)}>選んだ候補を画像で確認</button>
       <button type="button" disabled={busy || chosen.length === 0} onClick={add}>選んだ {chosen.length} 件を数量へ追加</button>
     </>}
+    {searchPageCount === 1 && completedPages.map(page => {
+      const reason = pageZeroReason(page)
+      return reason && <p key={page} role="status">{reason}</p>
+    })}
+    {completedPages.length > 0 && <details className="symbol-search-diagnostics"><summary>検索の詳細</summary>
+      <label><input type="checkbox" checked={store.symbolRejectedFilter === 'show'} disabled={!store.symbolCandidates?.some(c => c.rejected)}
+        onChange={e => store.setSymbolRejectedFilter(e.target.checked ? 'show' : 'hide')} />描画構造で除外した候補も表示する（要確認）</label>
+      {completedPages.map(page => {
+        const d = diagnostics[page]
+        if (!d) return null
+        const value = (v: number | string | undefined) => v === undefined ? '—（集計なし）' : v
+        const t = d.template, other = d.otherExcluded, supplement = d.supplement
+        const rows = [
+          ['検索方式', d.method === 'vector' ? '線（ベクター）' : d.method === 'vector+image' ? '線＋画像で補完' : '画像（線の情報が無いページ）'],
+          ['抽出された線分数', `${value(d.extractedSegments)}（線幅で絞った後 ${value(d.widthFilteredSegments)}）`],
+          ['見本として使った線分数（範囲内の本数）', t ? `${t.used}（${t.inRect}）${t.manual ? '・手動で整えた見本' : ''}` : undefined],
+          ['自動整形で除いた線分数', t ? `配線 ${t.removedWiring}・文字など ${t.removedOther}・細い線 ${t.removedThin}${t.manual ? '（手動で整えた見本）' : ''}` : undefined],
+          ['候補生成数', `${value(d.placements)}（起点 ${value(d.anchors)} 本・円の起点 ${d.ringAnchor === undefined ? value(undefined) : d.ringAnchor ? '使用' : '未使用'}）`],
+          ['幾何形状の照合後の候補数', d.geometrySites],
+          ['描画構造の照合で除外した候補数', d.structureExcluded],
+          ['その他の判定で除外した候補数', other ? `範囲外 ${other.region}・回転 ${other.rotation}・件数の上限 ${other.limit}・局所画像 ${other.localImage}` : undefined],
+          ['重複として統合した数', d.duplicates],
+          ['最終候補数', d.final],
+          ['表示条件を適用した後の候補数', candidates?.filter(c => c.pageIndex === page).length ?? 0],
+          ...(pageZeroReason(page) ? [['0 件の理由', pageZeroReason(page) ?? undefined] as const] : []),
+          ['補完', !supplement?.exhaustive && !supplement?.image ? '実行せず（幾何形状の候補があったため）' : `追加の起点での再探索 ${value(supplement?.exhaustive?.found)}・画像補完の候補 ${value(supplement?.image?.candidates)}・線との整合 ${value(supplement?.image?.vectorConfirmed)}・重複 ${value(supplement?.image?.duplicates)}・追加 ${value(supplement?.image?.added)}`],
+          ['処理時間（ms）', `合計 ${Math.round(d.ms.total)}・線 ${value(d.ms.vector === undefined ? undefined : Math.round(d.ms.vector))}・補完 ${value(d.ms.supplement === undefined ? undefined : Math.round(d.ms.supplement))}`],
+        ] as const
+        return <section key={page} aria-label={`p.${page + 1} の検索の詳細`}><h3>p.{page + 1}</h3>
+          <dl>{rows.map(([label, content]) => <div key={label}><dt>{label}</dt><dd>{value(content)}</dd></div>)}</dl>
+        </section>
+      })}
+    </details>}
     <p>候補は自動で数量に入りません。図面で確認して選んでください。</p>
     {message && <p role="status">{message}</p>}{error && <p role="alert">{error}</p>}
     <button type="button" onClick={onClose}>閉じる</button>

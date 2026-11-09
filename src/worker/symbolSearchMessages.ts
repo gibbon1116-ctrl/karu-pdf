@@ -1,6 +1,6 @@
 // Messages and pure handlers of the symbol search Worker. Kept out of the Worker entry so
 // the entry has no exports: the single-file build embeds Workers as one bundle without exports.
-import { defaultVectorTolerance, vectorSymbolSearch, type VectorSymbolOptions } from '../core/vectorSymbolSearch'
+import { defaultVectorTolerance, vectorSymbolSearch, scoreVectorPlacements, type VectorSymbolOptions } from '../core/vectorSymbolSearch'
 import { segmentEndpoints } from '../core/vectorPaths'
 import type { VectorPaint } from '../core/vectorPaint'
 import { buildSnapIndex, type SnapIndex } from '../core/snap'
@@ -26,6 +26,15 @@ export interface VectorSearchMessage {
   features?: {complete:boolean;sampleComplete:boolean;samePage:boolean}
 }
 export interface VectorFeatureProbes { sample:SymbolVectorFeatureProbe; matches:SymbolVectorFeatureProbe[]; ms:number }
+export interface VectorCoverageMessage {
+  type: 'vector-coverage'; id: number; segments: Float32Array; segmentWidths?: Float32Array
+  sampleSegments: Float32Array; sampleWidths: Float32Array; sampleRect: Rect
+  sampleLines?: { segments: Float32Array; widths: Float32Array }; targets: Array<{ center: Point; angle: number }>
+}
+export function scoreVectorMessage(message: VectorCoverageMessage): ReturnType<typeof scoreVectorPlacements> {
+  return scoreVectorPlacements(message.segments, message.sampleRect, message.targets,
+    message.sampleSegments, message.sampleWidths, message.segmentWidths, message.sampleLines)
+}
 /** Uses original extraction geometry, never a cleaned search template; bounds share its display pt space. */
 export interface EndpointMessage { type: 'endpoints'; id: number; segments: Float32Array; bounds: Rect }
 export interface VerifyMessage {
@@ -42,7 +51,7 @@ export interface LocalShape {
 }
 export type LocalDescribedBody = LocalBody & {shape?:LocalShape}
 export interface LocalLabelMessage { type:'local-labels'; id:number; labels:LocalLabel[] }
-export type SymbolSearchMessage = ImageSearchMessage | VectorSearchMessage | EndpointMessage | VerifyMessage | LocalDescribeMessage | LocalLabelMessage
+export type SymbolSearchMessage = ImageSearchMessage | VectorSearchMessage | VectorCoverageMessage | EndpointMessage | VerifyMessage | LocalDescribeMessage | LocalLabelMessage
 export type VectorSearchResult = ReturnType<typeof vectorSymbolSearch>
 export function searchVectorMessage(message: VectorSearchMessage): VectorSearchResult | null {
   const [x0, y0, x1, y1] = message.sampleRect
@@ -94,6 +103,7 @@ export function buildEndpointIndex(message: EndpointMessage): SnapIndex {
   return buildSnapIndex(segmentEndpoints(message.segments, 200_000), message.bounds, 16)
 }
 export type SymbolSearchResponse =
+  | { type: 'vector-coverage-result'; id: number; scores: Float32Array; centers: Float32Array; ms: number }
   | { type:'local-described'; id:number; bodies:LocalDescribedBody[] }
   | { type:'local-labels-resolved'; id:number; labels:LocalLabel[] }
   | { type: 'verify-result'; id: number; scores: Float32Array; verifyMs: number }

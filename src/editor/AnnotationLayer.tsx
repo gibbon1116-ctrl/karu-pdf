@@ -1378,7 +1378,9 @@ export function AnnotationLayer(props: Props) {
           : `線 ${c.score.toFixed(2)}・余分な線 ${Math.round(c.extra * 100)}%・添字 ${c.label || 'なし'}${c.gc ? '・G' : ''}${c.aroundCheck ? `・周りの線 ${Math.round((c.around ?? 0) * 100)}%` : ''}${c.imageScore === undefined ? '' : `・画像 ${c.imageScore.toFixed(2)}`}`}
           {c.shape?.decision === 'different' ? `・形の細部が違う（${c.shape.differences.map(feature => ({ topArc: '円弧', annexFrame: '外の枠', interiorLines: '中の斜線', interior: '中の塗り' }[feature])).join('・')}）`
             : c.shape?.decision === 'unknown' ? `・形の細部は不明（${c.shape.unknown.map(feature => ({ topArc: '円弧', annexFrame: '外の枠', interiorLines: '中の斜線', interior: '中の塗り' }[feature])).join('・')}）` : ''}
-          {c.otherFixture ? `・他の項目（${props.store.symbolOtherFixtureLabel(c.otherFixture)}）で拾い済み` : ''}</title>
+          {c.otherFixture ? `・他の項目（${props.store.symbolOtherFixtureLabel(c.otherFixture)}）で拾い済み` : ''}
+          {c.supplement ? '・画像で補完' : ''}{c.rejected ? '・描画構造で除外' : ''}
+          {c.scale === undefined ? '' : `・寸法差 ${Math.round((c.scale - 1) * 100)}%`}</title>
         <rect x={c.rect[0]} y={c.rect[1]} width={c.rect[2] - c.rect[0]} height={c.rect[3] - c.rect[1]} vectorEffect="non-scaling-stroke" />
         {props.store.focusedSymbolCandidateId === c.id && <path className="symbol-search-focus-halo"
           d={`M ${c.rect[0] - 2} ${c.rect[1] - 2} H ${c.rect[2] + 2} V ${c.rect[3] + 2} H ${c.rect[0] - 2} Z`}
