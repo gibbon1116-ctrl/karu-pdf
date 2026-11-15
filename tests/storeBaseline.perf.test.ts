@@ -192,34 +192,52 @@ function referenceCandidateSummary(
   candidates: readonly CandidateInput[],
   marks: readonly ReferenceMark[],
 ): CandidateSummary {
-  const byPage = new Map<number, ReferenceMark[]>()
+  const fallbackRect: Rect = [0, 0, 12, 12]
+  const matches = candidates.map(candidate => ({
+    candidate,
+    state: 'pending' as CandidateState,
+    otherFixture: undefined as string | undefined,
+    otherDistance: Infinity,
+  }))
+
   for (const mark of marks) {
-    const list = byPage.get(mark.pageIndex) ?? []
-    list.push(mark)
-    byPage.set(mark.pageIndex, list)
-  }
-  return candidateSummary(candidates.map(candidate => {
-    const onPage = byPage.get(candidate.pageIndex) ?? []
-    const distance = (mark: ReferenceMark) =>
-      Math.hypot(
+    let nearest: typeof matches[number] | undefined
+    let nearestDistance = Infinity
+    for (const match of matches) {
+      const { candidate } = match
+      if (candidate.pageIndex !== mark.pageIndex) continue
+      const rect = candidate.rect ?? fallbackRect
+      const padding = Math.max(
+        0.3,
+        Math.min(rect[2] - rect[0], rect[3] - rect[1]) * 0.15,
+      )
+      if (mark.center[0] < rect[0] - padding || mark.center[0] > rect[2] + padding
+        || mark.center[1] < rect[1] - padding || mark.center[1] > rect[3] + padding) continue
+      const distance = Math.hypot(
         mark.center[0] - candidate.center[0],
         mark.center[1] - candidate.center[1],
       )
-    if (onPage.some(mark => mark.fixtureId === 'f0' && distance(mark) <= 6)) {
-      return { pageIndex: candidate.pageIndex, state: 'counted' as const }
-    }
-    let nearestDistance = Infinity
-    let otherFixture: string | undefined
-    for (const mark of onPage) {
-      if (mark.fixtureId === 'f0') continue
-      const currentDistance = distance(mark)
-      if (currentDistance <= 6 && currentDistance < nearestDistance) {
-        nearestDistance = currentDistance
-        otherFixture = mark.fixtureId
+      // Strict comparison keeps the first candidate when distances are equal.
+      if (distance <= 6 && distance < nearestDistance) {
+        nearest = match
+        nearestDistance = distance
       }
     }
-    return { pageIndex: candidate.pageIndex, state: 'pending' as const, otherFixture }
-  }))
+    if (!nearest) continue
+    if (mark.fixtureId === 'f0') {
+      nearest.state = 'counted'
+      nearest.otherFixture = undefined
+    } else if (nearest.state !== 'counted' && nearestDistance < nearest.otherDistance) {
+      nearest.otherDistance = nearestDistance
+      nearest.otherFixture = mark.fixtureId
+    }
+  }
+
+  return candidateSummary(matches.map(({ candidate, state, otherFixture }) => ({
+    pageIndex: candidate.pageIndex,
+    state,
+    otherFixture,
+  })))
 }
 
 function selectionBenchmark(

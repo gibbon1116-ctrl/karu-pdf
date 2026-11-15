@@ -55,6 +55,7 @@ const squareStats = {
   duplicates: 1, limited: 0, final: 1, stopped: false, ringLimited: false, scaled: 0,
   exhaustiveRan: false, exhaustivePlacements: 0, exhaustiveFound: 0,
   keyStrokes: 3, keyStrokeRejected: 0,
+  junctionPlacements: 0, junctionLimited: false, hatchGroups: 0, hatchRejected: 0, hatchSelfDropped: 0, hatchRescued: 0, hatchRescueLimited: false, hatchRescuePlacements: 0,
 }
 
 describe('coverage before the key stroke gate', () => {
@@ -105,31 +106,29 @@ describe('coverage before the key stroke gate', () => {
     })
   }
 
-  it('rejects a one-ended 1.5x key stroke joined across a 0.1pt gap', () => {
+  // A key stroke may continue past a template corner; the match is kept as continued (check).
+  it('keeps a one-ended 1.5x key stroke joined across a 0.1pt gap as continued', () => {
     // The asymmetric mark prevents a half-turn from moving the extension onto
     // the unselected fourth side. The total right-side span is exactly 6pt.
     const extended: Line[] = [...markedSquare, [2, 2.1, 2, 4]]
     const result = search(markedSquare, stamp(extended), {
       threshold: .99, rotations: false, scaleRange: 0, exhaustiveWhenEmpty: false,
     })
-    expect(result.matches).toEqual([])
+    expect(result.matches).toHaveLength(1)
+    expect(result.matches[0]).toMatchObject({ center: [20, 20], continued: true })
     expect(result.rejected).toEqual([])
-    expect(result.stats.keyStrokeRejected).toBeGreaterThan(0)
-    expect(result.stats.geometryPassed).toBe(0)
-    expect(result.stats.geometrySites).toBe(0)
     expect(result.stats.structureExcluded).toBe(0)
     expect(result.stats.exhaustiveRan).toBe(false)
   })
 
-  it('rejects a connected interval reaching the local search boundary', () => {
+  it('keeps a corner side continuing to the local search boundary as continued', () => {
     const extended: Line[] = [...markedSquare, ...split([[2, 2.1, 2, 20]], 70)]
     const result = search(markedSquare, stamp(extended), {
       threshold: .99, rotations: false, scaleRange: 0, exhaustiveWhenEmpty: false,
     })
-    expect(result.matches).toEqual([])
+    expect(result.matches).toHaveLength(1)
+    expect(result.matches[0]).toMatchObject({ center: [20, 20], continued: true })
     expect(result.rejected).toEqual([])
-    expect(result.stats.keyStrokeRejected).toBeGreaterThan(0)
-    expect(result.stats.geometryPassed).toBe(0)
   })
 
   it('keeps the fixed extended-wire recovery result through the loose gate', () => {

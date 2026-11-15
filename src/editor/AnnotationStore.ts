@@ -512,31 +512,43 @@ export class AnnotationStore {
     perfTime('store.refreshSymbolCandidates', () => this.refreshSymbolCandidatesBody(this.symbolCandidates!))
   }
   private refreshSymbolCandidatesBody(candidates: SymbolSearchCandidate[]): void {
-    const marks = new Map<number, Point[]>()
-    const otherMarks = new Map<number, Array<{ center: Point; fixtureId: string }>>()
+    type CandidateMatch = { candidate: SymbolSearchCandidate; padding: number; otherDistance: number }
+    const candidatesByPage = new Map<number, CandidateMatch[]>()
+    for (const c of candidates) {
+      delete c.otherFixture
+      if (c.state === 'counted') c.state = 'pending'
+      const pageCandidates = candidatesByPage.get(c.pageIndex) ?? []
+      pageCandidates.push({ candidate: c, padding: Math.max(0.3, Math.min(c.rect[2] - c.rect[0], c.rect[3] - c.rect[1]) * 0.15), otherDistance: Infinity })
+      candidatesByPage.set(c.pageIndex, pageCandidates)
+    }
     for (const a of this.annotations.values()) {
       if (a.deleted || !a.count) continue
       const fixtureId = countFixtureId(a.count)
       if (!fixtureId) continue
       const center: Point = [(a.rect[0] + a.rect[2]) / 2, (a.rect[1] + a.rect[3]) / 2]
+      let nearest: CandidateMatch | undefined
+      let nearestDistance = Infinity
+      for (const match of candidatesByPage.get(a.pageIndex) ?? []) {
+        const { candidate: c, padding } = match
+        if (center[0] < c.rect[0] - padding || center[0] > c.rect[2] + padding
+          || center[1] < c.rect[1] - padding || center[1] > c.rect[3] + padding) continue
+        const distance = Math.hypot(center[0] - c.center[0], center[1] - c.center[1])
+        // Strict comparison preserves candidate order when distances are equal.
+        if (distance <= this.symbolCandidateRadius && distance < nearestDistance) {
+          nearest = match; nearestDistance = distance
+        }
+      }
+      if (!nearest) continue
+      const c = nearest.candidate
       if (fixtureId === this.symbolCandidateFixture) {
-        const points = marks.get(a.pageIndex) ?? []; points.push(center); marks.set(a.pageIndex, points)
-      } else {
-        const points = otherMarks.get(a.pageIndex) ?? []; points.push({ center, fixtureId }); otherMarks.set(a.pageIndex, points)
+        c.state = 'counted'
+        delete c.otherFixture
+      } else if (c.state !== 'counted' && nearestDistance < nearest.otherDistance) {
+        nearest.otherDistance = nearestDistance
+        c.otherFixture = fixtureId
       }
     }
     for (const c of candidates) {
-      delete c.otherFixture
-      const counted = marks.get(c.pageIndex)?.some(p => Math.hypot(p[0] - c.center[0], p[1] - c.center[1]) <= this.symbolCandidateRadius)
-      if (counted) { c.state = 'counted'; continue }
-      if (c.state === 'counted') c.state = 'pending'
-      let nearestDistance = Infinity
-      for (const mark of otherMarks.get(c.pageIndex) ?? []) {
-        const distance = Math.hypot(mark.center[0] - c.center[0], mark.center[1] - c.center[1])
-        if (distance <= this.symbolCandidateRadius && distance < nearestDistance) {
-          nearestDistance = distance; c.otherFixture = mark.fixtureId
-        }
-      }
       if (this.symbolOtherFilter === 'hide' && c.otherFixture && c.state === 'chosen') c.state = 'pending'
     }
   }

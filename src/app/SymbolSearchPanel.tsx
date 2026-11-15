@@ -118,7 +118,13 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
     const d = diagnostics[page]
     if (!d) return null
     const all = store.symbolCandidates?.filter(c => c.pageIndex === page) ?? []
-    return zeroResultReason(d, { total: all.length, visible: candidates?.filter(c => c.pageIndex === page).length ?? 0, rejected: all.filter(c => c.rejected).length })
+    return zeroResultReason(d, {
+      total: all.length,
+      visible: candidates?.filter(c => c.pageIndex === page).length ?? 0,
+      rejected: all.filter(c => c.rejected).length,
+      other: store.symbolOtherFilter === 'hide'
+        ? all.filter(c => c.otherFixture && store.isSymbolCandidateVisible({ ...c, otherFixture: undefined })).length : 0,
+    })
   }
   const stop = () => { generation.current++; task.current?.cancel(); task.current = null; setBusy(false) }
   const invalidate = () => { stop(); store.clearSymbolCandidates(); setCompletedPages([]); setMethods({}); setDiagnostics({}); setTemplateSummary(null); setMessage('条件を変えました。「探す」を押してください'); setError('') }
@@ -354,6 +360,10 @@ export default function SymbolSearchPanel({ selection, pool, onClose, onRecaptur
       : <button type="button" disabled={capturingArea} onClick={() => void search()}>探す</button>}
     {candidates && <>
       <p aria-live="polite">候補 {candidates.length} 件{confidenceSummary(candidates)}（拾い済み {counted} 件）{otherCandidates.length > 0 ? `（他の項目で拾い済み ${otherCandidates.length} 件）` : ''}</p>
+      {store.symbolOtherFilter === 'hide' && otherCandidates.length > 0 && <div className="fixture-drawing-filter-warning" role="status">
+        <p>他の項目で拾い済みの {otherCandidates.length} 件を隠しています（{otherFixtureSummary}）。</p>
+        <button type="button" onClick={() => store.setSymbolOtherFilter('show')}>表示する</button>
+      </div>}
       {templateSummary && <p>見本の線 {templateSummary.segments} 本（細い背景線・配線・文字とみて {templateSummary.removed} 本を除きました）</p>}
       <fieldset className="symbol-search-labels"><legend>添字で種類を分ける</legend>
         <div className="symbol-search-actions">

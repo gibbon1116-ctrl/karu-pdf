@@ -17,8 +17,9 @@ export interface SymbolSearchDiagnostics {
   ms: { total: number; vector?: number; supplement?: number }
 }
 
-export function zeroResultReason(d: SymbolSearchDiagnostics, counts: { total: number; visible: number; rejected: number }): string | null {
+export function zeroResultReason(d: SymbolSearchDiagnostics, counts: { total: number; visible: number; rejected: number; other?: number }): string | null {
   if (counts.visible > 0) return null
+  if ((counts.other ?? 0) > 0 && counts.other === counts.total) return '候補はありますが、すべて他の項目で拾い済みのため隠しています。「表示する」で確認できます'
   // Hidden structure-rejected candidates are explained by the next rule, not by the display filters.
   if (counts.total - counts.rejected > 0) return '候補はありますが、現在の表示条件では表示されていません（添字・GC回路・拾い済みなどの絞り込みを確かめてください）'
   if (counts.rejected > 0 || (d.structureExcluded ?? 0) > 0) return '候補はありましたが、描画構造（塗り・内部の線）の照合で除外されました。「描画構造で除外した候補も表示する」で確認できます'

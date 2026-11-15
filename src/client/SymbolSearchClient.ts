@@ -24,7 +24,7 @@ export interface SymbolSearchRequest {
 }
 export interface SymbolCandidate { pageIndex: number; rect: Rect; center: Point; score: number; rotation: number
   sampleBox?: Rect
-  scale?: number; supplement?: 'image'; vectorScore?: number; rejected?: 'structure'; source?: 'primary' | 'secondary' | 'ring' | 'exhaustive'
+  scale?: number; continued?: boolean; hatchRescued?: boolean; supplement?: 'image'; vectorScore?: number; rejected?: 'structure'; source?: 'primary' | 'secondary' | 'ring' | 'exhaustive'
   confidence?: 'high' | 'check'; imageScore?: number; extra?: number; around?: number; aroundCheck?: boolean; label?: string; gc?: boolean
   structureScore?:number;fillScore?:number;structureCheck?:boolean;shape?:SymbolShapeDecision }
 // Image similarity only grades line matches; it never removes them. On real drawings the
@@ -180,7 +180,7 @@ export class SymbolSearchClient {
           candidates: [...candidates.map((c, i) => {
             const aroundCheck = (c.around ?? 0) - result.template.sampleAround > .3
             const shape=shapeDecisions?.[i]
-            return { ...c, sampleBox: sampleBoxForMatch(sampleBox, body, c), ...labelValues[i], ...(shape?{shape}:{}), aroundCheck, confidence: c.source === 'exhaustive' || c.scale !== undefined || c.supplement || c.rejected || aroundCheck || c.structureCheck || (shape&&shape.decision!=='same') || sampleValue.label===UNKNOWN_SYMBOL_LABEL || labelValues[i]?.label===UNKNOWN_SYMBOL_LABEL ? 'check' as const : c.confidence }
+            return { ...c, sampleBox: sampleBoxForMatch(sampleBox, body, c), ...labelValues[i], ...(shape?{shape}:{}), aroundCheck, confidence: c.source === 'exhaustive' || c.scale !== undefined || c.continued || c.hatchRescued || c.supplement || c.rejected || aroundCheck || c.structureCheck || (shape&&shape.decision!=='same') || sampleValue.label===UNKNOWN_SYMBOL_LABEL || labelValues[i]?.label===UNKNOWN_SYMBOL_LABEL ? 'check' as const : c.confidence }
           }), ...supplementCandidates], rejectedCandidates,
           metrics: { renderScale: verification?.renderScale ?? 0, requestedRenderScale: verification?.requestedRenderScale ?? 0,
             scaleReduced: !!verification && verification.renderScale < verification.requestedRenderScale, renderTiles: localTiles+(verification ? 2 : 0),

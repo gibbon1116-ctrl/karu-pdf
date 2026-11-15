@@ -42,7 +42,7 @@ export function paintTemplateGeometry(lines:Float32Array,widths:Float32Array,bou
 
 type Mask={fill:Uint8Array;line:Uint8Array;known:boolean}
 /** Bounded, candidate-local analytic occupancy. No images or PDF originals live here. */
-export function createPaintMatcher(sample:VectorPaint,target:VectorPaint,bounds:Rect,tolerance:number){
+export function createPaintMatcher(sample:VectorPaint,target:VectorPaint,bounds:Rect,tolerance:number,ignoreLines?:Array<Array<[number,number]>>){
   validate(sample);if(target!==sample)validate(target)
   let remaining=MAX_WORK
   const makeIndex=(paint:VectorPaint)=>{
@@ -63,6 +63,20 @@ export function createPaintMatcher(sample:VectorPaint,target:VectorPaint,bounds:
   }
   const sampleIndex=makeIndex(sample),targetIndex=target===sample?sampleIndex:makeIndex(target)
   const width=bounds[2]-bounds[0],height=bounds[3]-bounds[1],short=Math.min(width,height)
+  // Both masks use the same template-coordinate cells, including rotated targets.
+  const ignored=ignoreLines?.length?new Uint8Array(PIXELS):undefined
+  if(ignored)for(let row=0;row<SIDE;row++)for(let col=0;col<SIDE;col++){
+    const x=bounds[0]+(col+.5)/SIDE*width,y=bounds[1]+(row+.5)/SIDE*height
+    if(ignoreLines!.some(polygon=>{
+      let inside=false
+      for(let i=0,j=polygon.length-1;i<polygon.length;j=i++){
+        const a=polygon[j],b=polygon[i]
+        if(distance(x,y,a[0],a[1],b[0],b[1])<=1e-9)return true
+        if((a[1]>y)!==(b[1]>y)&&x<(b[0]-a[0])*(y-a[1])/(b[1]-a[1])+a[0])inside=!inside
+      }
+      return inside
+    }))ignored[row*SIDE+col]=1
+  }
   function mask(index:ReturnType<typeof makeIndex>,center:readonly number[],angle:number):Mask {
     const fill=new Uint8Array(PIXELS),line=new Uint8Array(PIXELS)
     if(!index.known||remaining<=0)return {fill,line,known:false}
@@ -110,7 +124,7 @@ export function createPaintMatcher(sample:VectorPaint,target:VectorPaint,bounds:
       if(ink>=.05)visible=true
       fill[at]=areaInk>=.05?1:0
       // Exclude perimeter from internal-line comparison. Fill comparison uses all pixels.
-      line[at]=row>=3&&row<SIDE-3&&col>=3&&col<SIDE-3&&ink-areaInk>=.05?1:0
+      line[at]=!ignored?.[at]&&row>=3&&row<SIDE-3&&col>=3&&col<SIDE-3&&ink-areaInk>=.05?1:0
     }
     // Completely covered legacy outlines cannot establish a visible symbol.
     return {fill,line,known:visible}

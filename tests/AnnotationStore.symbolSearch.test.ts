@@ -393,9 +393,11 @@ describe('other-fixture candidates', () => {
     store.createCountMarks('near', [{ pageIndex: 0, center: [52, 50] }])
     store.beginSymbolCandidates('led', sampleRect)
     store.appendSymbolCandidates([candidate(50, 50), candidate(60, 50), candidate(60.01, 50), candidate(50, 50, 1)])
-    expect(store.symbolCandidates?.map(c => c.otherFixture)).toEqual(['near', 'other', undefined, undefined])
+    // A mark belongs only to the nearest candidate whose body contains it.
+    // The mark at 54 is nearer to the candidate at 50, so the neighbor at 60 is no longer hidden.
+    expect(store.symbolCandidates?.map(c => c.otherFixture)).toEqual(['near', undefined, undefined, undefined])
     expect(store.symbolCandidates?.map(c => c.state)).toEqual(['pending', 'pending', 'pending', 'pending'])
-    expect(store.visibleSymbolCandidates?.map(c => [c.pageIndex, ...c.center])).toEqual([[0, 60.01, 50], [1, 50, 50]])
+    expect(store.visibleSymbolCandidates?.map(c => [c.pageIndex, ...c.center])).toEqual([[0, 60, 50], [0, 60.01, 50], [1, 50, 50]])
   })
   it('prioritizes counted marks of the same fixture and removes otherFixture while counted', async () => {
     const store = await setup()

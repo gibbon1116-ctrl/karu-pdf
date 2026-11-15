@@ -94,6 +94,119 @@ export function mergeCollinearStrokes(segments: Float32Array, tolerance: number,
 
 export interface VectorRing { center: [number, number]; radius: number; turning: number }
 
+export interface VectorHatch {
+  ids: number[]; angle: number; spacing: number; count: number; length: number; hull: Array<[number, number]>
+}
+
+/** Detect clipped, regularly spaced rows, independently of their absolute phase. */
+export function detectTemplateHatches(segments: Float32Array, tolerance: number): VectorHatch[] {
+  if (segments.length / 4 > 4096 || !(tolerance > 0)) return []
+  const lines: Array<{ id: number; angle: number; length: number }> = []
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+  for (let i = 0; i < segments.length; i += 4) {
+    for (let end = 0; end < 4; end += 2) {
+      x0 = Math.min(x0, segments[i + end]); x1 = Math.max(x1, segments[i + end])
+      y0 = Math.min(y0, segments[i + end + 1]); y1 = Math.max(y1, segments[i + end + 1])
+    }
+    const dx = segments[i + 2] - segments[i], dy = segments[i + 3] - segments[i + 1], length = Math.hypot(dx, dy)
+    if (length >= tolerance) lines.push({ id: i, angle: (Math.atan2(dy, dx) + Math.PI) % Math.PI, length })
+  }
+  const difference = (a: number, b: number) => Math.min(Math.abs(a - b), Math.PI - Math.abs(a - b))
+  const directions: Array<{ angle: number; lines: typeof lines }> = []
+  const distance = (x: number, y: number, i: number) => {
+    const dx = segments[i + 2] - segments[i], dy = segments[i + 3] - segments[i + 1], d = dx * dx + dy * dy
+    const t = d ? Math.max(0, Math.min(1, ((x - segments[i]) * dx + (y - segments[i + 1]) * dy) / d)) : 0
+    return Math.hypot(x - segments[i] - t * dx, y - segments[i + 1] - t * dy)
+  }
+  const median = (values: number[]) => {
+    values.sort((a, b) => a - b)
+    const m = Math.floor(values.length / 2)
+    return values.length % 2 ? values[m] : (values[m - 1] + values[m]) / 2
+  }
+  const hullOf = (ids: number[]) => {
+    const points: Array<[number, number]> = ids.flatMap(i => [[segments[i], segments[i + 1]], [segments[i + 2], segments[i + 3]]] as Array<[number, number]>)
+    points.sort((a, b) => a[0] - b[0] || a[1] - b[1])
+    const half = (ordered: typeof points) => {
+      const hull: typeof points = []
+      for (const p of ordered) {
+        while (hull.length > 1) {
+          const a = hull[hull.length - 2], b = hull[hull.length - 1]
+          if ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) > 0) break
+          hull.pop()
+        }
+        hull.push(p)
+      }
+      hull.pop(); return hull
+    }
+    return [...half(points), ...half([...points].reverse())]
+  }
+  const templateHull = hullOf(Array.from({ length: segments.length / 4 }, (_, i) => i * 4))
+  const onHull = (x: number, y: number) => templateHull.some((a, i) => {
+    const b = templateHull[(i + 1) % templateHull.length], dx = b[0] - a[0], dy = b[1] - a[1], d = dx * dx + dy * dy
+    const t = d ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / d)) : 0
+    return Math.hypot(x - a[0] - t * dx, y - a[1] - t * dy) <= tolerance
+  })
+  for (const line of lines) {
+    const i = line.id
+    if ([0, .5, 1].every(t => onHull(segments[i] + t * (segments[i + 2] - segments[i]),
+      segments[i + 1] + t * (segments[i + 3] - segments[i + 1])))) continue
+    const group = directions.find(g => difference(g.angle, line.angle) <= 2 * Math.PI / 180)
+    if (group) group.lines.push(line)
+    else directions.push({ angle: line.angle, lines: [line] })
+  }
+  const extent = Math.max(x1 - x0, y1 - y0), result: VectorHatch[] = [], maxSpacing = extent * .3
+  for (const group of directions) {
+    if (group.lines.length < 3) continue
+    const nx = -Math.sin(group.angle), ny = Math.cos(group.angle)
+    const ordered = group.lines.map(line => ({ ...line, offset: nx * (segments[line.id] + segments[line.id + 2]) / 2 + ny * (segments[line.id + 1] + segments[line.id + 3]) / 2 }))
+      .sort((a, b) => a.offset - b.offset || a.id - b.id)
+    const rows: Array<{ offset: number; ids: number[]; length: number; supported: number }> = []
+    // Short contour pieces still count as endpoint support.
+    const boundaries: Array<{ id: number; angle: number }> = []
+    for (let i = 0; i < segments.length; i += 4) {
+      const dx = segments[i + 2] - segments[i], dy = segments[i + 3] - segments[i + 1]
+      const angle = (Math.atan2(dy, dx) + Math.PI) % Math.PI
+      if (Math.hypot(dx, dy) && difference(group.angle, angle) >= 18 * Math.PI / 180) boundaries.push({ id: i, angle })
+    }
+    for (const line of ordered) {
+      const i = line.id
+      const supported = [0, 2].every(end => boundaries.some(boundary => difference(line.angle, boundary.angle) >= 20 * Math.PI / 180
+        && distance(segments[i + end], segments[i + end + 1], boundary.id) <= tolerance)) ? 1 : 0
+      let row = rows[rows.length - 1]
+      if (!row || line.offset - row.offset > tolerance * .25) {
+        row = { offset: line.offset, ids: [], length: 0, supported: 0 }; rows.push(row)
+      }
+      row.ids.push(i); row.length += line.length; row.supported += supported
+    }
+    const pending: Array<[number, number]> = [[0, rows.length]]
+    while (pending.length) {
+      const [lo, hi] = pending.pop()!
+      let best: { start: number; end: number; spacing: number } | undefined
+      for (let start = lo; start + 2 < hi; start++) {
+        let min = Infinity, max = 0, count = rows[start].ids.length, supported = rows[start].supported
+        const gaps: number[] = []
+        for (let end = start + 1; end < hi; end++) {
+          const gap = rows[end].offset - rows[end - 1].offset
+          min = Math.min(min, gap); max = Math.max(max, gap)
+          if (max > min * 1.6) break
+          gaps.push(gap); count += rows[end].ids.length; supported += rows[end].supported
+          if (end - start < 2 || supported < count * .7 || (best && end - start <= best.end - best.start)) continue
+          const spacing = median([...gaps])
+          if (spacing >= tolerance * 1.5 && spacing <= maxSpacing) best = { start, end, spacing }
+        }
+      }
+      if (!best) continue
+      const selected = rows.slice(best.start, best.end + 1), ids = selected.flatMap(row => row.ids), hull = hullOf(ids)
+      const lengths = ids.map(i => Math.hypot(segments[i + 2] - segments[i], segments[i + 3] - segments[i + 1]))
+      if (hull.length >= 3 && median(lengths) >= best.spacing * 1.5) result.push({ ids, angle: group.angle, spacing: best.spacing, count: selected.length,
+        length: selected.reduce((sum, row) => sum + row.length, 0), hull })
+      if (best.start - lo >= 3) pending.push([lo, best.start])
+      if (hi - best.end - 1 >= 3) pending.push([best.end + 1, hi])
+    }
+  }
+  return result
+}
+
 export function detectTemplateRings(segments: Float32Array, tolerance: number): VectorRing[] {
   if (segments.length / 4 > 4096) return []
   const epsilon = Math.max(.02, tolerance * .1), cells = new CellMap<number[]>(), points: Array<[number, number]> = [], edges: number[][] = []

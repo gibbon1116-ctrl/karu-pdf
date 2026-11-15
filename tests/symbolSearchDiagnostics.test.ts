@@ -4,6 +4,30 @@ import { mergeSupplementCandidates, zeroResultReason, type SymbolSearchDiagnosti
 const base: SymbolSearchDiagnostics = { pageIndex: 0, method: 'vector', ms: { total: 0 } }
 const empty = { total: 0, visible: 0, rejected: 0 }
 
+describe('他項目で拾い済みの候補を隠した場合の診断', () => {
+  it('全候補が他項目で拾い済みのために隠れている場合は表示ボタンへ案内する', () => {
+    expect(zeroResultReason(base, { total: 3, visible: 0, rejected: 0, other: 3 }))
+      .toBe('候補はありますが、すべて他の項目で拾い済みのため隠しています。「表示する」で確認できます')
+  })
+  it('表示中の候補があれば他項目の件数があっても原因を出さない', () => {
+    expect(zeroResultReason(base, { total: 3, visible: 1, rejected: 0, other: 2 })).toBeNull()
+  })
+  it('添字など別の表示条件で隠れた候補が混在する場合は従来の案内を保つ', () => {
+    expect(zeroResultReason(base, { total: 3, visible: 0, rejected: 0, other: 2 }))
+      .toBe('候補はありますが、現在の表示条件では表示されていません（添字・GC回路・拾い済みなどの絞り込みを確かめてください）')
+  })
+  it('構造除外で隠れた候補が混在する場合は従来の判定順を保つ', () => {
+    expect(zeroResultReason({ ...base, structureExcluded: 1 }, { total: 2, visible: 0, rejected: 1, other: 1 }))
+      .toBe('候補はありますが、現在の表示条件では表示されていません（添字・GC回路・拾い済みなどの絞り込みを確かめてください）')
+  })
+  it('他項目の隠し件数がゼロなら従来の案内を保つ', () => {
+    expect(zeroResultReason(base, { total: 1, visible: 0, rejected: 0, other: 0 }))
+      .toBe('候補はありますが、現在の表示条件では表示されていません（添字・GC回路・拾い済みなどの絞り込みを確かめてください）')
+    expect(zeroResultReason(base, { ...empty, other: 0 }))
+      .toBe('見本と同じ幾何形状の候補が見つかりませんでした')
+  })
+})
+
 describe('検索診断', () => {
   it('表示中の候補があれば原因を出さない', () => {
     expect(zeroResultReason(base, { total: 2, visible: 1, rejected: 1 })).toBeNull()
