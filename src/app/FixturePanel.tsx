@@ -11,7 +11,7 @@ import { collectShapeMetrics } from '../core/shapeMetrics'
 import { createFixturePreviews } from './fixturePreviews'
 import { CountMarker, QuantitySwatch } from '../editor/countMarkers'
 import { ensureSessionFixtures, ensureSessionRelatedReviews, FixtureUiContext, SnapUiContext, type DocumentSession } from './documentModel'
-import QuantityBreakdown, { QuantityTableContext } from './QuantityBreakdown'
+import QuantityBreakdown, { QuantityNavigationContext, QuantityTableContext } from './QuantityBreakdown'
 import { floorFromDrawingName } from '../core/location'
 import { annotationFilterLabel } from '../editor/annotationFilter'
 import { groupFixtures, moveCategory, moveFixture, stepFixture } from './fixtureOrder'
@@ -20,15 +20,18 @@ import { RecentFixtures } from './fixtureQuickList'
 import { useRouteSets } from './RouteItems'
 import { resolveRouteSet, routeSetSummary } from './routeSets'
 import { SymbolSearchContext } from './symbolSearchContext'
-import { RoomRegionDialog, RoomSetDialog, RoomSetPickupDialog } from '../editor/MeasurementOverlay'
-import type { RoomRegion, RoomSet } from '../core/rooms'
+import { RoomRegionDialog, RoomSetDialog, RoomSetPickupDialog, ScaleInteractionContext } from '../editor/MeasurementOverlay'
+import { ScaleRegionInteractionContext } from '../editor/AnnotationLayer'
+import { MAX_ROOM_HOLES, type RoomRegion, type RoomSet } from '../core/rooms'
 import { getGroupByBreakdown, setGroupByBreakdown, subscribeGroupByBreakdown } from './breakdownGroupingPreference'
 import { perfCount, perfTime } from '../perf/counters'
 import { relatedSessionMemory } from './relatedState'
 
 const QuantityCsvExportDialog = lazy(() => import('./CsvExportDialog').then(m => ({ default: m.QuantityCsvExportDialog })))
+type RoomGroup = 'page' | 'set'
 const FixtureDialog = lazy(() => import('./FixtureDialog'))
 const FixturePresetDialog = lazy(() => import('./FixturePresetDialog'))
+const CarryOverDialog = lazy(() => import('./CarryOverDialog'))
 const BreakdownMoveDialog = lazy(() => import('./BreakdownMoveDialog'))
 
 const BREAKDOWN_REORDER_STATUS = '科目より下の見出しか項目へ落としてください'
@@ -149,11 +152,15 @@ function fixtureBreakdownGroups(
 export default function FixturePanel({ session, pool }: { session: DocumentSession; pool: PdfWorkerPool }) {
   perfCount('FixturePanel.render')
   const store = session.annotationStore, ui = useContext(FixtureUiContext)
+  const { tracePage } = useContext(ScaleInteractionContext)
+  const { drawPage } = useContext(ScaleRegionInteractionContext)
+  const otherDocuments = (ui?.documents ?? []).filter(document => document !== session)
   const relatedMemory = useMemo(() => relatedSessionMemory(store), [store])
   const [presetQuery, setPresetQuery] = useState('')
   const previews = useMemo(() => createFixturePreviews(store), [store])
   const symbolSearch = useContext(SymbolSearchContext)
   const table = useContext(QuantityTableContext)
+  const navigation = useContext(QuantityNavigationContext)
   const snap = useContext(SnapUiContext)
   const version = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [breakdownId, setBreakdownId] = useState<string | null>(null), [csvOpen, setCsvOpen] = useState(false)
@@ -177,8 +184,10 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     initialSection?: 'rc'
   } | null>(null)
   const [editingRoom, setEditingRoom] = useState<{ pageIndex: number; region: RoomRegion } | null>(null)
-  const [roomSetDialog, setRoomSetDialog] = useState<{ pageIndex: number; initial?: RoomSet } | null>(null)
+  const [roomSetDialog, setRoomSetDialog] = useState<{ pageIndex: number; initial?: RoomSet; mode?: 'duplicate' } | null>(null)
   const [roomSetConfirmation, setRoomSetConfirmation] = useState<{ pageIndex: number; setId: string } | null>(null)
+  const draggingRoom = useRef<{ pageIndex: number; group: RoomGroup; id: string } | null>(null)
+  const [roomDropTarget, setRoomDropTarget] = useState<{ id: string; side: 'before' | 'after' } | null>(null)
   const dragging = useRef<{ kind: FixtureDragKind; id: string } | null>(null)
   const [dropTarget, setDropTarget] = useState<{ kind: FixtureDragKind; id: string; side: 'before' | 'after' | 'inside' } | null>(null)
   const [status, setStatus] = useState('')
@@ -191,10 +200,11 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     setSampleHover(null)
   }, [groupByBreakdown])
   const [preset, setPreset] = useState(false), [sources, setSources] = useState<Array<{ name: string; fixtures: CountFixture[] }> | null>(null), [busy, setBusy] = useState(false)
+  const [carryOver, setCarryOver] = useState(false)
   useEffect(() => {
-    if (dialog || moveFixtureId || csvOpen || breakdownId || preset || sources
+    if (dialog || moveFixtureId || csvOpen || breakdownId || preset || sources || carryOver
       || editingRoom || roomSetDialog || roomSetConfirmation) setSampleHover(null)
-  }, [dialog, moveFixtureId, csvOpen, breakdownId, preset, sources, editingRoom, roomSetDialog, roomSetConfirmation])
+  }, [dialog, moveFixtureId, csvOpen, breakdownId, preset, sources, carryOver, editingRoom, roomSetDialog, roomSetConfirmation])
 
   useEffect(() => { let alive = true; void ensureSessionFixtures(session, pool).catch(e => { if (alive) setError(String(e)) }); return () => { alive = false } }, [session, pool, session.pageRevision])
   useEffect(() => {
@@ -245,11 +255,14 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
     setEditingRoom(null)
     setRoomSetDialog(null)
     setRoomSetConfirmation(null)
+    draggingRoom.current = null
+    setRoomDropTarget(null)
     if (store.roomSetAlignPage !== null && store.roomSetAlignPage !== pageIndex) {
       store.endRoomSetAlign(false)
     }
+    if (store.pageShiftTarget !== null && store.pageShiftTarget !== pageIndex) store.endPageShift()
   }, [session, pageIndex, session.pageRevision])
-  useEffect(() => () => { store.endRoomSetAlign(false) }, [store])
+  useEffect(() => () => { store.endRoomSetAlign(false); store.endPageShift() }, [store])
   useEffect(() => {
     const completion = store.takeRoomSetAlignCompletion(pageIndex)
     if (!completion) return
@@ -258,7 +271,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       || link?.id !== completion.setId
       || (link.dx ?? 0) !== completion.dx || (link.dy ?? 0) !== completion.dy
       || store.roomCapturePage !== null || store.roomEditTarget !== null
-      || store.areaHoleTarget !== null || store.roomSetAlignPage !== null) return
+      || store.areaHoleTarget !== null || store.roomHoleTarget !== null || store.roomSetAlignPage !== null || store.pageShiftTarget !== null) return
     if (store.roomSetPickupChanges(pageIndex).length) {
       setRoomSetConfirmation({ pageIndex, setId: completion.setId })
     }
@@ -266,7 +279,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
   useEffect(() => {
     if (roomSetConfirmation && (!roomSetConfirmationCount
       || store.roomSetAlignPage !== null || store.roomCapturePage !== null
-      || store.roomEditTarget !== null || store.areaHoleTarget !== null)) {
+      || store.roomEditTarget !== null || store.areaHoleTarget !== null || store.roomHoleTarget !== null || store.pageShiftTarget !== null)) {
       setRoomSetConfirmation(null)
     }
   }, [roomSetConfirmation, roomSetConfirmationCount, store, version])
@@ -606,6 +619,109 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
 
 
     : null
+  const roomEditTarget = store.roomEditTarget
+  const roomHoleTarget = store.roomHoleTarget
+  const roomModeActive = roomEditTarget !== null || store.roomCapturePage !== null || store.roomSetAlignPage !== null
+  const shiftingPage = store.pageShiftTarget === pageIndex
+  const shiftCounts = store.pageShiftCounts(pageIndex)
+  const hasShiftContents = !!(shiftCounts.pickups || shiftCounts.roomRegions || shiftCounts.roomSet || shiftCounts.scaleRegions)
+  const canReorderRooms = canEdit && !roomModeActive && roomHoleTarget === null && store.pageShiftTarget === null
+  const highlightedRoomId = store.highlightedRoom?.pageIndex === pageIndex ? store.highlightedRoom.id : undefined
+  const toggleRoomHighlight = (region: RoomRegion) => {
+    if (highlightedRoomId === region.id) {
+      store.setHighlightedRoom(null)
+      return
+    }
+    store.setHighlightedRoom({ pageIndex, id: region.id })
+    const xs = region.points.map(([x]) => x), ys = region.points.map(([, y]) => y)
+    navigation?.navigate(pageIndex, [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)])
+  }
+  const endRoomDrag = () => { draggingRoom.current = null; setRoomDropTarget(null) }
+  const handleRoomDrop = (event: DragEvent<HTMLLIElement>, group: RoomGroup, regions: RoomRegion[], index: number, drop: boolean) => {
+    const active = draggingRoom.current
+    if (!canReorderRooms || active?.pageIndex !== pageIndex || active.group !== group) return
+    const from = regions.findIndex(region => region.id === active.id)
+    if (from < 0) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    const rect = event.currentTarget.getBoundingClientRect()
+    const side = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+    if (drop) {
+      const insertion = index + (side === 'after' ? 1 : 0)
+      store.moveRoomRegion(pageIndex, active.id, insertion - (from < insertion ? 1 : 0))
+      endRoomDrag()
+    } else {
+      const id = regions[index].id
+      setRoomDropTarget(previous => previous?.id === id && previous.side === side ? previous : { id, side })
+    }
+  }
+  const renderRoomGroup = (group: RoomGroup, title: string, regions: RoomRegion[]) => <li>
+    <div className="room-region-group-heading">
+      <h4>{title}</h4>
+      <button type="button" disabled={!canReorderRooms || regions.length < 2}
+        onClick={() => store.sortRoomRegions(pageIndex, group)}>名前順</button>
+    </div>
+    <ul className="room-region-group" aria-label={title}>
+      {regions.map((region, index) => {
+        const editing = roomEditTarget?.pageIndex === pageIndex && roomEditTarget.id === region.id
+        const drawingHole = roomHoleTarget?.pageIndex === pageIndex && roomHoleTarget.id === region.id
+        const holes = region.holes ?? []
+        const dropClass = canReorderRooms && roomDropTarget?.id === region.id ? ` fixture-drop-${roomDropTarget.side}` : ''
+        const draggable = canReorderRooms && regions.length > 1
+        return <li key={region.id} className={`room-region-row${dropClass}`}
+          onDragOver={event => handleRoomDrop(event, group, regions, index, false)}
+          onDrop={event => handleRoomDrop(event, group, regions, index, true)}
+          onDragLeave={event => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setRoomDropTarget(previous => previous?.id === region.id ? null : previous)
+            }
+          }}>
+          <div className="room-region-row-main">
+            <span className="fixture-grip" aria-hidden="true" draggable={draggable}
+              onDragStart={event => {
+                if (!draggable) { event.preventDefault(); return }
+                draggingRoom.current = { pageIndex, group, id: region.id }
+                event.dataTransfer.setData('application/x-karu-room', region.id)
+                event.dataTransfer.effectAllowed = 'move'
+              }} onDragEnd={endRoomDrag}>⠿</span>
+            <button type="button" className="room-region-name" aria-pressed={highlightedRoomId === region.id}
+              onClick={() => toggleRoomHighlight(region)}>{[region.floor, region.name].filter(Boolean).join(' ')}</button>
+            <button type="button" aria-label={`「${region.name}」を上へ`} disabled={!canReorderRooms || index === 0}
+              onClick={() => store.moveRoomRegion(pageIndex, region.id, index - 1)}>▲</button>
+            <button type="button" aria-label={`「${region.name}」を下へ`} disabled={!canReorderRooms || index === regions.length - 1}
+              onClick={() => store.moveRoomRegion(pageIndex, region.id, index + 1)}>▼</button>
+          </div>
+          <div className="room-region-row-actions">
+            <button type="button" disabled={!canEdit} aria-pressed={editing} onClick={() => {
+              if (editing) store.endRoomEdit()
+              else store.startRoomEdit(pageIndex, region.id)
+              setError('')
+            }}>{editing ? '直し終える' : '範囲を直す'}</button>
+            <button type="button" disabled={!canEdit} onClick={() => setEditingRoom({ pageIndex, region })}>名前を変える</button>
+            <button type="button" disabled={!canEdit} onClick={() => store.removeRoomRegion(pageIndex, region.id)}>削除</button>
+            <button type="button" aria-pressed={drawingHole}
+              disabled={!canEdit || !drawingHole && (roomModeActive || store.areaHoleTarget !== null
+                || store.pageShiftTarget !== null || roomHoleTarget !== null || holes.length >= MAX_ROOM_HOLES)}
+              onClick={() => {
+                if (drawingHole) store.endRoomHoleCapture()
+                else store.startRoomHoleCapture(pageIndex, region.id)
+                setError('')
+                setStatus('')
+              }}>{drawingHole ? '囲み終える' : '抜く範囲を囲む'}</button>
+          </div>
+          {holes.length > 0 && <div className="room-region-row-actions room-region-row-holes">
+            <span>抜いた範囲 {holes.length}か所</span>
+            {holes.map((_, holeIndex) => <button type="button" key={holeIndex} disabled={!canEdit}
+              aria-label={`「${region.name}」の抜いた範囲${holeIndex + 1}を戻す`} onClick={() => {
+                store.removeRoomRegionHole(pageIndex, region.id, holeIndex)
+                setStatus(`「${region.name}」の抜いた範囲${holeIndex + 1}を戻しました`)
+              }}>{holeIndex + 1}を戻す</button>)}
+          </div>}
+        </li>
+      })}
+    </ul>
+  </li>
+  const duplicateRoomSetSource = roomSetDialog?.mode === 'duplicate' ? roomSetDialog.initial : undefined
   return <section className={`fixture-panel${store.drawingHidesCounts() ? ' drawing-hides-counts' : ''}`} aria-label="数量拾い" data-testid="fixture-panel">
     <div className="fixture-panel-controls">
     <div className="fixture-panel-heading">
@@ -661,6 +777,11 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
           .then(list => setSources(list.filter(s => s.fixtures.length))).catch(e => setError(String(e))).finally(() => setBusy(false))
       }}>他のPDFから読み込む</button>
       </div>
+      <div className="fixture-action-row">
+        <button type="button" disabled={!canEdit || !otherDocuments.length}
+          title={!otherDocuments.length ? '旧版のPDFを別のタブで開いてください' : undefined}
+          onClick={() => setCarryOver(true)}>旧版のPDFから写す…</button>
+      </div>
     </div>
     {(store.recentFixtureIds.some(id => fixtures.some(f => f.id === id)) || routeSets.length > 0) && <div className="fixture-quick-lists">
       <RecentFixtures fixtures={fixtures} ids={store.recentFixtureIds}
@@ -681,77 +802,87 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
         } catch (reason) { setError(String(reason)) }
       }}>{set.name}</button>)}</section>}
     </div>}
-    <fieldset className="current-location"><legend>現在の場所</legend>
-      <label>階<LocationInput value={store.currentFloor} label="現在の階" list="pickup-floors" commit={v => store.setCurrentLocation('floor', v)} /></label>
-      {inferredFloor && !store.currentFloor && <small>（図面名から: {inferredFloor}）</small>}
-      <label>部屋<LocationInput value={store.currentRoom} label="現在の部屋" list="pickup-rooms" commit={v => store.setCurrentLocation('room', v)} /></label>
+    <fieldset className="current-location"><legend>新しく拾う印の場所</legend>
+      <small>拾った印に入る階・部屋です。部屋の範囲の中で拾うと、その範囲の部屋名が優先されます。</small>
+      <div className="current-location-fields">
+        <label><span>階</span><LocationInput value={store.currentFloor} label="現在の階" list="pickup-floors"
+          placeholder={inferredFloor ? `図面名から: ${inferredFloor}` : '例: 1階'} commit={v => store.setCurrentLocation('floor', v)} /></label>
+        <label><span>部屋</span><LocationInput value={store.currentRoom} label="現在の部屋" list="pickup-rooms"
+          placeholder="例: 事務室（空欄のままでも可）" commit={v => store.setCurrentLocation('room', v)} /></label>
+      </div>
       <datalist id="pickup-floors">{locations.floors.map(f => <option key={f} value={f} />)}</datalist>
       <datalist id="pickup-rooms">{locations.rooms.map(r => <option key={r} value={r} />)}</datalist>
-      <button type="button" disabled={!canEdit || pageRoomRegions.length >= 200 && (!roomSet || roomSet.regions.length >= 200)}
-        onClick={() => { store.startRoomCapture(pageIndex); setError('') }}>部屋の範囲を囲む</button>
     </fieldset>
-    <section className="room-set-controls" aria-label="部屋の組">
-      {!roomSet && <>
-        {suggestedRoomSets.map(set => <button type="button" key={set.id} disabled={!canEdit}
-          onClick={() => useRoomSet(set.id)}>部屋の組「{set.name}」を使う（{set.regions.length}室）</button>)}
-        {roomSets.length > 0 && <label>部屋の組を使う<select aria-label="部屋の組を使う" value="" disabled={!canEdit}
-          onChange={event => {
-            if (event.currentTarget.value) useRoomSet(event.currentTarget.value)
-          }}>
-          <option value="">選んでください</option>
-          {roomSets.map(set => <option key={set.id} value={set.id}>{set.name}（{set.regions.length}室）</option>)}
-        </select></label>}
-        {pageRoomRegions.length > 0 && <button type="button" disabled={!canEdit || roomSets.length >= 100}
-          onClick={() => setRoomSetDialog({ pageIndex })}>この図面の範囲を部屋の組にする</button>}
-      </>}
-      {roomSet && <>
-        <p>部屋の組「{roomSet.name}」を使っています（{roomSetPageCount} 図面で共通）</p>
-        {(roomSetDx !== 0 || roomSetDy !== 0) && <small>
-          （位置を合わせ済み：{roomSetDx < 0 ? '左' : '右'}へ {Math.abs(roomSetDx).toFixed(1)}pt・{roomSetDy < 0 ? '上' : '下'}へ {Math.abs(roomSetDy).toFixed(1)}pt）
-        </small>}
-        {!roomSet.anchor && <small>支点：未設定</small>}
-        <div>
-          <button type="button" disabled={!canEdit} aria-pressed={aligningRoomSet} onClick={() => {
-            setRoomSetConfirmation(null)
-            if (aligningRoomSet) store.endRoomSetAlign()
-            else store.startRoomSetAlign(pageIndex)
-            setError('')
-          }}>{aligningRoomSet ? '合わせ終える' : '位置を合わせる'}</button>
-          {(roomSetDx !== 0 || roomSetDy !== 0) && <button type="button" disabled={!canEdit} onClick={() => {
-            store.setRoomSetOffset(pageIndex, 0, 0)
-            setError('')
-          }}>位置を戻す</button>}
-          <button type="button" disabled={!canEdit} onClick={() => {
-            store.useRoomSet(pageIndex, null)
-            setRoomSetConfirmation(null)
-          }}>組を外す</button>
-          <button type="button" disabled={!canEdit}
-            onClick={() => setRoomSetDialog({ pageIndex, initial: structuredClone(roomSet) })}>組の名前を変える</button>
-          <button type="button" disabled={!canEdit} onClick={() => {
-            if (window.confirm(`部屋の組「${roomSet.name}」を削除します。使っている ${roomSetPageCount} 図面から範囲が消えます（Ctrl+Z で戻せます）`)) {
-              store.deleteRoomSet(roomSet.id)
+    <section className="room-region-section" aria-label="部屋の範囲">
+      <div className="room-region-section-heading">
+        <h3>部屋の範囲（このページ {roomRegions.length}室）</h3>
+        <button type="button" disabled={!canEdit || pageRoomRegions.length >= 200 && (!roomSet || roomSet.regions.length >= 200)}
+          onClick={() => { store.startRoomCapture(pageIndex); setError('') }}>部屋の範囲を囲む</button>
+      </div>
+      <button type="button" className="page-shift-button" aria-pressed={shiftingPage}
+        disabled={!canEdit || !shiftingPage && (!hasShiftContents || roomModeActive || roomHoleTarget !== null
+          || store.areaHoleTarget !== null || store.pageShiftTarget !== null || tracePage !== null || drawPage !== null)}
+        title={!hasShiftContents ? 'このページには動かす拾い・部屋の範囲がありません' : undefined}
+        onClick={() => {
+          if (shiftingPage) store.endPageShift()
+          else store.startPageShift(pageIndex)
+          setError('')
+          setStatus('')
+        }}>{shiftingPage ? 'ずらすのをやめる' : 'このページの拾いと部屋をずらす'}</button>
+      <section className="room-set-controls" aria-label="部屋の組">
+        {!roomSet && <>
+          {suggestedRoomSets.map(set => <button type="button" key={set.id} disabled={!canEdit}
+            onClick={() => useRoomSet(set.id)}>部屋の組「{set.name}」を使う（{set.regions.length}室）</button>)}
+          {roomSets.length > 0 && <label>部屋の組を使う<select aria-label="部屋の組を使う" value="" disabled={!canEdit}
+            onChange={event => {
+              if (event.currentTarget.value) useRoomSet(event.currentTarget.value)
+            }}>
+            <option value="">選んでください</option>
+            {roomSets.map(set => <option key={set.id} value={set.id}>{set.name}（{set.regions.length}室）</option>)}
+          </select></label>}
+          {pageRoomRegions.length > 0 && <button type="button" disabled={!canEdit || roomSets.length >= 100}
+            onClick={() => setRoomSetDialog({ pageIndex })}>この図面の範囲を部屋の組にする</button>}
+        </>}
+        {roomSet && <>
+          <p>部屋の組「{roomSet.name}」を使っています（{roomSetPageCount} 図面で共通）</p>
+          {(roomSetDx !== 0 || roomSetDy !== 0) && <small>
+            （位置を合わせ済み：{roomSetDx < 0 ? '左' : '右'}へ {Math.abs(roomSetDx).toFixed(1)}pt・{roomSetDy < 0 ? '上' : '下'}へ {Math.abs(roomSetDy).toFixed(1)}pt）
+          </small>}
+          {!roomSet.anchor && <small>支点：未設定</small>}
+          <div>
+            <button type="button" disabled={!canEdit} aria-pressed={aligningRoomSet} onClick={() => {
               setRoomSetConfirmation(null)
-            }
-          }}>組を削除</button>
-        </div>
-      </>}
+              if (aligningRoomSet) store.endRoomSetAlign()
+              else store.startRoomSetAlign(pageIndex)
+              setError('')
+            }}>{aligningRoomSet ? '合わせ終える' : '位置を合わせる'}</button>
+            {(roomSetDx !== 0 || roomSetDy !== 0) && <button type="button" disabled={!canEdit} onClick={() => {
+              store.setRoomSetOffset(pageIndex, 0, 0)
+              setError('')
+            }}>位置を戻す</button>}
+            <button type="button" disabled={!canEdit} onClick={() => {
+              store.useRoomSet(pageIndex, null)
+              setRoomSetConfirmation(null)
+            }}>組を外す</button>
+            <button type="button" disabled={!canEdit}
+              onClick={() => setRoomSetDialog({ pageIndex, initial: structuredClone(roomSet) })}>組の名前を変える</button>
+            <button type="button" disabled={!canEdit || roomSets.length >= 100}
+              onClick={() => setRoomSetDialog({ pageIndex, initial: structuredClone(roomSet), mode: 'duplicate' })}>組を複製して使う</button>
+            <button type="button" disabled={!canEdit} onClick={() => {
+              if (window.confirm(`部屋の組「${roomSet.name}」を削除します。使っている ${roomSetPageCount} 図面から範囲が消えます（Ctrl+Z で戻せます）`)) {
+                store.deleteRoomSet(roomSet.id)
+                setRoomSetConfirmation(null)
+              }
+            }}>組を削除</button>
+          </div>
+        </>}
+      </section>
+      {(roomRegions.length > 0 || roomSet) && <ul className="room-region-list" aria-label="このページの部屋の範囲">
+        {(pageRoomRegions.length > 0 || !roomSet) && renderRoomGroup('page', 'この図面だけの部屋', pageRoomRegions)}
+        {roomSet && renderRoomGroup('set', `部屋の組「${roomSet.name}」の部屋`,
+          roomRegions.filter(entry => entry.setId).map(({ region }) => region))}
+      </ul>}
     </section>
-    {roomRegions.length > 0 && <ul className="room-region-list" aria-label="このページの部屋の範囲">
-      {roomRegions.map(({ region, setId }) => <li key={region.id}>
-        <span>{[region.floor, region.name].filter(Boolean).join(' ')}{setId ? '（組）' : ''}</span>
-        <button type="button" disabled={!canEdit}
-          aria-pressed={store.roomEditTarget?.pageIndex === pageIndex && store.roomEditTarget.id === region.id}
-          onClick={() => {
-            if (store.roomEditTarget?.pageIndex === pageIndex && store.roomEditTarget.id === region.id) store.endRoomEdit()
-            else store.startRoomEdit(pageIndex, region.id)
-            setError('')
-          }}>{store.roomEditTarget?.pageIndex === pageIndex && store.roomEditTarget.id === region.id ? '直し終える' : '範囲を直す'}</button>
-        <button type="button" disabled={!canEdit} onClick={() => setEditingRoom({ pageIndex, region })}>名前を変える</button>
-        <button type="button" disabled={!canEdit} onClick={() => {
-          store.removeRoomRegion(pageIndex, region.id)
-        }}>削除</button>
-      </li>)}
-    </ul>}
     {editingRoom && <RoomRegionDialog store={store} initial={editingRoom.region} complete={region => {
       if (region) {
         try {
@@ -766,12 +897,20 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
       }
       setEditingRoom(null)
     }} />}
-    {roomSetDialog && <RoomSetDialog initial={roomSetDialog.initial}
-      name={inferredFloor || `部屋の組${roomSets.length + 1}`} floor={inferredFloor}
+    {roomSetDialog && <RoomSetDialog initial={roomSetDialog.initial} mode={roomSetDialog.mode}
+      name={duplicateRoomSetSource
+        ? `${duplicateRoomSetSource.name.slice(0, 36).replace(/[\uD800-\uDBFF]$/u, '')}のコピー`
+        : inferredFloor || `部屋の組${roomSets.length + 1}`} floor={inferredFloor}
+      description={duplicateRoomSetSource
+        && `この図面だけ新しい組に切り替えます。新しい組で部屋の名前や範囲を直しても、元の組「${duplicateRoomSetSource.name}」とそれを使う他の図面は変わりません。`}
       complete={value => {
         if (!value) { setRoomSetDialog(null); return }
         try {
-          if (roomSetDialog.initial) {
+          if (duplicateRoomSetSource) {
+            const set = store.duplicateRoomSet(roomSetDialog.pageIndex, duplicateRoomSetSource.id, value.name, value.floor ?? '')
+            setRoomSetConfirmation(null)
+            setStatus(`部屋の組「${set.name}」を作り、この図面で使います（元の組「${duplicateRoomSetSource.name}」は変わりません。Ctrl+Z で戻せます）`)
+          } else if (roomSetDialog.initial) {
             if (!store.getRoomSets().some(set => set.id === roomSetDialog.initial!.id)) {
               return '部屋の組が見つかりません。'
             }
@@ -1013,6 +1152,7 @@ export default function FixturePanel({ session, pool }: { session: DocumentSessi
         onSave={saveFixture} onClose={() => setDialog(null)} />}
       {preset && <FixturePresetDialog initialQuery={presetQuery} fixtures={fixtures} onAdd={(items, options) => addMany(items, true, options)} onClose={() => setPreset(false)} />}
       {sources && <FixturePresetDialog sources={sources} onAdd={items => addMany(items)} onClose={() => setSources(null)} />}
+      {carryOver && <CarryOverDialog session={session} documents={otherDocuments} pool={pool} onClose={() => setCarryOver(false)} />}
     </Suspense>
   </section>
 }

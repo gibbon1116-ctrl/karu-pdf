@@ -169,7 +169,7 @@ test('支点・図面ごとの位置合わせ・ドラッグ・矢印・拾い�
   expect(pickups.filter(mark => !mark.room)).toHaveLength(1)
 
   const row = page.getByRole('list', { name: 'このページの部屋の範囲', exact: true })
-    .locator('li').filter({ hasText: '事務室' })
+    .locator('.room-region-row').filter({ hasText: '事務室' })
   await row.getByRole('button', { name: '範囲を直す', exact: true }).click()
   await drag(page, 1, [216, 117], [236, 107])
   await row.getByRole('button', { name: '直し終える', exact: true }).click()

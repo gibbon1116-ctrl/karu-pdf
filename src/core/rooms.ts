@@ -52,9 +52,11 @@ export function translateRoomRegion(
   dy = 0,
 ): RoomRegion {
   if (dx === 0 && dy === 0) return region
+  const translate = (point: Point): Point => [point[0] + dx, point[1] + dy]
   return {
     ...region,
-    points: region.points.map(point => [point[0] + dx, point[1] + dy] as Point),
+    points: region.points.map(translate),
+    ...(region.holes ? { holes: region.holes.map(hole => hole.map(translate)) } : {}),
   }
 }
 
@@ -63,12 +65,29 @@ export interface RoomRegion {
   name: string
   floor?: string
   points: Point[]
+  holes?: Point[][]
 }
 
 const MAX_ROOM_REGIONS = 200
 const MAX_ROOM_POINTS = 500
+export const MAX_ROOM_HOLES = 50
 const MAX_LOCATION_LENGTH = 40
 const MAX_ROOM_SETS = 100
+
+function isRoomPoint(point: unknown): point is Point {
+  return Array.isArray(point) && point.length === 2
+    && Number.isFinite(point[0]) && Number.isFinite(point[1])
+}
+
+function parseRoomPolygon(raw: unknown): Point[] | undefined {
+  if (!Array.isArray(raw) || raw.length < 3 || raw.length > MAX_ROOM_POINTS) return
+  const points: Point[] = []
+  for (const point of raw) {
+    if (!isRoomPoint(point)) return
+    points.push([point[0], point[1]])
+  }
+  return points
+}
 
 function parseRegion(raw: unknown): RoomRegion | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return
@@ -82,19 +101,16 @@ function parseRegion(raw: unknown): RoomRegion | undefined {
   if (value.floor !== undefined
     && (typeof value.floor !== 'string'
       || value.floor.length > MAX_LOCATION_LENGTH)) return
-  if (!Array.isArray(value.points)
-    || value.points.length < 3
-    || value.points.length > MAX_ROOM_POINTS) return
-
-  const points: Point[] = []
-  for (const point of value.points) {
-    if (!Array.isArray(point)
-      || point.length !== 2
-      || typeof point[0] !== 'number'
-      || typeof point[1] !== 'number'
-      || !Number.isFinite(point[0])
-      || !Number.isFinite(point[1])) return
-    points.push([point[0], point[1]])
+  const points = parseRoomPolygon(value.points)
+  if (!points) return
+  const holes: Point[][] = []
+  if (value.holes !== undefined) {
+    if (!Array.isArray(value.holes) || value.holes.length > MAX_ROOM_HOLES) return
+    for (const rawHole of value.holes) {
+      const hole = parseRoomPolygon(rawHole)
+      if (!hole) return
+      holes.push(hole)
+    }
   }
   return {
     id: value.id,
@@ -102,6 +118,7 @@ function parseRegion(raw: unknown): RoomRegion | undefined {
     ...(typeof value.floor === 'string' && value.floor.length
       ? { floor: value.floor } : {}),
     points,
+    ...(holes.length ? { holes } : {}),
   }
 }
 
@@ -373,18 +390,34 @@ function onSegment(point: Point, a: Point, b: Point): boolean {
     && point[1] <= Math.max(a[1], b[1]) + tolerance
 }
 
-export function pointInRoomRegion(region: RoomRegion, point: Point): boolean {
-  if (region.points.length < 3 || !point.every(Number.isFinite)) return false
+export function pointInRoomPolygon(points: readonly Point[], point: Point, includeBoundary = true): boolean {
+  if (points.length < 3 || !point.every(Number.isFinite)) return false
   let inside = false
-  for (let i = 0, j = region.points.length - 1; i < region.points.length; j = i++) {
-    const a = region.points[j], b = region.points[i]
-    if (onSegment(point, a, b)) return true
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const a = points[j], b = points[i]
+    if (onSegment(point, a, b)) return includeBoundary
     if ((a[1] > point[1]) !== (b[1] > point[1])
       && point[0] < a[0] + (point[1] - a[1]) * (b[0] - a[0]) / (b[1] - a[1])) {
       inside = !inside
     }
   }
   return inside
+}
+
+export function pointInRoomRegion(region: RoomRegion, point: Point): boolean {
+  return pointInRoomPolygon(region.points, point)
+    && !region.holes?.some(hole => pointInRoomPolygon(hole, point, false))
+}
+
+export function roomRegionHoleError(region: RoomRegion, hole: readonly Point[]): string | undefined {
+  if ((region.holes?.length ?? 0) >= MAX_ROOM_HOLES) return '抜く範囲は1部屋50か所までです'
+  if (hole.length < 3 || hole.length > MAX_ROOM_POINTS) return '抜く範囲は3点以上500点以下で囲んでください'
+  for (const point of hole) {
+    if (!isRoomPoint(point)) return '抜く範囲の点が不正です'
+  }
+  if (hole.some(point => !pointInRoomPolygon(region.points, point))) {
+    return '抜く範囲は部屋の範囲の内側を囲んでください'
+  }
 }
 
 export function roomAt(
@@ -395,7 +428,9 @@ export function roomAt(
   let selectedArea = Infinity
   for (const region of regions) {
     if (!pointInRoomRegion(region, point)) continue
-    const area = Math.abs(polygonMoments(region.points).twiceArea) / 2
+    const outer = Math.abs(polygonMoments(region.points).twiceArea)
+    const holes = region.holes?.reduce((sum, hole) => sum + Math.abs(polygonMoments(hole).twiceArea), 0) ?? 0
+    const area = Math.max(0, outer - holes) / 2
     if (!selected || area < selectedArea) {
       selected = region
       selectedArea = area

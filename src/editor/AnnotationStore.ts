@@ -1,4 +1,4 @@
-import { QuantityIndex } from '../core/quantityIndex'
+import { compareFloors, QuantityIndex } from '../core/quantityIndex'
 import { isRouteSurfaceFixture, surfacePerimeterM } from '../core/routeSurface'
 import { nextRoutePointAt } from '../core/routePointAdd'
 import { perfCount, perfTime } from '../perf/counters'
@@ -15,23 +15,24 @@ import { symbolRectFromDrag, nearestCalloutEdgePoint, type AnnotationColor, type
 import type { Quad } from 'mupdf'
 import type { FontName } from '../core/fontMetrics'
 import type { LayoutResult } from '../core/textLayout'
-import { measureBounds, measureText, resolveScale, pointInScaleRegion, validScaleRegion, MAX_SCALE_REGIONS, type ScaleRegion, type MeasureKind, type MeasureSettings, type PageScale } from '../core/measure'
+import { measureBounds, measureText, resolveScale, pointInScaleRegion, validAreaHoles, validScaleRegion, MAX_SCALE_REGIONS, type ScaleRegion, type MeasureKind, type MeasureSettings, type PageScale } from '../core/measure'
 import { History, type HistoryStep } from './history'
 import { IssueNumbers, issueColor, issueOrder, parseIssue, type Issue } from '../core/issues'
 import type { CloudIntensity } from '../core/cloud'
 import { countFixtureId, countMembers, parseCount, validCountComponents, type CountComponent, type CountMark } from '../core/counts'
-import { fixtureIdentity, nextCountStyle, serializeCountFixtures, type CountFixture } from '../core/countFixtures'
+import { fixtureIdentity, MAX_COUNT_FIXTURES, nextCountStyle, parseFixtureOpening, serializeCountFixtures, type CountFixture } from '../core/countFixtures'
 import { isPerEquipmentComponent, perEquipmentComponentFixture } from '../core/perEquipment'
 import { fixtureLinkError } from '../core/fixtureLink'
 import { DEFAULT_ANNOTATION_FILTER, filterShowsCountMarks, matchesAnnotationFilter, type AnnotationFilter } from './annotationFilter'
 import type { SymbolShapeDecision } from '../core/symbolShapeDecision'
-import { parseRoomRegions, parseRoomSets, parseRoomSetLink, pickupPoint, pointInRoomRegion, roomAt, translateRoomRegion, type RoomRegion, type RoomSet, type RoomSetLink } from '../core/rooms'
+import { MAX_ROOM_HOLES, parseRoomRegions, parseRoomSets, parseRoomSetLink, pickupPoint, pointInRoomPolygon, pointInRoomRegion, roomAt, roomRegionHoleError, translateRoomRegion, type RoomRegion, type RoomSet, type RoomSetLink } from '../core/rooms'
 
 import { validRoutePerM, validRoutePoints, type RouteExtra, type RoutePoint } from '../core/quantity'
 import { fixtureDimensionUpdateEnabled } from '../core/countFixtures'
 import { FIXTURE_DIMENSION_KEYS, planFixtureDimensions, type FixtureDimensionValues } from '../core/fixtureDimensions'
 import { backfillSummary, calculateBackfillVolume } from '../core/backfill'
 import { polylineLength } from '../core/measure'
+import { convertCarryOverScale, isPagePickup, pickupUsesLinkedFixture, transformCarryOverPoint, type CarryOverInclude, type CarryOverPage } from '../core/carryOver'
 
 const EMPTY_EFFECTIVE_ROOM_REGIONS: Array<{ region: RoomRegion; setId?: string }> = []
 
@@ -85,6 +86,26 @@ export interface EditableAnnotation {
   layout: LayoutResult | null
   dirty: boolean
   madeByKaru: boolean
+}
+
+export interface CarryOverInput {
+  fixtures: CountFixture[]
+  pages: CarryOverPage<EditableAnnotation>[]
+  roomSets: RoomSet[]
+  include: CarryOverInclude
+}
+
+export interface CarryOverResult {
+  fixturesAdded: number
+  fixturesExisting: number
+  pickupsAdded: number
+  pickupsSkipped: number
+  roomRegionsAdded: number
+  roomSetsAdded: number
+  roomLinksSkipped: number
+  scalesCopied: number
+  scalesSkipped: number
+  pagesOutside: number[]
 }
 
 export type RelatedAdditionKind = 'route' | 'point' | 'component' | 'factor' | 'perimeter'
@@ -212,6 +233,36 @@ function clonePoints(points: readonly Point[]): Point[] {
 
 function cloneQuantity(mark: QuantityMark): QuantityMark { return structuredClone(mark) }
 function cloneCount(mark: CountMark): CountMark { return structuredClone(mark) }
+
+function transformRect(rect: Rect, transform: (point: Point) => Point): Rect {
+  return [...transform([rect[0], rect[1]]), ...transform([rect[2], rect[3]])]
+}
+
+function transformPickupPoints(annotation: AnnotationState, transform: (point: Point) => Point): void {
+  const pair = ([first, second]: [Point, Point]): [Point, Point] => [transform(first), transform(second)]
+  if (annotation.vertices) annotation.vertices = annotation.vertices.map(transform)
+  if (annotation.line) annotation.line = pair(annotation.line)
+  if (annotation.inkList) annotation.inkList = annotation.inkList.map(stroke => stroke.map(transform))
+  if (annotation.quads) annotation.quads = annotation.quads.map(quad => [
+    ...transform([quad[0], quad[1]]), ...transform([quad[2], quad[3]]),
+    ...transform([quad[4], quad[5]]), ...transform([quad[6], quad[7]]),
+  ])
+  if (annotation.calloutPoint) annotation.calloutPoint = transform(annotation.calloutPoint)
+  if (annotation.calloutLine) annotation.calloutLine = pair(annotation.calloutLine)
+  if (annotation.measure?.holes) annotation.measure.holes = annotation.measure.holes.map(hole => hole.map(transform))
+  if (annotation.quantity?.holes) annotation.quantity.holes = annotation.quantity.holes.map(hole => hole.map(transform))
+}
+
+function copyRoomRegion(region: RoomRegion, transform: (point: Point) => Point): RoomRegion {
+  return {
+    ...region, id: crypto.randomUUID(), points: region.points.map(transform),
+    ...(region.holes ? { holes: region.holes.map(hole => hole.map(transform)) } : {}),
+  }
+}
+
+function pointOutsidePage([x, y]: Point, size?: { width: number; height: number }): boolean {
+  return x < 0 || y < 0 || !!size && (x > size.width || y > size.height)
+}
 
 function cloneState(annotation: AnnotationState): AnnotationState {
   return {
@@ -359,6 +410,8 @@ export interface DirtySummary {
 }
 
 export class AnnotationStore {
+  constructor(private readonly pageSizeAt?: (pageIndex: number) => { width: number; height: number } | undefined) {}
+
   private vertexHighlight: { annotationId: string; vertexIndex: number } | null = null
   get highlightedVertex(): Readonly<{ annotationId: string; vertexIndex: number }> | null { return this.vertexHighlight }
   setHighlightedVertex(value: { annotationId: string; vertexIndex: number } | null): void {
@@ -373,6 +426,21 @@ export class AnnotationStore {
     if (this.riseHighlight?.annotationId === value?.annotationId && this.riseHighlight?.riseIndex === value?.riseIndex) return
     this.riseHighlight = value ? { ...value } : null
     this.notifyUi()
+  }
+  private roomHighlight: { pageIndex: number; id: string } | null = null
+  get highlightedRoom(): Readonly<{ pageIndex: number; id: string }> | null { return this.roomHighlight }
+  setHighlightedRoom(value: { pageIndex: number; id: string } | null): void {
+    if (this.roomHighlight?.pageIndex === value?.pageIndex && this.roomHighlight?.id === value?.id) return
+    this.roomHighlight = value ? { ...value } : null
+    this.pruneRoomHighlight()
+    this.notifyUi()
+  }
+  private pruneRoomHighlight(): void {
+    const active = this.roomHighlight
+    if (active && !this.roomRegions.get(active.pageIndex)?.some(region => region.id === active.id)
+      && !this.getPageRoomSet(active.pageIndex)?.regions.some(region => region.id === active.id)) {
+      this.roomHighlight = null
+    }
   }
   private flashTarget: string | null = null
   flashVersion = 0
@@ -635,9 +703,11 @@ export class AnnotationStore {
         : !!annotation.count || annotation.measure.kind !== 'area')) return false
     if (this.areaHoleId === id) return true
     this.endRoomSetAlign(false)
+    this.pageShiftIndex = null
     this.roomCaptureIndex = null
     this.roomEditState = null
     this.roomEditCompletion = null
+    this.roomHoleState = null
     this.areaHoleId = id
     this.notifyUi()
     return true
@@ -666,8 +736,10 @@ export class AnnotationStore {
     const active = this.roomEditTarget
     if (active?.pageIndex === pageIndex && active.id === id) return true
     this.endRoomSetAlign(false)
+    this.pageShiftIndex = null
     this.roomCaptureIndex = null
     this.areaHoleId = null
+    this.roomHoleState = null
     this.roomEditCompletion = null
     this.roomEditState = { pageIndex, id, points: region.points.map(point => [...point] as Point) }
     this.notifyUi()
@@ -700,9 +772,11 @@ export class AnnotationStore {
     if (!Number.isInteger(pageIndex) || pageIndex < 0) return false
     if (this.roomCaptureIndex === pageIndex) return true
     this.endRoomSetAlign(false)
+    this.pageShiftIndex = null
     this.areaHoleId = null
     this.roomEditState = null
     this.roomEditCompletion = null
+    this.roomHoleState = null
     this.roomCaptureIndex = pageIndex
     this.notifyUi()
     return true
@@ -712,6 +786,37 @@ export class AnnotationStore {
     this.roomCaptureIndex = null
     this.notifyUi()
   }
+
+  private roomHoleState: { pageIndex: number; id: string } | null = null
+  get roomHoleTarget(): { pageIndex: number; id: string } | null {
+    const active = this.roomHoleState
+    if (active && !this.roomRegions.get(active.pageIndex)?.some(region => region.id === active.id)
+      && !this.getPageRoomSet(active.pageIndex)?.regions.some(region => region.id === active.id)) {
+      this.roomHoleState = null
+    }
+    return this.roomHoleState
+  }
+  startRoomHoleCapture(pageIndex: number, id: string): boolean {
+    if (!this.fixturesReady || !Number.isInteger(pageIndex) || pageIndex < 0) return false
+    const region = this.effectiveRoomRegions(pageIndex).find(entry => entry.region.id === id)?.region
+    if (!region || (region.holes?.length ?? 0) >= MAX_ROOM_HOLES) return false
+    if (this.roomHoleState?.pageIndex === pageIndex && this.roomHoleState.id === id) return true
+    this.endRoomSetAlign(false)
+    this.pageShiftIndex = null
+    this.roomCaptureIndex = null
+    this.roomEditState = null
+    this.roomEditCompletion = null
+    this.areaHoleId = null
+    this.roomHoleState = { pageIndex, id }
+    this.notifyUi()
+    return true
+  }
+  endRoomHoleCapture(): void {
+    if (this.roomHoleState === null) return
+    this.roomHoleState = null
+    this.notifyUi()
+  }
+
   private roomSetAlignState: {
     pageIndex: number; setId: string; dx: number; dy: number
   } | null = null
@@ -734,10 +839,12 @@ export class AnnotationStore {
     const link = this.getPageRoomSetLink(pageIndex)
     if (!link || !this.getPageRoomSet(pageIndex)) return false
     if (this.roomSetAlignPage === pageIndex) return true
+    this.pageShiftIndex = null
     this.roomCaptureIndex = null
     this.roomEditState = null
     this.roomEditCompletion = null
     this.areaHoleId = null
+    this.roomHoleState = null
     this.roomSetAlignCompletion = null
     this.roomSetAlignState = {
       pageIndex, setId: link.id, dx: link.dx ?? 0, dy: link.dy ?? 0,
@@ -769,6 +876,32 @@ export class AnnotationStore {
     const completion = this.roomSetAlignCompletion
     this.roomSetAlignCompletion = null
     return completion
+  }
+
+  private pageShiftIndex: number | null = null
+  get pageShiftTarget(): number | null { return this.pageShiftIndex }
+
+  startPageShift(pageIndex: number): boolean {
+    if (!Number.isInteger(pageIndex) || pageIndex < 0 || (this.pageSizeAt && !this.pageSizeAt(pageIndex))) return false
+    const { pickups, roomRegions, roomSet, scaleRegions } = this.pageShiftCounts(pageIndex)
+    if (!pickups && !roomRegions && !roomSet && !scaleRegions) return false
+    if (this.pageShiftIndex === pageIndex) return true
+    this.areaHoleId = null
+    this.roomCaptureIndex = null
+    this.roomEditState = null
+    this.roomEditCompletion = null
+    this.roomHoleState = null
+    this.roomSetAlignState = null
+    this.roomSetAlignCompletion = null
+    this.pageShiftIndex = pageIndex
+    this.notifyUi()
+    return true
+  }
+
+  endPageShift(): void {
+    if (this.pageShiftIndex === null) return
+    this.pageShiftIndex = null
+    this.notifyUi()
   }
 
   showRoomRegions = true
@@ -918,6 +1051,7 @@ export class AnnotationStore {
 
   reset(preserveFixtureVisibility = false): void {
     this.riseHighlight = null
+    this.roomHighlight = null
     this.clearSymbolCandidates()
     if (!preserveFixtureVisibility) { this.routeTemplate = null; this.lastRouteConditions.clear(); this.lastCondition.clear(); this.lastRouteMembers.clear(); this.lastCountComponents.clear() }
     if (!preserveFixtureVisibility) this.recentFixtures = []
@@ -943,8 +1077,10 @@ export class AnnotationStore {
     this.roomSetAlignState = null
     this.roomSetAlignCompletion = null
     this.roomCaptureIndex = null
+    this.pageShiftIndex = null
     this.roomEditState = null
     this.roomEditCompletion = null
+    this.roomHoleState = null
     if (!preserveFixtureVisibility) this.showRoomRegions = true
     this.annotations.clear()
     this.baselines.clear()
@@ -1106,6 +1242,7 @@ export class AnnotationStore {
     this.roomSetAlignCompletion = null
     this.roomEditState = null
     this.roomEditCompletion = null
+    this.roomHoleState = null
     this.roomRegions.clear(); this.roomRegionBaselines.clear()
     for (const [pageIndex, regions] of entries) {
       if (!Number.isInteger(pageIndex) || pageIndex < 0) continue
@@ -1114,6 +1251,7 @@ export class AnnotationStore {
       this.roomRegions.set(pageIndex, valid)
       this.roomRegionBaselines.set(pageIndex, structuredClone(valid))
     }
+    this.pruneRoomHighlight()
     this.notify(false)
   }
   getRoomRegions(pageIndex: number): RoomRegion[] {
@@ -1131,11 +1269,13 @@ export class AnnotationStore {
     before.roomRegions = [{ pageIndex, regions: old }]
     after.roomRegions = [{ pageIndex, regions: structuredClone(next) }]
     this.roomRegions.set(pageIndex, next)
+    this.pruneRoomHighlight()
     if (this.roomEditState?.pageIndex === pageIndex
       && !this.effectiveRoomRegions(pageIndex).some(({ region }) => region.id === this.roomEditState!.id)) {
       this.roomEditState = null
       this.roomEditCompletion = null
     }
+    void this.roomHoleTarget
     this.history.push({ before, after })
     this.notify(false)
   }
@@ -1144,6 +1284,7 @@ export class AnnotationStore {
     this.roomSetAlignCompletion = null
     this.roomEditState = null
     this.roomEditCompletion = null
+    this.roomHoleState = null
     this.roomSets = parseRoomSets({ version: 1, sets })
     this.roomSetBaseline = structuredClone(this.roomSets)
     this.pendingRoomSets = null
@@ -1158,6 +1299,7 @@ export class AnnotationStore {
       this.pageRoomSets.set(pageIndex, link)
       this.pageRoomSetBaselines.set(pageIndex, structuredClone(link))
     }
+    this.pruneRoomHighlight()
     this.notify(false)
   }
 
@@ -1330,6 +1472,15 @@ export class AnnotationStore {
     ]
   }
 
+  roomNameOrder(): string[] {
+    const pages = [...new Set([...this.roomRegions.keys(), ...this.pageRoomSets.keys()])].sort((a, b) => a - b)
+    const names = new Set<string>()
+    for (const pageIndex of pages) {
+      for (const { region } of this.effectiveRoomRegions(pageIndex)) names.add(region.name)
+    }
+    return [...names]
+  }
+
   suggestedRoomSets(pageIndex: number): RoomSet[] {
     if (this.getPageRoomSet(pageIndex)) return []
     const floor = normalizeFloor(floorFromDrawingName(this.getDrawingInfo(pageIndex)?.name ?? '') ?? '')
@@ -1403,7 +1554,9 @@ export class AnnotationStore {
     for (const item of changedPages) this.roomRegions.set(item.pageIndex, structuredClone(item.regions))
     // Also closes an edit whose shared region disappeared or was detached.
     void this.roomEditTarget
+    void this.roomHoleTarget
     void this.roomSetAlignPage
+    this.pruneRoomHighlight()
     this.history.push({ before, after })
     this.notify(false)
   }
@@ -1439,18 +1592,57 @@ export class AnnotationStore {
   updateRoomRegion(pageIndex: number, region: RoomRegion): void {
     const entry = this.effectiveRoomRegions(pageIndex).find(current => current.region.id === region.id)
     if (!entry) return
-    const valid = parseRoomRegions([region])[0]
+    const valid = parseRoomRegions([{ ...region, holes: undefined }])[0]
     if (!valid) throw new Error('部屋の範囲が不正です。')
+    // Keep stored holes fixed while editing the boundary or location text.
+    const replace = (current: RoomRegion, edited: RoomRegion) => current.id === edited.id
+      ? { ...edited, ...(current.holes ? { holes: current.holes } : {}) }
+      : current
     if (!entry.setId) {
-      this.setRoomRegions(pageIndex, this.getRoomRegions(pageIndex).map(current =>
-        current.id === valid.id ? valid : current))
+      this.setRoomRegions(pageIndex, this.getRoomRegions(pageIndex).map(current => replace(current, valid)))
       return
     }
     const link = this.pageRoomSets.get(pageIndex)
     const shared = translateRoomRegion(valid, -(link?.dx ?? 0), -(link?.dy ?? 0))
     this.changeRoomSets(this.roomSets.map(set => set.id === entry.setId
-      ? { ...set, regions: set.regions.map(current => current.id === valid.id ? shared : current) }
+      ? { ...set, regions: set.regions.map(current => replace(current, shared)) }
       : set))
+  }
+
+  addRoomRegionHole(pageIndex: number, id: string, hole: Point[]): void {
+    const entry = this.effectiveRoomRegions(pageIndex).find(({ region }) => region.id === id)
+    if (!entry) throw new Error('部屋の範囲が見つかりません。')
+    const reason = roomRegionHoleError(entry.region, hole)
+    if (reason) throw new Error(reason)
+    const link = entry.setId ? this.pageRoomSets.get(pageIndex) : undefined
+    const storedHole: Point[] = hole.map(([x, y]) => [x - (link?.dx ?? 0), y - (link?.dy ?? 0)])
+    this.changeRoomRegionHoles(pageIndex, entry, holes => [...holes, storedHole])
+  }
+
+  removeRoomRegionHole(pageIndex: number, id: string, holeIndex: number): void {
+    if (!Number.isInteger(holeIndex) || holeIndex < 0) return
+    const entry = this.effectiveRoomRegions(pageIndex).find(({ region }) => region.id === id)
+    if (!entry?.region.holes?.[holeIndex]) return
+    this.changeRoomRegionHoles(pageIndex, entry, holes => holes.filter((_, index) => index !== holeIndex))
+  }
+
+  private changeRoomRegionHoles(
+    pageIndex: number,
+    entry: { region: RoomRegion; setId?: string },
+    change: (holes: Point[][]) => Point[][],
+  ): void {
+    const update = (current: RoomRegion): RoomRegion => {
+      if (current.id !== entry.region.id) return current
+      const { holes, ...region } = current
+      const next = change(holes ?? [])
+      return next.length ? { ...region, holes: next } : region
+    }
+    if (!entry.setId) {
+      this.setRoomRegions(pageIndex, this.getRoomRegions(pageIndex).map(update))
+      return
+    }
+    this.changeRoomSets(this.roomSets.map(set => set.id === entry.setId
+      ? { ...set, regions: set.regions.map(update) } : set))
   }
 
   removeRoomRegion(pageIndex: number, id: string): void {
@@ -1462,6 +1654,38 @@ export class AnnotationStore {
     }
     this.changeRoomSets(this.roomSets.map(set => set.id === entry.setId
       ? { ...set, regions: set.regions.filter(region => region.id !== id) } : set))
+  }
+
+  private setRoomRegionOrder(pageIndex: number, set: RoomSet | undefined, regions: RoomRegion[]): void {
+    if (set) {
+      this.changeRoomSets(this.roomSets.map(current => current.id === set.id ? { ...current, regions } : current))
+    } else {
+      this.setRoomRegions(pageIndex, regions)
+    }
+  }
+
+  moveRoomRegion(pageIndex: number, id: string, toIndex: number): void {
+    const local = this.roomRegions.get(pageIndex)
+    const set = local?.some(region => region.id === id) ? undefined : this.getPageRoomSet(pageIndex)
+    const regions = set?.regions ?? local ?? []
+    const from = regions.findIndex(region => region.id === id)
+    if (from < 0 || Number.isNaN(toIndex)) return
+    const to = Math.min(regions.length - 1, Math.max(0, Math.trunc(toIndex)))
+    if (from === to) return
+    const next = [...regions]
+    const [region] = next.splice(from, 1)
+    next.splice(to, 0, region)
+    this.setRoomRegionOrder(pageIndex, set, next)
+  }
+
+  sortRoomRegions(pageIndex: number, group: 'page' | 'set'): void {
+    const set = group === 'set' ? this.getPageRoomSet(pageIndex) : undefined
+    const regions = group === 'set' ? set?.regions : this.roomRegions.get(pageIndex)
+    if (!regions || regions.length < 2) return
+    const next = [...regions].sort((a, b) => compareFloors(a.floor ?? '', b.floor ?? '')
+      || a.name.localeCompare(b.name, 'ja', { numeric: true }))
+    if (next.every((region, index) => region === regions[index])) return
+    this.setRoomRegionOrder(pageIndex, set, next)
   }
 
   createRoomSetFromPage(pageIndex: number, name: string, floor?: string): RoomSet {
@@ -1480,6 +1704,36 @@ export class AnnotationStore {
     const links = new Map(this.pageRoomSets)
     links.set(pageIndex, { id })
     this.changeRoomSets([...this.roomSets, set], links, [{ pageIndex, regions: [] }])
+    return structuredClone(set)
+  }
+
+  duplicateRoomSet(pageIndex: number, setId: string, name: string, floor?: string): RoomSet {
+    if (!Number.isInteger(pageIndex) || pageIndex < 0) throw new Error('ページ番号が不正です。')
+    const source = this.roomSets.find(set => set.id === setId)
+    if (!source) throw new Error('部屋の組が見つかりません。')
+    const ids = new Set<string>()
+    for (const set of this.roomSets) {
+      ids.add(set.id)
+      for (const region of set.regions) ids.add(region.id)
+    }
+    for (const regions of this.roomRegions.values()) for (const region of regions) ids.add(region.id)
+    const newId = () => {
+      let id: string
+      do { id = crypto.randomUUID() } while (ids.has(id))
+      ids.add(id)
+      return id
+    }
+    const { anchor, regions } = structuredClone(source)
+    const normalizedFloor = normalizeFloor(floor ?? source.floor ?? '')
+    const set: RoomSet = {
+      id: newId(), name: name.trim(),
+      ...(normalizedFloor ? { floor: normalizedFloor } : {}),
+      ...(anchor ? { anchor } : {}),
+      regions: regions.map(region => ({ ...region, id: newId() })),
+    }
+    const links = new Map(this.pageRoomSets)
+    links.set(pageIndex, { ...links.get(pageIndex), id: set.id })
+    this.changeRoomSets([...this.roomSets, set], links)
     return structuredClone(set)
   }
 
@@ -1572,6 +1826,38 @@ export class AnnotationStore {
     return ids
   }
 
+  pickupsInRoomHole(pageIndex: number, id: string, holeIndex: number): string[] {
+    const region = this.effectiveRoomRegions(pageIndex).find(entry => entry.region.id === id)?.region
+    const hole = region?.holes?.[holeIndex]
+    if (!region || !hole) return []
+    const ids: string[] = []
+    for (const annotation of this.annotations.values()) {
+      if (annotation.deleted || annotation.legacyChange || annotation.pageIndex !== pageIndex) continue
+      const mark = (annotation.quantity ?? annotation.count) as { room?: string } | null
+      if (mark?.room !== region.name) continue
+      const point = pickupPoint(annotation)
+      if (point && pointInRoomPolygon(hole, point, false)) ids.push(annotation.id)
+    }
+    return ids
+  }
+
+  reassignPickupRooms(pageIndex: number, ids: readonly string[]): void {
+    const regions = this.effectiveRoomRegions(pageIndex).map(({ region }) => region)
+    this.mutateMany(ids, annotation => {
+      if (annotation.pageIndex !== pageIndex || !annotation.count && !annotation.quantity) return
+      const point = pickupPoint(annotation)
+      if (!point) return
+      const room = roomAt(regions, point)?.name
+      if (annotation.count?.version === 1 && room) {
+        annotation.count = { version: 2, id: annotation.count.id, fixtureId: countFixtureId(annotation.count) }
+      }
+      const mark = annotation.quantity ?? (annotation.count?.version === 2 ? annotation.count : null)
+      if (!mark) return
+      if (room) mark.room = room
+      else delete mark.room
+    })
+  }
+
   getScale(pageIndex: number): PageScale | null { const s = this.scales.get(pageIndex); return s ? { ...s } : null }
 
   private replaceFixtures(next: CountFixture[]): void {
@@ -1603,8 +1889,7 @@ export class AnnotationStore {
     return structuredClone(this.fixtures.filter(f => f.link?.sources.some(source => source.itemId === id)))
   }
   private hasLinkedPickup(mark: { quantity?: QuantityMark | null; count?: CountMark | null }): boolean {
-    return !!mark.quantity && routeMembers(mark.quantity).some(e => this.getCountFixture(e.itemId)?.link !== undefined)
-      || !!mark.count && countMembers(mark.count).some(e => this.getCountFixture(e.itemId)?.link !== undefined)
+    return pickupUsesLinkedFixture(mark, id => this.getCountFixture(id))
   }
   fixtureForCount(mark: CountMark | null | undefined): CountFixture | undefined { return mark ? this.getCountFixture(countFixtureId(mark)) : undefined }
   async ensureCountFixtures(loader: () => Promise<CountFixture[]>, loadPages: () => Promise<void>): Promise<void> {
@@ -1665,7 +1950,11 @@ export class AnnotationStore {
     const regions = point ? this.effectiveRoomRegions(pageIndex) : undefined
     const region = point && regions?.length ? roomAt(regions.map(entry => entry.region), point) : undefined
     const floor = region?.floor || normalizeFloor(this.currentFloor) || floorFromDrawingName(this.getDrawingInfo(pageIndex)?.name ?? '')
-    const room = region?.name ?? this.currentRoom.trim()
+    const fallbackRoom = this.currentRoom.trim()
+    // A manual default for this same room should also respect its exclusion.
+    const excludedFallback = !region && point && fallbackRoom && regions?.some(({ region }) =>
+      region.name === fallbackRoom && region.holes?.length && pointInRoomPolygon(region.points, point))
+    const room = region?.name ?? (excludedFallback ? '' : fallbackRoom)
     return { ...(floor ? { floor } : {}), ...(room ? { room } : {}) }
   }
   updatePickupLocation(ids: readonly string[], key: 'floor' | 'room', value: string, additional?: Partial<Record<'floor' | 'room', string>>): void {
@@ -3437,9 +3726,17 @@ export class AnnotationStore {
     return undefined
   }
   quantityText(a: Pick<EditableAnnotation, 'quantity' | 'vertices' | 'measure' | 'text'>, points = a.vertices): string {
+    return this.formatQuantityText(a, points, id => this.getCountFixture(id))
+  }
+
+  private formatQuantityText(
+    a: Pick<EditableAnnotation, 'quantity' | 'vertices' | 'measure' | 'text'>,
+    points: Point[] | null | undefined,
+    getFixture: (id: string) => CountFixture | undefined,
+  ): string {
     if (!points || !a.measure) return a.text
     if (!a.quantity) return measureText(points, a.measure)
-    const f = this.getCountFixture(a.quantity.itemId)
+    const f = getFixture(a.quantity.itemId)
     if (!f) return a.text
     const code = quantityKind(f) === 'count' ? fixtureDrawingCode(f) : fixtureLabelCode(f)
     const mark = a.quantity
@@ -3448,20 +3745,23 @@ export class AnnotationStore {
     return quantityLabel(
       points, a.measure.mmPerPoint, mark, code, f.style.showCode,
       id => {
-        const item = this.getCountFixture(id)
+        const item = getFixture(id)
         return item ? fixtureLabelCode(item) : id
       },
-      id => this.openingSize(id),
+      id => {
+        const item = getFixture(id)
+        return item && quantityKind(item) === 'count' ? parseFixtureOpening(item.opening) : undefined
+      },
       id => {
         const member = mark.method === 'polyline'
           ? mark.extra?.find(e => e.itemId === id) : undefined
-        const item = member ? this.getCountFixture(id) : undefined
+        const item = member ? getFixture(id) : undefined
         if (!member || !item || item.link !== undefined
           || quantityMethod(item) !== 'lengthWidthDepth' || !item.backfill?.deductPipes) {
           return ''
         }
         const result = calculateBackfillVolume(
-          planM, mark, member, item, pipeId => this.getCountFixture(pipeId),
+          planM, mark, member, item, getFixture,
         )
         return `${fixtureLabelCode(item)} ${backfillSummary(result)}`
       },
@@ -4088,6 +4388,293 @@ export class AnnotationStore {
     return created.map((annotation) => annotation.id)
   }
 
+  applyCarryOver({ fixtures: sourceFixtures, pages, roomSets, include }: CarryOverInput): CarryOverResult {
+    const result: CarryOverResult = {
+      fixturesAdded: 0, fixturesExisting: 0, pickupsAdded: 0, pickupsSkipped: 0,
+      roomRegionsAdded: 0, roomSetsAdded: 0, roomLinksSkipped: 0,
+      scalesCopied: 0, scalesSkipped: 0, pagesOutside: [],
+    }
+    const before: HistoryState = [], after: HistoryState = []
+    const fixtures = new Map(this.fixtures.map(fixture => [fixture.id, fixture]))
+    const sourceById = new Map(sourceFixtures.map(fixture => [fixture.id, fixture]))
+    if (include.fixtures) {
+      let order = this.fixtures.reduce((next, fixture) => Math.max(next, fixture.order + 1), 0)
+      for (const fixture of sourceFixtures) {
+        if (fixtures.has(fixture.id)) {
+          result.fixturesExisting++
+          continue
+        }
+        if (fixtures.size >= MAX_COUNT_FIXTURES) throw new Error('項目が1000件を超えるため写せません')
+        // The mark and fixture references use these IDs, including nested members.
+        fixtures.set(fixture.id, { ...structuredClone(fixture), order: order++ })
+        result.fixturesAdded++
+      }
+      if (result.fixturesAdded) {
+        before.fixtures = this.getCountFixtures()
+        after.fixtures = structuredClone([...fixtures.values()])
+        serializeCountFixtures(after.fixtures)
+      }
+    }
+
+    const targetPages = new Set<number>()
+    for (const { oldPage, newPage, factor } of pages) {
+      if (![oldPage, newPage].every(index => Number.isInteger(index) && index >= 0)
+        || targetPages.has(newPage) || (this.pageSizeAt && !this.pageSizeAt(newPage))
+        || !Number.isFinite(factor) || factor <= 0) throw new Error('ページの対応または倍率が不正です。')
+      targetPages.add(newPage)
+    }
+
+    const copiedSets = new Map<string, RoomSet>()
+    const links = new Map(this.pageRoomSets)
+    if (include.rooms) {
+      const sourceSets = new Map(roomSets.map(set => [set.id, set]))
+      const names = new Set(this.roomSets.map(set => set.name))
+      for (const { roomSetLink, factor } of pages) {
+        if (!roomSetLink || copiedSets.has(roomSetLink.id)) continue
+        const source = sourceSets.get(roomSetLink.id)
+        if (!source) throw new Error('旧版の部屋の組が見つかりません。')
+        if (this.roomSets.length + copiedSets.size >= 100) throw new Error('部屋の組が100組を超えるため写せません')
+        const suffix = '（旧版）'
+        const name = names.has(source.name)
+          ? source.name.slice(0, 40 - suffix.length).replace(/[\uD800-\uDBFF]$/u, '') + suffix
+          : source.name
+        const geometry = { factor }
+        const transform = (point: Point) => transformCarryOverPoint(point, geometry)
+        const copy: RoomSet = {
+          ...source, id: crypto.randomUUID(), name,
+          ...(source.anchor ? { anchor: transform(source.anchor) } : {}),
+          regions: source.regions.map(region => copyRoomRegion(region, transform)),
+        }
+        copiedSets.set(source.id, copy)
+        names.add(name)
+      }
+      if (copiedSets.size) {
+        const sets = [...this.roomSets, ...copiedSets.values()]
+        if (stableJson(parseRoomSets({ version: 1, sets })) !== stableJson(sets)) {
+          throw new Error('部屋の組が不正です。')
+        }
+        before.roomSets = this.getRoomSets()
+        after.roomSets = structuredClone(sets)
+        result.roomSetsAdded = copiedSets.size
+      }
+    }
+
+    for (const page of pages) {
+      const { newPage: pageIndex, factor } = page
+      const size = this.pageSizeAt?.(pageIndex)
+      let outside = false
+      const track = (point: Point): Point => {
+        if (!point.every(Number.isFinite)) throw new Error('写す座標が不正です。')
+        if (pointOutsidePage(point, size)) outside = true
+        return point
+      }
+      const geometry = { factor }
+      const transform = (point: Point) => transformCarryOverPoint(point, geometry)
+      const transformAndTrack = (point: Point) => track(transform(point))
+      const trackRect = ([x, y, right, bottom]: Rect) => { track([x, y]); track([right, bottom]) }
+
+      if (include.pickups) for (const item of page.pickups) {
+        if (!isPagePickup(item) || pickupUsesLinkedFixture(item, id => sourceById.get(id))) continue
+        const references = [
+          ...(item.count ? countMembers(item.count) : []),
+          ...(item.quantity ? routeMembers(item.quantity) : []),
+          ...(item.quantity?.points ?? []),
+          ...(item.quantity?.openings ?? []),
+        ]
+        if (references.some(({ itemId }) => itemId !== undefined && !fixtures.has(itemId))
+          || pickupUsesLinkedFixture(item, id => fixtures.get(id))) {
+          result.pickupsSkipped++
+          continue
+        }
+        const { dirty: _dirty, ...source } = item
+        const next = cloneState(source)
+        next.id = crypto.randomUUID()
+        next.pageIndex = pageIndex
+        next.objNum = null
+        if (next.quantity) next.quantity.id = crypto.randomUUID()
+        if (next.count) next.count.id = crypto.randomUUID()
+        transformPickupPoints(next, transformAndTrack)
+        if (next.count && !next.vertices) {
+          // A count mark's box is the fixture's symbol size; move its center only.
+          const [left, top, right, bottom] = next.rect
+          const [x, y] = transform([(left + right) / 2, (top + bottom) / 2])
+          const halfWidth = (right - left) / 2, halfHeight = (bottom - top) / 2
+          next.rect = [x - halfWidth, y - halfHeight, x + halfWidth, y + halfHeight]
+        } else next.rect = transformRect(next.rect, transform)
+        if (next.measure) {
+          next.measure.mmPerPoint /= factor
+          if (!Number.isFinite(next.measure.mmPerPoint) || next.measure.mmPerPoint <= 0
+            || (next.measure.holes && !validAreaHoles(next.measure.holes))) {
+            throw new Error('数量拾いの縮尺が不正です。')
+          }
+          if (factor !== 1 && next.vertices) {
+            next.text = this.formatQuantityText(next, next.vertices, id => fixtures.get(id))
+            next.rect = measureBounds(next.vertices, next.measure.kind, next.text, next.fontSize)
+          }
+        }
+        if (next.quantity && !parseQuantityMark(serializeQuantityMark(next.quantity))
+          || next.count && (!parseCount(JSON.stringify(next.count))
+            || (next.count.version === 2 && next.count.extra
+              && !validCountComponents(next.count.fixtureId, next.count.extra)))) {
+          throw new Error('数量拾いの値が不正です。')
+        }
+        trackRect(next.rect)
+        after.push(next)
+        result.pickupsAdded++
+      }
+
+      if (include.rooms) {
+        if (page.roomRegions.length) {
+          const current = this.getRoomRegions(pageIndex)
+          if (current.length + page.roomRegions.length > 200) {
+            throw new Error(`部屋の範囲が1ページ200個を超えるため写せません（p.${pageIndex + 1}）`)
+          }
+          const added = page.roomRegions.map(region => copyRoomRegion(region, transformAndTrack))
+          const regions = parseRoomRegions([...current, ...added])
+          if (regions.length !== current.length + added.length) throw new Error('部屋の範囲が不正です。')
+          before.roomRegions ??= []
+          after.roomRegions ??= []
+          before.roomRegions.push({ pageIndex, regions: current })
+          after.roomRegions.push({ pageIndex, regions })
+          result.roomRegionsAdded += added.length
+        }
+        if (page.roomSetLink) {
+          if (links.has(pageIndex)) result.roomLinksSkipped++
+          else {
+            const set = copiedSets.get(page.roomSetLink.id)!
+            const dx = (page.roomSetLink.dx ?? 0) * factor, dy = (page.roomSetLink.dy ?? 0) * factor
+            const link = parseRoomSetLink({ id: set.id, dx, dy })
+            if (!link) throw new Error('部屋の組の結び付けが不正です。')
+            links.set(pageIndex, link)
+            for (const region of set.regions) {
+              for (const [x, y] of region.points) track([x + dx, y + dy])
+              for (const hole of region.holes ?? []) for (const [x, y] of hole) track([x + dx, y + dy])
+            }
+          }
+        }
+      }
+
+      if (include.scales) {
+        let copied = false, skipped = false
+        if (page.scale) {
+          if (this.getScale(pageIndex)) skipped = true
+          else {
+            before.scales ??= []
+            after.scales ??= []
+            before.scales.push({ pageIndex, scale: null })
+            after.scales.push({ pageIndex, scale: convertCarryOverScale(page.scale, factor, size) })
+            copied = true
+          }
+        }
+        if (page.scaleRegions?.length) {
+          if (this.scaleRegions.get(pageIndex)?.length) skipped = true
+          else {
+            const regions = page.scaleRegions.map(region => ({
+              ...region, id: crypto.randomUUID(), rect: transformRect(region.rect, transform),
+              scale: convertCarryOverScale(region.scale, factor, size),
+            }))
+            if (regions.length > MAX_SCALE_REGIONS || regions.some(region => !validScaleRegion(region))) {
+              throw new Error('縮尺の範囲が不正です。')
+            }
+            for (const region of regions) trackRect(region.rect)
+            before.scaleRegions ??= []
+            after.scaleRegions ??= []
+            before.scaleRegions.push({ pageIndex, regions: [] })
+            after.scaleRegions.push({ pageIndex, regions })
+            copied = true
+          }
+        }
+        if (copied) result.scalesCopied++
+        if (skipped) result.scalesSkipped++
+      }
+      if (outside) result.pagesOutside.push(pageIndex)
+    }
+
+    if (after.roomSets || after.roomRegions) {
+      const roomPages = new Map(this.roomRegions)
+      for (const { pageIndex, regions } of after.roomRegions ?? []) roomPages.set(pageIndex, regions)
+      this.validateRoomRegionIds(after.roomSets ?? this.roomSets, roomPages)
+    }
+    if (links.size !== this.pageRoomSets.size) {
+      before.pageRoomSets = structuredClone([...this.pageRoomSets])
+      after.pageRoomSets = structuredClone([...links])
+    }
+    if (after.length || after.fixtures || after.roomSets || after.roomRegions || after.pageRoomSets
+      || after.scales || after.scaleRegions) {
+      this.restoreMany(after, before)
+      this.history.push({ before, after })
+      this.notify()
+    }
+    result.pagesOutside.sort((a, b) => a - b)
+    return result
+  }
+
+  pageShiftCounts(pageIndex: number): { pickups: number; roomRegions: number; roomSet: boolean; scaleRegions: number } {
+    let pickups = 0
+    for (const item of this.annotations.values()) if (item.pageIndex === pageIndex && isPagePickup(item)) pickups++
+    return {
+      pickups, roomRegions: this.roomRegions.get(pageIndex)?.length ?? 0,
+      roomSet: this.pageRoomSets.has(pageIndex), scaleRegions: this.scaleRegions.get(pageIndex)?.length ?? 0,
+    }
+  }
+
+  shiftPageContents(pageIndex: number, dx: number, dy: number): void {
+    if (dx === 0 && dy === 0) return
+    const size = this.pageSizeAt?.(pageIndex)
+    if (!Number.isInteger(pageIndex) || pageIndex < 0 || (this.pageSizeAt && !size)
+      || !Number.isFinite(dx) || !Number.isFinite(dy)) throw new Error('ページまたは移動量が不正です。')
+    const before: HistoryState = [], after: HistoryState = []
+    const move = ([x, y]: Point): Point => [x + dx, y + dy]
+
+    const scaleRegions = this.getScaleRegions(pageIndex)
+    if (scaleRegions.length) {
+      const regions = scaleRegions.map(region => ({ ...region, rect: transformRect(region.rect, move) }))
+      if (regions.some(region => !validScaleRegion(region)
+        || pointOutsidePage([region.rect[2], region.rect[3]], size))) {
+        throw new Error('縮尺の範囲が用紙の外に出るため動かせません')
+      }
+      before.scaleRegions = [{ pageIndex, regions: scaleRegions }]
+      after.scaleRegions = [{ pageIndex, regions }]
+    }
+
+    const roomRegions = this.getRoomRegions(pageIndex)
+    if (roomRegions.length) {
+      const regions = parseRoomRegions(roomRegions.map(region => translateRoomRegion(region, dx, dy)))
+      if (regions.length !== roomRegions.length) throw new Error('部屋の範囲が不正です。')
+      before.roomRegions = [{ pageIndex, regions: roomRegions }]
+      after.roomRegions = [{ pageIndex, regions }]
+    }
+
+    const link = this.getPageRoomSetLink(pageIndex)
+    if (link) {
+      const moved = parseRoomSetLink({ id: link.id, dx: (link.dx ?? 0) + dx, dy: (link.dy ?? 0) + dy })
+      if (!moved) throw new Error('部屋の組の結び付けが不正です。')
+      before.pageRoomSets = structuredClone([...this.pageRoomSets])
+      after.pageRoomSets = before.pageRoomSets.map(([index, current]) => [index, index === pageIndex ? moved : current])
+    }
+
+    const movePickup = (point: Point): Point => {
+      const moved = move(point)
+      if (!moved.every(Number.isFinite)) throw new Error('移動先の座標が不正です。')
+      return moved
+    }
+    for (const item of this.annotations.values()) {
+      if (item.pageIndex !== pageIndex || !isPagePickup(item)) continue
+      const original = cloneState(item), shifted = cloneState(original)
+      shifted.rect = transformRect(shifted.rect, movePickup)
+      transformPickupPoints(shifted, movePickup)
+      if (shifted.quantity?.holes && !parseQuantityMark(serializeQuantityMark(shifted.quantity))) {
+        throw new Error('数量拾いの値が不正です。')
+      }
+      before.push(original)
+      after.push(shifted)
+    }
+    if (!after.length && !after.scaleRegions && !after.roomRegions && !after.pageRoomSets) return
+    this.restoreMany(after, before)
+    this.history.push({ before, after })
+    this.notify()
+  }
+
   undo(): void {
     const step = this.history.undo()
     if (!step) return
@@ -4363,7 +4950,9 @@ export class AnnotationStore {
       this.pageRoomSets.clear()
       for (const [pageIndex, setId] of target.pageRoomSets) this.pageRoomSets.set(pageIndex, { ...setId })
     }
+    this.pruneRoomHighlight()
     void this.roomEditTarget
+    void this.roomHoleTarget
     void this.roomSetAlignPage
     const targetById = new Map(target.map((state) => [state.id, state]))
     const ids = new Set([...target.map((state) => state.id), ...counterpart.map((state) => state.id)])

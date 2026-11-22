@@ -39,6 +39,7 @@ export type QuantityTableRow = {
 }
 
 export interface QuantityTableDisplay {
+  roomOrder?: readonly string[]
   allConditions?: boolean
   expanded?: Readonly<Record<string, boolean>>
   groupByBreakdown?: boolean
@@ -210,11 +211,15 @@ export function projectQuantityTable(data: readonly TableItem[], mode: QuantityT
   const keys = new Set<string>()
   for (const item of items) for (const key of item.values[mode].keys()) keys.add(key)
   const floorOrder = (a: string, b: string) => a === '' ? (b === '' ? 0 : 1) : b === '' ? -1 : compareFloors(a, b)
+  const roomRanks = new Map(display.roomOrder?.map((name, index) => [name, index]))
+  const unregisteredRank = display.roomOrder?.length ?? 0
   const ordered = [...keys].sort((a, b) => {
     if (mode === 'page') return Number(a) - Number(b)
     if (mode === 'floor') return floorOrder(a, b)
     const [af, ar] = JSON.parse(a) as string[], [bf, br] = JSON.parse(b) as string[]
-    return floorOrder(af, bf) || ar.localeCompare(br, 'ja', { numeric: true })
+    return floorOrder(af, bf)
+      || (roomRanks.get(ar) ?? unregisteredRank) - (roomRanks.get(br) ?? unregisteredRank)
+      || ar.localeCompare(br, 'ja', { numeric: true })
   })
   const columns: QuantityTableColumn[] = ordered.slice(0, columnLimit).map(key => {
     if (mode === 'page') {
@@ -398,14 +403,18 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
     setSelectionCollapse({ fixtureId: selectedFixtureId, keys: new Set<string>() })
   }
   // Metadata edits do not invalidate the quantity index. Selection and flashes
-  // must not recreate the table: compare only the page headings.
+  // must not recreate the table: compare the page headings and room names.
   const pages = useMemo(() => [...new Set(data.flatMap(item => [...item.values.page.keys()].map(Number)))], [data])
   const headings = pages.map(page => { const info = store.getDrawingInfo(page); return [page, info?.number ?? '', info?.name ?? ''] as const })
   const headingKey = JSON.stringify(headings)
   const info = useMemo(() => new Map(headings.map(([page, number, name]) => [page, { number, name } as DrawingInfo])), [headingKey])
+  const contentRevision = store.getContentRevision()
+  const roomOrderKey = useMemo(() => mode === 'room' ? JSON.stringify(store.roomNameOrder()) : '',
+    [store, mode, contentRevision])
+  const roomOrder = useMemo(() => roomOrderKey ? JSON.parse(roomOrderKey) as string[] : undefined, [roomOrderKey])
   const outline = useMemo(() => perfTime('QuantityTable.project', () => projectQuantityTable(data, mode, filters, page => info.get(page) ?? null,
-    { allConditions, expanded, groupByBreakdown, breakdownOrder })),
-  [data, mode, filters, info, allConditions, expanded, groupByBreakdown, breakdownOrder])
+    { allConditions, expanded, groupByBreakdown, breakdownOrder, roomOrder })),
+  [data, mode, filters, info, allConditions, expanded, groupByBreakdown, breakdownOrder, roomOrder])
   const table = useMemo(() => ({
     ...outline,
     rows: collapseQuantityTableRows(
@@ -622,7 +631,7 @@ export default function QuantityTable({ session, pool, height, onHeightChange, o
       const includeRelated = exportReviews.projectMode !== undefined
         || Object.keys(exportReviews.decisions).length > 0
       const drawingInfo = (page: number) => info.get(page) ?? null
-      const options = { data, mode, filters, display: { allConditions, expanded, groupByBreakdown, breakdownOrder }, drawingInfo, pdfName, index, fixtures }
+      const options = { data, mode, filters, display: { allConditions, expanded, groupByBreakdown, breakdownOrder, roomOrder }, drawingInfo, pdfName, index, fixtures }
       const picker = (window as unknown as { showSaveFilePicker?: QuantityWorkbookPicker }).showSaveFilePicker
       // Invoke the picker before awaiting import(), while user activation is present.
       const handle = picker ? await picker.call(window, {

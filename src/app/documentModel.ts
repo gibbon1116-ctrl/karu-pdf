@@ -75,15 +75,18 @@ export class DocumentSession {
   readonly docId: string
   private fileIdentity: DocumentIdentity
   pageSizes: PageSize[]
-  readonly annotationStore = new AnnotationStore()
+  readonly annotationStore = new AnnotationStore(pageIndex => this.pageSizes[pageIndex])
   private drawingScanToken = 0
   private drawingScanPromise: Promise<void> | null = null
   drawingScanStatus = ''
   drawingScanning = false
   drawingScanMs = 0
   drawingPageMs: number[] = []
-  private drawingNotify: (() => void) | null = null
-  subscribeDrawingScan = (listener: () => void): (() => void) => { this.drawingNotify = listener; return () => { if (this.drawingNotify === listener) this.drawingNotify = null } }
+  private readonly drawingListeners = new Set<() => void>()
+  subscribeDrawingScan = (listener: () => void): (() => void) => {
+    this.drawingListeners.add(listener)
+    return () => { this.drawingListeners.delete(listener) }
+  }
   getDrawingScanSnapshot = (): string => this.drawingScanStatus
   cancelDrawingScan(): void { this.drawingScanToken++; this.drawingScanPromise = null; this.drawingScanning = false }
   scanDrawingInfos(pool: PdfWorkerPool, force = false): Promise<void> {
@@ -92,7 +95,10 @@ export class DocumentSession {
     if (!indices.length) return Promise.resolve()
     const token = ++this.drawingScanToken, started = performance.now()
     this.drawingScanning = true; this.drawingPageMs = []
-    const notify = (message: string) => { this.drawingScanStatus = message; this.drawingNotify?.() }
+    const notify = (message: string) => {
+      this.drawingScanStatus = message
+      for (const listener of this.drawingListeners) listener()
+    }
     notify('図面番号・図面名称を読み取っています（0 / ' + indices.length + ' ページ）')
     const task = (async () => {
       const results = new Map<number, DrawingDetection>(); let errors = 0
@@ -295,12 +301,14 @@ export class DocumentTabsModel {
     if (this.sessions.length >= MAX_OPEN_DOCUMENTS) {
       throw new Error('同時に開けるのは8ファイルまでです')
     }
+    this.active?.annotationStore.setHighlightedRoom(null)
     this.sessions = [...this.sessions, session]
     this.activeId = session.docId
   }
 
   activate(docId: string): boolean {
     if (!this.sessions.some((session) => session.docId === docId)) return false
+    if (this.activeId !== docId) this.active?.annotationStore.setHighlightedRoom(null)
     this.activeId = docId
     return true
   }
@@ -312,6 +320,7 @@ export class DocumentTabsModel {
     removed.vectorCache.clear()
     this.sessions = [...this.sessions]
     if (this.activeId === docId) {
+      removed.annotationStore.setHighlightedRoom(null)
       this.activeId = this.sessions[Math.min(index, this.sessions.length - 1)]?.docId ?? null
     }
     return removed

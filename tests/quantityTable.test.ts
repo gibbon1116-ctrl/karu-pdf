@@ -34,6 +34,33 @@ it('uses only occupied pages, their numeric order and the drawing number/name', 
   expect(led.total).toBe(6)
 })
 
+it('uses the registered room order within each floor in the table and Excel', () => {
+  const fixtures = [fixture('led')]
+  const index = QuantityIndex.build([
+    count('a', 0, 'led', '1階', '倉庫10'),
+    count('b', 0, 'led', '1階', '倉庫2'),
+    count('c', 0, 'led', '1階', '会議室1'),
+    count('d', 0, 'led', '1階', '会議室2'),
+    count('e', 1, 'led', '2階', '倉庫10'),
+  ], fixtures)
+  const data = buildQuantityTableData(index, fixtures)
+  const display = { roomOrder: ['倉庫10', '倉庫2'] }
+  const order = (columns: ReturnType<typeof projectQuantityTable>['columns']) =>
+    columns.map(({ floor, room }) => [floor, room])
+  const alphabetical = (a: string, b: string) => a.localeCompare(b, 'ja', { numeric: true })
+  expect(order(projectQuantityTable(data, 'room', {}, info).columns)).toEqual([
+    ...['倉庫2', '倉庫10', '会議室1', '会議室2'].sort(alphabetical).map(room => ['1階', room]),
+    ['2階', '倉庫10'],
+  ])
+  expect(order(projectQuantityTable(data, 'room', {}, info, display).columns)).toEqual([
+    ['1階', '倉庫10'], ['1階', '倉庫2'], ['1階', '会議室1'], ['1階', '会議室2'], ['2階', '倉庫10'],
+  ])
+  const workbook = createQuantityWorkbook({
+    data, mode: 'room', filters: {}, display, drawingInfo: info, pdfName: '部屋順.pdf', index, fixtures,
+  })
+  expect(new TextDecoder().decode(workbook)).toMatch(/>倉庫10<[\s\S]*?>倉庫2<[\s\S]*?>会議室1<[\s\S]*?>会議室2</)
+})
+
 it('provides six fixed headers and only the scrolling summary metadata', () => {
   expect(QUANTITY_TABLE_FIXED_HEADERS).toEqual([
     '見本', '略号', '名称', '規格', '単位', '全図面',

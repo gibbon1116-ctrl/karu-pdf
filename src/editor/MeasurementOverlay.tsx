@@ -8,7 +8,7 @@ import { createContext, useContext, useEffect, useRef, useState, type RefObject 
 import { QuantityDimensionsDialog } from './QuantityDimensionsDialog'
 import type { Point } from '../core/annotations'
 import { cloudPath, type CloudIntensity } from '../core/cloud'
-import { pointInScaleRegion, scaleLabel, type PageScale, type ScaleRegion, constrainMeasurePoint, measureBounds, measureLabel, measureText, type MeasureKind } from '../core/measure'
+import { pointInScaleRegion, scaleLabel, PT_MM, type PageScale, type ScaleRegion, constrainMeasurePoint, measureBounds, measureLabel, measureText, type MeasureKind } from '../core/measure'
 import type { EditableAnnotation, AnnotationStore } from './AnnotationStore'
 import type { EditorTool } from './AnnotationLayer'
 import type { FormatDefaults } from './formatDefaults'
@@ -129,9 +129,10 @@ export function RoomRegionDialog({ store, initial, points, floor = '', roomSet, 
   </dialog>, document.body)
 }
 
-function RoomPickupDialog({ region, count, complete }: {
+function RoomPickupDialog({ region, count, hole, complete }: {
   region: RoomRegion
   count: number
+  hole?: boolean
   complete(apply: boolean): void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
@@ -139,33 +140,40 @@ function RoomPickupDialog({ region, count, complete }: {
     const element = dialog.current
     if (element && !element.open) element.showModal()
   }, [])
-  return createPortal(<dialog ref={dialog} className="room-region-dialog" aria-label="既存の拾いに部屋を入れる"
+  const title = hole ? '抜いた範囲の拾い' : '既存の拾いに部屋を入れる'
+  return createPortal(<dialog ref={dialog} className="room-region-dialog" aria-label={title}
     onCancel={event => { event.preventDefault(); complete(false) }}
     onKeyDown={event => event.stopPropagation()}>
-    <h2>既存の拾いに部屋を入れる</h2>
-    <p>この範囲の {count} 件の拾いの部屋を「{region.name}」にしますか（Ctrl+Z で戻せます）</p>
+    <h2>{title}</h2>
+    {hole
+      ? <p>抜いた範囲の中に、部屋名が「{region.name}」の拾いが {count}件あります。部屋名を直しますか？（ほかの部屋の範囲の中にあればその部屋名に、無ければ部屋なしにします）</p>
+      : <p>この範囲の {count} 件の拾いの部屋を「{region.name}」にしますか（Ctrl+Z で戻せます）</p>}
     <div className="room-region-dialog-actions">
-      <button type="button" onClick={() => complete(true)}>部屋を入れる</button>
-      <button type="button" onClick={() => complete(false)}>入れない</button>
+      <button type="button" onClick={() => complete(true)}>{hole ? '直す' : '部屋を入れる'}</button>
+      <button type="button" onClick={() => complete(false)}>{hole ? 'そのままにする' : '入れない'}</button>
     </div>
   </dialog>, document.body)
 }
 
-export function RoomSetDialog({ initial, name: initialName, floor: initialFloor = '', complete }: {
+export function RoomSetDialog({ initial, name: initialName, floor: initialFloor = '', mode, description, complete }: {
   initial?: RoomSet
   name: string
   floor?: string
+  mode?: 'create' | 'rename' | 'duplicate'
+  description?: string
   complete(value: { name: string; floor?: string } | null): string | void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
-  const [name, setName] = useState(initial?.name ?? initialName)
-  const [floor, setFloor] = useState(initial?.floor ?? initialFloor)
+  const duplicate = mode === 'duplicate'
+  const title = duplicate ? '部屋の組を複製' : '部屋の組'
+  const [name, setName] = useState(duplicate ? initialName : initial?.name ?? initialName)
+  const [floor, setFloor] = useState(duplicate ? initial?.floor ?? '' : initial?.floor ?? initialFloor)
   const [error, setError] = useState('')
   useEffect(() => {
     const element = dialog.current
     if (element && !element.open) element.showModal()
   }, [])
-  return createPortal(<dialog ref={dialog} className="room-region-dialog" aria-label="部屋の組"
+  return createPortal(<dialog ref={dialog} className="room-region-dialog" aria-label={title}
     onCancel={event => { event.preventDefault(); complete(null) }}
     onKeyDown={event => event.stopPropagation()}>
     <form onSubmit={event => {
@@ -182,14 +190,15 @@ export function RoomSetDialog({ initial, name: initialName, floor: initialFloor 
       const reason = complete(value)
       if (reason) setError(reason)
     }}>
-      <h2>部屋の組</h2>
+      <h2>{title}</h2>
+      {description && <p>{description}</p>}
       <label>組の名前<input autoFocus required maxLength={40} value={name}
         onChange={event => setName(event.currentTarget.value)} /></label>
       <label>階<input maxLength={40} value={floor}
         onChange={event => setFloor(event.currentTarget.value)} /></label>
       {error && <p role="alert">{error}</p>}
       <div className="room-region-dialog-actions">
-        <button type="submit">{initial ? '変更する' : '作る'}</button>
+        <button type="submit">{initial && !duplicate ? '変更する' : '作る'}</button>
         <button type="button" onClick={() => complete(null)}>やめる</button>
       </div>
     </form>
@@ -247,6 +256,8 @@ export function useMeasurementInteraction(props: Props) {
   const roomVertex = useRef<{ id: string; index: number; original: RoomRegion; points: Point[]; element: SVGGElement | null; pointerId: number; start: Point } | null>(null)
   const roomEditSession = useRef<{ id: string; tool: EditorTool; pageIndex: number; viewPage?: number } | null>(null)
   const roomSetAlignSession = useRef<{ id: string; tool: EditorTool; pageIndex: number; viewPage?: number } | null>(null)
+  const pageShiftSession = useRef<{ tool: EditorTool; pageIndex: number } | null>(null)
+  const shiftReference = useRef<SVGPathElement>(null)
   const roomSetDrag = useRef<{
     id: string; pointerId: number; start: Point; offset: Point; delta: Point;
     inside: boolean; moved: boolean; element: SVGGElement | null
@@ -260,6 +271,8 @@ export function useMeasurementInteraction(props: Props) {
   const movedVertex = (start: Point, end: Point) => Math.hypot(end[0] - start[0], end[1] - start[1]) * props.zoom * (96 / 72) >= 3
   const frame = useRef(0)
   const tracing = scaleInteraction.tracePage === props.pageIndex
+  const pageShiftTarget = props.store.pageShiftTarget
+  const shiftingPage = pageShiftTarget === props.pageIndex && scaleInteraction.tracePage === null
   const cloud = props.tool === 'cloudPolygon'
   const pickupMethod = props.quantityItem ? props.store.pickupMethod(props.quantityItem) : undefined
   const quantityItem = props.tool === 'count' && props.quantityItem && pickupMethod !== 'click' ? props.quantityItem : undefined
@@ -284,18 +297,24 @@ export function useMeasurementInteraction(props: Props) {
   const alignedRoomSet = aligningRoomSet ? props.store.getPageRoomSet(props.pageIndex) : undefined
   const roomCapturePage = props.store.roomCapturePage
   const capturingRoom = roomCapturePage === props.pageIndex && !tracing
+  const roomHoleTarget = props.store.roomHoleTarget
+  const roomWithHoleCapture = roomHoleTarget?.pageIndex === props.pageIndex && !tracing
+    ? props.store.effectiveRoomRegions(props.pageIndex).find(({ region }) => region.id === roomHoleTarget.id)?.region
+    : undefined
+  const drawingRoomPolygon = capturingRoom || !!roomWithHoleCapture
+  const roomHoleSession = useRef<{ id: string; tool: EditorTool; pageIndex: number; viewPage?: number } | null>(null)
   const roomEditTarget = props.store.roomEditTarget
   const editedRoom = roomEditTarget?.pageIndex === props.pageIndex
     ? props.store.effectiveRoomRegions(props.pageIndex).find(({ region }) => region.id === roomEditTarget.id)?.region
     : undefined
-  const editingRoom = !!editedRoom && !tracing && !capturingRoom
+  const editingRoom = !!editedRoom && !tracing && !drawingRoomPolygon
   const roomSession = useRef<{ tool: EditorTool; pageIndex: number; viewPage?: number } | null>(null)
   const [pendingRoom, setPendingRoom] = useState<{ points: Point[]; floor: string } | null>(null)
-  const [roomConfirmation, setRoomConfirmation] = useState<{ region: RoomRegion; ids: string[] } | null>(null)
+  const [roomConfirmation, setRoomConfirmation] = useState<{ region: RoomRegion; ids: string[]; hole?: boolean } | null>(null)
   const [roomError, setRoomError] = useState('')
   const holeTarget = props.store.areaHoleTarget
   const holeAnnotation = holeTarget ? props.store.get(holeTarget) : undefined
-  const excluding = !!holeAnnotation && holeAnnotation.pageIndex === props.pageIndex && !tracing && !capturingRoom && !editingRoom
+  const excluding = !!holeAnnotation && holeAnnotation.pageIndex === props.pageIndex && !tracing && !drawingRoomPolygon && !editingRoom
   const holeSession = useRef<{ id: string; tool: EditorTool; pageIndex: number; viewPage?: number } | null>(null)
   const [exclusionError, setExclusionError] = useState('')
   const extraCode = (id: string) => { const f = props.store.getCountFixture(id); return f ? fixtureLabelCode(f) : id }
@@ -309,19 +328,27 @@ export function useMeasurementInteraction(props: Props) {
   const areaSelection = props.tool === 'select' ? props.store.selectedIds() : []
   const selectedArea = areaSelection.length === 1 ? props.store.get(areaSelection[0]) : undefined
   const editingArea = !!selectedArea && isEditableArea(selectedArea)
-  const enabled = aligningRoomSet || editingRoom || capturingRoom || excluding || tracing || cloud || !!quantityItem || isMeasureTool(props.tool)
-  const snapEnabled = snap && (aligningRoomSet || editingRoom || editingArea || capturingRoom || excluding || tracing || !!quantityItem || isMeasureTool(props.tool))
+  const enabled = shiftingPage || aligningRoomSet || editingRoom || drawingRoomPolygon || excluding || tracing || cloud || !!quantityItem || isMeasureTool(props.tool)
+  const snapEnabled = snap && (shiftingPage || aligningRoomSet || editingRoom || editingArea || drawingRoomPolygon || excluding || tracing || !!quantityItem || isMeasureTool(props.tool))
   useEffect(() => {
     vertexIndex.current = null
     if (!snapEnabled) return
     const vertices: Point[] = []
     const add = (items: readonly Point[]) => { for (const p of items) { vertices.push(p); if (vertices.length > MAX_SNAP_VERTICES) return } }
     for (const a of props.store.getPageAnnotations(props.pageIndex)) {
-      if (!props.store.isShownOnDrawing(a) || a.count) continue
-      if (a.vertices) add(a.vertices)
+      if (!props.store.isShownOnDrawing(a)) continue
+      if (a.count) {
+        const point = shiftingPage ? pickupPoint(a) : undefined
+        if (point) vertices.push(point)
+      } else if (a.vertices) add(a.vertices)
       else if (a.line) vertices.push(...a.line)
       else if (a.inkList) { for (const stroke of a.inkList) if (stroke.length) vertices.push(stroke[0], stroke.at(-1)!) }
       else if (['square', 'cloudSquare', 'freetext', 'callout', 'symbol', 'issue'].includes(a.kind)) { const [x0, y0, x1, y1] = a.rect; vertices.push([x0, y0], [x1, y0], [x1, y1], [x0, y1]); if (a.calloutPoint) vertices.push(a.calloutPoint) }
+      if (vertices.length > MAX_SNAP_VERTICES) break
+    }
+    if (shiftingPage && props.store.showRoomRegions) for (const { region } of props.store.effectiveRoomRegions(props.pageIndex)) {
+      add(region.points)
+      for (const hole of region.holes ?? []) add(hole)
       if (vertices.length > MAX_SNAP_VERTICES) break
     }
     if (!vertices.length) return
@@ -330,7 +357,7 @@ export function useMeasurementInteraction(props: Props) {
     try {
       vertexIndex.current = buildSnapIndex(vertices, [bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height])
     } catch { props.onStatus(`頂点が多すぎるため、このページではスナップを使えません（上限 ${MAX_SNAP_VERTICES.toLocaleString()} 点）`) }
-  }, [snapEnabled, props.version, props.pageIndex, props.store])
+  }, [snapEnabled, shiftingPage, props.version, props.pageIndex, props.store])
   useEffect(() => {
     snapMarker.current?.setAttribute('data-drawing-ready', 'false')
     if (!snapEnabled || !drawing?.enabled || !props.svg.current) return
@@ -389,6 +416,11 @@ export function useMeasurementInteraction(props: Props) {
   const clear = () => {
     pickedScale.current = null
     snapMarker.current?.setAttribute('display', 'none'); rawCursor.current = null
+    shiftReference.current?.setAttribute('display', 'none')
+    const shiftPointer = shiftingPage ? down.current?.id : undefined
+    if (shiftPointer !== undefined && props.svg.current?.hasPointerCapture(shiftPointer)) {
+      props.svg.current.releasePointerCapture(shiftPointer)
+    }
     if (!frame.current && !points.current.length && !cursor.current && !down.current && !vertex.current && !roomVertex.current && !roomSetDrag.current && !draftRef.current?.firstChild) return
     if (frame.current) cancelAnimationFrame(frame.current)
     const alignmentDrag = roomSetDrag.current
@@ -445,7 +477,7 @@ export function useMeasurementInteraction(props: Props) {
     if (roomVertex.current) {
       const drag = roomVertex.current
       draw(drag.points, drag.original.name, 'area', '#007cbb', 11 / Math.max(.01, props.zoom * (96 / 72)), 1.5 / Math.max(.01, props.zoom * (96 / 72)), false, undefined, undefined, 'dashed', 1)
-      draftRef.current?.children[0]?.setAttribute('fill-opacity', '.12')
+      draftRef.current?.children[0]?.setAttribute('fill-opacity', drag.original.holes?.length ? '0' : '.12')
       return
     }
     if (vertex.current) {
@@ -455,9 +487,21 @@ export function useMeasurementInteraction(props: Props) {
       return
     }
     if (!points.current.length) { draftRef.current?.replaceChildren(); return }
-    if (capturingRoom) {
+    if (shiftingPage) {
+      const [start] = points.current, end = cursor.current
+      const [x, y] = start
+      const screenScale = Math.max(.01, props.zoom * (96 / 72)), radius = 6 / screenScale
+      shiftReference.current?.setAttribute('d', `M${x - radius},${y}h${2 * radius}M${x},${y - radius}v${2 * radius}`)
+      shiftReference.current?.setAttribute('display', '')
+      if (end) {
+        const mm = Math.hypot(end[0] - x, end[1] - y) * PT_MM
+        draw([start, end], `${mm.toFixed(1)} mm`, 'distance', '#005580', 12 / screenScale, 1.5 / screenScale, true)
+      } else draftRef.current?.replaceChildren()
+      return
+    }
+    if (drawingRoomPolygon) {
       const p = cursor.current ? [...points.current, cursor.current] : points.current
-      draw(p, '部屋の範囲', 'area', '#007cbb', 10, .75, true, undefined, undefined, 'dashed', 1)
+      draw(p, roomWithHoleCapture ? '抜く範囲' : '部屋の範囲', 'area', '#007cbb', 10, .75, true, undefined, undefined, 'dashed', 1)
       draftRef.current?.children[0]?.setAttribute('fill-opacity', '.08')
       return
     }
@@ -491,7 +535,7 @@ export function useMeasurementInteraction(props: Props) {
         schedule()
         return
       }
-      const p = resolvePoint(rawCursor.current, event, points.current.at(-1))
+      const p = resolvePoint(rawCursor.current, event, shiftingPage ? undefined : points.current.at(-1))
       if (points.current.length) { cursor.current = p; schedule() }
     }
     window.addEventListener('keydown', modifiers); window.addEventListener('keyup', modifiers)
@@ -521,6 +565,22 @@ export function useMeasurementInteraction(props: Props) {
     if (pending || pendingRoom || roomConfirmation) return
     if (aligningRoomSet || editingRoom) return
     const p = points.current
+    if (roomWithHoleCapture) {
+      const { id, name, holes } = roomWithHoleCapture
+      try {
+        props.store.addRoomRegionHole(props.pageIndex, id, p)
+      } catch (reason) {
+        clear()
+        setRoomError(reason instanceof Error ? reason.message : String(reason))
+        return
+      }
+      const ids = props.store.pickupsInRoomHole(props.pageIndex, id, holes?.length ?? 0)
+      clear()
+      props.store.endRoomHoleCapture()
+      props.onStatus(`「${name}」から範囲を抜きました（Ctrl+Z で戻せます）`)
+      if (ids.length) setRoomConfirmation({ region: roomWithHoleCapture, ids, hole: true })
+      return
+    }
     if (capturingRoom) {
       if (p.length < 3) return
       const draft = p.map(point => [...point] as Point)
@@ -578,13 +638,27 @@ export function useMeasurementInteraction(props: Props) {
     setExclusionError('')
     setRoomError('')
     return clear
-  }, [props.tool, props.pageIndex, tracing, props.quantityItem?.id, pickupMethod, holeTarget, roomCapturePage, roomEditTarget?.pageIndex, roomEditTarget?.id, roomSetAlignPage])
+  }, [props.tool, props.pageIndex, tracing, props.quantityItem?.id, pickupMethod, holeTarget, roomCapturePage, roomHoleTarget, roomEditTarget?.pageIndex, roomEditTarget?.id, roomSetAlignPage, pageShiftTarget])
   useEffect(() => {
     setRoomConfirmation(null)
   }, [props.tool, props.pageIndex, props.store])
   useEffect(() => {
-    if (roomCapturePage !== null || holeTarget !== null || roomEditTarget !== null || roomSetAlignPage !== null) setRoomConfirmation(null)
-  }, [roomCapturePage, holeTarget, roomEditTarget?.pageIndex, roomEditTarget?.id, roomSetAlignPage])
+    if (roomCapturePage !== null || roomHoleTarget !== null || holeTarget !== null || roomEditTarget !== null || roomSetAlignPage !== null || pageShiftTarget !== null) setRoomConfirmation(null)
+  }, [roomCapturePage, roomHoleTarget, holeTarget, roomEditTarget?.pageIndex, roomEditTarget?.id, roomSetAlignPage, pageShiftTarget])
+  useEffect(() => {
+    const active = pageShiftSession.current
+    if (active && (!shiftingPage || active.tool !== props.tool || active.pageIndex !== props.pageIndex)) {
+      pageShiftSession.current = null
+      if (props.store.pageShiftTarget === active.pageIndex) props.store.endPageShift()
+    } else if (!active && shiftingPage) {
+      pageShiftSession.current = { tool: props.tool, pageIndex: props.pageIndex }
+    }
+  }, [shiftingPage, props.tool, props.pageIndex, props.store])
+  useEffect(() => () => {
+    const active = pageShiftSession.current
+    pageShiftSession.current = null
+    if (active && props.store.pageShiftTarget === active.pageIndex) props.store.endPageShift()
+  }, [props.store])
   useEffect(() => {
     const active = roomSetAlignSession.current
     if (active && (active.id !== alignedRoomSet?.id
@@ -615,7 +689,7 @@ export function useMeasurementInteraction(props: Props) {
     const completion = props.store.takeRoomEditCompletion(props.pageIndex)
     if (!completion) return
     const active = roomEditSession.current
-    if (tracing || roomCapturePage !== null || holeTarget !== null || roomEditTarget !== null || roomSetAlignPage !== null
+    if (tracing || roomCapturePage !== null || roomHoleTarget !== null || holeTarget !== null || roomEditTarget !== null || roomSetAlignPage !== null || pageShiftTarget !== null
       || active && (active.tool !== props.tool || active.pageIndex !== props.pageIndex
         || active.viewPage !== undefined && active.viewPage !== drawing?.session.view.page)) return
     const region = props.store.effectiveRoomRegions(props.pageIndex).find(current => current.region.id === completion.region.id)?.region
@@ -628,7 +702,7 @@ export function useMeasurementInteraction(props: Props) {
         || !!region.floor && normalizeFloor(mark.floor ?? '') !== normalizeFloor(region.floor))
     })
     if (ids.length) setRoomConfirmation({ region: structuredClone(region), ids })
-  }, [props.version, props.tool, props.pageIndex, props.store, tracing, roomCapturePage, holeTarget, roomEditTarget?.pageIndex, roomEditTarget?.id, roomSetAlignPage, drawing?.session.view.page])
+  }, [props.version, props.tool, props.pageIndex, props.store, tracing, roomCapturePage, roomHoleTarget, holeTarget, roomEditTarget?.pageIndex, roomEditTarget?.id, roomSetAlignPage, pageShiftTarget, drawing?.session.view.page])
   useEffect(() => {
     const active = roomEditSession.current
     if (active && (active.id !== roomEditTarget?.id || active.pageIndex !== roomEditTarget?.pageIndex
@@ -675,6 +749,31 @@ export function useMeasurementInteraction(props: Props) {
     if (active && props.store.roomCapturePage === active.pageIndex) props.store.endRoomCapture()
   }, [props.store])
   useEffect(() => {
+    const active = roomHoleSession.current
+    if (active && (active.id !== roomWithHoleCapture?.id || active.pageIndex !== props.pageIndex
+      || active.tool !== props.tool
+      || active.viewPage !== undefined && active.viewPage !== drawing?.session.view.page)) {
+      roomHoleSession.current = null
+      clear()
+      setRoomError('')
+      const target = props.store.roomHoleTarget
+      if (target?.pageIndex === active.pageIndex && target.id === active.id) {
+        props.store.endRoomHoleCapture()
+        return
+      }
+    }
+    if (!roomHoleSession.current && roomWithHoleCapture) {
+      roomHoleSession.current = {
+        id: roomWithHoleCapture.id, tool: props.tool, pageIndex: props.pageIndex, viewPage: drawing?.session.view.page,
+      }
+    }
+  }, [roomHoleTarget, roomWithHoleCapture?.id, props.tool, props.pageIndex, drawing?.session.view.page])
+  useEffect(() => () => {
+    const active = roomHoleSession.current, target = props.store.roomHoleTarget
+    roomHoleSession.current = null
+    if (active && target?.pageIndex === active.pageIndex && target.id === active.id) props.store.endRoomHoleCapture()
+  }, [props.store])
+  useEffect(() => {
     const active = holeSession.current
     const selected = props.store.selectedIds()
     const validSelection = !!holeAnnotation && !holeAnnotation.legacyChange
@@ -705,7 +804,18 @@ export function useMeasurementInteraction(props: Props) {
   useEffect(() => {
     if (!enabled) return
     const onKey = (event: KeyboardEvent) => {
-      if (pending || pendingRoom || roomConfirmation || (event.target as Element)?.matches('input,select,textarea,[contenteditable="true"]')) return
+      const target = event.target instanceof Element ? event.target : null
+      if (pending || pendingRoom || roomConfirmation || target?.closest('dialog[open],input,select,textarea,[contenteditable="true"]')) return
+      if (shiftingPage) {
+        if (event.key === 'Escape') {
+          event.preventDefault(); event.stopImmediatePropagation()
+          if (event.repeat) return
+          const hasReference = points.current.length > 0
+          clear()
+          if (!hasReference) props.store.endPageShift()
+        }
+        return
+      }
       if (aligningRoomSet) {
         if (event.key === 'Enter' || event.key === 'Escape') {
           event.preventDefault(); event.stopImmediatePropagation()
@@ -736,6 +846,10 @@ export function useMeasurementInteraction(props: Props) {
         event.preventDefault(); event.stopImmediatePropagation()
         clear(); props.store.endRoomCapture(); return
       }
+      if (roomWithHoleCapture && event.key === 'Escape') {
+        event.preventDefault(); event.stopImmediatePropagation()
+        clear(); props.store.endRoomHoleCapture(); return
+      }
       if (excluding && event.key === 'Escape') {
         event.preventDefault(); event.stopImmediatePropagation()
         clear(); props.store.endAreaHoles(); return
@@ -753,9 +867,11 @@ export function useMeasurementInteraction(props: Props) {
         setPendingRoom(null)
         props.store.endRoomCapture()
       }
+      if (roomWithHoleCapture) props.store.endRoomHoleCapture()
       if (excluding) props.store.endAreaHoles()
       if (editingRoom) props.store.endRoomEdit(false)
       if (aligningRoomSet) props.store.endRoomSetAlign(false)
+      if (shiftingPage) props.store.endPageShift()
     }
     window.addEventListener('keydown', onKey, true); window.addEventListener('karu-pdf:measurement-start', otherPage)
     return () => { window.removeEventListener('keydown', onKey, true); window.removeEventListener('karu-pdf:measurement-start', otherPage) }
@@ -763,9 +879,18 @@ export function useMeasurementInteraction(props: Props) {
   const pointerDown = (event: React.PointerEvent, p: Point): boolean => {
     if (scaleInteraction.tracePage !== null && !tracing) return true
     if (roomCapturePage !== null && !capturingRoom) return true
+    if (roomHoleTarget !== null && !roomWithHoleCapture) return true
     if (roomEditTarget !== null && !editingRoom) return true
     if (roomSetAlignPage !== null && !aligningRoomSet) return true
     if (pending || pendingRoom || roomConfirmation) return true
+    if (pageShiftTarget !== null) {
+      if (shiftingPage && event.button === 0 && !down.current) {
+        window.dispatchEvent(new CustomEvent('karu-pdf:measurement-start', { detail: props.pageIndex }))
+        down.current = { id: event.pointerId, start: p, hadPoints: points.current.length > 0 }
+        event.currentTarget.setPointerCapture(event.pointerId)
+      }
+      return true
+    }
     if (aligningRoomSet) {
       if (event.button !== 0 || roomSetDrag.current) return true
       const link = props.store.getPageRoomSetLink(props.pageIndex)
@@ -797,7 +922,7 @@ export function useMeasurementInteraction(props: Props) {
       if (!next[vertexIndex]) return true
       roomVertex.current = {
         id: editedRoom!.id, index: vertexIndex, original: structuredClone(editedRoom!), points: next,
-        element: target.closest<SVGGElement>('g.room-region'), pointerId: event.pointerId, start: [...p] as Point,
+        element: target.closest<SVGGElement>('g.room-region-shape'), pointerId: event.pointerId, start: [...p] as Point,
       }
       // Keep an unchanged vertex visible through the two clicks of a double click.
       if (midpoint !== null) {
@@ -808,7 +933,7 @@ export function useMeasurementInteraction(props: Props) {
       return true
     }
     const target = (event.target as Element).closest('[data-measure-vertex], [data-measure-midpoint]')
-    if (!capturingRoom && !excluding && props.tool === 'select' && target) {
+    if (!drawingRoomPolygon && !excluding && props.tool === 'select' && target) {
       const id = target.getAttribute('data-annotation-id')!, a = props.store.get(id)
       if (a?.vertices && (a.measure || a.kind === 'cloudPolygon')) {
         const midpoint = target.getAttribute('data-measure-midpoint')
@@ -833,31 +958,41 @@ export function useMeasurementInteraction(props: Props) {
     const hadPoints = points.current.length > 0
     const previous = points.current.at(-1)
     const next = resolvePoint(p, event, previous)
-    if (!hadPoints && !tracing && !cloud && !excluding && !capturingRoom) {
+    if (!hadPoints && !tracing && !cloud && !excluding && !drawingRoomPolygon) {
       // No region lookup during redraw: retain the first resolved scale until completion.
       pickedScale.current = props.store.scaleRegions.get(props.pageIndex)?.length
         ? props.store.scaleAt(props.pageIndex, next)
         : (() => { const scale = props.store.getScale(props.pageIndex); return scale ? { scale } : null })()
       if (!pickedScale.current) { scaleInteraction.request(props.pageIndex); return true }
     }
-    if (tracing || !excluding && !capturingRoom && props.tool === 'distance') {
+    if (tracing || !excluding && !drawingRoomPolygon && props.tool === 'distance') {
       if (!hadPoints) points.current.push(next)
     } else if (!previous || Math.hypot(next[0] - previous[0], next[1] - previous[1]) > .01) {
-      if (capturingRoom && points.current.length >= 500) {
-        const message = '部屋の範囲の点は500点までです'
-        setRoomError(message); props.onStatus(message); return true
+      if (drawingRoomPolygon && points.current.length >= 500) {
+        const message = roomWithHoleCapture ? '抜く範囲の点は500点までです' : '部屋の範囲の点は500点までです'
+        setRoomError(message)
+        if (capturingRoom) props.onStatus(message)
+        return true
       }
       if (excluding && points.current.length >= 500) {
         const message = '除外範囲の点は500点までです'
         setExclusionError(message); props.onStatus(message); return true
       }
       points.current.push(next)
+      if (roomWithHoleCapture && roomError) setRoomError('')
     }
     cursor.current = null; down.current = { id: event.pointerId, start: p, hadPoints }
     event.currentTarget.setPointerCapture(event.pointerId); schedule()
     return true
   }
   const pointerMove = (event: React.PointerEvent, p: Point): boolean => {
+    if (pageShiftTarget !== null) {
+      if (shiftingPage) {
+        const next = resolvePoint(p, event)
+        if (points.current.length) { cursor.current = next; schedule() }
+      }
+      return true
+    }
     if (roomSetDrag.current) {
       const drag = roomSetDrag.current
       if (drag.pointerId !== event.pointerId) return true
@@ -906,6 +1041,34 @@ export function useMeasurementInteraction(props: Props) {
     return true
   }
   const pointerUp = (event: React.PointerEvent, p: Point): boolean => {
+    if (pageShiftTarget !== null) {
+      const click = down.current
+      if (!shiftingPage || click?.id !== event.pointerId) return true
+      down.current = null
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+      if (movedVertex(click.start, p) || props.store.pageShiftTarget !== props.pageIndex) return true
+      const point = resolvePoint(p, event)
+      const start = points.current[0]
+      if (!start) {
+        points.current = [point]
+        cursor.current = null
+        schedule()
+        return true
+      }
+      const dx = point[0] - start[0], dy = point[1] - start[1]
+      const { pickups, roomRegions, roomSet } = props.store.pageShiftCounts(props.pageIndex)
+      clear()
+      try {
+        props.store.shiftPageContents(props.pageIndex, dx, dy)
+        props.onStatus(dx === 0 && dy === 0 ? '位置は変わりませんでした'
+          : `拾い ${pickups}件・部屋の範囲 ${roomRegions}${roomSet ? '・部屋の組の位置' : ''}を動かしました（Ctrl+Z で戻せます）`)
+      } catch (reason) {
+        props.onStatus(reason instanceof Error ? reason.message : String(reason))
+      } finally {
+        props.store.endPageShift()
+      }
+      return true
+    }
     if (roomSetDrag.current) {
       const drag = roomSetDrag.current
       if (drag.pointerId !== event.pointerId) return true
@@ -981,7 +1144,7 @@ export function useMeasurementInteraction(props: Props) {
     if (!enabled || !d || d.id !== event.pointerId) return enabled
     down.current = null
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
-    if ((tracing || !excluding && !capturingRoom && props.tool === 'distance') && (d.hadPoints || Math.hypot(p[0] - d.start[0], p[1] - d.start[1]) > 1)) {
+    if ((tracing || !excluding && !drawingRoomPolygon && props.tool === 'distance') && (d.hadPoints || Math.hypot(p[0] - d.start[0], p[1] - d.start[1]) > 1)) {
       const end = resolvePoint(p, event, points.current[0])
       if (Math.hypot(end[0] - points.current[0][0], end[1] - points.current[0][1]) > .01) { points.current.push(end); commit() }
     }
@@ -994,7 +1157,9 @@ export function useMeasurementInteraction(props: Props) {
   }
   const doubleClick = (event: React.MouseEvent): boolean => {
     if (pending || pendingRoom || roomConfirmation) return true
+    if (pageShiftTarget !== null) return true
     if (roomSetAlignPage !== null) return true
+    if (roomHoleTarget !== null && !roomWithHoleCapture) return true
     if (roomEditTarget !== null) {
       if (!editingRoom) return true
       const target = handleAt(event, '[data-room-vertex]')
@@ -1012,7 +1177,7 @@ export function useMeasurementInteraction(props: Props) {
       return true
     }
     const target = handleAt(event, '[data-measure-vertex]')
-    if (!capturingRoom && !excluding && !tracing && props.tool === 'select' && target) {
+    if (!drawingRoomPolygon && !excluding && !tracing && props.tool === 'select' && target) {
       const id = target.getAttribute('data-annotation-id')
       const annotation = id ? props.store.get(id) : undefined
       const selected = props.store.selectedIds()
@@ -1031,17 +1196,30 @@ export function useMeasurementInteraction(props: Props) {
     return false
   }
   return { pointerDown, pointerMove, pointerUp, doubleClick,
-    pointerLeave: () => { snapMarker.current?.setAttribute('display', 'none'); if (!down.current) rawCursor.current = null },
+    pointerLeave: () => {
+      snapMarker.current?.setAttribute('display', 'none')
+      if (!down.current) rawCursor.current = null
+      if (shiftingPage && points.current.length) { cursor.current = null; schedule() }
+    },
     cancel: () => {
       if (pendingRoom || roomConfirmation) return true
+      if (props.store.pageShiftTarget === props.pageIndex) { clear(); props.store.endPageShift(); return true }
       if (aligningRoomSet || roomSetDrag.current) { clear(); props.store.endRoomSetAlign(false); return true }
       if (editingRoom) { clear(); props.store.endRoomEdit(false); return true }
       if (capturingRoom) { clear(); props.store.endRoomCapture(); return true }
+      if (roomWithHoleCapture) { clear(); props.store.endRoomHoleCapture(); return true }
       if (excluding) { clear(); props.store.endAreaHoles(); return true }
       if (!points.current.length && !down.current && !vertex.current && !roomVertex.current) return false
       clear(); return true
     },
     draft: <><g ref={draftRef} className="measurement-draft" pointerEvents="none" /><path ref={snapMarker} data-testid={`snap-marker-${props.pageIndex}`} display="none" fill="white" stroke="#007cbb" strokeWidth="1.5" vectorEffect="non-scaling-stroke" pointerEvents="none" />
+      {shiftingPage && <>
+        <path ref={shiftReference} display="none" fill="none" stroke="#005580" strokeWidth="2"
+          vectorEffect="non-scaling-stroke" pointerEvents="none" data-testid="page-shift-reference" />
+        {createPortal(<div className="room-region-guide" role="status">
+          このページの拾いと部屋をずらす：1点目に写した拾い・部屋の範囲の基準点、2点目に図面上の正しい位置をクリックします（Esc で中止）
+        </div>, document.body)}
+      </>}
       {aligningRoomSet && createPortal(<div className="room-region-guide room-set-align-guide" role="status"
         // React bubbles portal events to the drawing layer, whose pointer capture would swallow the button click.
         onPointerDown={event => event.stopPropagation()} onPointerMove={event => event.stopPropagation()}
@@ -1058,6 +1236,10 @@ export function useMeasurementInteraction(props: Props) {
       </div>, document.body)}
       {capturingRoom && !pendingRoom && createPortal(<div className="room-region-guide" role="status">
         <div>部屋の範囲を囲んでください（Enter・ダブルクリックで決定、Esc で中止）</div>
+        {roomError && <div role="alert">{roomError}</div>}
+      </div>, document.body)}
+      {roomWithHoleCapture && createPortal(<div className="room-region-guide" role="status">
+        <div>抜く範囲を囲む：「{roomWithHoleCapture.name}」の中で、部屋に含めない範囲（柱・PS・吹抜など）をクリックで囲み、ダブルクリックか Enter で終えます（Esc で中止）</div>
         {roomError && <div role="alert">{roomError}</div>}
       </div>, document.body)}
       {excluding && createPortal(<div className="area-hole-guide" role="status" style={{
@@ -1096,11 +1278,12 @@ export function useMeasurementInteraction(props: Props) {
             props.onStatus(message)
           }
         }} />}
-      {roomConfirmation && <RoomPickupDialog region={roomConfirmation.region} count={roomConfirmation.ids.length}
+      {roomConfirmation && <RoomPickupDialog region={roomConfirmation.region} count={roomConfirmation.ids.length} hole={roomConfirmation.hole}
         complete={apply => {
           if (apply) {
             const { region, ids } = roomConfirmation
-            props.store.updatePickupLocation(ids, 'room', region.name, region.floor ? { floor: region.floor } : undefined)
+            if (roomConfirmation.hole) props.store.reassignPickupRooms(props.pageIndex, ids)
+            else props.store.updatePickupLocation(ids, 'room', region.name, region.floor ? { floor: region.floor } : undefined)
           }
           setRoomConfirmation(null)
         }} />}

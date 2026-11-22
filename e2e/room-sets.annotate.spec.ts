@@ -148,7 +148,8 @@ test('階の候補・共有した範囲での拾い・形の共有・保存と�
   await open(page)
   await addItem(page)
   await createSet(page)
-  await expect(page.getByRole('list', { name: 'このページの部屋の範囲', exact: true })).toContainText('（組）')
+  await expect(page.getByRole('list', { name: 'このページの部屋の範囲', exact: true })
+    .getByRole('heading', { name: '部屋の組「1階」の部屋', exact: true })).toBeVisible()
 
   await goToPage(page, 1)
   const candidate = page.getByRole('button', { name: '部屋の組「1階」を使う（2室）', exact: true })
@@ -162,7 +163,7 @@ test('階の候補・共有した範囲での拾い・形の共有・保存と�
   ]))
 
   await goToPage(page, 2)
-  await expect(page.locator('.current-location > small')).toContainText('2階')
+  await expect(page.getByLabel('現在の階', { exact: true })).toHaveAttribute('placeholder', '図面名から: 2階')
   await expect(candidate).toHaveCount(0)
   await expect(page.getByLabel('部屋の組を使う', { exact: true })).toBeVisible()
   await expect(page.getByTestId('annotation-layer-2').locator('.room-region')).toHaveCount(0)
@@ -170,7 +171,7 @@ test('階の候補・共有した範囲での拾い・形の共有・保存と�
   await goToPage(page, 1)
   await expect(page.locator('.room-set-controls')).toContainText('2 図面で共通')
   const row = page.getByRole('list', { name: 'このページの部屋の範囲', exact: true })
-    .locator('li').filter({ hasText: '事務室' })
+    .locator('.room-region-row').filter({ hasText: '事務室' })
   await row.getByRole('button', { name: '範囲を直す', exact: true }).click()
   const handle = secondLayer.getByTestId('room-handle-1')
   const box = await handle.boundingBox()

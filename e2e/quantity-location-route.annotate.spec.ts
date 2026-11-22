@@ -59,7 +59,7 @@ test('locations, drawing-name fallback, bulk Undo, shared route, spec duplicatio
  expect((await marks(page,0)).every(m=>m?.version===2&&m.room==='事務室')).toBe(true)
  await page.evaluate(()=>window.__karu!.setDrawingInfo(1,{name:'2階 電灯設備平面図',nameManual:true,scanned:true}))
  await panel.getByLabel('現在の階',{exact:true}).fill('');await panel.getByLabel('現在の階',{exact:true}).press('Enter')
- await page.evaluate(()=>window.__karu!.scrollToPage(1));await expect(panel.getByText('（図面名から: 2階）',{exact:true})).toBeVisible()
+ await page.evaluate(()=>window.__karu!.scrollToPage(1));await expect(panel.getByLabel('現在の階',{exact:true})).toHaveAttribute('placeholder','図面名から: 2階')
  await row(page,'LED 300W 照明器具').click();await click(page,1,80,180)
  expect((await marks(page,1))[0]).toMatchObject({floor:'2階',room:'事務室'})
  await page.evaluate(()=>window.__karu!.scrollToPage(0))

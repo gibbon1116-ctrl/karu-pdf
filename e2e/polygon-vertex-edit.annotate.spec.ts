@@ -84,7 +84,7 @@ const measureMidpoints = (page: Page) => page.locator('[data-measure-midpoint]')
 const labels = (page: Page) => page.locator('.measurement-shape .measurement-label')
 const roomHandles = (page: Page) => page.locator('.room-region-editing [data-room-vertex]')
 const roomMidpoints = (page: Page) => page.locator('.room-region-editing [data-room-midpoint]')
-const roomPolygon = (page: Page) => page.locator('.room-region-editing > polygon')
+const roomPolygon = (page: Page) => page.locator('.room-region-editing > .room-region-shape > polygon')
 const confirmation = (page: Page) => page.getByRole('dialog', { name: '既存の拾いに部屋を入れる' })
 
 // Undo clears the selection, so read the point count from the store and select again to keep editing.

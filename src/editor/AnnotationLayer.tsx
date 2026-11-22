@@ -2,7 +2,7 @@ import { routeMembers, conditionSuffix } from '../core/quantity'
 import { fixtureCode, fixtureDrawingCode, fixtureLabelCode } from '../core/countFixtures'
 import { quantityMethod } from '../core/countFixtures'
 import { constrainLinePoint, arrowHeadSize } from '../core/lineGeometry'
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { Quad } from 'mupdf'
 import type { PdfWorkerPool } from '../client/PdfWorkerPool'
 import type { CountFixtureSample } from '../core/countFixtures'
@@ -24,7 +24,7 @@ import { CLEAR_EDITOR_SELECTION } from './interaction'
 import { ToolIcon } from '../ui/ToolIcon'
 import { CountMarker, countMarkerData, countSvgPath } from './countMarkers'
 import { countFixtureId } from '../core/counts'
-import { pickupPoint, polygonCentroid } from '../core/rooms'
+import { pickupPoint, pointInRoomPolygon, polygonCentroid } from '../core/rooms'
 
 import { scaleLabel } from '../core/measure'
 import { perfCount } from '../perf/counters'
@@ -351,6 +351,7 @@ function selectionBounds(quads: readonly Quad[]): Rect | null {
 }
 
 export function AnnotationLayer(props: Props) {
+  const roomHatchId = useId()
   const sampleInteraction = useContext(FixtureSampleContext)
   const version = useSyncExternalStore(props.store.subscribe, props.store.getSnapshot)
   perfCount('AnnotationLayer.render')
@@ -1070,7 +1071,10 @@ export function AnnotationLayer(props: Props) {
   }
 
   const roomEditTarget = props.store.roomEditTarget
+  const roomHoleTarget = props.store.roomHoleTarget
+  const shiftingPage = props.store.pageShiftTarget === props.pageIndex
   const roomRegions = props.store.effectiveRoomRegions(props.pageIndex)
+  const capturingRoomHole = roomHoleTarget?.pageIndex === props.pageIndex
   const aligningRoomSet = props.store.roomSetAlignPage === props.pageIndex
   const alignedSet = aligningRoomSet ? props.store.getPageRoomSet(props.pageIndex) : undefined
   const alignedLink = aligningRoomSet ? props.store.getPageRoomSetLink(props.pageIndex) : undefined
@@ -1084,38 +1088,88 @@ export function AnnotationLayer(props: Props) {
   const editingRoom = roomEditTarget?.pageIndex === props.pageIndex
     ? roomRegions.find(({ region }) => region.id === roomEditTarget.id)?.region
     : undefined
-  const renderRoomRegion = (region: NonNullable<typeof editingRoom>, editing: boolean, aligning = false) => {
-    const center = polygonCentroid(region.points)
+  const highlight = props.store.highlightedRoom
+  const highlightedRoom = highlight?.pageIndex === props.pageIndex && highlight.id !== editingRoom?.id
+    ? roomRegions.find(({ region }) => region.id === highlight.id)?.region
+    : undefined
+  let roomMaskIndex = 0
+  const renderRoomRegion = (region: NonNullable<typeof editingRoom>, mode?: 'editing' | 'aligning' | 'highlighted') => {
+    const editing = mode === 'editing', aligning = mode === 'aligning', highlighted = mode === 'highlighted'
+    const holes = region.holes ?? []
+    const outsideHoles = (point: Point) => !holes.some(hole => pointInRoomPolygon(hole, point, false))
+    const centroid = polygonCentroid(region.points)
+    let center = centroid
+    if (centroid && !outsideHoles(centroid)) {
+      const vertex = region.points.find(outsideHoles)
+      if (vertex) {
+        const inset: Point = [vertex[0] * .75 + centroid[0] * .25, vertex[1] * .75 + centroid[1] * .25]
+        center = outsideHoles(inset) && pointInRoomPolygon(region.points, inset) ? inset : vertex
+      } else {
+        const left = holes.reduce((x, hole) => hole.reduce((min, point) => Math.min(min, point[0]), x), Infinity)
+        center = [left, centroid[1]]
+      }
+    }
     const size = 11 / Math.max(.01, props.zoom * CSS_PX_PER_PT)
     const handleSize = 8 / Math.max(.01, props.zoom * CSS_PX_PER_PT)
-    return <g key={region.id} className={`room-region${editing ? ' room-region-editing' : ''}${aligning ? ' room-region-aligning' : ''}`} data-room-id={region.id} pointerEvents="none">
-      <polygon points={region.points.map(point => point.join(',')).join(' ')}
-        fill="#007cbb" fillOpacity={editing || aligning ? '.12' : '.08'} stroke={aligning ? '#005580' : '#007cbb'} strokeWidth={editing || aligning ? '1.5' : '.75'}
-        strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
-      {center && <text className="room-region-label" x={center[0]} y={center[1]}
-        textAnchor="middle" dominantBaseline="central" fontSize={size}
-        fill="#007cbb" stroke="white" strokeWidth={size * .3} paintOrder="stroke">{region.name}</text>}
-      {editing && region.points.map((point, index) => <rect key={`vertex-${index}`}
-        className="annotation-resize-handle room-region-handle" data-room-vertex={index}
-        data-testid={`room-handle-${index}`}
-        x={point[0] - handleSize / 2} y={point[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
-      {editing && region.points.map((point, index, vertices) => {
-        const next = vertices[(index + 1) % vertices.length]
-        return <circle key={`midpoint-${index}`} className="annotation-midpoint-handle room-region-handle"
-          data-room-midpoint={index} data-testid={`room-midpoint-${index}`}
-          cx={point[0] / 2 + next[0] / 2} cy={point[1] / 2 + next[1] / 2} r={handleSize * .3} />
-      })}
+    const coordinates = (polygon: Point[]) => polygon.map(point => point.join(',')).join(' ')
+    const points = coordinates(region.points)
+    const outerPath = `M${points}Z`
+    const holePaths = holes.map(hole => `M${coordinates(hole)}Z`)
+    const roomMaskId = holePaths.length ? `${roomHatchId}-mask-${roomMaskIndex++}` : undefined
+    const color = highlighted ? '#ff8c00' : '#007cbb'
+    const fillOpacity = highlighted ? '.18' : editing || aligning ? '.12' : '.08'
+    const outline = {
+      stroke: aligning ? '#005580' : color,
+      strokeWidth: highlighted ? 2.5 : editing || aligning ? 1.5 : .75,
+      strokeDasharray: highlighted ? undefined : '4 3',
+      vectorEffect: 'non-scaling-stroke',
+    }
+    return <g key={region.id} className={`room-region${mode ? ` room-region-${mode}` : ''}`} data-room-id={region.id} pointerEvents="none">
+      {roomMaskId && <defs>
+        {/* Even-odd fill alone would fill nested/overlapping holes and parts of holes beyond the edited boundary. */}
+        <mask id={roomMaskId}>
+          <path d={outerPath} fill="white" fillRule="evenodd" />
+          {holePaths.map((path, index) => <path key={index} d={path} fill="black" fillRule="evenodd" />)}
+        </mask>
+      </defs>}
+      {holePaths.map((path, index) => <path key={index} className="room-region-hole" d={path} fillRule="evenodd"
+        fill={`url(#${roomHatchId})`} stroke={color} strokeWidth=".5" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />)}
+      <g className="room-region-shape">
+        {highlighted && <polygon className="room-region-converge" points={points} fill="none" stroke={color}
+          strokeWidth={4} strokeLinejoin="round" vectorEffect="non-scaling-stroke" aria-hidden="true" />}
+        {roomMaskId
+          ? <>
+            <path className="room-region-fill" d={[outerPath, ...holePaths].join(' ')} fillRule="evenodd"
+              fill={color} fillOpacity={fillOpacity} mask={`url(#${roomMaskId})`} />
+            <path d={outerPath} fill="none" {...outline} />
+          </>
+          : <polygon points={points} fill={color} fillOpacity={fillOpacity} {...outline} />}
+        {center && <text className="room-region-label" x={center[0]} y={center[1]}
+          textAnchor="middle" dominantBaseline="central" fontSize={size} fontWeight={highlighted ? 'bold' : undefined}
+          fill={color} stroke="white" strokeWidth={size * .3} paintOrder="stroke">{region.name}</text>}
+        {editing && region.points.map((point, index) => <rect key={`vertex-${index}`}
+          className="annotation-resize-handle room-region-handle" data-room-vertex={index}
+          data-testid={`room-handle-${index}`}
+          x={point[0] - handleSize / 2} y={point[1] - handleSize / 2} width={handleSize} height={handleSize} />)}
+        {editing && region.points.map((point, index, vertices) => {
+          const next = vertices[(index + 1) % vertices.length]
+          return <circle key={`midpoint-${index}`} className="annotation-midpoint-handle room-region-handle"
+            data-room-midpoint={index} data-testid={`room-midpoint-${index}`}
+            cx={point[0] / 2 + next[0] / 2} cy={point[1] / 2 + next[1] / 2} r={handleSize * .3} />
+        })}
+      </g>
     </g>
   }
 
   return <>
     <svg
       ref={svgRef}
-      className={`annotation-layer tool-${props.tool}${drawingRegion ? ' drawing-scale-region' : ''}${props.store.roomCapturePage === props.pageIndex ? ' drawing-room-region' : ''}${editingRoom ? ' editing-room-region' : ''}${aligningRoomSet ? ' aligning-room-set' : ''}`}
+      className={`annotation-layer tool-${props.tool}${drawingRegion ? ' drawing-scale-region' : ''}${props.store.roomCapturePage === props.pageIndex || capturingRoomHole ? ' drawing-room-region' : ''}${editingRoom ? ' editing-room-region' : ''}${aligningRoomSet ? ' aligning-room-set' : ''}${shiftingPage ? ' shifting-page-contents' : ''}`}
       data-testid={`annotation-layer-${props.pageIndex}`}
       viewBox={`0 0 ${props.pageSize.width} ${props.pageSize.height}`}
       onPointerEnter={(event) => {
-        if (regionInteraction.drawPage !== null || props.store.roomCapturePage !== null || props.store.roomEditTarget !== null || props.store.roomSetAlignPage !== null) return
+        if (regionInteraction.drawPage !== null || props.store.roomCapturePage !== null || roomHoleTarget !== null
+          || props.store.roomEditTarget !== null || props.store.roomSetAlignPage !== null || props.store.pageShiftTarget !== null) return
         if (!TEXT_MARK_TOOLS.has(props.tool)) return
         pointerPointRef.current = pointInPage(event.currentTarget, event)
         ensureTextLines()
@@ -1138,7 +1192,7 @@ export function AnnotationLayer(props: Props) {
         }
         const id = annotationIdFromTarget(event.target) ?? (compactCounts && props.tool === 'select'
           ? orderedAnnotations.findLast(a => a.count && start[0] >= a.rect[0] && start[0] <= a.rect[2] && start[1] >= a.rect[1] && start[1] <= a.rect[3])?.id ?? null : null)
-        if (props.tool === 'count' && props.store.roomEditTarget === null) {
+        if (props.tool === 'count' && roomHoleTarget === null && props.store.roomEditTarget === null && props.store.pageShiftTarget === null) {
           props.store.prepareCountTool()
         }
         if (measurement.pointerDown(event, start)) return
@@ -1310,21 +1364,28 @@ export function AnnotationLayer(props: Props) {
         if (annotation && !annotation.legacyChange && (annotation.kind === 'issue' || annotation.kind === 'freetext' || annotation.kind === 'callout')) { props.store.touch(annotation.id); props.onSelect(annotation.id); props.onEdit(annotation.id) }
       }}
     >
+      {roomRegions.some(({ region }) => region.holes?.length) && <defs>
+        <pattern id={roomHatchId} patternUnits="userSpaceOnUse" width={6 / Math.SQRT2} height={6 / Math.SQRT2} patternTransform="rotate(45)">
+          <path d={`M0,0V${6 / Math.SQRT2}`} fill="none" stroke="#007cbb" strokeWidth=".5" strokeOpacity=".35" />
+        </pattern>
+      </defs>}
       <rect className="annotation-surface" x="0" y="0" width={props.pageSize.width} height={props.pageSize.height} />
-      {props.store.showRoomRegions && roomRegions.map(({ region, setId }) =>
-        region.id === editingRoom?.id || aligningRoomSet && setId === alignedSet?.id
-          ? null : renderRoomRegion(region, false))}
+      {roomRegions.map(({ region, setId }) =>
+        (!props.store.showRoomRegions && !(capturingRoomHole && roomHoleTarget.id === region.id))
+          || region.id === editingRoom?.id || region.id === highlightedRoom?.id || aligningRoomSet && setId === alignedSet?.id
+          ? null : renderRoomRegion(region))}
       {displayItems}
       {aligningRoomSet && <g className="room-set-align-ranges" pointerEvents="none">
-        {roomRegions.filter(entry => entry.setId === alignedSet?.id)
-          .map(({ region }) => renderRoomRegion(region, false, true))}
+        {roomRegions.filter(entry => entry.setId === alignedSet?.id && entry.region.id !== highlightedRoom?.id)
+          .map(({ region }) => renderRoomRegion(region, 'aligning'))}
         {alignedAnchor && <path data-testid="room-set-anchor"
           d={`M${alignedAnchor[0] - anchorSize},${alignedAnchor[1]}h${anchorSize * 2}M${alignedAnchor[0]},${alignedAnchor[1] - anchorSize}v${anchorSize * 2}`}
           fill="none" stroke="#005580" strokeWidth="2"
           vectorEffect="non-scaling-stroke" pointerEvents="none" />}
       </g>}
-      {editingRoom && renderRoomRegion(editingRoom, true)}
-      {(isMeasureTool(props.tool) || props.tool === 'count' || drawingRegion || regionInteraction.dialogPage === props.pageIndex) && props.store.scaleRegions.get(props.pageIndex)?.map(region => {
+      {highlightedRoom && renderRoomRegion(highlightedRoom, 'highlighted')}
+      {editingRoom && renderRoomRegion(editingRoom, 'editing')}
+      {(isMeasureTool(props.tool) || props.tool === 'count' || drawingRegion || shiftingPage || regionInteraction.dialogPage === props.pageIndex) && props.store.scaleRegions.get(props.pageIndex)?.map(region => {
         const [x, y, right, bottom] = region.rect, size = 11 / Math.max(.01, props.zoom * CSS_PX_PER_PT)
         const label = [region.label, scaleLabel(region.scale).replace(/^(縮尺|約) /, '')].filter(Boolean).join(' ')
         return <g key={region.id} className="scale-region" pointerEvents="none">
